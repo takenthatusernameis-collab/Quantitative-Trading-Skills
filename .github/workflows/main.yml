@@ -150,6 +150,16 @@ jobs:
           command=$(cat <<'PROMPT'
           Execute the task assigned by the previous agent and prepare a task for the next agent !
 
+          REPOSITORY-SPECIFIC MISSION — QUANTITATIVE TRADING SKILLS
+          This repository is a focused skills/agents/modes/plugins library based on Kilo Marketplace. Do not let generic automation work displace that mission.
+          - Prefer improving or validating one concrete quantitative-trading skill, reusable agent/mode, related plugin definition, or skill-quality test per session.
+          - Begin by reading the previous handoff, AGENTS.md, the relevant existing skill, and the repository's validation/contribution rules. Reuse and improve existing material before creating near-duplicates.
+          - Prioritize reproducibility, data provenance, lookahead/universe-leakage controls, realistic fees/slippage/fills, robust out-of-sample evaluation, and explicit limits on claims. Never invent empirical results or claim a strategy is profitable without cited evidence.
+          - Follow this marketplace's skill metadata, license, source-attribution, and directory conventions exactly. Keep examples small, executable where practical, and testable.
+          - Do not spend sessions rewriting Kilo controller workflows, scheduling, retries, Git plumbing, or the automation framework. Do not add new infrastructure unless it directly enables a validated skill deliverable and no simpler option exists.
+          - If a handoff is generic or missing, inspect the skill inventory and validator, identify the highest-value concrete gap, then implement the smallest useful improvement.
+          - Finish with a concise handoff naming the artifact changed, commands/tests actually run and results, remaining uncertainty, and one precise next skill-focused task.
+
           Reliability rules:
           - Before every tool call, check the exact schema, required arguments, and value types. After a rejection, inspect the actual error/schema, change the invalid argument, and never repeat an identical malformed call.
           - For network, provider, EOF, rate-limit, idle-timeout, and tool errors, preserve partial progress, classify the error, honor Retry-After/reset hints, use appropriate backoff, and change the approach before retrying. Do not amplify provider outages with parallel calls.
