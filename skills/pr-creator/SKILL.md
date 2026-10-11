@@ -4,10 +4,11 @@ description: >-
   Use this skill when asked to create a pull request (PR). It ensures all PRs
   follow the repository's established templates and standards.
 metadata:
-  category: unknown
+  category: development
   source:
     repository: 'https://github.com/google-gemini/gemini-cli'
     path: .gemini/skills/pr-creator
+    license_path: LICENSE
     ref: main
     commit: 9b6e0265d16bbd29ca51e33c9e0c01dc4cec5e83
 ---
