@@ -50,3 +50,19 @@ test("findLicenseFile ignores directories named like licenses", (t) => {
   fs.mkdirSync(path.join(root, "LICENSE"), { recursive: true });
   assert.strictEqual(findLicenseFile(root), undefined);
 });
+
+test("findLicenseFile ignores broken symlinks named like licenses", (t) => {
+  const root = fixture(t);
+  fs.symlinkSync(
+    path.join(root, "does-not-exist"),
+    path.join(root, "LICENSE"),
+  );
+  assert.strictEqual(findLicenseFile(root), undefined);
+});
+
+test("findLicenseFile returns the symlinked license file", (t) => {
+  const root = fixture(t);
+  fs.writeFileSync(path.join(root, "LICENSE.real"), "Apache-2.0");
+  fs.symlinkSync("LICENSE.real", path.join(root, "LICENSE"));
+  assert.strictEqual(findLicenseFile(root), "LICENSE");
+});

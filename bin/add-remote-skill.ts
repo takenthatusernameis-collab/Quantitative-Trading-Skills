@@ -153,15 +153,26 @@ function findLicenseFile(skillDir: string): string | undefined {
   }
   try {
     const entries = fs.readdirSync(skillDir);
-    const match = entries.find(
-      (entry) =>
-        entry.toLowerCase() === "license" ||
-        entry.toLowerCase() === "license.md" ||
-        entry.toLowerCase() === "license.txt" ||
-        entry.toLowerCase() === "copying" ||
-        entry.toLowerCase() === "copying.md" ||
-        entry.toLowerCase() === "copying.txt",
-    );
+    const match = entries.find((entry) => {
+      if (
+        !(
+          entry.toLowerCase() === "license" ||
+          entry.toLowerCase() === "license.md" ||
+          entry.toLowerCase() === "license.txt" ||
+          entry.toLowerCase() === "copying" ||
+          entry.toLowerCase() === "copying.md" ||
+          entry.toLowerCase() === "copying.txt"
+        )
+      ) {
+        return false;
+      }
+      // Directories named like licenses are not valid license files.
+      try {
+        return fs.statSync(path.join(skillDir, entry)).isFile();
+      } catch {
+        return false;
+      }
+    });
     return match;
   } catch {
     return undefined;
