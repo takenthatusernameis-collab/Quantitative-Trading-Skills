@@ -3,7 +3,7 @@ name: skill-share
 description: >-
   A skill that creates new agent skills and automatically shares them on Slack
   using Rube for seamless team collaboration and skill discovery.
-license: Complete terms in LICENSE.txt
+license: NOASSERTION
 metadata:
   category: development
   source:
