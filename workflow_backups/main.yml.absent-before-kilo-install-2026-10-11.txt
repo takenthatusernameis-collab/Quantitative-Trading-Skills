@@ -1,0 +1,3 @@
+# Workflow installation note
+
+At installation time, this repository's main tree matched Kilo-Org/kilo-marketplace exactly (same tree SHA ff51758b06b8249007116184096765d47bdb7505; comparison status identical, ahead 0 / behind 0). No .github/workflows/main.yml existed before this install. Existing marketplace workflows (generate-marketplace.yml, package-skills.yml, validate-skills.yml) are being preserved. The new generic Kilo workflow is an additional, repository-specific customization.
