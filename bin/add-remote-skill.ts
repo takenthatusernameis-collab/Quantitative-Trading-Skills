@@ -129,6 +129,45 @@ function getSkillName(skillPath: string): string {
   return path.basename(skillPath);
 }
 
+/**
+ * Locate a LICENSE file within the skill directory. Returns the path relative
+ * to the skill directory, or undefined when none is present. The canonical
+ * naming variants from CONTRIBUTING.md are checked first, then a case-
+ * insensitive fallback.
+ */
+function findLicenseFile(skillDir: string): string | undefined {
+  const candidates = [
+    "LICENSE",
+    "LICENSE.md",
+    "LICENSE.txt",
+    "license",
+    "COPYING",
+    "COPYING.md",
+    "COPYING.txt",
+  ];
+  for (const name of candidates) {
+    const candidatePath = path.join(skillDir, name);
+    if (fs.existsSync(candidatePath) && fs.statSync(candidatePath).isFile()) {
+      return name;
+    }
+  }
+  try {
+    const entries = fs.readdirSync(skillDir);
+    const match = entries.find(
+      (entry) =>
+        entry.toLowerCase() === "license" ||
+        entry.toLowerCase() === "license.md" ||
+        entry.toLowerCase() === "license.txt" ||
+        entry.toLowerCase() === "copying" ||
+        entry.toLowerCase() === "copying.md" ||
+        entry.toLowerCase() === "copying.txt",
+    );
+    return match;
+  } catch {
+    return undefined;
+  }
+}
+
 async function main() {
   const args = process.argv.slice(2);
 
@@ -243,6 +282,21 @@ async function main() {
     console.log(`  Added ref: ${ref}`);
     console.log(`  Added commit: ${sourceCommit}`);
 
+    // CONTRIBUTING.md requires metadata.source.license_path for every
+    // contributed skill. Copy the license file alongside the skill and
+    // record it; if none is present, warn so the importer can add it
+    // rather than shipping a silently non-compliant entry.
+    const licenseFile = findLicenseFile(targetDir);
+    if (licenseFile) {
+      frontmatter.metadata.source.license_path = licenseFile;
+      console.log(`  Added license_path: ${licenseFile}`);
+    } else {
+      console.log(
+        `  Warning: no LICENSE file found in ${targetDir}; ` +
+          "metadata.source.license_path was not set (see CONTRIBUTING.md).",
+      );
+    }
+
     // Write back the updated SKILL.md
     const updatedContent = matter.stringify(body, frontmatter);
     fs.writeFileSync(skillMdPath, ensureFinalNewline(updatedContent));
@@ -255,7 +309,13 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("Error:", err.message);
-  process.exit(1);
-});
+export { findLicenseFile };
+
+// Only run main() when executed directly, so the module can be imported by
+// tests without triggering the CLI flow.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error("Error:", err.message);
+    process.exit(1);
+  });
+}
