@@ -200,4 +200,4 @@ Every completed investigation should leave behind:
 
 ## Related Skills
 
-- Use the [`answering-natural-language-questions-with-dbt`](https://github.com/dbt-labs/dbt-agent-skills/tree/main/skills/dbt/skills/answering-natural-language-questions-with-dbt) workflow when the goal is answering a business question rather than debugging why analysis or metrics disagree.
+- Use `answering-natural-language-questions-with-dbt` when the goal is answering a business question rather than debugging why analysis or metrics disagree.

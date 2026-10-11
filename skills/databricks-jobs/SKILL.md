@@ -10,7 +10,7 @@ metadata:
     repository: 'https://github.com/databricks/databricks-agent-skills'
     path: skills/databricks-jobs
     license_path: LICENSE
-    commit: 3985599b8efaf0bb155be7e60847a3975bf45331
+    commit: c1964266c7aa6063d89036691d0594420ffa0129
 ---
 
 # Lakeflow Jobs Development

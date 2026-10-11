@@ -13,7 +13,7 @@ metadata:
     repository: 'https://github.com/datadog-labs/agent-skills'
     path: dd-logs
     license_path: LICENSE
-    commit: 9dbf79d0dccc53ac040fc151009d2179363bf34f
+    commit: d2411cc85d340c63ef955edff949179adf0e5ac8
 ---
 
 # Datadog Logs

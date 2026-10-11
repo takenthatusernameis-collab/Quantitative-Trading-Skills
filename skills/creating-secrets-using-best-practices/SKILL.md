@@ -15,7 +15,7 @@ metadata:
     path: >-
       skills/specialized-skills/security-and-identity-skills/creating-secrets-using-best-practices
     license_path: LICENSE
-    commit: cbdc61a29707dc97989d5d11a2b53ad584781e78
+    commit: 2cb0fa1c2e668e1bb075028800b6b27efb95779e
 ---
 
 # Creating Secrets Using Best Practices

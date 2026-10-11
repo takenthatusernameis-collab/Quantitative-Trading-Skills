@@ -13,7 +13,7 @@ metadata:
     repository: 'https://github.com/j4flmao/agent-skills'
     path: skills/data/distributed-storage
     license_path: LICENSE
-    commit: 1c9c7df11952848cba8599d37a49ce8b646795d2
+    commit: 5a19d636db60d2f7e08f036037a5b49c0a4ae8bd
 ---
 
 # Distributed Storage

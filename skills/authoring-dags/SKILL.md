@@ -1,9 +1,12 @@
 ---
 name: authoring-dags
 description: >-
-  Workflow and best practices for writing Apache Airflow DAGs. Use when the user
-  wants to create a new DAG, write pipeline code, or asks about DAG patterns and
-  conventions. For testing and debugging DAGs, see the testing-dags skill.
+  Workflow and best practices for writing Apache Airflow DAGs. Use when creating
+  a new DAG, write pipeline code, handling questions about DAG patterns and
+  conventions or extending an existing DAG with a follow-up/downstream task. ANY
+  request shaped like 'add a DAG named X', 'write a pipeline', 'add a task that
+  runs after Y', or 'extend the DAG'. For testing and debugging DAGs, see the
+  testing-dags skill.
 metadata:
   upstream:
     hooks:
@@ -16,7 +19,7 @@ metadata:
     repository: 'https://github.com/astronomer/agents'
     path: skills/authoring-dags
     license_path: LICENSE
-    commit: e4ebf9a7ad3f8dbf3fcfda9c245a65eb1415967b
+    commit: 486ee63d01f8126c52fbc92c36cd36ec31708dcd
 ---
 
 # DAG Authoring Skill

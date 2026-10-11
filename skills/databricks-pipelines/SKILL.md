@@ -3,7 +3,8 @@ name: databricks-pipelines
 description: >-
   Develop Lakeflow Spark Declarative Pipelines (formerly Delta Live Tables) on
   Databricks. Use when building batch or streaming data pipelines with Python or
-  SQL. Invoke BEFORE starting implementation.
+  SQL, including Auto CDC from event streams or periodic complete snapshots.
+  Invoke BEFORE starting implementation.
 compatibility: Requires databricks CLI (>= v1.0.0)
 metadata:
   version: 0.3.0
@@ -14,7 +15,7 @@ metadata:
     repository: 'https://github.com/databricks/databricks-agent-skills'
     path: skills/databricks-pipelines
     license_path: LICENSE
-    commit: 3985599b8efaf0bb155be7e60847a3975bf45331
+    commit: c1964266c7aa6063d89036691d0594420ffa0129
 ---
 
 # Lakeflow Spark Declarative Pipelines Development
@@ -33,6 +34,7 @@ User request → What kind of output?
 │   ├── Pipeline-private helper logic (not published to catalog)
 │   └── Published to UC for external queries → Persistent View (SQL only)
 ├── Persisted dataset
+│   ├── Source is a periodic complete snapshot that must be diffed by key → Streaming Table + Auto CDC FROM SNAPSHOT (SQL requires DBR 18.3+)
 │   ├── Source is streaming/incremental/continuously growing → Streaming Table
 │   │   ├── File ingestion (cloud storage, Volumes) → Auto Loader
 │   │   ├── Message bus (Kafka, Kinesis, Pub/Sub, Pulsar, Event Hubs) → streaming source read
@@ -68,7 +70,8 @@ User request → What kind of output?
 - **Kafka/Event Hubs sink serialization** → the `value` column is mandatory; serialize the row with `to_json(struct(*)) AS value`. See [sink-python.md](references/sink-python.md).
 - **Multi-column Auto CDC sequencing** → SQL: `SEQUENCE BY STRUCT(col1, col2)`. Python: `sequence_by=struct("col1", "col2")`. See the auto-cdc references.
 - **Auto CDC TRUNCATE** (SCD Type 1 only) → SQL: `APPLY AS TRUNCATE WHEN condition`. Python: `apply_as_truncates=expr("condition")`. Do NOT claim truncate is unsupported.
-- **Python-only features** → Sinks, ForEachBatch Sinks, CDC from snapshots, and custom data sources are Python-only. When the user is working in SQL, clarify this and suggest switching to Python.
+- **Periodic complete snapshots** → use SQL `AUTO CDC FROM SNAPSHOT` on DBR 18.3+, or Python `dp.create_auto_cdc_from_snapshot_flow` on older runtimes. Read the Auto CDC reference for version selection and lifecycle rules.
+- **Python-only features** → Sinks, ForEachBatch Sinks, and custom data sources are Python-only. When the user is working in SQL, clarify this and suggest switching to Python.
 - **Recommend ONE clear approach** → present a single recommended path. Don't list anti-patterns or inferior alternatives — they confuse. Only mention alternatives when they genuinely offer different trade-offs.
 
 ## Common Issues
@@ -124,13 +127,14 @@ Some features sit on top of others — read both:
 | Backfill Flow                | One-time historical load + ongoing live stream into same table. | `@dp.append_flow(once=True)` | `CREATE FLOW ... INSERT INTO ... ONCE` | [streaming-table-python](references/streaming-table-python.md) | [streaming-table-sql](references/streaming-table-sql.md) |
 | Sink (Delta/Kafka/EH/custom) | Write streaming output to external Delta / Kafka / Event Hubs.   | `dp.create_sink()`           | N/A — Python only                      | [sink-python](references/sink-python.md)                    | —                                                 |
 | ForEachBatch Sink            | Custom per-batch Python logic (merge/upsert, multi-destination). Public Preview. | `@dp.foreach_batch_sink()` | N/A — Python only         | [foreach-batch-sink-python](references/foreach-batch-sink-python.md) | —                                       |
+| RTM update flow              | Real-Time Mode: route a flow to a sink with sub-second latency. Public Preview. | `@dp.update_flow(target=...)` | N/A — Python only          | [real-time-mode](references/real-time-mode.md)              | —                                                 |
 
 ### CDC APIs
 
 | Feature                      | Description                                                          | Python                                      | SQL                             | Skill (Py)                                | Skill (SQL)                          |
 | ---------------------------- | -------------------------------------------------------------------- | ------------------------------------------- | ------------------------------- | ----------------------------------------- | ------------------------------------ |
 | Auto CDC (streaming source)  | SCD Type 1 (overwrite) or Type 2 (history) from a CDC feed.          | `dp.create_auto_cdc_flow()`                 | `AUTO CDC INTO ... FROM STREAM` | [auto-cdc-python](references/auto-cdc-python.md) | [auto-cdc-sql](references/auto-cdc-sql.md) |
-| Auto CDC (periodic snapshot) | Compare consecutive full snapshots to detect changes.                | `dp.create_auto_cdc_from_snapshot_flow()`   | N/A — Python only               | [auto-cdc-python](references/auto-cdc-python.md) | —                                    |
+| Auto CDC (periodic snapshot) | Compare consecutive full snapshots to detect changes.                | `dp.create_auto_cdc_from_snapshot_flow()`   | `AUTO CDC ... FROM SNAPSHOT` (DBR 18.3+) | [auto-cdc-python](references/auto-cdc-python.md) | [auto-cdc-sql](references/auto-cdc-sql.md) |
 
 For querying SCD Type 2 history tables (`__START_AT` / `__END_AT`, point-in-time, joining facts with historical dimensions), see [scd-2-querying.md](references/scd-2-querying.md).
 
@@ -160,7 +164,7 @@ For querying SCD Type 2 history tables (`__START_AT` / `__END_AT`, point-in-time
 | JDBC / Lakehouse Federation       | Batch read from external systems via federation.       | `spark.read.format("postgresql")` etc.         | Direct table ref via federation catalog          | —                                                       | —                                                 |
 | Custom data source                | User-defined Python data source.                       | `spark.read[Stream].format("custom")`          | N/A — Python only                                | —                                                       | —                                                 |
 | Static file read (batch)          | One-shot load of files (no incremental tracking).      | `spark.read.format("json"\|"csv"\|...).load()` | `read_files(...)` (no STREAM)                    | —                                                       | —                                                 |
-| Skip upstream change commits      | Ignore CDC commits on the upstream table.              | `.option("skipChangeCommits", "true")`         | `read_stream("name", skipChangeCommits => true)` | [streaming-table-python](references/streaming-table-python.md) | [streaming-table-sql](references/streaming-table-sql.md) |
+| Skip upstream change commits      | Ignore CDC commits on the upstream table.              | `.option("skipChangeCommits", "true")`         | `STREAM name WITH (SKIPCHANGECOMMITS)`            | [streaming-table-python](references/streaming-table-python.md) | [streaming-table-sql](references/streaming-table-sql.md) |
 
 ### Table/Schema Feature APIs
 
@@ -268,6 +272,7 @@ Cross-cutting patterns:
 - [streaming-patterns.md](references/streaming-patterns.md) — Dedup, windowed aggregations, late data, rescue-data quarantine, anomaly detection, lag monitoring.
 - [scd-2-querying.md](references/scd-2-querying.md) — Current-state, point-in-time, joining facts with historical dims.
 - [kafka.md](references/kafka.md) — Kafka / Event Hubs ingestion.
+- [real-time-mode.md](references/real-time-mode.md) — Real-Time Mode (RTM): sub-second continuous pipelines (`@dp.update_flow`, Kafka sinks, serverless or classic).
 
 Auto Loader format-specific options: [JSON](references/options-json.md) · [CSV](references/options-csv.md) · [XML](references/options-xml.md) · [Parquet](references/options-parquet.md) · [Avro](references/options-avro.md) · [Text](references/options-text.md) · [ORC](references/options-orc.md).
 

@@ -6,7 +6,7 @@ description: >-
   radius, schema registry, and retry storm risk.
 allowed-tools: Read Grep Glob
 metadata:
-  author: 'github: Raishin'
+  author: 'github: VincentChuWaiChow'
   version: 0.1.0
   updated: '2026-05-09'
   category: development
@@ -14,7 +14,7 @@ metadata:
     repository: 'https://github.com/Raishin/vanguard-frontier-agentic'
     path: skills/gcp/gcp-event-driven-architecture-review
     license_path: LICENSE
-    commit: 6e4bb3f7660bd29ae6bfce4db5e58e916f264c27
+    commit: 9b6033e6c137e104a9355cc6363c94d9974a5b7c
 ---
 
 # GCP Event-Driven Architecture Review

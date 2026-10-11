@@ -10,7 +10,7 @@ metadata:
     repository: 'https://github.com/datarobot-oss/datarobot-agent-skills'
     path: skills/datarobot-data-preparation
     license_path: LICENSE
-    commit: f4b3c29db60e1d735285a6f51328a69a2b500338
+    commit: c8d4c7f197657518f9f1f13d07b17ac93fe6f3c4
 ---
 
 # DataRobot Data Preparation Skill
@@ -147,18 +147,13 @@ The agent can run this script directly or use it as reference when writing code.
 ### Pattern 1: Upload and validate
 ```python
 import datarobot as dr
-import os
 
 # Initialize client
-client = dr.Client(
-    token=os.getenv("DATAROBOT_API_TOKEN"),
-    endpoint=os.getenv("DATAROBOT_ENDPOINT")
-)
+dr.Client()
 
 # Upload dataset
 dataset = dr.Dataset.create_from_file(
-    file_path="sales_data.csv",
-    name="Sales Data Q4 2024"
+    file_path="sales_data.csv", name="Sales Data Q4 2024"
 )
 
 print(f"Dataset ID: {dataset.id}")
@@ -238,12 +233,8 @@ pip install datarobot
 
 ```python
 import datarobot as dr
-import os
 
-client = dr.Client(
-    token=os.getenv("DATAROBOT_API_TOKEN"),
-    endpoint=os.getenv("DATAROBOT_ENDPOINT", "https://app.datarobot.com")
-)
+dr.Client()
 ```
 
 ## Resources

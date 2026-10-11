@@ -4,13 +4,14 @@ description: >-
   Databricks Model Serving endpoint lifecycle and ops. Use when asked to: CRUD
   serving endpoints (CLI or MLflow Deployments client); configure traffic
   routing for A/B / canary deploys and zero-downtime version swaps; retrieve
-  OpenAPI schemas; inspect logs, metrics, or permissions; manage AI Gateway rate
-  limits; discover Foundation Model API endpoints at runtime; integrate
-  endpoints into Databricks Apps; or stream from off-platform clients (Vercel AI
-  SDK v6, standalone Node.js). NOT for: training, MLflow autologging, UC
-  registration, custom PyFunc/ResponsesAgent authoring (databricks-ml-training);
-  Knowledge Assistants/Supervisor Agents (databricks-agent-bricks); MLflow
-  evaluation (databricks-mlflow-evaluation).
+  OpenAPI schemas; inspect logs, metrics, or permissions; manage legacy AI
+  Gateway rate limits (not Unity Gateway); discover Foundation Model API
+  endpoints at runtime; integrate endpoints into Databricks Apps; or stream from
+  off-platform clients (Vercel AI SDK v6, standalone Node.js). NOT for: Unity
+  Gateway CRUD and management (databricks-unity-gateway), training, MLflow
+  autologging, UC registration, custom PyFunc/ResponsesAgent authoring
+  (databricks-ml-training); Knowledge Assistants/Supervisor Agents
+  (databricks-agent-bricks); MLflow evaluation (databricks-mlflow-evaluation).
 compatibility: Requires databricks CLI (>= v0.294.0)
 metadata:
   version: 0.4.0
@@ -21,12 +22,17 @@ metadata:
     repository: 'https://github.com/databricks/databricks-agent-skills'
     path: skills/databricks-model-serving
     license_path: LICENSE
-    commit: 3985599b8efaf0bb155be7e60847a3975bf45331
+    commit: c1964266c7aa6063d89036691d0594420ffa0129
 ---
 
 # Model Serving Endpoints
 
 **FIRST**: Use the parent `databricks-core` skill for CLI basics, authentication, and profile selection.
+
+> **Gateway boundary:** This skill owns legacy AI Gateway configuration attached to a
+> Model Serving endpoint, such as `serving-endpoints put-ai-gateway`. An explicit Unity
+> Gateway / Unity AI Gateway request or any `databricks ai-gateway` model service, MCP
+> service, or model provider service belongs to `databricks-unity-gateway`.
 
 Model Serving provides managed endpoints for serving LLMs, custom ML models, and external models as scalable REST APIs. Endpoints are identified by **name** (unique per workspace).
 
@@ -242,7 +248,7 @@ This skill is ops-focused (manage existing endpoints). For the dev-side flow —
 
 ## Foundation Model API endpoints
 
-Pay-per-token, pre-provisioned in every workspace. New models land regularly and a static skill list goes stale fast — **always list at runtime instead of hard-coding names**. Filter by the `databricks-` name prefix AND by the served entity being in `system.ai.*` (other endpoints like `databricks-app-template-serving` share the prefix but aren't FM API endpoints).
+Pay-per-token, pre-provisioned in every workspace. New models land regularly and a static skill list goes stale fast — **always list at runtime instead of hard-coding names**. Filter by the `databricks-` name prefix AND by the served entity being in `system.ai.*` (other endpoints like `databricks-app-template-serving` share the prefix but aren't FM API endpoints). Use Databricks Unity Gateway (databricks-unity-gateway) to manage access to foundation model endpoints. Do not use databricks-model-serving legacy AI Gateway.
 
 ```bash
 # FM API endpoints in this workspace, grouped by task (chat / embeddings / etc.)
@@ -258,7 +264,7 @@ databricks serving-endpoints list \
 
 ## Off-platform streaming
 
-For apps deployed **outside** Databricks Apps (Vercel, AWS, standalone Node.js) hitting Databricks AI Gateway with Vercel AI SDK v6, see [references/off-platform-streaming.md](references/off-platform-streaming.md). For AppKit-based apps, use the `databricks-apps` skill's built-in serving plugin instead.
+For apps deployed **outside** Databricks Apps (Vercel, AWS, standalone Node.js) hitting Databricks legacy AI Gateway with Vercel AI SDK v6, see [references/off-platform-streaming.md](references/off-platform-streaming.md). Off-platform apps should be updated to hit Databricks Unity Gateway (databricks-unity-gateway). For AppKit-based apps, use the `databricks-apps` skill's built-in serving plugin instead.
 
 ## Troubleshooting
 

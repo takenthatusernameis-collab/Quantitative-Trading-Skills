@@ -23,7 +23,7 @@ metadata:
     repository: 'https://github.com/TerminalSkills/skills'
     path: skills/cassandra
     license_path: LICENSE
-    commit: 77fa0150aa0921f892420d3ec2a9204e3124b71e
+    commit: a021875c0f1bd906248e3784ce470faa65055201
 ---
 
 # Cassandra

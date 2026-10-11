@@ -11,15 +11,14 @@ description: >-
   querying existing tables (use querying-data-lake), or locating existing table
   (use finding-data-lake-assets).
 metadata:
-  upstream:
-    version: 1
-    argument-hint: '[table-description|schema-spec]'
+  version: '1'
+  argument-hint: '''[table-description|schema-spec]'''
   category: data
   source:
     repository: 'https://github.com/aws/agent-toolkit-for-aws'
     path: skills/specialized-skills/storage-skills/creating-data-lake-table
     license_path: LICENSE
-    commit: cbdc61a29707dc97989d5d11a2b53ad584781e78
+    commit: 2cb0fa1c2e668e1bb075028800b6b27efb95779e
 ---
 
 # Create Data Lake Tables with Amazon S3 Tables

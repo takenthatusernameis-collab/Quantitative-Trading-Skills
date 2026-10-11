@@ -11,7 +11,7 @@ metadata:
     repository: 'https://github.com/datarobot-oss/datarobot-agent-skills'
     path: skills/datarobot-feature-engineering
     license_path: LICENSE
-    commit: f4b3c29db60e1d735285a6f51328a69a2b500338
+    commit: c8d4c7f197657518f9f1f13d07b17ac93fe6f3c4
 ---
 
 # DataRobot Feature Engineering Skill
@@ -131,13 +131,9 @@ See the [Common Patterns](#common-patterns) section below for complete examples.
 ### Pattern 1: Feature importance analysis
 ```python
 import datarobot as dr
-import os
 
 # Initialize client
-client = dr.Client(
-    token=os.getenv("DATAROBOT_API_TOKEN"),
-    endpoint=os.getenv("DATAROBOT_ENDPOINT")
-)
+dr.Client()
 
 # Get model and feature importance
 model = dr.Model.get("xyz123")
@@ -145,9 +141,7 @@ feature_impact = model.get_feature_impact()
 
 # Sort by importance
 sorted_features = sorted(
-    feature_impact,
-    key=lambda x: x.get('impactNormalized', 0),
-    reverse=True
+    feature_impact, key=lambda x: x.get("impactNormalized", 0), reverse=True
 )
 
 # Get top 10 features
@@ -165,10 +159,7 @@ model = dr.Model.get("xyz123")
 feature_impact = model.get_feature_impact()
 
 # Filter by importance threshold (> 0.1)
-important_features = [
-    f for f in feature_impact
-    if f.get('impactNormalized', 0) > 0.1
-]
+important_features = [f for f in feature_impact if f.get("impactNormalized", 0) > 0.1]
 
 print(f"Found {len(important_features)} features with importance > 0.1")
 ```
@@ -224,12 +215,8 @@ pip install datarobot
 
 ```python
 import datarobot as dr
-import os
 
-client = dr.Client(
-    token=os.getenv("DATAROBOT_API_TOKEN"),
-    endpoint=os.getenv("DATAROBOT_ENDPOINT", "https://app.datarobot.com")
-)
+dr.Client()
 ```
 
 ## Resources

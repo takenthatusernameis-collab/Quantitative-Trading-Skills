@@ -7,12 +7,16 @@ description: >-
   (db2advis, db2pd, MON functions), runstats/reorg, SELinux contexts, firewalld
   rules, and DB2 pureScale. Part of the db2-* skill family.
 metadata:
+  upstream:
+    disambiguation: >-
+      DB2 LUW specifically, on RHEL. Other engines on RHEL are rhel-databases;
+      DB2 for z/OS is db2-mainframe; MQ messaging is ibm-mq.
   category: data
   source:
     repository: 'https://github.com/joogy06/agent-foundry'
     path: skills/db2-rhel
     license_path: LICENSE
-    commit: 527e3a8e9d395f564d62a63ef3bff5ff44bc9b6f
+    commit: b3b3133ae4c0f7dde9ae433d8deee612e1a1ee4c
 ---
 
 # IBM DB2 LUW — Administration on RHEL 9

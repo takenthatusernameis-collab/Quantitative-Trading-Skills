@@ -15,7 +15,7 @@ metadata:
     repository: 'https://github.com/microsoft/skills'
     path: .github/plugins/azure-sdk-python/skills/azure-eventhub-py
     license_path: LICENSE
-    commit: c5860b8b602163359255f8e3b2f194f0af03295a
+    commit: d5741a1e9325adead3a28d1d203bb69283907e06
 ---
 
 # Azure Event Hubs SDK for Python

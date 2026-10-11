@@ -17,7 +17,7 @@ metadata:
     repository: 'https://github.com/jaingxyz/aws-data-skills'
     path: skills/cdc-streaming-pipeline
     license_path: LICENSE
-    commit: 57fdbc37f1883d5abd320f0a9b0ef04a0a5c5930
+    commit: f3b4cae94f72168f2b306cffc26b7e5b281df88a
 ---
 
 # CDC streaming pipeline (Kinesis -> Redshift Serverless / S3)

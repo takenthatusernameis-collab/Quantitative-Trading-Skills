@@ -6,7 +6,7 @@ description: >-
   rules, or establishing data contracts.
 metadata:
   upstream:
-    risk: unknown
+    risk: critical
     source: community
     date_added: '2026-02-27'
   category: data
@@ -14,7 +14,7 @@ metadata:
     repository: 'https://github.com/sickn33/antigravity-awesome-skills'
     path: skills/data-quality-frameworks
     license_path: LICENSE
-    commit: bdce4fc3ce8899e7c1133204e5825955a7f940da
+    commit: 5f4e9f9f002d5139d132326d09ca2734a4548ea1
 ---
 
 # Data Quality Frameworks

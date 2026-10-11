@@ -1,16 +1,16 @@
 ---
 name: deploying-airflow
 description: >-
-  Deploy Airflow DAGs and projects. Use when the user wants to deploy code, push
-  DAGs, set up CI/CD, deploy to production, or asks about deployment strategies
-  for Airflow.
+  Deploys Airflow DAGs and projects. Use when deploying Airflow or answering
+  anything about deployment - deploying DAGs/projects, pushing code, setting up
+  CI/CD, deploying to production or deployment strategies for Airflow.
 metadata:
   category: data
   source:
     repository: 'https://github.com/astronomer/agents'
     path: skills/deploying-airflow
     license_path: LICENSE
-    commit: e4ebf9a7ad3f8dbf3fcfda9c245a65eb1415967b
+    commit: 486ee63d01f8126c52fbc92c36cd36ec31708dcd
 ---
 
 # Deploying Airflow

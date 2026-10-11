@@ -15,7 +15,7 @@ metadata:
     repository: 'https://github.com/dbt-labs/dbt-agent-skills'
     path: skills/dbt/skills/using-dbt-for-analytics-engineering
     license_path: LICENSE
-    commit: f30da77590f0ec1a4c78ff03599c3c715077f1c1
+    commit: 168a2b0b92da59be88866257140907c206ff0e44
 ---
 
 # Using dbt for Analytics Engineering

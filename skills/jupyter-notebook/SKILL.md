@@ -4,7 +4,6 @@ description: >-
   Use whenever the user works with Jupyter notebooks (`.ipynb`), including
   creating, inspecting, editing, executing, or visualizing notebook content for
   experiments, explorations, or tutorials.
-license: MIT
 metadata:
   category: development
   author: Kilo
@@ -18,6 +17,7 @@ metadata:
     repository: 'https://github.com/Kilo-Org/skills'
     path: skills/jupyter-notebook
     license_path: LICENSE
+    commit: a30ff33da809171784aca50d1b5978cebc2185f1
 ---
 
 # Jupyter Notebook Skill

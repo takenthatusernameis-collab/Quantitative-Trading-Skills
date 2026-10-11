@@ -98,6 +98,8 @@ Format: `seconds minutes hours day-of-month month day-of-week`
 
 Run jobs at fixed intervals (simpler than cron).
 
+**Prefer periodic over cron** for a regular fixed cadence (hourly, daily, weekly): it takes just an `interval` and `unit` and does not pin a clock time. Use cron only when the schedule needs a specific time-of-day or day-of-week.
+
 ### DABs YAML
 
 ```yaml
@@ -233,23 +235,6 @@ job = w.jobs.create(
 | Azure ADLS | `abfss://container@account.dfs.core.windows.net/path/` | `abfss://data@myaccount.dfs.core.windows.net/uploads/` |
 | GCS | `gs://bucket/path/` | `gs://my-bucket/uploads/` |
 | Unity Catalog Volume | `/Volumes/catalog/schema/volume/path/` | `/Volumes/main/data/uploads/` |
-
-### Access File Information in Notebook
-
-```python
-# The trigger provides file information via task context
-import json
-
-# Get trigger info from job context
-trigger_info = dbutils.jobs.taskValues.get(
-    taskKey="__trigger_info__",
-    key="file_arrival",
-    debugValue={}
-)
-
-# Contains: url, files (list of new files)
-print(f"New files: {trigger_info.get('files', [])}")
-```
 
 ---
 

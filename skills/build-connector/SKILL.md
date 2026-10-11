@@ -13,14 +13,14 @@ metadata:
     repository: 'https://github.com/fivetran/connector_sdk_tools'
     path: canonical/skills/build-connector
     license_path: LICENSE
-    commit: cb22799a357f1620e1d3653cad13cbdc7b2f862d
+    commit: f4e1025abfaf0fb3043c05b0aaec574e5d46e142
 ---
 
 > **Context**: This plugin is for the Fivetran Connector SDK (CSDK). "CSDK" is shorthand for "Connector SDK".
 
 # Build a New Fivetran Connector
 
-**FIRST**: Read `sdk-reference.md` from the plugin directory to load SDK rules, patterns, and example URLs.
+**FIRST**: Read `sdk-reference.md` from the plugin directory to load SDK rules, patterns, and **Example discovery** guidance.
 
 You are building a complete Fivetran connector from the user's description. This skill orchestrates the build; detailed per-phase logic lives in the plugin's workflow files.
 
@@ -93,22 +93,38 @@ Apply the validator workflow — read `workflows/validator.md` in the plugin dir
 
 ## Phase 2: Scaffold the Project with `fivetran init`
 
-`fivetran init` is the canonical scaffolding path — it produces a complete, runnable connector with the correct structure (`validate_configuration()`, docstrings, the `__main__` block). **Always scaffold with `fivetran init`; never hand-write the project from scratch.** Pick the command from the Phase 1 discovery result. The project directory is the connector name (lowercase, underscores).
+`fivetran init` is the canonical scaffolding path — it produces a complete, runnable connector with the correct structure (`validate_configuration()`, docstrings, the `__main__` block). **Always scaffold with `fivetran init`; never hand-write the project from scratch.** Pick the command from the Phase 1 discovery result.
+
+**Confirm the project/connector name before scaffolding.** Propose a directory name (lowercase,
+underscores) based on the source, tell the user what it will be, and let them override it before
+running `fivetran init`. Do not silently derive it from the current path or proceed without
+confirmation — this name becomes the project directory and, by default, the connection name at
+deploy time (see **deploy-connector**).
+
+**Before running `fivetran init`, check whether `<connector_dir>` already exists and has
+contents.** Confirming the *name* is not the same as confirming an *overwrite* — the proposed
+name could collide with an unrelated existing directory (a different project, someone else's
+connector). If it exists and isn't empty, stop and ask the user to explicitly confirm overwriting
+it, or pick a different directory name; only pass `--yes` once the target is confirmed empty/new
+or the user has explicitly authorized overwriting it.
 
 - **EXACT MATCH / FUZZY MATCH** — start from the community connector:
   ```bash
-  printf '\n' | fivetran init "<connector_dir>" --template connectors/<name> --force
+  fivetran init "<connector_dir>" --template connectors/<name> --yes
   ```
 - **BUILD ON TEMPLATE** — start from the default template:
   ```bash
-  printf '\n' | fivetran init "<connector_dir>" --force
+  fivetran init "<connector_dir>" --yes
   ```
 
-Windows PowerShell: replace `printf '\n' |` with `"" |`.
+**Why `--yes`:** `fivetran init` normally prompts to confirm overwriting an existing directory and
+to pick a coding agent to install the plugin for; `--yes` auto-confirms both — overwrites an
+existing project directory (unlike `--non-interactive`, which keeps existing files untouched and
+silently skips setup) and skips the agent-setup prompt (logs `skipping AI agent setup` and exits
+0) since the plugin is already installed. No input piping needed. Prefer `--yes` over `--force`,
+which is deprecated for this purpose (still works, but the CLI warns to migrate).
 
-**Why the piped newline and `--force`:** `fivetran init` always runs an interactive "which coding agent shall we install the plugin for?" prompt, and there is no flag to skip it. `--force` auto-confirms project creation and file overwrites; the piped empty line answers the agent prompt with an invalid choice, so it logs `invalid choice; skipping agent setup` (this is **expected and benign** — the plugin is already installed) and continues.
-
-**Verify success by checking that `<connector_dir>/connector.py` exists**, not by the exit code — an exhausted input pipe can make `init` exit non-zero even after the files download correctly. `connectors/<name>` resolves to the `community_connectors` repo; `examples/<path>` resolves to `connector_sdk`.
+**Verify success by checking that `<connector_dir>/connector.py` exists** and the exit code is 0. `connectors/<name>` resolves to the `community_connectors` repo; `examples/<path>` resolves to `connector_sdk`.
 
 ## Phase 3: Customize the Scaffolded Files
 
@@ -134,37 +150,25 @@ uv pip install --python .\.venv\Scripts\python.exe -r requirements.txt fivetran_
 
 ## Phase 5: Enter Configuration & Test
 
-After scaffolding and customizing the files (or finding existing files with placeholder values), configuration values must be entered via the encryption script. This is **not negotiable** and **not a user choice** — it is the only supported configuration-entry flow.
+Follow **Configuration entry** in `sdk-reference.md`: reuse local values, try
+`fivetran configuration` for missing values, offer a setup form if absent, or fill
+ordinary JSON values as agreed with the user. Do not force custom encryption.
+Collect missing secrets through the form or the user's local editor/terminal;
+do not ask users to paste them into chat.
 
-**HARD RULES — violating any of these is a failure:**
-- DO NOT use `AskUserQuestion` (or any choice-menu / multi-option UI) to ask how the user wants to enter configuration values. There is exactly one way.
-- DO NOT present "Paste in chat", "Edit the file yourself", "Use a public repo", or any other option as a configuration-entry choice.
-- DO NOT tell the user to paste configuration values in chat.
-- DO NOT accept values pasted in chat.
-- DO NOT run `enter_configuration.py` yourself. The user must run it in their own separate terminal.
-- DO NOT inspect or print configuration values.
-
-**THE ONLY ACCEPTABLE FLOW.** Output the following message to the user as plain text (substitute `<plugin>` with the actual plugin directory path, and `<connector_dir>` with the connector directory). Use one fenced command block: `bash` on macOS/Linux, `powershell` on Windows. Quote both paths. Do not insert a line break inside the `python` command.
-
-````text
-I've generated the connector files (or the files already exist). To fill in configuration values securely, open a separate terminal, then run:
+Once configuration is ready, run the connector:
 
 ```bash
-cd "<connector_dir>"
-python "<plugin>/tools/enter_configuration.py" "configuration.json"
+python "<plugin>/tools/run_connector.py" "<connector_dir>" --timeout-seconds 600
 ```
 
-The script will prompt you for each configuration field and encrypt values in place. I never see plaintext configuration values. Let me know when it's done and I'll run the test.
-If the local encryption secret file does not exist yet, the script creates it first.
-````
+The runner defaults to 120 seconds and accepts up to 600. Use 600 for debug
+runs because the first run downloads and starts the Java tester. Set the
+harness command timeout to 600 seconds as well.
 
-After the user confirms configuration values are entered, run the connector via the secure runner:
 
-```bash
-python <plugin>/tools/run_connector.py <connector_dir>
-```
-
-This decrypts encrypted configuration values in memory, passes user-chosen plaintext values through, and supplies the runtime config via named pipe.
+The runner passes plaintext values through and decrypts only existing encrypted
+fields. Plaintext configuration does not require a local encryption key.
 
 Check results:
 

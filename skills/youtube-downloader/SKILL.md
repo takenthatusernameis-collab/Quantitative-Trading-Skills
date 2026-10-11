@@ -10,7 +10,7 @@ metadata:
   source:
     repository: 'https://github.com/ComposioHQ/awesome-claude-skills'
     path: video-downloader
-    commit: 92568c1edaff1bde5371154f036d959346c145a8
+    commit: be2a406907dbc61b73e6827ded415c96139d13a2
 license: NOASSERTION
 ---
 

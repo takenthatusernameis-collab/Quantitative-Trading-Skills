@@ -10,7 +10,7 @@ metadata:
     repository: 'https://github.com/apache/beam'
     path: .agent/skills/io-connectors
     license_path: LICENSE
-    commit: 0802263e48e842bfbe437ed9b8ec72c2311c0d76
+    commit: 7d93ef8e76aa3fd7874e760010f6479fba40721a
 ---
 
 # I/O Connectors in Apache Beam

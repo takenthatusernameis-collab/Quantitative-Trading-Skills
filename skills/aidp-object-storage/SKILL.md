@@ -1,4 +1,5 @@
 ---
+name: aidp-object-storage
 description: >-
   Read and write OCI Object Storage natively from an AIDP notebook using the
   `oci://` URI scheme. Use when the user mentions OCI Object Storage, "oci://",
@@ -14,8 +15,7 @@ metadata:
     path: >-
       ai/claude-code-plugins/oracle-ai-data-platform-workbench-spark-connectors/skills/aidp-object-storage
     license_path: LICENSE.txt
-    commit: 6dba86bf4d92b6874bdb929b675b29137d673a71
-name: aidp-object-storage
+    commit: 54b6695919e3196072b788466c96a5db89202e5c
 ---
 
 # `aidp-object-storage` — OCI Object Storage native (`oci://`)

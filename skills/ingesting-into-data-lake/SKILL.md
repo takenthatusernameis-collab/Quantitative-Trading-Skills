@@ -16,17 +16,16 @@ description: >-
   exploring-data-catalog), or SaaS platforms like Salesforce, ServiceNow, SAP,
   MongoDB, Kafka.
 metadata:
-  upstream:
-    version: 1
-    argument-hint: >-
-      [source-path|connection-name|table-name] [--target
-      s3-tables|iceberg|parquet]
+  version: '1'
+  argument-hint: >-
+    '[source-path|connection-name|table-name] [--target
+    s3-tables|iceberg|parquet]'
   category: data
   source:
     repository: 'https://github.com/aws/agent-toolkit-for-aws'
     path: plugins/aws-data-analytics/skills/ingesting-into-data-lake
     license_path: LICENSE
-    commit: cbdc61a29707dc97989d5d11a2b53ad584781e78
+    commit: 2cb0fa1c2e668e1bb075028800b6b27efb95779e
 ---
 
 # Ingest into Data Lake

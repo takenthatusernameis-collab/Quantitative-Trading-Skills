@@ -12,7 +12,7 @@ metadata:
     repository: 'https://github.com/monahand1023/claude-code-skills'
     path: aws-cognito-admin
     license_path: LICENSE
-    commit: 9549ae50374a9755990ab924840dc4679ce4778b
+    commit: 853a8da0f4096a9b10d0c94d89fd44a0cbd8e820
 ---
 
 # AWS Cognito Admin

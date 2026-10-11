@@ -140,13 +140,14 @@ items:
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/airbyte-agent.tar.gz
   - id: airflow
     description: >-
-      Queries, manages, and troubleshoots Apache Airflow using the af CLI. Covers listing DAGs, triggering runs, reading
-      task logs, diagnosing failures, debugging DAG import errors, checking connections, variables, pools, and
-      monitoring health. Also routes to sub-skills for writing DAGs, debugging, deploying, and migrating Airflow 2 to 3.
-      Use when user mentions "Airflow", "DAG", "DAG run", "task log", "import error", "parse error", "broken DAG", or
-      asks to "trigger a pipeline", "debug import errors", "check Airflow health", "list connections", "retry a run", or
-      any Airflow operation. Do NOT use for warehouse/SQL analytics on Airflow metadata tables — use analyzing-data
-      instead.
+      Queries, manages, and troubleshoots Apache Airflow using the `af` CLI. Use when working with anything related to
+      Airflow - a DAG, a DAG run, a task log, an import or parse error, a broken DAG, or any Airflow operation. Covers
+      listing and triggering DAGs, retrying runs, reading task logs, diagnosing failures, debugging import and parse
+      errors, checking connections, variables and pools, exploring the REST API, and monitoring health (for example
+      "trigger a pipeline", "retry a run", "list connections", "check Airflow health", "why did my DAG fail"). This is
+      the entrypoint that routes to sibling skills for authoring, testing, deploying, and migrating Airflow 2 to 3. Not
+      for warehouse/SQL analytics on Airflow metadata tables (use analyzing-data); for deep root-cause reports use
+      debugging-dags or airflow-investigation.
     category: data
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/airflow
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/airflow/SKILL.md
@@ -170,9 +171,10 @@ items:
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/apache-hudi-lakehouse.tar.gz
   - id: authoring-dags
     description: >-
-      Workflow and best practices for writing Apache Airflow DAGs. Use when the user wants to create a new DAG, write
-      pipeline code, or asks about DAG patterns and conventions. For testing and debugging DAGs, see the testing-dags
-      skill.
+      Workflow and best practices for writing Apache Airflow DAGs. Use when creating a new DAG, write pipeline code,
+      handling questions about DAG patterns and conventions or extending an existing DAG with a follow-up/downstream
+      task. ANY request shaped like 'add a DAG named X', 'write a pipeline', 'add a task that runs after Y', or 'extend
+      the DAG'. For testing and debugging DAGs, see the testing-dags skill.
     category: data
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/authoring-dags
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/authoring-dags/SKILL.md
@@ -293,8 +295,12 @@ items:
   - id: bigquery-ai-ml
     description: >-
       Leverages BigQuery's built-in machine learning and GenAI capabilities for advanced data analytics. Use when you
-      need to write SQL queries that perform time-series forecasting, detect outliers, or leverage generative AI
-      capabilities in BigQuery.
+      need to write SQL queries that perform time-series forecasting, predict values, detect outliers or anomalies, find
+      key drivers, perform semantic search or vector search, classify text, calculate similarity, summarize content,
+      translate language, evaluate models, filter by semantic conditions, measure the causal effect of an intervention,
+      compute correlations between columns, detect change points or structural breaks, extract trend or seasonality
+      components, or leverage generative AI capabilities in BigQuery. Do not use for general BigQuery dataset, table, or
+      job management requests.
     category: data
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/bigquery-ai-ml
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/bigquery-ai-ml/SKILL.md
@@ -509,11 +515,12 @@ items:
     description: >-
       Databricks Model Serving endpoint lifecycle and ops. Use when asked to: CRUD serving endpoints (CLI or MLflow
       Deployments client); configure traffic routing for A/B / canary deploys and zero-downtime version swaps; retrieve
-      OpenAPI schemas; inspect logs, metrics, or permissions; manage AI Gateway rate limits; discover Foundation Model
-      API endpoints at runtime; integrate endpoints into Databricks Apps; or stream from off-platform clients (Vercel AI
-      SDK v6, standalone Node.js). NOT for: training, MLflow autologging, UC registration, custom PyFunc/ResponsesAgent
-      authoring (databricks-ml-training); Knowledge Assistants/Supervisor Agents (databricks-agent-bricks); MLflow
-      evaluation (databricks-mlflow-evaluation).
+      OpenAPI schemas; inspect logs, metrics, or permissions; manage legacy AI Gateway rate limits (not Unity Gateway);
+      discover Foundation Model API endpoints at runtime; integrate endpoints into Databricks Apps; or stream from
+      off-platform clients (Vercel AI SDK v6, standalone Node.js). NOT for: Unity Gateway CRUD and management
+      (databricks-unity-gateway), training, MLflow autologging, UC registration, custom PyFunc/ResponsesAgent authoring
+      (databricks-ml-training); Knowledge Assistants/Supervisor Agents (databricks-agent-bricks); MLflow evaluation
+      (databricks-mlflow-evaluation).
     category: data
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/databricks-model-serving
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/databricks-model-serving/SKILL.md
@@ -521,7 +528,8 @@ items:
   - id: databricks-pipelines
     description: >-
       Develop Lakeflow Spark Declarative Pipelines (formerly Delta Live Tables) on Databricks. Use when building batch
-      or streaming data pipelines with Python or SQL. Invoke BEFORE starting implementation.
+      or streaming data pipelines with Python or SQL, including Auto CDC from event streams or periodic complete
+      snapshots. Invoke BEFORE starting implementation.
     category: data
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/databricks-pipelines
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/databricks-pipelines/SKILL.md
@@ -628,8 +636,8 @@ items:
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/delta-sharing.tar.gz
   - id: deploying-airflow
     description: >-
-      Deploy Airflow DAGs and projects. Use when the user wants to deploy code, push DAGs, set up CI/CD, deploy to
-      production, or asks about deployment strategies for Airflow.
+      Deploys Airflow DAGs and projects. Use when deploying Airflow or answering anything about deployment - deploying
+      DAGs/projects, pushing code, setting up CI/CD, deploying to production or deployment strategies for Airflow.
     category: data
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/deploying-airflow
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/deploying-airflow/SKILL.md
@@ -678,9 +686,10 @@ items:
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/exploring-data-catalog.tar.gz
   - id: flink
     description: >-
-      Apache Flink stream processing expertise for stateful computations over bounded and unbounded streams. Use when
-      the user mentions Flink, Flink SQL, Table API, DataStream API, CDC, Kafka-to-Flink pipelines, checkpoints,
-      savepoints, watermarks, windows, Flink Kubernetes Operator, or Flink integrations with Iceberg, Paimon, or Fluss.
+      Architect, implement, deploy, upgrade, and troubleshoot Apache Flink stream processing jobs. Use for Flink SQL,
+      Table API, or DataStream implementation, 1.x to 2.x migration, savepoint and state compatibility, checkpoint
+      failures, backpressure, watermark and late-data problems, Kubernetes Operator deployment, Flink CDC pipelines, or
+      Iceberg, Paimon, and Fluss connector work.
     category: data
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/flink
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/flink/SKILL.md
@@ -1148,8 +1157,9 @@ items:
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/anaconda-intelligence.tar.gz
   - id: angular-component
     description: >-
-      Create modern Angular standalone components following v20+ best practices. Use for building UI components with
-      signal-based inputs/outputs, OnPush change detection, host bindings, content projection, and lifecycle hooks.
+      DEPRECATED - this skill is unmaintained. Use the official Angular skills at https://github.com/angular/skills
+      instead. Create modern Angular standalone components following v20+ best practices. Use for building UI components
+      with signal-based inputs/outputs, OnPush change detection, host bindings, content projection, and lifecycle hooks.
       Triggers on component creation, refactoring class-based inputs to signals, adding host bindings, or implementing
       accessible interactive components.
     category: development
@@ -1162,20 +1172,23 @@ items:
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/angular-component.tar.gz
   - id: angular-di
     description: >-
-      Implement dependency injection in Angular v20+ using inject(), injection tokens, and provider configuration. Use
-      for service architecture, providing dependencies at different levels, creating injectable tokens, and managing
-      singleton vs scoped services. Triggers on service creation, configuring providers, using injection tokens, or
-      understanding DI hierarchy.
+      DEPRECATED - this skill is unmaintained. Use the official Angular skills at https://github.com/angular/skills
+      instead. Implement dependency injection in Angular v20+ using inject(), injection tokens, and provider
+      configuration. Use for service architecture, providing dependencies at different levels, creating injectable
+      tokens, and managing singleton vs scoped services. Triggers on service creation, configuring providers, using
+      injection tokens, or understanding DI hierarchy.
     category: development
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/angular-di
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/angular-di/SKILL.md
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/angular-di.tar.gz
   - id: angular-directives
     description: >-
-      Create custom directives in Angular v20+ for DOM manipulation and behavior extension. Use for attribute directives
-      that modify element behavior/appearance, structural directives for portals/overlays, and host directives for
-      composition. Triggers on creating reusable DOM behaviors, extending element functionality, or composing behaviors
-      across components. Note - use native @if/@for/@switch for control flow, not custom structural directives.
+      DEPRECATED - this skill is unmaintained. Use the official Angular skills at https://github.com/angular/skills
+      instead. Create custom directives in Angular v20+ for DOM manipulation and behavior extension. Use for attribute
+      directives that modify element behavior/appearance, structural directives for portals/overlays, and host
+      directives for composition. Triggers on creating reusable DOM behaviors, extending element functionality, or
+      composing behaviors across components. Note - use native @if/@for/@switch for control flow, not custom structural
+      directives.
     category: development
     suggest_for:
       filename:
@@ -1185,8 +1198,9 @@ items:
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/angular-directives.tar.gz
   - id: angular-forms
     description: >-
-      Build signal-based forms in Angular v21+ using the new Signal Forms API. Use for form creation with automatic
-      two-way binding, schema-based validation, field state management, and dynamic forms. Triggers on form
+      DEPRECATED - this skill is unmaintained. Use the official Angular skills at https://github.com/angular/skills
+      instead. Build signal-based forms in Angular v21+ using the new Signal Forms API. Use for form creation with
+      automatic two-way binding, schema-based validation, field state management, and dynamic forms. Triggers on form
       implementation, adding validation, creating multi-step forms, or building forms with conditional fields. Signal
       Forms are experimental but recommended for new Angular projects. Don't use for template-driven forms without
       signals or third-party form libraries like Formly or ngx-formly.
@@ -1196,8 +1210,9 @@ items:
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/angular-forms.tar.gz
   - id: angular-http
     description: >-
-      Implement HTTP data fetching in Angular v20+ using resource(), httpResource(), and HttpClient. Use for API calls,
-      data loading with signals, request/response handling, and interceptors. Triggers on data fetching, API
+      DEPRECATED - this skill is unmaintained. Use the official Angular skills at https://github.com/angular/skills
+      instead. Implement HTTP data fetching in Angular v20+ using resource(), httpResource(), and HttpClient. Use for
+      API calls, data loading with signals, request/response handling, and interceptors. Triggers on data fetching, API
       integration, loading states, error handling, or converting Observable-based HTTP to signal-based patterns.
     category: development
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/angular-http
@@ -1205,7 +1220,8 @@ items:
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/angular-http.tar.gz
   - id: angular-routing
     description: >-
-      Implement routing in Angular v20+ applications with lazy loading, functional guards, resolvers, and route
+      DEPRECATED - this skill is unmaintained. Use the official Angular skills at https://github.com/angular/skills
+      instead. Implement routing in Angular v20+ applications with lazy loading, functional guards, resolvers, and route
       parameters. Use for navigation setup, protected routes, route-based data loading, and nested routing. Triggers on
       route configuration, adding authentication guards, implementing lazy loading, or reading route parameters with
       signals.
@@ -1215,29 +1231,32 @@ items:
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/angular-routing.tar.gz
   - id: angular-signals
     description: >-
-      Implement signal-based reactive state management in Angular v20+. Use for creating reactive state with signal(),
-      derived state with computed(), dependent state with linkedSignal(), and side effects with effect(). Triggers on
-      state management questions, converting from BehaviorSubject/Observable patterns to signals, or implementing
-      reactive data flows.
+      DEPRECATED - this skill is unmaintained. Use the official Angular skills at https://github.com/angular/skills
+      instead. Implement signal-based reactive state management in Angular v20+. Use for creating reactive state with
+      signal(), derived state with computed(), dependent state with linkedSignal(), and side effects with effect().
+      Triggers on state management questions, converting from BehaviorSubject/Observable patterns to signals, or
+      implementing reactive data flows.
     category: development
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/angular-signals
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/angular-signals/SKILL.md
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/angular-signals.tar.gz
   - id: angular-ssr
     description: >-
-      Implement server-side rendering and hydration in Angular v20+ using @angular/ssr. Use for SSR setup, hydration
-      strategies, prerendering static pages, and handling browser-only APIs. Triggers on SSR configuration, fixing
-      hydration mismatches, prerendering routes, or making code SSR-compatible.
+      DEPRECATED - this skill is unmaintained. Use the official Angular skills at https://github.com/angular/skills
+      instead. Implement server-side rendering and hydration in Angular v20+ using @angular/ssr. Use for SSR setup,
+      hydration strategies, prerendering static pages, and handling browser-only APIs. Triggers on SSR configuration,
+      fixing hydration mismatches, prerendering routes, or making code SSR-compatible.
     category: development
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/angular-ssr
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/angular-ssr/SKILL.md
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/angular-ssr.tar.gz
   - id: angular-testing
     description: >-
-      Write unit and integration tests for Angular v20+ applications using Vitest or Jasmine with TestBed and modern
-      testing patterns. Use for testing components with signals, OnPush change detection, services with inject(), and
-      HTTP interactions. Triggers on test creation, testing signal-based components, mocking dependencies, or setting up
-      test infrastructure. Don't use for E2E testing with Cypress or Playwright, or for testing non-Angular
+      DEPRECATED - this skill is unmaintained. Use the official Angular skills at https://github.com/angular/skills
+      instead. Write unit and integration tests for Angular v20+ applications using Vitest or Jasmine with TestBed and
+      modern testing patterns. Use for testing components with signals, OnPush change detection, services with inject(),
+      and HTTP interactions. Triggers on test creation, testing signal-based components, mocking dependencies, or
+      setting up test infrastructure. Don't use for E2E testing with Cypress or Playwright, or for testing non-Angular
       JavaScript/TypeScript code.
     category: development
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/angular-testing
@@ -1245,7 +1264,8 @@ items:
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/angular-testing.tar.gz
   - id: angular-tooling
     description: >-
-      Use Angular CLI and development tools effectively in Angular v20+ projects. Use for project setup, code
+      DEPRECATED - this skill is unmaintained. Use the official Angular skills at https://github.com/angular/skills
+      instead. Use Angular CLI and development tools effectively in Angular v20+ projects. Use for project setup, code
       generation, building, testing, and configuration. Triggers on creating new projects, generating
       components/services/modules, configuring builds, running tests, or optimizing production builds. Don't use for Nx
       workspace commands, custom Webpack configurations, or non-Angular CLI build systems like Vite standalone or
@@ -1290,10 +1310,16 @@ items:
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/aws-cognito-admin/SKILL.md
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/aws-cognito-admin.tar.gz
   - id: aws-messaging-and-streaming
-    description: >
-      Guides use of AWS messaging and streaming services. Covers Amazon SQS, Amazon SNS, Amazon EventBridge, Amazon MQ,
-      Amazon Kinesis Data Streams, Amazon Data Firehose, Amazon Managed Service for Apache Flink, and Amazon Managed
-      Streaming for Apache Kafka (MSK). Use when implementing messaging and streaming patterns.
+    description: >-
+      Guides general use of AWS messaging and streaming services. Covers Amazon SQS, Amazon SNS, Amazon EventBridge,
+      Amazon MQ, Amazon Kinesis Data Streams, Amazon Data Firehose, Amazon Managed Service for Apache Flink, and Amazon
+      Managed Streaming for Apache Kafka (MSK). Use when reasoning about messaging and streaming patterns. Also
+      identifies which AWS service owns each customer communication channel: email (Amazon SES), and WhatsApp, SMS, MMS,
+      RCS, voice and mobile push (the AWS End User Messaging family of services). Routes the request to the specialized
+      skill for that channel. Defers to the channel's specialized skill when the user already named a specific channel.
+      In general, use specific skills or documentation searches for detailed service-specific questions. Do NOT use for
+      MSK or Managed Service for Apache Flink questions, prefer specific skills. Does not configure customer
+      communication channels; defers to specific skills.
     category: development
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/aws-messaging-and-streaming
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/aws-messaging-and-streaming/SKILL.md
@@ -1346,9 +1372,9 @@ items:
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/azure-rbac.tar.gz
   - id: bootstrapping-agent
     description: >-
-      Wires up an Airbyte connector for use in a PydanticAI or Claude SDK agent. Generates auth config, connector
-      initialization, and tool_utils-decorated tool function. Use when adding a connector to an agent or setting up a
-      new agent with a connector.
+      Wires up an Airbyte connector for use in a PydanticAI, Claude SDK, or other agent. Generates auth config,
+      connector initialization, prebuilt connector tools, or agent_tool-decorated custom tool functions. Use when adding
+      a connector to an agent or setting up a new agent with a connector.
     category: development
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/bootstrapping-agent
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/bootstrapping-agent/SKILL.md
@@ -1443,9 +1469,8 @@ items:
     description: >-
       Guides Microsoft Entra ID app registration, OAuth 2.0 authentication, and MSAL integration. USE FOR: create app
       registration, register Azure AD app, configure OAuth, set up authentication, add API permissions, generate service
-      principal, MSAL example, console app auth, Entra ID setup, Azure AD authentication. DO NOT USE FOR: Azure RBAC or
-      role assignments (use azure-rbac), Key Vault secrets (use azure-keyvault-expiration-audit), general Azure resource
-      security guidance.
+      principal, MSAL example, console app auth, Entra ID setup, Azure AD authentication. DO NOT USE FOR: Key Vault
+      secrets (use azure-keyvault-expiration-audit), general Azure resource security guidance.
     category: development
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/entra-app-registration
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/entra-app-registration/SKILL.md
@@ -1486,11 +1511,10 @@ items:
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/frontend-design.tar.gz
   - id: gcloud
     description: >-
-      Interacts with Google Cloud services using the gcloud CLI safely and efficiently. Covers command validation, data
-      reduction, safety guardrails with a denylist, and workflows for discovery and investigation. You MUST read this
-      skill before invoking any gcloud command. Use when managing cloud resources, querying configurations, or
-      troubleshooting issues via gcloud. Don't use when writing or debugging Google Cloud client library code or raw
-      REST/gRPC API interactions.
+      Provides safety-critical validation, guardrails, and data reduction for gcloud CLI operations across Google Cloud
+      Platform (GCP) services and infrastructure. Use when planning, generating, constructing, proposing, describing, or
+      executing any gcloud CLI commands - including when answering questions about gcloud syntax, or formatting flags.
+      Don't use when writing Google Cloud client library code or raw REST/gRPC API requests.
     category: development
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/gcloud
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/gcloud/SKILL.md
@@ -1684,23 +1708,29 @@ items:
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/webapp-testing.tar.gz
   - id: dashboarding
     description: >-
-      Create, modify, and organise Grafana dashboards including panels, variables, transformations, and alerting. Use
-      when the user asks to create a Grafana dashboard, add a panel, configure a time series or stat panel, add template
-      variables, set up dashboard linking, use transformations, configure thresholds, build a dashboard for a service,
-      or export dashboard JSON. Triggers on phrases like "create dashboard", "add panel", "time series panel", "Grafana
-      dashboard JSON", "template variables", "dashboard variable", "panel transformation", "threshold", "stat panel",
-      "table panel", "Grafana annotations", or "dashboard folder".
+      Build, modify, and ship Grafana dashboards as JSON via the HTTP API — panel types (timeseries / stat / gauge /
+      table / heatmap / logs / traces / node-graph), `gridPos` 24-column layout, units, thresholds, template +
+      datasource + chained variables, transformations (`organize` / `calculateField` / `filterByValue`), panel +
+      dashboard links with `${__field.labels.x}` / `${__from}`, and Loki/Prometheus annotations. Use when scripting
+      dashboard creation, writing the dashboard JSON for a new service, adding a `$job` dropdown variable, computing an
+      "Error %" column with a transformation, overlaying deploys as annotations, or pushing a dashboard via `POST
+      /api/dashboards/db` — even when the user says "create a dashboard for this metric", "add a service dropdown",
+      "show errors as percentage", "overlay our deploys", or "export the dashboard JSON" without naming the API or
+      schema. After every API push, verify with the returned `version` plus a GET on the dashboard UID.
     category: observability
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/dashboarding
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/dashboarding/SKILL.md
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/dashboarding.tar.gz
   - id: database-observability
-    description: >
-      Grafana Cloud Database Observability — query-level performance insights for MySQL and PostgreSQL. Covers setup
-      with Grafana Alloy, query samples, visual explain plans, RED metrics, pg_stat_statements and Performance Schema
-      integration, and correlation with application traces. Use when monitoring database performance, diagnosing slow
-      queries, setting up database observability for MySQL or PostgreSQL (self-managed, RDS, Aurora, Azure, Cloud SQL),
-      or correlating DB metrics with APM data.
+    description: >-
+      Set up Grafana Cloud Database Observability for MySQL and PostgreSQL — enables `pg_stat_statements` / Performance
+      Schema, creates a least-privilege monitoring user, configures the `database_observability.postgres` /
+      `database_observability.mysql` Alloy components, ships query samples + visual explain plans + RED metrics + schema
+      details to Grafana Cloud, and correlates slow queries with application traces via `db.statement` / `db.system`
+      OTel attributes. Use when monitoring database performance, diagnosing slow queries, setting up DB observability
+      for RDS / Aurora / Cloud SQL / Azure Database / self-managed instances, correlating DB metrics with APM, or
+      alerting on query latency — even when the user says "my database is slow", "find the slow queries", or "monitor
+      RDS" without saying "observability".
     category: observability
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/database-observability
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/database-observability/SKILL.md

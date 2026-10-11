@@ -12,7 +12,7 @@ metadata:
     repository: 'https://github.com/sfc-gh-dflippo/snowflake-dbt-demo'
     path: .claude/skills/dbt-testing
     license_path: LICENSE
-    commit: f9db05e235299610e53a0dd98982b89da590efd1
+    commit: fafcfa726991c9e53c3af8906ea2d7d2d14f9016
 ---
 
 # dbt Testing

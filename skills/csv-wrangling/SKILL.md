@@ -9,7 +9,7 @@ metadata:
     repository: 'https://github.com/dathere/qsv'
     path: .claude/skills/skills/csv-wrangling
     license_path: COPYING
-    commit: d7bcd2d9ac92ca2edcc6086a1132ea2beb6ab079
+    commit: 23fe32c914097a8976d864f943bf38bbaa1e4f85
 ---
 
 # CSV Wrangling with qsv
@@ -122,7 +122,7 @@ blake3 file.csv > checksums.b3 (before transfer) -> blake3 --check checksums.b3 
 
 ## Tool Discovery
 
-Use **`mcp__qsv__qsv_search_tools`** to discover commands beyond the initially loaded core tools. There are 55 qsv skill-based commands covering selection, filtering, transformation, aggregation, joining, validation, formatting, conversion, and more.
+Use **`mcp__qsv__qsv_search_tools`** to discover commands beyond the initially loaded core tools. There are 57 qsv skill-based commands covering selection, filtering, transformation, aggregation, joining, validation, formatting, conversion, and more.
 
 ## Operational Notes
 

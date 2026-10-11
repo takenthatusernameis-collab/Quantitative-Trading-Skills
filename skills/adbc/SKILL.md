@@ -9,7 +9,7 @@ metadata:
     repository: 'https://github.com/columnar-tech/skills'
     path: skills/adbc
     license_path: LICENSE
-    commit: 8add65001dfb37b423e31124a0749d7879557723
+    commit: 138bee73fa956e89577b0efb8e1a212cd5232498
 ---
 
 ## Find a driver for a database

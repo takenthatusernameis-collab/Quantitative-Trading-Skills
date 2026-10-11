@@ -10,7 +10,7 @@ metadata:
     repository: 'https://github.com/itsmostafa/aws-agent-skills'
     path: skills/cognito
     license_path: LICENSE
-    commit: 4ab904a69cda893b5c98f97966bf9a48311823e9
+    commit: e786d25128a6018d42bd7bcb8c47c531ff31c0f0
 ---
 
 # AWS Cognito

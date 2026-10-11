@@ -14,7 +14,7 @@ metadata:
     repository: 'https://github.com/awslabs/agent-plugins'
     path: plugins/sagemaker-ai/skills/dataset-transformation
     license_path: LICENSE
-    commit: ba79e65ab968ed456b3cbee5f2d851d58239e864
+    commit: fbefb3764e67558fe10ac834dd85db49734aa9b6
 ---
 
 # Dataset Transformation Agent

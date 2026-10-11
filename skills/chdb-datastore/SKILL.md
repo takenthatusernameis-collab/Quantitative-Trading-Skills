@@ -16,7 +16,7 @@ metadata:
     repository: 'https://github.com/ClickHouse/agent-skills'
     path: skills/chdb-datastore
     license_path: LICENSE
-    commit: 544384f4fab1d6ed59f16a354d1c68296dfa6007
+    commit: 356a8c1b9a7392adb389a132f5ad3fec38532a03
 ---
 
 # chdb DataStore — It's Just Faster Pandas
