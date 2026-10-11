@@ -9,7 +9,7 @@ metadata:
     repository: 'https://github.com/dathere/qsv'
     path: .claude/skills/skills/csv-wrangling
     license_path: COPYING
-    commit: 23fe32c914097a8976d864f943bf38bbaa1e4f85
+    commit: 63cc4d3970065272d0e52c5c4779b52b9bc12998
 ---
 
 # CSV Wrangling with qsv

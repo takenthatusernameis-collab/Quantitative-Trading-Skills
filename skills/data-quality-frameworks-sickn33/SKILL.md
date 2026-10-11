@@ -14,7 +14,7 @@ metadata:
     repository: 'https://github.com/sickn33/antigravity-awesome-skills'
     path: skills/data-quality-frameworks
     license_path: LICENSE
-    commit: 5f4e9f9f002d5139d132326d09ca2734a4548ea1
+    commit: 09e94102a5008d4d8066e14bdb8d0b95d365748c
 ---
 
 # Data Quality Frameworks
