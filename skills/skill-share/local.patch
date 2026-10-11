@@ -4,6 +4,9 @@ diff -rN -U0 --ignore-trailing-space a/skill-share/SKILL.md b/skill-share/SKILL.
 @@ -4 +4 @@
 -  A skill that creates new Claude skills and automatically shares them on Slack
 +  A skill that creates new agent skills and automatically shares them on Slack
+@@ -6 +6 @@
+-license: Complete terms in LICENSE.txt
++license: NOASSERTION
 @@ -18 +18 @@
 -- **Create new Claude skills** with proper structure and metadata
 +- **Create new agent skills** with proper structure and metadata

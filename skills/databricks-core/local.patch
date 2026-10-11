@@ -1,3 +1,28 @@
+diff -rN -U0 --ignore-trailing-space a/databricks-core/SKILL.md b/databricks-core/SKILL.md
+--- a/databricks-core/SKILL.md	2000-01-01 00:00:00.000000000 +0000
++++ b/databricks-core/SKILL.md	2000-01-01 00:00:00.000000000 +0000
+@@ -9 +8,0 @@
+-compatibility: Requires databricks CLI (>= v0.292.0)
+@@ -11 +9,0 @@
+-  version: 0.1.0
+@@ -38 +36 @@
+-   - Note: In sandboxed environments (Cursor IDE, containers), install commands write outside the workspace and may be blocked. Present the install command to the user and ask them to run it in their own terminal.
++   - Note: In sandboxed or containerized environments, install commands write outside the workspace and may be blocked. Present the install command to the user and ask them to run it in their own terminal.
+@@ -53 +51 @@
+-## Claude Code - IMPORTANT
++## Agent Shell Behavior
+diff -rN -U0 --ignore-trailing-space a/databricks-core/data-exploration.md b/databricks-core/data-exploration.md
+--- a/databricks-core/data-exploration.md	2000-01-01 00:00:00.000000000 +0000
++++ b/databricks-core/data-exploration.md	2000-01-01 00:00:00.000000000 +0000
+@@ -264 +264 @@
+-## Claude Code-Specific Tips
++## Agent Shell Tips
+@@ -266 +266 @@
+-Remember that each Bash command in Claude Code runs in a separate shell:
++Bash commands issued in separate agent tool calls may run in separate shells:
+@@ -376 +376 @@
+-5. **Profile usage** - Always specify `--profile` in Claude Code to avoid authentication issues
++5. **Profile usage** - Always specify `--profile` when commands run in separate shells to avoid authentication issues
 diff -rN -U0 --ignore-trailing-space a/databricks-core/databricks-cli-auth.md b/databricks-core/databricks-cli-auth.md
 --- a/databricks-core/databricks-cli-auth.md	2000-01-01 00:00:00.000000000 +0000
 +++ b/databricks-core/databricks-cli-auth.md	2000-01-01 00:00:00.000000000 +0000
@@ -166,28 +191,3 @@ diff -rN -U0 --ignore-trailing-space a/databricks-core/databricks-cli-install.md
 -  - Re-run curl installer with `sudo` (macOS/Linux).
 -  - If sudo requires interactive password, use manual install to `~/.local/bin` instead.
 +  - Use the manual install to `~/.local/bin` instead of elevating an installer.
-diff -rN -U0 --ignore-trailing-space a/databricks-core/data-exploration.md b/databricks-core/data-exploration.md
---- a/databricks-core/data-exploration.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/databricks-core/data-exploration.md	2000-01-01 00:00:00.000000000 +0000
-@@ -264 +264 @@
--## Claude Code-Specific Tips
-+## Agent Shell Tips
-@@ -266 +266 @@
--Remember that each Bash command in Claude Code runs in a separate shell:
-+Bash commands issued in separate agent tool calls may run in separate shells:
-@@ -376 +376 @@
--5. **Profile usage** - Always specify `--profile` in Claude Code to avoid authentication issues
-+5. **Profile usage** - Always specify `--profile` when commands run in separate shells to avoid authentication issues
-diff -rN -U0 --ignore-trailing-space a/databricks-core/SKILL.md b/databricks-core/SKILL.md
---- a/databricks-core/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/databricks-core/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-@@ -9 +8,0 @@
--compatibility: Requires databricks CLI (>= v0.292.0)
-@@ -11 +9,0 @@
--  version: 0.1.0
-@@ -38 +36 @@
--   - Note: In sandboxed environments (Cursor IDE, containers), install commands write outside the workspace and may be blocked. Present the install command to the user and ask them to run it in their own terminal.
-+   - Note: In sandboxed or containerized environments, install commands write outside the workspace and may be blocked. Present the install command to the user and ask them to run it in their own terminal.
-@@ -53 +51 @@
--## Claude Code - IMPORTANT
-+## Agent Shell Behavior

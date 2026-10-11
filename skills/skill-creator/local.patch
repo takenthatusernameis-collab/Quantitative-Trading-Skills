@@ -1,21 +1,3 @@
-diff -rN -U0 --ignore-trailing-space a/skill-creator/scripts/init_skill.py b/skill-creator/scripts/init_skill.py
---- a/skill-creator/scripts/init_skill.py	2000-01-01 00:00:00.000000000 +0000
-+++ b/skill-creator/scripts/init_skill.py	2000-01-01 00:00:00.000000000 +0000
-@@ -78 +78 @@
--**Note:** Scripts may be executed without loading into context, but can still be read by Claude for patching or environment adjustments.
-+**Note:** Scripts may be executed without loading into context, but can still be read for patching or environment adjustments.
-@@ -81 +81 @@
--Documentation and reference material intended to be loaded into context to inform Claude's process and thinking.
-+Documentation and reference material intended to be loaded into context to inform the agent's process and thinking.
-@@ -88 +88 @@
--**Appropriate for:** In-depth documentation, API references, database schemas, comprehensive guides, or any detailed information that Claude should reference while working.
-+**Appropriate for:** In-depth documentation, API references, database schemas, comprehensive guides, or any detailed information to reference while working.
-@@ -91 +91 @@
--Files not intended to be loaded into context, but rather used within the output Claude produces.
-+Files not intended to be loaded into context, but rather used within the output the agent produces.
-@@ -168 +168 @@
--the output Claude produces.
-+the output the agent produces.
 diff -rN -U0 --ignore-trailing-space a/skill-creator/SKILL.md b/skill-creator/SKILL.md
 --- a/skill-creator/SKILL.md	2000-01-01 00:00:00.000000000 +0000
 +++ b/skill-creator/SKILL.md	2000-01-01 00:00:00.000000000 +0000
@@ -58,3 +40,21 @@ diff -rN -U0 --ignore-trailing-space a/skill-creator/SKILL.md b/skill-creator/SK
 @@ -182 +182 @@
 -3. In practice, how should Claude use the skill? All reusable skill contents developed above should be referenced so that Claude knows how to use them.
 +3. In practice, how should the agent use the skill? All reusable skill contents developed above should be referenced so that the agent knows how to use them.
+diff -rN -U0 --ignore-trailing-space a/skill-creator/scripts/init_skill.py b/skill-creator/scripts/init_skill.py
+--- a/skill-creator/scripts/init_skill.py	2000-01-01 00:00:00.000000000 +0000
++++ b/skill-creator/scripts/init_skill.py	2000-01-01 00:00:00.000000000 +0000
+@@ -78 +78 @@
+-**Note:** Scripts may be executed without loading into context, but can still be read by Claude for patching or environment adjustments.
++**Note:** Scripts may be executed without loading into context, but can still be read for patching or environment adjustments.
+@@ -81 +81 @@
+-Documentation and reference material intended to be loaded into context to inform Claude's process and thinking.
++Documentation and reference material intended to be loaded into context to inform the agent's process and thinking.
+@@ -88 +88 @@
+-**Appropriate for:** In-depth documentation, API references, database schemas, comprehensive guides, or any detailed information that Claude should reference while working.
++**Appropriate for:** In-depth documentation, API references, database schemas, comprehensive guides, or any detailed information to reference while working.
+@@ -91 +91 @@
+-Files not intended to be loaded into context, but rather used within the output Claude produces.
++Files not intended to be loaded into context, but rather used within the output the agent produces.
+@@ -168 +168 @@
+-the output Claude produces.
++the output the agent produces.

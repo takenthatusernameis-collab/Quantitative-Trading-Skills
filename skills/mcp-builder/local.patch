@@ -1,15 +1,3 @@
-diff -rN -U0 --ignore-trailing-space a/mcp-builder/reference/mcp_best_practices.md b/mcp-builder/reference/mcp_best_practices.md
---- a/mcp-builder/reference/mcp_best_practices.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/mcp-builder/reference/mcp_best_practices.md	2000-01-01 00:00:00.000000000 +0000
-@@ -184 +184 @@
--- Integrating with desktop applications (e.g., Claude Desktop)
-+- Integrating with desktop MCP clients
-diff -rN -U0 --ignore-trailing-space a/mcp-builder/reference/python_mcp_server.md b/mcp-builder/reference/python_mcp_server.md
---- a/mcp-builder/reference/python_mcp_server.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/mcp-builder/reference/python_mcp_server.md	2000-01-01 00:00:00.000000000 +0000
-@@ -43 +43 @@
--`https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/main/README.md`
-+`https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/a5271423128ac76cbd171adad40e225d1c755522/README.md`
 diff -rN -U0 --ignore-trailing-space a/mcp-builder/SKILL.md b/mcp-builder/SKILL.md
 --- a/mcp-builder/SKILL.md	2000-01-01 00:00:00.000000000 +0000
 +++ b/mcp-builder/SKILL.md	2000-01-01 00:00:00.000000000 +0000
@@ -24,3 +12,15 @@ diff -rN -U0 --ignore-trailing-space a/mcp-builder/SKILL.md b/mcp-builder/SKILL.
 -- **TypeScript SDK**: Fetch from `https://raw.githubusercontent.com/modelcontextprotocol/typescript-sdk/main/README.md`
 +- **Python SDK**: Fetch from `https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/a5271423128ac76cbd171adad40e225d1c755522/README.md`
 +- **TypeScript SDK**: Fetch from `https://raw.githubusercontent.com/modelcontextprotocol/typescript-sdk/c59dc3aa1a633d27fbbe873f1a430483cf7440f8/README.md`
+diff -rN -U0 --ignore-trailing-space a/mcp-builder/reference/mcp_best_practices.md b/mcp-builder/reference/mcp_best_practices.md
+--- a/mcp-builder/reference/mcp_best_practices.md	2000-01-01 00:00:00.000000000 +0000
++++ b/mcp-builder/reference/mcp_best_practices.md	2000-01-01 00:00:00.000000000 +0000
+@@ -184 +184 @@
+-- Integrating with desktop applications (e.g., Claude Desktop)
++- Integrating with desktop MCP clients
+diff -rN -U0 --ignore-trailing-space a/mcp-builder/reference/python_mcp_server.md b/mcp-builder/reference/python_mcp_server.md
+--- a/mcp-builder/reference/python_mcp_server.md	2000-01-01 00:00:00.000000000 +0000
++++ b/mcp-builder/reference/python_mcp_server.md	2000-01-01 00:00:00.000000000 +0000
+@@ -43 +43 @@
+-`https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/main/README.md`
++`https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/a5271423128ac76cbd171adad40e225d1c755522/README.md`

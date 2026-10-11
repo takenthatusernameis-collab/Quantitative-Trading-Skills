@@ -1,3 +1,12 @@
+diff -rN -U0 --ignore-trailing-space a/elasticsearch-esql/SKILL.md b/elasticsearch-esql/SKILL.md
+--- a/elasticsearch-esql/SKILL.md	2000-01-01 00:00:00.000000000 +0000
++++ b/elasticsearch-esql/SKILL.md	2000-01-01 00:00:00.000000000 +0000
+@@ -3 +3 @@
+-description: >
++description: >-
+@@ -8,2 +7,0 @@
+-  author: elastic
+-  version: 0.3.0
 diff -rN -U0 --ignore-trailing-space a/elasticsearch-esql/references/environment-setup.md b/elasticsearch-esql/references/environment-setup.md
 --- a/elasticsearch-esql/references/environment-setup.md	2000-01-01 00:00:00.000000000 +0000
 +++ b/elasticsearch-esql/references/environment-setup.md	2000-01-01 00:00:00.000000000 +0000
@@ -73,12 +82,3 @@ diff -rN -U0 --ignore-trailing-space a/elasticsearch-esql/scripts/esql.js b/elas
 @@ -620 +616 @@
 -  ELASTICSEARCH_INSECURE    Set to "true" to skip TLS verification
 +  NODE_EXTRA_CA_CERTS       Path to a trusted private CA bundle, when required
-diff -rN -U0 --ignore-trailing-space a/elasticsearch-esql/SKILL.md b/elasticsearch-esql/SKILL.md
---- a/elasticsearch-esql/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/elasticsearch-esql/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-@@ -3 +3 @@
--description: >
-+description: >-
-@@ -8,2 +7,0 @@
--  author: elastic
--  version: 0.3.0

@@ -1,9 +1,3 @@
-diff -rN -U0 --ignore-trailing-space a/artifacts-builder/scripts/bundle-artifact.sh b/artifacts-builder/scripts/bundle-artifact.sh
---- a/artifacts-builder/scripts/bundle-artifact.sh	2000-01-01 00:00:00.000000000 +0000
-+++ b/artifacts-builder/scripts/bundle-artifact.sh	2000-01-01 00:00:00.000000000 +0000
-@@ -53 +53 @@
--echo "You can now use this single HTML file as an artifact in Claude conversations."
-+echo "You can now use this single HTML file as an artifact in Kilo sessions."
 diff -rN -U0 --ignore-trailing-space a/artifacts-builder/SKILL.md b/artifacts-builder/SKILL.md
 --- a/artifacts-builder/SKILL.md	2000-01-01 00:00:00.000000000 +0000
 +++ b/artifacts-builder/SKILL.md	2000-01-01 00:00:00.000000000 +0000
@@ -22,3 +16,9 @@ diff -rN -U0 --ignore-trailing-space a/artifacts-builder/SKILL.md b/artifacts-bu
 @@ -62 +62 @@
 -This creates `bundle.html` - a self-contained artifact with all JavaScript, CSS, and dependencies inlined. This file can be directly shared in Claude conversations as an artifact.
 +This creates `bundle.html` - a self-contained artifact with all JavaScript, CSS, and dependencies inlined. This file can be directly shared in Kilo sessions as an artifact.
+diff -rN -U0 --ignore-trailing-space a/artifacts-builder/scripts/bundle-artifact.sh b/artifacts-builder/scripts/bundle-artifact.sh
+--- a/artifacts-builder/scripts/bundle-artifact.sh	2000-01-01 00:00:00.000000000 +0000
++++ b/artifacts-builder/scripts/bundle-artifact.sh	2000-01-01 00:00:00.000000000 +0000
+@@ -53 +53 @@
+-echo "You can now use this single HTML file as an artifact in Claude conversations."
++echo "You can now use this single HTML file as an artifact in Kilo sessions."

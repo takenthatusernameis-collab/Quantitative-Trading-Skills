@@ -1,3 +1,43 @@
+diff -rN -U0 --ignore-trailing-space a/cortex-code/SKILL.md b/cortex-code/SKILL.md
+--- a/cortex-code/SKILL.md	2000-01-01 00:00:00.000000000 +0000
++++ b/cortex-code/SKILL.md	2000-01-01 00:00:00.000000000 +0000
+@@ -25 +25 @@
+-## Install
++## Prerequisite
+@@ -27,3 +27 @@
+-```bash
+-# Install via npm skills ecosystem (works with Claude Code, Cursor, Codex, and 40+ agents)
+-npx skills add snowflake-labs/subagent-cortex-code --copy
++This marketplace skill is already installed; do not install or replace skill instructions dynamically. Cortex Code CLI must be installed and configured from the official Snowflake documentation. Verify the reviewed installation with:
+@@ -31,3 +29,2 @@
+-# Prerequisite: Cortex Code CLI must be installed and configured
+-# See: https://docs.snowflake.com/en/user-guide/cortex-code
+-which cortex  # verify installation
++```bash
++which cortex
+@@ -84 +81 @@
+-- **Organization Policy**: Enterprise override via `~/.snowflake/cortex/claude-skill-policy.yaml`
++- **Organization Policy**: Enterprise override via `~/.snowflake/cortex/agent-skill-policy.yaml`
+@@ -219,2 +216,2 @@
+-**Claude Conversation Context**:
+-- Last 2-3 relevant exchanges from current Claude session
++**Current Agent Conversation Context**:
++- Last 2-3 relevant exchanges from the current agent session
+@@ -314 +311 @@
+-**Claude Action**: Uses Read tool directly, no Cortex involvement.
++**Agent Action**: Uses Read tool directly, no Cortex involvement.
+@@ -389 +386 @@
+-# Check approval mode (path varies by agent: ~/.claude/, ~/.cursor/, ~/.codex/, etc.)
++# Check approval mode in the agent-specific skill directory.
+@@ -394 +391 @@
+-cat ~/.snowflake/cortex/claude-skill-policy.yaml 2>/dev/null
++cat ~/.snowflake/cortex/agent-skill-policy.yaml 2>/dev/null
+@@ -434 +431 @@
+-# Path is agent-specific: ~/.claude/skills/cortex-code/, ~/.cursor/skills/cortex-code/, etc.
++# Path is agent-specific; use the configured cortex-code skill directory.
+@@ -482 +479 @@
+-FORCE_CLAUDE_PATTERNS = [
++FORCE_CODING_AGENT_PATTERNS = [
 diff -rN -U0 --ignore-trailing-space a/cortex-code/config.yaml.example b/cortex-code/config.yaml.example
 --- a/cortex-code/config.yaml.example	2000-01-01 00:00:00.000000000 +0000
 +++ b/cortex-code/config.yaml.example	2000-01-01 00:00:00.000000000 +0000
@@ -85,43 +125,3 @@ diff -rN -U0 --ignore-trailing-space a/cortex-code/security/policies/default_pol
 @@ -15 +15 @@
 -  audit_log_path: "~/.claude/skills/cortex-code/audit.log"
 +  audit_log_path: "~/.cache/cortex-skill/audit.log"
-diff -rN -U0 --ignore-trailing-space a/cortex-code/SKILL.md b/cortex-code/SKILL.md
---- a/cortex-code/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/cortex-code/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-@@ -25 +25 @@
--## Install
-+## Prerequisite
-@@ -27,3 +27 @@
--```bash
--# Install via npm skills ecosystem (works with Claude Code, Cursor, Codex, and 40+ agents)
--npx skills add snowflake-labs/subagent-cortex-code --copy
-+This marketplace skill is already installed; do not install or replace skill instructions dynamically. Cortex Code CLI must be installed and configured from the official Snowflake documentation. Verify the reviewed installation with:
-@@ -31,3 +29,2 @@
--# Prerequisite: Cortex Code CLI must be installed and configured
--# See: https://docs.snowflake.com/en/user-guide/cortex-code
--which cortex  # verify installation
-+```bash
-+which cortex
-@@ -84 +81 @@
--- **Organization Policy**: Enterprise override via `~/.snowflake/cortex/claude-skill-policy.yaml`
-+- **Organization Policy**: Enterprise override via `~/.snowflake/cortex/agent-skill-policy.yaml`
-@@ -219,2 +216,2 @@
--**Claude Conversation Context**:
--- Last 2-3 relevant exchanges from current Claude session
-+**Current Agent Conversation Context**:
-+- Last 2-3 relevant exchanges from the current agent session
-@@ -314 +311 @@
--**Claude Action**: Uses Read tool directly, no Cortex involvement.
-+**Agent Action**: Uses Read tool directly, no Cortex involvement.
-@@ -389 +386 @@
--# Check approval mode (path varies by agent: ~/.claude/, ~/.cursor/, ~/.codex/, etc.)
-+# Check approval mode in the agent-specific skill directory.
-@@ -394 +391 @@
--cat ~/.snowflake/cortex/claude-skill-policy.yaml 2>/dev/null
-+cat ~/.snowflake/cortex/agent-skill-policy.yaml 2>/dev/null
-@@ -434 +431 @@
--# Path is agent-specific: ~/.claude/skills/cortex-code/, ~/.cursor/skills/cortex-code/, etc.
-+# Path is agent-specific; use the configured cortex-code skill directory.
-@@ -482 +479 @@
--FORCE_CLAUDE_PATTERNS = [
-+FORCE_CODING_AGENT_PATTERNS = [
