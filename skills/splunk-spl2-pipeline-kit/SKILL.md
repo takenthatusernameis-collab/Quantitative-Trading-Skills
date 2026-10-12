@@ -91,3 +91,47 @@ The default output directory is `splunk-spl2-pipeline-kit-rendered/`:
   `(?P<fieldName>...)`.
 - Edge Processor-only and Ingest Processor-only differences are reported in
   the lint output rather than hidden in comments.
+
+## Test Coverage
+
+This skill bundles a standard-library unit-test suite (no third-party test
+framework) under `tests/`, following the pattern established by
+`skills/quantitative-backtesting/tests/`. Run either file directly with Python:
+
+```bash
+python3 skills/splunk-spl2-pipeline-kit/tests/test_kit_lint.py
+python3 skills/splunk-spl2-pipeline-kit/tests/test_kit_render.py
+```
+
+- `test_kit_lint.py` - pure lint/parsing helpers:
+  - `strip_comments` removes `//` comments inline while preserving pipeline text
+  - `command_names` extracts piped commands and ignores commented-out pipes
+  - `import_names` parses `import <name> from` blocks
+  - `LintFinding.as_dict` serializes severity/code/message
+  - `lint_text` emits each finding branch: `SPL2-MISSING-PIPELINE`,
+    `SPL2-MISSING-SOURCE`, `SPL2-MISSING-DESTINATION`, `SPL2-PROFILE-INCOMPATIBLE`
+    (ingest-only command under `edgeProcessor`), `SPL2-METRICS-IMPORT`,
+    `SPL2-UNKNOWN-COMMAND` (warning vs. error under `--strict`), `SPL2-STATS-AVG`,
+    `SPL2-STATS-FUNCTION`, `SPL2-DEPRECATED-FUNCTION`, `SPL2-PCRE2-NAMED-CAPTURE`
+    (rejects bare `(?<`) while accepting Splunk `(?P<`, and
+    `SPL2-PCRE2-BACKREFERENCE`)
+  - `lint_file` returns `PASS` for a clean template and `FAIL` for one missing `$pipeline`
+  - `status_from_reports` rolls up `PASS` / `PASS_WITH_WARNINGS` / `FAIL`
+- `test_kit_render.py` - argument parsing, rendering, and orchestration:
+  - `parse_args` defaults, `--profile both`, `--strict`/`--json`, and
+    `--pipeline-file` append behavior
+  - `profiles_for` and the profile-command catalog definitions stay consistent
+  - `render_templates` writes every starter and the custom template app
+  - `render_coverage` emits a JSON array with `rendered`/`lint` statuses
+  - `render_lint_reports` writes JSON and Markdown and renders findings
+  - `render_readme` lists profiles and the secret-policy notice
+  - `collect_lint_targets` prefers `--pipeline-file`, then rendered assets,
+    then globs `templates/**/*.spl2`
+  - `run_lint` reports `SPL2-FILE-MISSING` for absent files, `PASS` for clean
+    files, and detects the profile from the template path
+  - `main` flows for `--phase all`, `--phase render`, `--phase lint`, and
+    `--json` output, plus the offline `run_smoke` integration check
+
+The end-to-end path (`main` invoking the kit) is also exercised via
+`scripts/smoke_offline.sh` and `scripts/validate.sh`; those remain the
+authoritative offline regression gates.
