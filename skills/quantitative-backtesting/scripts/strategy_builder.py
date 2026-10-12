@@ -173,10 +173,11 @@ class DonchianChannelBreakout(StrategyBase):
         period = self.parameters.get("period", 20)
         exit_period = self.parameters.get("exit_period", 10)
 
-        upper = data["high"].rolling(period).max()
-        lower = data["low"].rolling(period).min()
-        exit_upper = data["high"].rolling(exit_period).max()
-        exit_lower = data["low"].rolling(exit_period).min()
+        # Compute prior N-period channel; shift by 1 to exclude current bar
+        upper = data["high"].rolling(period).max().shift(1)
+        lower = data["low"].rolling(period).min().shift(1)
+        exit_upper = data["high"].rolling(exit_period).max().shift(1)
+        exit_lower = data["low"].rolling(exit_period).min().shift(1)
 
         signals = pd.Series(0, index=data.index)
         position = 0

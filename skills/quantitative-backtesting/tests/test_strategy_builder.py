@@ -91,6 +91,27 @@ def test_sma_crossover_signals_are_binary_with_crossovers():
     assert (signals.diff() != 0).sum() > 0
 
 
+
+def test_donchian_breakout_uses_prior_period_high():
+    """Donchian channel breakout uses prior N-period high (shifted)."""
+    dates = pd.date_range("2020-01-01", periods=6, freq="D")
+    data = pd.DataFrame(
+        {
+            "open": [100] * 6,
+            "high": [100, 101, 102, 103, 104, 105],
+            "low": [99] * 6,
+            "close": [100] * 6,
+            "volume": [1000000] * 6,
+        },
+        index=dates,
+    )
+    strat = build_strategy("donchian_breakout", '{"period": 5}')
+    signals = strat.generate_signals(data)
+    assert signals.iloc[0] == 0
+    assert signals.iloc[-1] == 1
+    # With shifted channel (period 5), channel is not defined until enough prior bars exist
+    assert pd.isna(signals.iloc[4]) or signals.iloc[4] == 0  # behavior depends on implementation - signals start at 0
+
 def main() -> int:
     tests = [
         ("build_strategy_unknown_type_raises", test_build_strategy_unknown_type_raises),
@@ -98,6 +119,7 @@ def main() -> int:
         ("registry_listing_and_defaults_agree", test_registry_listing_and_defaults_agree),
         ("all_registered_strategies_generate_valid_signals", test_all_registered_strategies_generate_valid_signals),
         ("sma_crossover_signals_are_binary_with_crossovers", test_sma_crossover_signals_are_binary_with_crossovers),
+        ("donchian_breakout_uses_prior_period_high", test_donchian_breakout_uses_prior_period_high),
     ]
 
     failures = 0
@@ -116,3 +138,43 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+def test_donchian_breakout_uses_prior_period_high():
+    """Donchian channel breakout uses prior N-period high (shifted)."""
+    dates = pd.date_range("2020-01-01", periods=6, freq="D")
+    data = pd.DataFrame(
+        {
+            "open": [100] * 6,
+            "high": [100, 101, 102, 103, 104, 105],
+            "low": [99] * 6,
+            "close": [100] * 6,
+            "volume": [1000000] * 6,
+        },
+        index=dates,
+    )
+    strat = build_strategy("donchian_breakout", '{"period": 5}')
+    signals = strat.generate_signals(data)
+    # Prior 5-period max before the last bar is 104; last bar breaks to 105 -> triggers at last bar
+    assert signals.iloc[0] == 0
+    assert signals.iloc[-1] == 1
+    # No trigger in early bars where channel not yet defined
+    assert signals.iloc[4] == 0  # 5th bar (index 4) has no shifted channel defined yet? upper_new[4] is nan
+
+def test_donchian_breakout_uses_prior_period_high():
+    """Donchian channel breakout uses prior N-period high (shifted)."""
+    dates = pd.date_range("2020-01-01", periods=6, freq="D")
+    data = pd.DataFrame(
+        {
+            "open": [100] * 6,
+            "high": [100, 101, 102, 103, 104, 105],
+            "low": [99] * 6,
+            "close": [100] * 6,
+            "volume": [1000000] * 6,
+        },
+        index=dates,
+    )
+    strat = build_strategy("donchian_breakout", '{"period": 5}')
+    signals = strat.generate_signals(data)
+    assert signals.iloc[0] == 0
+    assert signals.iloc[-1] == 1
+    assert signals.iloc[4] == 0  # channel not fully formed before shift gives defined value? upper_new[4] is nan with period=5,shift=1 gives nan at pos 4
