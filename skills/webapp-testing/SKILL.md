@@ -103,3 +103,28 @@ with sync_playwright() as p:
   - `element_discovery.py` - Discovering buttons, links, and inputs on a page
   - `static_html_automation.py` - Using file:// URLs for local HTML
   - `console_logging.py` - Capturing console logs during automation
+
+---
+
+## Test Coverage
+
+This skill bundles a standard-library unit-test suite (no third-party test
+framework) under `tests/`, following the pattern established by
+`skills/quantitative-backtesting/tests/`. Run the test file directly with Python:
+
+```bash
+python3 skills/webapp-testing/tests/test_with_server.py
+```
+
+- `test_with_server.py` - Server lifecycle management tests:
+  - `is_server_ready` polls TCP ports correctly, handles success, failure, and timeout cases
+  - `main` validates argument parsing: mismatched server/port counts, missing command
+  - `main` starts single server, waits for readiness, runs command, cleans up on success
+  - `main` starts multiple servers in sequence, waits for each, runs command, cleans up all
+  - `main` handles server startup failure: terminates process and exits with error code
+  - `main` handles server termination timeout: calls terminate, then kill, then wait
+  - `main` propagates command exit code when the user command fails
+  - `main` strips the `--` separator correctly from command arguments
+  - `main` passes `--timeout` parameter to `is_server_ready`
+
+---
