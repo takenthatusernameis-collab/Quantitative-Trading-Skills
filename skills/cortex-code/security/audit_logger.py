@@ -120,7 +120,7 @@ class AuditLogger:
 
     def _parse_size(self, size_str: str) -> int:
         """Parse size string like '10MB' to bytes."""
-        size_str = size_str.upper()
+        size_str = size_str.strip().upper()
         multipliers = {
             'KB': 1024,
             'MB': 1024 * 1024,

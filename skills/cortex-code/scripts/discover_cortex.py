@@ -142,7 +142,7 @@ def extract_triggers(content):
 
     # Look for "Use when", "Trigger", "When to use" sections
     trigger_patterns = [
-        r'(?:Use when|When to use|Trigger).*?:\s*(.+?)(?=\n\n|\#\#)',
+        r'(?:Use when|When to use|Trigger).*?:\s*(.+?)(?=\n\n|\#\#|$)',
         r'- Use (?:when|for|if):\s*(.+?)$'
     ]
 
