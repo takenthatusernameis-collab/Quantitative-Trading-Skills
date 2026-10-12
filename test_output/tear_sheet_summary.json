@@ -1,0 +1,23 @@
+{
+  "symbol": "SPY",
+  "strategy": "SMA Crossover",
+  "metrics": {
+    "total_return": 0.08917200415200055,
+    "annualized_return": 0.08917200415200055,
+    "annualized_volatility": 0.23031100631183563,
+    "sharpe_ratio": 0.39845590058689306,
+    "sortino_ratio": 0.720604978323938,
+    "max_drawdown": -0.20659875922389445,
+    "avg_drawdown": -0.12231230187352622,
+    "calmar_ratio": 0.43161926280188057,
+    "max_drawdown_recovery_days": 149,
+    "var_95": -0.021923025187160862,
+    "cvar_95": -0.02726743592056375,
+    "skewness": 0.30199507230910366,
+    "kurtosis": 0.6154534203768973,
+    "omega_ratio": 1.7990429934115286,
+    "tail_ratio": 0.9374566544078212,
+    "initial_capital": 100000
+  },
+  "plot_files": []
+}
