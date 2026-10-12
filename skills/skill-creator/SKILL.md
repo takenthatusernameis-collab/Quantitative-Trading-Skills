@@ -216,3 +216,51 @@ After testing the skill, users may request improvements. Often this happens righ
 2. Notice struggles or inefficiencies
 3. Identify how SKILL.md or bundled resources should be updated
 4. Implement changes and test again
+
+## Test Coverage
+
+The `tests/` directory contains unit tests for all three bundled scripts, using only the Python standard library (no third-party test framework required).
+
+Run the full suite with:
+
+```bash
+python3 skills/skill-creator/tests/test_init_skill.py
+python3 skills/skill-creator/tests/test_quick_validate.py
+python3 skills/skill-creator/tests/test_package_skill.py
+```
+
+### init_skill Tests
+**File:** `tests/test_init_skill.py`
+
+Tests cover:
+- Directory creation and return value
+- SKILL.md generation with YAML frontmatter (name + description)
+- Creation of `scripts/`, `references/`, and `assets/` directories with example files
+- Executable bit on the generated example script
+- Refusal to overwrite an existing skill directory
+- `title_case_skill_name` hyphen-to-Title-Case conversion
+
+### quick_validate Tests
+**File:** `tests/test_quick_validate.py`
+
+Tests cover:
+- Acceptance of a freshly scaffolded valid skill
+- Rejection of missing SKILL.md
+- Rejection of missing YAML frontmatter
+- Rejection of missing `name` and `description` frontmatter fields
+- Rejection of non-hyphen-case names (uppercase, underscores)
+- Rejection of names with leading/trailing hyphens
+- Rejection of angle brackets in descriptions
+
+### package_skill Tests
+**File:** `tests/test_package_skill.py`
+
+Tests cover:
+- Zip creation for a valid skill with the expected filename
+- Zip contents include SKILL.md, example script, reference doc, and asset placeholder
+- Rejection of nonexistent paths and file paths (non-directories)
+- Rejection of directories missing SKILL.md
+- Rejection of invalid skills (validation failure aborts packaging)
+- Default output directory behavior (zip written to current working directory)
+
+All 21 tests (6 init_skill + 8 quick_validate + 7 package_skill) pass.
