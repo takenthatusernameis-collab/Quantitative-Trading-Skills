@@ -201,7 +201,14 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   `generate_tear_sheet` HTML + JSON summary generation (matplotlib optional).
   Uses the stdlib `unittest` framework rather than the custom runner.
 - `test_run_backtest.py` - `run_backtest` end-to-end on synthetic data, the
-  `signals_active` flat-strategy guard, and `parse_args` CLI behavior.
+  `signals_active` flat-strategy guard, `parse_args` CLI behavior, and **trade
+  extraction across long/short flips**. Regression coverage for a defect where
+  a direct `+1 -> -1` position flip (used by Bollinger Bands, Donchian Breakout
+  and RSI mean reversion) was never closed out: the old extractor only fired on
+  a return to zero, so one leg of the round turn leaked and the short leg was
+  never recorded. The fix treats every position change as a trade boundary,
+  closes the open leg and opens the new one at the same bar, and signs each
+  PnL by the direction it was taken (long follows price, short moves opposite).
 - `test_strategy_builder.py` - strategy registry, `build_strategy`, defaults,
   and binary long/flat signal generation with real crossovers.
 - `test_walk_forward.py` - walk-forward windowing, parameter grid parsing, and

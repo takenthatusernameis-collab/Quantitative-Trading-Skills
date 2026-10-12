@@ -1,40 +1,40 @@
 # Agent Handoff - Session Summary
 
 ## What changed
-This session executed the task assigned by the previous agent context and prepared work for the next agent, while focusing on the repository's quantitative financial trading methodology research mission.
+Fixed a methodological defect in the quantitative-backtesting trade extractor and added regression tests.
 
-- Added `skills/quantitative-backtesting/tests/test_generate_sample_data.py` (1 test) - unit test validating the sample data generator. The test patches the output path to a temporary location, runs the generation logic, verifies the CSV has expected shape (504 rows), columns in correct order (date, open, high, low, close, volume), validates OHLCV constraints (high >= low/close/open, low <= close/open), and checks positive values for close and volume. Uses the same stdlib unittest-style runner pattern as other quant tests.
-- Updated `skills/quantitative-backtesting/SKILL.md` - added the new test to the test commands list and appended test coverage description in the Test Coverage section.
+- `skills/quantitative-backtesting/scripts/run_backtest.py` — trade extraction rewritten. The old loop only fired when the position returned to zero, so a direct `+1 -> -1` flip (used by `bollinger_bands`, `donchian_breakout`, `rsi_mean_reversion`) never closed the long leg and never opened the short leg. Every position change is now treated as a trade boundary: the open leg is closed and the new one opened at the same bar, and each PnL is signed by the direction it was taken (long follows price, short moves opposite to price). The old `(exit_price - entry_price) * sign` formula also treated shorts as longs.
+- `skills/quantitative-backtesting/tests/test_run_backtest.py` — added 3 tests: `run_backtest_records_both_legs_of_direct_long_short_flip`, `run_backtest_short_leg_pnl_moves_opposite_to_price`, `run_backtest_long_leg_pnl_moves_with_price` (13/13 pass).
+- `skills/quantitative-backtesting/SKILL.md` — documented the trade-extraction regression coverage in the Test Coverage section.
+- `skills/quantitative-backtesting/test_output/*` — regenerated pinned regression snapshot from `assets/example_data/sample_ohlcv.csv` (now 8 real trades vs the previous 5 phantom trades).
 
 ## What was actually verified
-- New test: `python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py` → 1/1 passed, exit code 0.
-- All quant-backtesting tests pass: `test_data_loader.py` 6/6, `test_performance.py` 11/11, `test_reporting.py` 8/8 (Ran 8 tests in OK, exit 0), `test_run_backtest.py` 10/10, `test_strategy_builder.py` 5/5, `test_walk_forward.py` 12/12, `test_cpcv.py` 10/10, `test_generate_sample_data.py` 1/1. Total 63 tests, all passing.
-- Senior-data-engineer tests (from previous session) still pass: `test_data_quality_validator.py` 129/129, `test_etl_performance_optimizer.py` 172/172, `test_pipeline_orchestrator.py` 150/150.
-- Splunk SPL2 pipeline kit tests still pass: `test_kit_lint.py` 29/29, `test_kit_render.py` 22/22.
-- Webapp-testing tests still pass: `test_with_server.py` 12/12.
-- Python compilation verified for new test file.
+- All quant-backtesting tests pass: `test_data_loader.py` 6/6, `test_performance.py` 11/11, `test_reporting.py` 8/8, `test_run_backtest.py` 13/13, `test_strategy_builder.py` 5/5, `test_walk_forward.py` 12/12, `test_cpcv.py` 10/10, `test_generate_sample_data.py` 1/1. Total 66 tests, all passing.
+- chdb-datastore tests still pass: `test_verify_install.py` 11/11.
+- The defect was reproduced before the fix: a synthetic flip strategy (long → short → flat, no zero bar between legs) produced only 1 phantom trade; after the fix it produces the full round turn.
+- Short-leg PnL sign verified numerically: short opened at 102, closed at 106 on a rising market → pnl = -4 (loss), not +4.
+- Long-leg PnL sign verified numerically: long opened at 102, closed at 106 → pnl = +4.
 
 ## What remains unresolved
 - Changes are NOT committed (repository policy: only commit when explicitly requested).
-- The handoff from the previous session incorrectly stated splunk-spl2-pipeline-kit had no existing tests; in reality it already has comprehensive test coverage (51 tests across 2 files) that all pass. The suggested next task needs to be reassessed based on current state.
-- Several other script files across skills have no tests (e.g., `skills/chdb-datastore/scripts/verify_install.py`, `skills/youtube-downloader/scripts/download_video.py`, `skills/webapp-testing/scripts/with_server.py` as thin scripts, plus others in cortex-code, mcp-builder, etc.), but many require external dependencies not available in this environment.
+- The previous handoff's suggested task (chdb-datastore test coverage) was already completed and committed in an earlier session; this session picked a different, higher-value task instead.
+- No claims about profitability are made. The regenerated snapshot shows the corrected trade accounting on synthetic data; it is a regression guard, not evidence of a profitable strategy.
 
 ## Which approaches have already failed and why
-- Initial test approach for `generate_sample_data.py` tried to call a `main()` function that doesn't exist (the script executes at module level). Switched to reading the script and exec-ing with modified `out` path and appropriate globals; this worked. Also had to handle `__file__` references properly.
+- Initial test for the short-leg PnL used a strategy that held the short to the end of the data with no exit bar, so no trade was recorded and the assertion failed. Fixed by using a short-then-flat strategy so the position is fully closed and recorded.
+- The old trade-extractor approach (exit only on `positions == 0`) was the root cause of the defect and is now replaced, not patched.
 
 ## One precise next task, with relevant evidence and constraints
-**Task:** Add stdlib unit-test coverage for `skills/chdb-datastore/scripts/verify_install.py` (101 lines, pure stdlib + imports of chdb/datastore which are missing - so tests must mock/patch or test the verification logic structure without requiring actual chdb installation).
+**Task:** Audit the remaining strategy classes in `skills/quantitative-backtesting/scripts/strategy_builder.py` for the same position-flip / PnL-sign issues, and add a parameterized test that runs `run_backtest` through each registered strategy (`sma_crossover`, `ema_crossover`, `bollinger_bands`, `rsi_mean_reversion`, `donchian_breakout`, `cross_sectional_momentum`, `dual_momentum`, `zscore_mean_reversion`) asserting that every recorded trade has a finite `pnl`/`return`, `entry_date < exit_date`, and that the sign of `pnl` is consistent with the direction of the position taken.
 
 Evidence supporting this choice:
-- It's a thin verification script with clear check functions and CLI-style behavior (prints results, exits based on pass/fail). It can be tested by mocking the chdb/datastore imports and simulating success/failure cases.
-- Part of the quantitative/data tooling ecosystem that aligns with the mission (data quality/verification).
-- Small, bounded scope (101 lines). The script has functions like `check_python_version()`, `check_chdb_import()`, `check_basic_operations()`, etc. that lend themselves to unit testing with mocking.
-- All quant tests pass; adding more targeted coverage to data-related scripts supports the research mission's emphasis on reproducible, verifiable infrastructure.
-- Follows the same stdlib testing conventions used throughout the codebase (no third-party test frameworks).
+- The flip defect was found by testing `run_backtest` with a synthetic long/short flip; the long/short strategies in the registry are exactly the ones that produce direct flips, so they are the ones most likely to carry a similar accounting bug.
+- It is bounded (one file to audit, one new test file or addition to `test_run_backtest.py`), directly serves the mission's emphasis on reproducible, verified backtests and honest trade-level reporting, and follows the existing stdlib test conventions.
+- All 66 quant tests currently pass, so this is additive verification, not a blocker fix.
 
 Constraints / notes for the next agent:
-- Follow stdlib unittest-style runner pattern with `def main()` and `if __name__ == "__main__": sys.exit(main())`.
-- Mock missing dependencies (chdb, datastore) appropriately - the environment doesn't have them installed as shown by running the script.
-- Create `skills/chdb-datastore/tests/` directory with `__init__.py` and `test_verify_install.py`.
-- Append test file info to `skills/chdb-datastore/SKILL.md` Test Coverage section if it exists, or create appropriately.
-- Avoid making network calls or installing dependencies; focus on testing the script's logic.
+- Use the stdlib runner pattern (`def main()`, `if __name__ == "__main__": sys.exit(main())`).
+- Reuse the `_make_data`/`_Args` helpers already in `test_run_backtest.py`.
+- Do not commit unless explicitly asked.
+
+(End of file - total 48 lines)

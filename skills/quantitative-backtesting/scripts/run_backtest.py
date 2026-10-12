@@ -68,24 +68,31 @@ def run_backtest(data, strategy, args):
     equity = (1 + strategy_returns).cumprod() * args.initial_capital
     equity.name = "equity"
 
-    # Extract trade-level statistics
+    # Extract trade-level statistics.
+    #
+    # A trade boundary is any bar where the position changes. We must close the
+    # previously open position and open a new one at that same bar. This matters
+    # for long/short strategies that flip directly between +1 and -1 (e.g.
+    # Bollinger Bands, Donchian Breakout, RSI mean reversion): a flip is a
+    # position change but never reaches 0, so an exit-only heuristic would
+    # silently leak the long leg and never record the short leg. Costs for the
+    # round turn are already accounted for by `position_changes` above.
     position_changes_bool = positions.diff().fillna(0) != 0
-    entry_mask = position_changes_bool & (positions != 0)
-    exit_mask = position_changes_bool & (positions == 0)
 
     trades = []
     entry_idx = None
     entry_price = None
     entry_date = None
+    entry_direction = None  # +1 for long, -1 for short
     for i in range(len(data)):
-        if entry_mask.iloc[i] and entry_idx is None:
-            entry_idx = i
-            entry_price = close.iloc[i]
-            entry_date = data.index[i]
-        elif exit_mask.iloc[i] and entry_idx is not None:
+        if not position_changes_bool.iloc[i]:
+            continue
+
+        # Close any currently open position at this bar's price.
+        if entry_idx is not None:
             exit_price = close.iloc[i]
             exit_date = data.index[i]
-            pnl = (exit_price - entry_price) * (positions.iloc[entry_idx] / abs(positions.iloc[entry_idx]))
+            pnl = (exit_price - entry_price) * entry_direction
             trades.append({
                 "pnl": float(pnl),
                 "return": float(pnl / entry_price),
@@ -95,6 +102,15 @@ def run_backtest(data, strategy, args):
             entry_idx = None
             entry_price = None
             entry_date = None
+            entry_direction = None
+
+        # Open the new position at this bar's price (if it is non-zero).
+        new_pos = positions.iloc[i]
+        if new_pos != 0:
+            entry_idx = i
+            entry_price = close.iloc[i]
+            entry_date = data.index[i]
+            entry_direction = 1 if new_pos > 0 else -1
 
     return {
         "equity_curve": equity,

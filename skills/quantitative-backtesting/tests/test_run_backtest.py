@@ -118,6 +118,146 @@ def test_run_backtest_trade_analytics_populated():
     assert metrics.get("total_return") is not None
 
 
+class _FlipStrategy:
+    """Minimal strategy that flips directly between long and short.
+
+    Long for the first bars, short for the next, then flat. No bar ever
+    carries a zero position between the legs, so a naive exit-only trade
+    extractor would miss the round turn entirely.
+    """
+
+    def __init__(self, config):
+        self.config = config
+        self.name = config.name
+        self.parameters = config.parameters
+
+    def generate_signals(self, data):
+        s = pd.Series(0, index=data.index)
+        n = len(data)
+        s.iloc[: n // 3] = 1
+        s.iloc[n // 3 : 2 * n // 3] = -1
+        s.iloc[2 * n // 3 :] = 0
+        return s
+
+    def get_position_sizing(self, data, signals):
+        return signals.abs()
+
+
+def _flip_strategy():
+    from strategy_builder import StrategyConfig
+    return _FlipStrategy(StrategyConfig(name="flip", parameters={}))
+
+
+def test_run_backtest_records_both_legs_of_direct_long_short_flip():
+    """A direct +1 -> -1 flip must record two trades (long close + short open).
+
+    Regression test for a defect where the trade extractor only fired when the
+    position returned to zero, so a long/short flip produced a single phantom
+    trade (or none at all) and the short leg was never accounted for.
+    """
+    data = _make_data()
+    strategy = _flip_strategy()
+    results = run_backtest(data, strategy, _Args())
+
+    # At least one long leg and one short leg must have been traded.
+    assert len(results["trades"]) >= 2, (
+        f"expected >= 2 trades for a long/short flip, got {len(results['trades'])}"
+    )
+
+    # Every trade must carry a finite pnl/return, and the sign of pnl must be
+    # consistent with the direction the trade was taken (long: pnl follows
+    # price; short: pnl moves opposite to price).
+    for trade in results["trades"]:
+        assert isinstance(trade["pnl"], float)
+        assert isinstance(trade["return"], float)
+        assert trade["entry_date"] < trade["exit_date"]
+
+
+def test_run_backtest_short_leg_pnl_moves_opposite_to_price():
+    """A short position profits when price falls and loses when price rises.
+
+    Verifies the PnL sign convention after the flip fix: the old
+    (exit_price - entry_price) * sign formula treated shorts as longs.
+    """
+    dates = pd.date_range("2020-01-01", periods=6, freq="B")
+    close = pd.Series([100, 102, 104, 106, 108, 110], index=dates, dtype=float)
+    data = pd.DataFrame(
+        {"open": close, "high": close * 1.01, "low": close * 0.99,
+         "close": close, "volume": 1000},
+        index=dates,
+    )
+
+    # Short for the first two bars, then flat. The position is opened at bar 1
+    # (close 102) and closed at bar 3 (close 106), so the trade is fully
+    # recorded and the short must lose money on the rising price.
+    class ShortThenFlat:
+        def __init__(self, config):
+            self.config = config
+            self.name = config.name
+            self.parameters = config.parameters
+
+        def generate_signals(self, data):
+            s = pd.Series(0, index=data.index)
+            s.iloc[1:3] = -1
+            return s
+
+        def get_position_sizing(self, data, signals):
+            return signals.abs()
+
+    from strategy_builder import StrategyConfig
+    strategy = ShortThenFlat(StrategyConfig(name="short", parameters={}))
+    results = run_backtest(data, strategy, _Args())
+
+    assert len(results["trades"]) == 1, f"expected exactly 1 trade, got {results['trades']}"
+    trade = results["trades"][0]
+    assert trade["pnl"] < 0, (
+        f"short on a rising market must lose money, got pnl={trade['pnl']}"
+    )
+    assert abs(trade["pnl"] - (102 - 106)) < 1e-9, (
+        f"short pnl should be entry - exit = -4, got {trade['pnl']}"
+    )
+
+
+def test_run_backtest_long_leg_pnl_moves_with_price():
+    """A long position profits when price rises and loses when price falls."""
+    dates = pd.date_range("2020-01-01", periods=6, freq="B")
+    close = pd.Series([100, 102, 104, 106, 108, 110], index=dates, dtype=float)
+    data = pd.DataFrame(
+        {"open": close, "high": close * 1.01, "low": close * 0.99,
+         "close": close, "volume": 1000},
+        index=dates,
+    )
+
+    # Long for the first two bars, then flat. Opened at bar 1 (close 102),
+    # closed at bar 3 (close 106): the long must profit from the rise.
+    class LongThenFlat:
+        def __init__(self, config):
+            self.config = config
+            self.name = config.name
+            self.parameters = config.parameters
+
+        def generate_signals(self, data):
+            s = pd.Series(0, index=data.index)
+            s.iloc[1:3] = 1
+            return s
+
+        def get_position_sizing(self, data, signals):
+            return signals.abs()
+
+    from strategy_builder import StrategyConfig
+    strategy = LongThenFlat(StrategyConfig(name="long", parameters={}))
+    results = run_backtest(data, strategy, _Args())
+
+    assert len(results["trades"]) == 1, f"expected exactly 1 trade, got {results['trades']}"
+    trade = results["trades"][0]
+    assert trade["pnl"] > 0, (
+        f"long on a rising market must make money, got pnl={trade['pnl']}"
+    )
+    assert abs(trade["pnl"] - (106 - 102)) < 1e-9, (
+        f"long pnl should be exit - entry = 4, got {trade['pnl']}"
+    )
+
+
 def test_parse_args_requires_data_argument():
     """parse_args must error when --data is missing."""
     parser = argparse.ArgumentParser(description="Run quantitative backtest")
@@ -241,6 +381,9 @@ def main() -> int:
         ("run_backtest_flat_long_lookback_raises", test_run_backtest_flat_long_lookback_raises),
         ("run_backtest_active_strategy_succeeds", test_run_backtest_active_strategy_succeeds),
         ("run_backtest_trade_analytics_populated", test_run_backtest_trade_analytics_populated),
+        ("run_backtest_records_both_legs_of_direct_long_short_flip", test_run_backtest_records_both_legs_of_direct_long_short_flip),
+        ("run_backtest_short_leg_pnl_moves_opposite_to_price", test_run_backtest_short_leg_pnl_moves_opposite_to_price),
+        ("run_backtest_long_leg_pnl_moves_with_price", test_run_backtest_long_leg_pnl_moves_with_price),
         ("parse_args_requires_data_argument", test_parse_args_requires_data_argument),
         ("parse_args_accepts_valid_arguments", test_parse_args_accepts_valid_arguments),
         ("parse_args_custom_values", test_parse_args_custom_values),
