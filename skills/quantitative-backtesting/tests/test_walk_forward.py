@@ -182,6 +182,65 @@ def test_monte_carlo_simulation_block_bootstrap():
         assert not np.any(np.isnan(vals))
 
 
+def test_monte_carlo_block_bootstrap_preserves_autocorrelation():
+    """Stationary block bootstrap should preserve autocorrelation better than i.i.d."""
+    # Create AR(1) process with known autocorrelation phi = 0.5
+    rng = np.random.default_rng(42)
+    n = 1000
+    phi = 0.5
+    dates = pd.date_range("2020-01-01", periods=n, freq="B")
+    innovations = rng.normal(0, 0.01, n)
+    ar1_returns = np.zeros(n)
+    ar1_returns[0] = innovations[0]
+    for i in range(1, n):
+        ar1_returns[i] = phi * ar1_returns[i-1] + innovations[i]
+
+    returns = pd.Series(ar1_returns, index=dates)
+
+    # Base autocorrelation at lag 1
+    base_acf1 = returns.autocorr(lag=1)
+    assert base_acf1 > 0.3, "Base series should have positive autocorrelation"
+
+    # i.i.d. bootstrap (block_size=None)
+    mc_iid = monte_carlo_simulation(
+        base_returns=returns,
+        n_simulations=200,
+        block_size=None,
+    )
+
+    # Stationary block bootstrap with block_size=20
+    mc_block = monte_carlo_simulation(
+        base_returns=returns,
+        n_simulations=200,
+        block_size=20,
+    )
+
+    # Compute average lag-1 autocorrelation across simulations
+    iid_acf1s = []
+    block_acf1s = []
+
+    for eq_curve in mc_iid["simulated_equity_curves"]:
+        sim_returns = eq_curve.pct_change().dropna()
+        if len(sim_returns) > 10:
+            iid_acf1s.append(sim_returns.autocorr(lag=1))
+
+    for eq_curve in mc_block["simulated_equity_curves"]:
+        sim_returns = eq_curve.pct_change().dropna()
+        if len(sim_returns) > 10:
+            block_acf1s.append(sim_returns.autocorr(lag=1))
+
+    avg_iid_acf1 = np.mean(iid_acf1s) if iid_acf1s else 0
+    avg_block_acf1 = np.mean(block_acf1s) if block_acf1s else 0
+
+    # i.i.d. bootstrap should destroy autocorrelation (close to 0)
+    # Block bootstrap should preserve some autocorrelation (closer to base)
+    assert abs(avg_iid_acf1) < 0.15, f"i.i.d. bootstrap autocorrelation should be near 0, got {avg_iid_acf1}"
+    assert abs(avg_block_acf1 - base_acf1) < abs(avg_iid_acf1 - base_acf1), (
+        f"Block bootstrap ({avg_block_acf1:.3f}) should preserve autocorrelation "
+        f"better than i.i.d. ({avg_iid_acf1:.3f}) vs base ({base_acf1:.3f})"
+    )
+
+
 def test_monte_carlo_simulation_probability_of_ruin():
     """Probability of ruin is between 0 and 1."""
     data = _make_data(periods=252)
@@ -368,6 +427,7 @@ def main() -> int:
         ("signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
         ("monte_carlo_simulation_basic", test_monte_carlo_simulation_basic),
         ("monte_carlo_simulation_block_bootstrap", test_monte_carlo_simulation_block_bootstrap),
+        ("monte_carlo_block_bootstrap_preserves_autocorrelation", test_monte_carlo_block_bootstrap_preserves_autocorrelation),
         ("monte_carlo_simulation_probability_of_ruin", test_monte_carlo_simulation_probability_of_ruin),
         ("monte_carlo_simulation_handles_short_series", test_monte_carlo_simulation_handles_short_series),
         ("run_walk_forward_cli", test_run_walk_forward_cli),

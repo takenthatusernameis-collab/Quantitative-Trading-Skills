@@ -423,7 +423,9 @@ def monte_carlo_simulation(
     if block_size is not None and block_size > 1:
         # Stationary block bootstrap (Politis & Romano, 1994)
         # Average block length = block_size
-        pass  # Use simple resampling for now; block bootstrap is more complex
+        # Implementation: for each position, with prob 1/block_size start new block
+        # at random index; otherwise continue sequentially (circular wrap)
+        pass
 
     simulated_metrics = {
         "total_return": [],
@@ -445,14 +447,24 @@ def monte_carlo_simulation(
                 sim_returns = base_returns.sample(n=n_obs, replace=True).values
                 sim_returns = pd.Series(sim_returns, index=base_returns.index)
             else:
-                # Simple block bootstrap: resample blocks of consecutive returns
-                n_blocks = int(np.ceil(n_obs / block_size))
-                block_starts = np.random.randint(0, n_obs - block_size + 1, n_blocks)
-                sim_returns_list = []
-                for start in block_starts:
-                    end = min(start + block_size, n_obs)
-                    sim_returns_list.append(base_returns.iloc[start:end].values)
-                sim_returns = np.concatenate(sim_returns_list)[:n_obs]
+                # Stationary block bootstrap (Politis & Romano, 1994)
+                # Blocks have geometrically distributed lengths with mean = block_size
+                # Circular wrap-around ensures stationarity
+                p_new_block = 1.0 / block_size
+                sim_returns = np.empty(n_obs)
+                returns_array = base_returns.values
+
+                # Random starting position
+                pos = np.random.randint(0, n_obs)
+
+                for i in range(n_obs):
+                    sim_returns[i] = returns_array[pos]
+                    # Decide whether to start a new block
+                    if np.random.random() < p_new_block:
+                        pos = np.random.randint(0, n_obs)
+                    else:
+                        pos = (pos + 1) % n_obs  # Continue sequentially with wrap
+
                 sim_returns = pd.Series(sim_returns, index=base_returns.index)
         else:
             # Simple i.i.d. bootstrap
