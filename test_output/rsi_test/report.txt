@@ -1,0 +1,35 @@
+============================================================
+BACKTEST PERFORMANCE REPORT
+============================================================
+Symbol: SPY
+Strategy: rsi_mean_reversion
+
+--- Return Metrics ---
+Total Return:          -14.48%
+Annualized Return:     -7.54%
+Annualized Volatility: 15.64%
+
+--- Risk-Adjusted Returns ---
+Sharpe Ratio:          -0.55
+Sortino Ratio:         -0.74
+Calmar Ratio:          0.27
+
+--- Risk Metrics ---
+Max Drawdown:          -28.07%
+Avg Drawdown:          -10.11%
+VaR (95%):             -1.76%
+CVaR (95%):            -2.53%
+Skewness:              -0.11
+Kurtosis:              3.73
+
+--- Trade-Level Analytics ---
+Total Trades:          13
+Winning Trades:        8
+Losing Trades:         5
+Win Rate:              61.54%
+Avg Win:               222.45%
+Avg Loss:              643.34%
+Profit Factor:         0.35
+Expectancy:            -1.1055
+
+============================================================

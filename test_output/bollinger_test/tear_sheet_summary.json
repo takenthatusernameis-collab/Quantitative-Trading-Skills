@@ -1,0 +1,32 @@
+{
+  "symbol": "SPY",
+  "strategy": "bollinger_bands",
+  "metrics": {
+    "total_return": -0.03914164238692419,
+    "annualized_return": -0.01980507680733723,
+    "annualized_volatility": 0.15300908413217365,
+    "sharpe_ratio": -0.1850561508553227,
+    "sortino_ratio": -0.25383268464862957,
+    "max_drawdown": -0.24997109127847153,
+    "avg_drawdown": -0.11067023338208766,
+    "calmar_ratio": 0.07922946891996434,
+    "max_drawdown_recovery_days": null,
+    "var_95": -0.016930197708903805,
+    "cvar_95": -0.024702325963826363,
+    "skewness": -0.013185217365606197,
+    "kurtosis": 4.520161207831501,
+    "total_trades": 15,
+    "winning_trades": 10,
+    "losing_trades": 5,
+    "win_rate": 0.6666666666666666,
+    "avg_win": 4.441095732565278,
+    "avg_loss": 6.56991741871567,
+    "profit_factor": 0.6759743615519374,
+    "expectancy": 0.7707580154716283,
+    "avg_trade_duration": 0.00464984261445785,
+    "omega_ratio": 1.7883963430204366,
+    "tail_ratio": 1.014265612948369,
+    "initial_capital": 100000
+  },
+  "plot_files": []
+}

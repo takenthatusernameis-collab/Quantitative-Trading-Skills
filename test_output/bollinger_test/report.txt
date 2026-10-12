@@ -1,0 +1,35 @@
+============================================================
+BACKTEST PERFORMANCE REPORT
+============================================================
+Symbol: SPY
+Strategy: bollinger_bands
+
+--- Return Metrics ---
+Total Return:          -3.91%
+Annualized Return:     -1.98%
+Annualized Volatility: 15.30%
+
+--- Risk-Adjusted Returns ---
+Sharpe Ratio:          -0.19
+Sortino Ratio:         -0.25
+Calmar Ratio:          0.08
+
+--- Risk Metrics ---
+Max Drawdown:          -25.00%
+Avg Drawdown:          -11.07%
+VaR (95%):             -1.69%
+CVaR (95%):            -2.47%
+Skewness:              -0.01
+Kurtosis:              4.52
+
+--- Trade-Level Analytics ---
+Total Trades:          15
+Winning Trades:        10
+Losing Trades:         5
+Win Rate:              66.67%
+Avg Win:               444.11%
+Avg Loss:              656.99%
+Profit Factor:         0.68
+Expectancy:            0.7708
+
+============================================================
