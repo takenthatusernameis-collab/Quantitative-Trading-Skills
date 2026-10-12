@@ -296,6 +296,44 @@ This script demonstrates:
 - Evaluating clustering quality without ground truth
 - Visualizing results with PCA projection
 
+## Test Coverage
+
+The `tests/` directory contains unit tests for both example scripts, using only the Python
+standard library (no third-party test framework required).
+
+### Classification Pipeline Tests
+**File:** `tests/test_classification_pipeline.py`
+
+Run with:
+```bash
+python3 tests/test_classification_pipeline.py
+```
+
+Tests cover:
+- `create_preprocessing_pipeline` with numeric-only, categorical-only, and mixed features
+- `train_and_evaluate_model` for binary and multiclass classification
+- Handling of missing values in numeric features
+- Stratified train/test splitting
+- Returned model has `predict` and `predict_proba` methods
+- Metrics validation (accuracy, precision, recall, F1 in valid ranges)
+
+### Clustering Analysis Tests
+**File:** `tests/test_clustering_analysis.py`
+
+Run with:
+```bash
+python3 tests/test_clustering_analysis.py
+```
+
+Tests cover:
+- `preprocess_for_clustering` with scaling, PCA, and combinations
+- `find_optimal_k_kmeans` returns expected keys and inertia decreases with K
+- `compare_clustering_algorithms` returns results for all algorithms (K-Means, Agglomerative, Gaussian Mixture, DBSCAN)
+- Label shape validation
+- `complete_clustering_analysis` with/without optimal K search, true labels, and scaling options
+
+All 21 tests (8 classification + 13 clustering) pass.
+
 ## Reference Documentation
 
 This skill includes comprehensive reference files for deep dives into specific topics:
