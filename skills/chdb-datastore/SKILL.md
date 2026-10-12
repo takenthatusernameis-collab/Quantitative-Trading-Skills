@@ -142,3 +142,26 @@ target.insert_into("category", "total", "count").select_from(
 
 > Note: This skill teaches how to *use* chdb DataStore.
 > For raw SQL queries, use the `chdb-sql` skill. Source-contribution workflows are outside this package.
+
+## Test Coverage
+
+Unit tests for the verification script (`scripts/verify_install.py`) are located in `tests/test_verify_install.py`:
+
+- `test_check_python_version` — Validates Python ≥ 3.9 check
+- `test_check_chdb_import_success` — Verifies chdb import with mocked module
+- `test_check_chdb_import_failure` — Verifies graceful failure when chdb missing
+- `test_check_datastore_import_from_datastore` — Tests `from datastore import DataStore`
+- `test_check_datastore_import_from_chdb` — Tests `from chdb.datastore import DataStore`
+- `test_check_datastore_as_pd` — Tests `import chdb.datastore as pd`
+- `test_check_basic_operations` — Tests DataStore filter operation
+- `test_check_sort` — Tests DataStore sort_values operation
+- `test_check_groupby` — Tests DataStore groupby aggregation
+- `test_full_verification_all_pass` — End-to-end test with all mocks passing
+- `test_full_verification_missing_chdb` — End-to-end test with chdb missing (exits 1)
+
+Run tests with:
+```bash
+python3 skills/chdb-datastore/tests/test_verify_install.py
+```
+
+Uses only standard library (`unittest.mock`, no third-party test framework).
