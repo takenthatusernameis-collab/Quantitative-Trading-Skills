@@ -204,12 +204,14 @@ See `references/dataops_best_practices.md` for:
 
 ## Test Coverage
 
-This skill bundles a standard-library unit-test suite (no third-party test
-framework) under `tests/`, following the pattern established by
-`skills/quantitative-backtesting/tests/`. Run the test file directly with Python:
+This skill bundles a standard-library unit-test suite (no third-party
+test framework) under `tests/`, following the pattern established by
+`skills/quantitative-backtesting/tests/`. Run the test files directly
+with Python:
 
 ```bash
 python3 skills/senior-data-engineer/tests/test_data_quality_validator.py
+python3 skills/senior-data-engineer/tests/test_etl_performance_optimizer.py
 ```
 
 - `test_data_quality_validator.py` - stdlib-only tests for `scripts/data_quality_validator.py` (129 tests):
@@ -225,3 +227,13 @@ python3 skills/senior-data-engineer/tests/test_data_quality_validator.py
   - `DataLoader`: CSV, JSON (list/object/data-key/scalar), and JSONL loading, plus missing-file and unsupported-format errors
   - `SchemaLoader`: full schema loading and default values
   - CLI: subcommand exit codes, `--detect-anomalies` flag, text/JSON output, and log-message capture via a custom logging handler
+- `test_etl_performance_optimizer.py` - stdlib-only tests for `scripts/etl_performance_optimizer.py` (172 tests):
+  - Dataclasses: `SQLQueryInfo`, `OptimizationRecommendation`, `SparkJobMetrics`, `PartitionStrategy`, `CostEstimate` construction, defaults, and `asdict` serialization
+  - `SQLParser`: SQL cleaning (line/block comments, whitespace), query-type detection (SELECT/INSERT/UPDATE/DELETE/MERGE/CREATE/UNKNOWN), SELECT-clause extraction (columns, aliases, `SELECT *`, `COUNT(*)`, qualified columns), WHERE/AND/OR splitting, GROUP BY/ORDER BY/LIMIT, DISTINCT, aggregations (including MEDIAN/PERCENTILE_CONT), CTEs, subqueries, and window functions
+  - `SQLParser` complexity scoring: low/medium/high/very_high thresholds across tables, join types, subqueries, aggregations, and window functions
+  - `SQLOptimizer`: recommendation triggers for SELECT *, missing WHERE, CROSS JOIN, missing join condition, many joins, DISTINCT, ORDER BY without LIMIT, subquery-to-CTE conversion, partition pruning, index opportunities (filter and join columns), high-cardinality GROUP BY, and COUNT DISTINCT, plus priority sorting
+  - `SparkJobAnalyzer`: skew, shuffle, GC-overhead, task-failure (high/medium severity boundary), speculation, too-many-tasks, and low-parallelism recommendations with threshold boundaries and implementation math
+  - `PartitionAdvisor`: range (date/timestamp), list (low cardinality), and hash (medium cardinality, power-of-two rounding) strategies, null-percentage and high-cardinality skips, top-3 selection, and partition-size ordering
+  - `CostEstimator`: BigQuery/Snowflake/Redshift/Databricks estimates, minimum-billing floors, warehouse case-insensitivity, unknown-warehouse `ValueError`, and `_estimate_data_scanned` filter/projection discounts
+  - `ReportGenerator`: text report sections, severity icons, and JSON report structure with severity summary counts
+  - CLI: subcommand exit codes (1 for no-command/error, 2 for argparse errors), inline and file-based SQL input, text/JSON output, output-file writing with log-message capture, Spark job arrays with deduplication, partition recommendations, cost estimates, and template generation
