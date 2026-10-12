@@ -1,93 +1,148 @@
 # Agent Handoff - Session Summary
 
 ## What changed
-This session executed the "next task" named in the prior handoff: adding a
-standard-library unit-test suite (`skills/splunk-spl2-pipeline-kit/tests/`) for
-`scripts/spl2_pipeline_kit.py`, the shared SPL2 rendering/linting kit that
-`splunk-ingest-processor-setup`'s `render_assets.py` shells out to.
+This session executed the test-coverage theme on
+`skills/tableau-dashboard-creator`, whose
+`scripts/validate_twb.py` (635 lines, pure stdlib: argparse,
+logging, re, sys, xml.etree, dataclasses, pathlib, typing) had
+zero tests. The other two scripts in the skill were not viable
+targets here: `validate_twb_xsd.py` imports `lxml` and
+`query_postgresql.py` imports `pandas`/`psycopg2`/`dotenv`,
+none of which are installed in this environment.
 
-- Added `tests/__init__.py` (empty package marker) - the `tests/` directory
-  was already partially seeded (only `__init__.py` existed); the two test
-  modules were added on top of it.
-- Added `tests/test_kit_lint.py` - 29 tests for `strip_comments`,
-  `command_names`, `import_names`, `LintFinding.as_dict`, `lint_text` (all
-  finding branches), `lint_file`, and `status_from_reports`.
-- Added `tests/test_kit_render.py` - 22 tests for `parse_args`, `profiles_for`,
-  profile/catalog consistency, `render_templates`, `render_coverage`,
-  `render_lint_reports`, `render_readme`, `collect_lint_targets`, `run_lint`,
-  `main` phase flows + `--json`, and the `run_smoke` integration check.
-- Appended a "Test Coverage" section to `skills/splunk-spl2-pipeline-kit/SKILL.md`
-  documenting both suites, mirroring the pattern used for
-  `splunk-ingest-processor-setup`.
-
-51 tests total. Tests use stdlib only (`unittest`-style `main()` runners), no
-third-party test framework.
+- Added `tests/__init__.py` (empty package marker).
+- Added `tests/test_validate_twb.py` - 51 stdlib-only tests
+  (`unittest`-style `main()` runner, no third-party framework):
+  - `CheckResult` / `ValidationReport` dataclass behavior
+    (`passed`, `failed_count`, `passed_count`, default `details`)
+  - `_is_builtin_field` / `_is_builtin_field_name` helpers
+  - `_check_well_formed_xml`: ok / malformed ("XML parse
+    error") / missing file ("File read error")
+  - `validate`: runs all 8 checks in order, short-circuits on
+    parse failure, passes a bare `<workbook/>`
+  - All 8 checks exercised with pass + fail fixtures built by
+    string-mutating one valid base workbook (a `_mutate` helper
+    asserts each mutation anchor exists, so fixture drift fails
+    loudly)
+  - `print_report` output captured via a custom `logging.Handler`
+    attached to the `validate_twb` logger (the script logs via
+    `logger.info`, not `print`)
+  - `main` exit codes: 0 valid, 1 failed checks, 1 malformed
+    XML, 2 missing file; non-`.twb` extension warns but still
+    validates; `--verbose` runs
+- Appended a "## Test Coverage" section to
+  `skills/tableau-dashboard-creator/SKILL.md` mirroring the
+  pattern used by `splunk-spl2-pipeline-kit`,
+  `secrets-vault-manager`, and `webapp-testing`.
 
 ## What was actually verified
-- `python3 skills/splunk-spl2-pipeline-kit/tests/test_kit_lint.py`: 29/29 passed
-- `python3 skills/splunk-spl2-pipeline-kit/tests/test_kit_render.py`: 22/22 passed
-- `python3 -m py_compile` on both test files and on all three scripts: OK
-- `bash skills/splunk-spl2-pipeline-kit/scripts/smoke_offline.sh`: PASS
-- `bash skills/splunk-spl2-pipeline-kit/scripts/validate.sh`: PASS (bash -n
-  syntax check, py_compile, `--phase smoke`) - covers the shell entry points
-  `setup.sh`/`validate.sh`/`smoke_offline.sh` end-to-end.
-- Regression: `splunk-ingest-processor-setup` tests still 30/30 (unaffected;
-  only the new kit tests were added).
+- `python3 skills/tableau-dashboard-creator/tests/test_validate_twb.py`:
+  51/51 passed, exit 0
+- `python3 -m py_compile` on the test file, `__init__.py`, and
+  `scripts/validate_twb.py`: OK
+- CLI end-to-end: missing file exits 2, malformed XML exits 1
+- Regression (all still pass): splunk kit lint 29/29, splunk kit
+  render 22/22, secrets-vault-manager 11/11 + 11/11 + 12/12,
+  webapp-testing 12/12
+- `git status`: only `skills/tableau-dashboard-creator/SKILL.md`
+  (modified) and `skills/tableau-dashboard-creator/tests/` (new)
+  changed; nothing else touched
 
 ## What remains unresolved
-- Changes are NOT committed (per repo policy: only commit when explicitly
-  requested). Working tree contains the new tests and the SKILL.md update.
-- The shell scripts (`setup.sh`, `validate.sh`, `smoke_offline.sh`) are not
-  unit-tested directly as shell; they are exercised via `validate.sh` and
-  `smoke_offline.sh` instead. `validate.sh` is the authoritative offline gate
-  for them.
-- `TEMPLATES` content is asserted structurally (file presence + lint PASS),
-  not byte-for-byte.
-- `render_custom_template_app`'s output is asserted via file existence in
-  `render_templates_writes_all_starter_files`, not its full contents.
+- Changes are NOT committed (repo policy: only commit when
+  explicitly requested).
+- `validate_twb_xsd.py` and `query_postgresql.py` remain untested
+  (third-party deps unavailable in this environment).
+- FINDING (not fixed, needs maintainer decision):
+  `TwbValidator._check_column_reference_integrity` builds
+  `ds_columns` keyed only by datasource `name` from
+  `.//datasources/datasource` in document order, so a later
+  same-named datasource OVERWRITES an earlier one's columns. A
+  realistic workbook that declares columns on the top-level
+  `<datasource>` while the worksheet `<view>` carries a bare
+  same-named `<datasource name="sales"/>` reference therefore
+  produces a FALSE "Column reference integrity" failure (verified
+  with a standalone probe: column-instance `[sum:profit:qk]`
+  referencing top-level-declared `[profit]` is reported as
+  undeclared). Fixing it (e.g. union instead of overwrite, or
+  only counting the top-level `<datasources>` block) changes
+  validator behavior and is out of scope for a test-coverage
+  session; the test suite was written to match current behavior
+  (the datasource-declared-column test declares the column on the
+  view's datasource, the last same-named one in document order).
 
 ## Which approaches have already failed and why
-- `test_main_all_profile_both_renders_and_lints_clean` initially failed: file
-  existence assertions were placed OUTSIDE the `TemporaryDirectory` context
-  manager, so `tmp` was already removed before the asserts ran. Fixed by moving
-  the assertions inside the `with` block. (Script was correct; the test
-  scoped the temp dir wrongly.)
-- `test_ingest_only_disjoint_from_edge_profile` failed with `NameError:
-  PROFILE_COMMANDS is not defined` because the name was referenced but not
-  imported. Fixed by adding `PROFILE_COMMANDS` to the import list.
-- `test_render_readme_lists_profiles_and_secret_policy` failed on
-  `assert "lookups" in md` because `render_readme` writes "lookup" (singular),
-  not "lookups". Fixed the assertion to match the actual output ("lookup").
-- Initial draft named the test runner `main()`, which shadowed
-  `spl2_pipeline_kit.main` and caused `TypeError: main() takes 0 positional
-  arguments but 1 was given`. Fixed by aliasing the import as `kit_main`.
-- No failures in `spl2_pipeline_kit.py` itself; all failures were test bugs.
+- Initial draft imported `main` from `validate_twb` and later
+  defined the test runner `def main()`, shadowing the script's
+  `main`. The `test_main_*` cases then called the TEST RUNNER
+  recursively, re-running the whole suite infinitely until
+  `RecursionError` inside `tempfile` and a hang (killed by
+  timeout). Fixed by aliasing the import
+  (`main as validator_main`) - the same fix the prior session
+  recorded for `spl2_pipeline_kit.main`.
+- `test_column_reference_integrity_parent_datasource_column`
+  initially asserted that a column declared on the TOP-LEVEL
+  datasource resolves. It does not (see the ds_columns shadowing
+  finding above); the check failed. Fixed by declaring the column
+  on the view's `<datasource>` instead and documenting why in a
+  comment. No failures in `validate_twb.py` itself were changed;
+  both failures were test bugs.
 
 ## One precise next task, with relevant evidence and constraints
-**Task:** Continue the test-coverage theme by adding a stdlib unit-test suite for
-`skills/secrets-vault-manager`, which currently has three scripts and no tests:
+**Task:** Add a stdlib unit-test suite for
+`skills/nifi-flow-layout/scripts/nifi_layout.py` (2087 lines, the
+largest remaining untested script with testable pure logic).
 
-- `scripts/audit_log_analyzer.py` - `load_logs`, `extract_fields`, `analyze`,
-  `print_human` (stdlib only: argparse, json, textwrap, collections, datetime)
-- `scripts/rotation_planner.py` - `load_inventory`, `compute_schedule`,
-  `build_summary`, `print_human`
-- `scripts/vault_config_generator.py` - `parse_secrets`, `generate_policy_hcl`,
-  `generate_auth_config`, `build_output`, `print_human`
-
-Evidence supporting this choice: `python3 -m py_compile` succeeds on all three
-scripts, and none import third-party packages, so they can be imported and
-unit-tested in this environment without installing dependencies (unlike the
-next-most-similar candidates `dataset-transformation`-needs-boto3,
-`sql-server-table-reconciliation`-needs-pandas/pyarrow/mssql_python, and
-`mcp-builder`-needs-mcp/anthropic).
+Evidence supporting this choice:
+- `python3 skills/nifi-flow-layout/scripts/nifi_layout.py --mode
+  self-test` prints `self-test ok` in this environment.
+- Its only third-party import is `requests`, and
+  `requests` 2.31.0 IS installed here, so
+  `sys.path.insert(0, "<skill>/scripts"); import nifi_layout`
+  works normally (a plain import registers the module in
+  `sys.modules`, which its dataclass string annotations need).
+- Dozens of pure functions are unit-testable without network:
+  `Rect` (inflate/intersects/as_dict), `Node`/`Conn` dataclasses,
+  `node_from`, `conn_from`, `parse_group`, `visual_id`,
+  `is_failureish_text`/`is_sideish_text`/`is_errorish`,
+  `strip_number`, `comment_for`, `relation_text`,
+  `processor_has_side_hint`, `classify_main`, `target_layout`,
+  `with_targets`, `rects`/`rects_actual`, `segment_rect`,
+  `orthogonal_segment`, `segment_overlap_amount`,
+  `segment_parallel_overlap`, `perpendicular_cross_point`,
+  `distinct_route_segment_pair`, `route_points`,
+  `terminal_is_group_port`, `connection_label_size`,
+  `label_rect`, `best_label_index`, `route_cost`,
+  `candidate_routes`, `choose_route`, the `*_route` helpers,
+  `branch_target_side`, `dense_fanin_target_side`, `edge_slot`,
+  `source_exit_point`, `spread_coord`, `find_clear_horizontal_lane`,
+  `route_to_side`, `route_has_component_hit`, `clear_same_column_route`,
+  `same_column_blocked`, `same_column_around_route`,
+  `label_clearance_rect`, `nudge_segment_coordinate`, etc.
+  (Full list via
+  `grep -n '^def \|^class \|^    def ' skills/nifi-flow-layout/scripts/nifi_layout.py`.)
+- The `NiFi` class methods (`req`, `flow`, `snapshot`,
+  `update_*`) are HTTP-bound; skip them or test only their pure
+  inputs (e.g. `p12_cert_pair`, `_component_endpoint`).
 
 Constraints / notes for the next agent:
-- Follow the same `SKILLS_DIR` / `sys.path.insert` pattern and `main()` runner
-  conventions as `skills/quantitative-backtesting/tests/` and this skill's new
-  `tests/test_kit_*.py`.
-- Keep the `tests/__init__.py` package marker.
-- Target the pure functions above first; guard the `main()`/CLI and
-  stdout-printing functions (`print_human`) with `contextlib.redirect_stdout`
-  or temp files, mirroring `test_kit_render.py`.
+- Follow the same `SKILLS_DIR` / `sys.path.insert` pattern and
+  `main()` runner conventions as this session's
+  `test_validate_twb.py` and the other suites; keep
+  `tests/__init__.py`.
+- Alias the script's `main` on import (e.g. `main as
+  nifi_main`) to avoid shadowing it with the test runner - the
+  exact failure mode recorded above and in the two prior
+  handoffs.
+- `nifi_layout.py` calls `logging.basicConfig` at import; use a
+  custom `logging.Handler` to assert on log output if needed.
+- Remaining smaller candidates after that:
+  `skills/jupyter-notebook/scripts/new_notebook.py` (41 lines,
+  stdlib-only: `slugify` + `main`) and
+  `skills/chdb-datastore/scripts/verify_install.py` (needs the
+  `chdb` package - check availability before attempting).
+  `youtube-downloader/scripts/download_video.py` is a thin
+  yt-dlp subprocess wrapper (and pip-installs yt-dlp), so it has
+  little unit-test value.
 
 (End of file)

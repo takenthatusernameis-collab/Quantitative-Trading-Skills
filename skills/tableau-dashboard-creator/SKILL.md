@@ -249,3 +249,52 @@ project-root/
         ├── dashboard.twb
         └── dashboard.twbx
 ```
+
+---
+
+## Test Coverage
+
+This skill bundles a standard-library unit-test suite (no third-party
+test framework) for `scripts/validate_twb.py`, following the pattern
+established by `skills/quantitative-backtesting/tests/`. Run it with:
+
+```bash
+python3 skills/tableau-dashboard-creator/tests/test_validate_twb.py
+```
+
+- `test_validate_twb.py` — TWB breakage-only validation (51 tests):
+  - `CheckResult` / `ValidationReport` dataclass behavior (`passed`,
+    `failed_count`, `passed_count`, default `details`)
+  - `_is_builtin_field` / `_is_builtin_field_name` built-in and
+    generated field detection
+  - `_check_well_formed_xml` handles well-formed, malformed, and
+    missing files
+  - `validate` runs all eight checks in order, short-circuits on
+    parse failure, and passes a bare `<workbook/>`
+  - `_check_datasource_existence` flags worksheet references to
+    undeclared datasources
+  - `_check_column_reference_integrity` flags undeclared columns,
+    skips built-in fields, and resolves columns declared in a
+    same-named `<datasource>`
+  - `_check_shelf_reference_integrity` flags undeclared shelf
+    references, allows empty shelves, skips Measure Names/Values,
+    and matches unbracketed instance names
+  - `_check_cdata_field_references` flags entity-encoded field
+    references in `<run>` elements and allows CDATA-wrapped or
+    plain-text runs
+  - `_check_dashboard_datasource_declarations` flags filter zones
+    (`type` and `mode` triggers) without a dashboard-level
+    `<datasources>` block
+  - `_check_filter_slices_consistency` flags filters without
+    matching `<slices>` entries
+  - `_check_worksheet_window_match` flags missing worksheet/window
+    pairs in both directions and ignores non-worksheet windows
+  - `print_report` renders PASS/FAIL lines, failure details, and
+    the summary line
+  - `main` exits 0 (valid), 1 (failed checks or malformed XML),
+    and 2 (missing file), and warns on non-`.twb` extensions
+
+`scripts/validate_twb_xsd.py` (requires `lxml`) and
+`scripts/query_postgresql.py` (requires `pandas`, `psycopg2`,
+`python-dotenv`) are not covered: their third-party dependencies
+are not available in this environment.
