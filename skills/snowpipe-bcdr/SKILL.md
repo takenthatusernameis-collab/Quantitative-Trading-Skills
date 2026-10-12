@@ -28,7 +28,7 @@ metadata:
   source:
     repository: 'https://github.com/Snowflake-Labs/coco-skills'
     path: skills/snowpipe-bcdr
-    license_path: skills/snowpipe-bcdr/LICENSE
+    license_path: LICENSE
     commit: d62f6ff052b7efca106432727f493a7ae62b8cf3
 ---
 

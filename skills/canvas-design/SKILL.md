@@ -10,7 +10,7 @@ metadata:
   source:
     repository: 'https://github.com/ComposioHQ/awesome-claude-skills'
     path: canvas-design
-    license_path: canvas-design/LICENSE.txt
+    license_path: LICENSE
     commit: be2a406907dbc61b73e6827ded415c96139d13a2
 ---
 

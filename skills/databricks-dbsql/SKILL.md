@@ -16,7 +16,7 @@ metadata:
   source:
     repository: 'https://github.com/databricks-solutions/ai-dev-kit'
     path: databricks-skills/databricks-dbsql
-    license_path: LICENSE.md
+    license_path: LICENSE
     commit: 1c43c215042804a17fdfd8878a97f3617c8807be
 ---
 

@@ -19,7 +19,7 @@ metadata:
   source:
     repository: 'https://github.com/k-dense-ai/scientific-agent-skills'
     path: skills/scikit-learn
-    license_path: LICENSE.md
+    license_path: LICENSE
     commit: 9c9bd2e92af12311ecd0c1a643e0931643f9ea04
 ---
 

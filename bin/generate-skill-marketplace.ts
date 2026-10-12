@@ -15,6 +15,7 @@ import {
   listVisibleDirectories,
   loadMcpIds,
   repoPathFromBin,
+  validateLicensePath,
   validateRequirements,
   validateSuggestFor,
 } from "./marketplace-generator-utils.ts";
@@ -33,8 +34,9 @@ const declaredNames = new Set<string>();
 generateMarketplace({
   rootDir: skillsDir,
   parseItem: (dirName) => {
+    const skillMdPath = path.join(skillsDir, dirName, "SKILL.md");
     const { data } = matter(
-      fs.readFileSync(path.join(skillsDir, dirName, "SKILL.md"), "utf-8"),
+      fs.readFileSync(skillMdPath, "utf-8"),
     );
     if (data.name !== dirName) {
       throw new Error(
@@ -52,6 +54,7 @@ generateMarketplace({
       mcpIds,
       { subgroup: "skills", id: dirName },
     );
+    validateLicensePath(data, dirName, skillsDir);
     console.log(`Added: ${data.name}`);
     return {
       id: dirName,

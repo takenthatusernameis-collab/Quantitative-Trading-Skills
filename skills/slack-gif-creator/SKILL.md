@@ -10,7 +10,7 @@ metadata:
   source:
     repository: 'https://github.com/ComposioHQ/awesome-claude-skills'
     path: slack-gif-creator
-    license_path: slack-gif-creator/LICENSE.txt
+    license_path: LICENSE
     commit: be2a406907dbc61b73e6827ded415c96139d13a2
 ---
 

@@ -299,3 +299,46 @@ export function validateSuggestFor(
 
   return value;
 }
+
+/**
+ * Ensures `metadata.source.license_path` (required by CONTRIBUTING.md for
+ * every contributed skill) resolves to a real file inside the skill directory.
+ * A dangling reference silently breaks license attribution and downstream
+ * packaging, so fail loudly at generation time instead.
+ */
+export function validateLicensePath(
+  data: Record<string, unknown>,
+  itemId: string,
+  skillsDir: string,
+): void {
+  const source =
+    data.metadata && typeof data.metadata === "object"
+      ? (data.metadata as Record<string, unknown>).source
+      : undefined;
+  if (!source || typeof source !== "object" || Array.isArray(source)) return;
+
+  const licensePath = (source as Record<string, unknown>).license_path;
+  if (licensePath === undefined) return;
+  if (typeof licensePath !== "string" || licensePath.trim().length === 0) {
+    throw new Error(
+      `${itemId}/SKILL.md: metadata.source.license_path must be a non-empty string`,
+    );
+  }
+
+  if (
+    path.isAbsolute(licensePath) ||
+    licensePath.split(/[\\/]/).some((part) => part === "..") ||
+    /[\r\n]/.test(licensePath)
+  ) {
+    throw new Error(
+      `${itemId}/SKILL.md: metadata.source.license_path must be a relative path without ".." or newlines (found "${licensePath}")`,
+    );
+  }
+
+  const resolved = path.resolve(skillsDir, itemId, licensePath);
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+    throw new Error(
+      `${itemId}/SKILL.md: metadata.source.license_path "${licensePath}" does not exist`,
+    );
+  }
+}
