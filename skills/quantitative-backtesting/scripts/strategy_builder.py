@@ -208,20 +208,143 @@ class DonchianChannelBreakout(StrategyBase):
 class CrossSectionalMomentum(StrategyBase):
     """Cross-Sectional Momentum Strategy.
 
-    Ranks assets by past return, goes long top quantile, short bottom quantile.
-    For single-asset usage, uses rolling quantile thresholds on historical returns.
+    Ranks assets by past return each period; goes long top quantile,
+    short bottom quantile. Supports both multi-asset panel data and
+    single-asset fallback.
+
+    Multi-asset data formats:
+    - DataFrame with MultiIndex columns: (field, symbol) e.g. ('close', 'AAPL')
+    - Dict mapping symbol -> DataFrame with OHLCV columns
+
+    Single-asset DataFrame (backward compatible): uses rolling quantile
+    thresholds on historical returns as a momentum filter.
     """
 
-    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+    def generate_signals(self, data: pd.DataFrame | dict) -> pd.Series:
         lookback = self.parameters.get("lookback", 252)
         top_quantile = self.parameters.get("top_quantile", 0.2)
         bottom_quantile = self.parameters.get("bottom_quantile", 0.2)
 
+        # Detect multi-asset panel data
+        if isinstance(data, dict):
+            return self._generate_multi_asset_signals_dict(data, lookback, top_quantile, bottom_quantile)
+        elif isinstance(data.columns, pd.MultiIndex):
+            return self._generate_multi_asset_signals_multiindex(data, lookback, top_quantile, bottom_quantile)
+        else:
+            # Single-asset fallback (backward compatible)
+            import warnings
+            warnings.warn(
+                "CrossSectionalMomentum used with single-asset data; "
+                "falling back to rolling quantile momentum filter. "
+                "For true cross-sectional momentum, provide panel data "
+                "(MultiIndex columns or dict of DataFrames).",
+                UserWarning,
+                stacklevel=2,
+            )
+            return self._generate_single_asset_signals(data, lookback, top_quantile, bottom_quantile)
+
+    def _generate_multi_asset_signals_dict(
+        self,
+        data_dict: dict,
+        lookback: int,
+        top_quantile: float,
+        bottom_quantile: float,
+    ) -> pd.Series:
+        """Generate signals from dict of symbol -> DataFrame."""
+        if not data_dict:
+            return pd.Series(dtype=float)
+
+        # Align all symbols to common date index
+        common_index = None
+        for df in data_dict.values():
+            if common_index is None:
+                common_index = df.index
+            else:
+                common_index = common_index.intersection(df.index)
+
+        if common_index is None or len(common_index) == 0:
+            return pd.Series(dtype=float)
+
+        common_index = common_index.sort_values()
+
+        # Compute lookback returns for each symbol
+        returns_dict = {}
+        for symbol, df in data_dict.items():
+            df_aligned = df.reindex(common_index)
+            close = df_aligned["close"]
+            returns_dict[symbol] = close.pct_change(lookback)
+
+        returns_df = pd.DataFrame(returns_dict, index=common_index)
+
+        # Rank cross-sectionally each period
+        signals = pd.Series(0.0, index=common_index, dtype=float)
+
+        for date in common_index[lookback:]:
+            row = returns_df.loc[date].dropna()
+            if len(row) == 0:
+                continue
+
+            n_assets = len(row)
+            n_long = max(1, int(np.ceil(n_assets * top_quantile)))
+            n_short = max(1, int(np.ceil(n_assets * bottom_quantile)))
+
+            # Rank: highest returns = long, lowest returns = short
+            ranked = row.rank(ascending=False, method="first")
+            long_symbols = ranked[ranked <= n_long].index
+            short_symbols = ranked[ranked > n_assets - n_short].index
+
+            # For the portfolio-level signal, we return the net position
+            # (number of longs - number of shorts) / n_assets
+            # This gives a single scalar signal per period for the portfolio
+            signals.loc[date] = (len(long_symbols) - len(short_symbols)) / n_assets
+
+        return signals
+
+    def _generate_multi_asset_signals_multiindex(
+        self,
+        data: pd.DataFrame,
+        lookback: int,
+        top_quantile: float,
+        bottom_quantile: float,
+    ) -> pd.Series:
+        """Generate signals from DataFrame with MultiIndex columns (field, symbol)."""
+        # Expect columns like ('close', 'AAPL'), ('close', 'MSFT'), etc.
+        if "close" not in data.columns.get_level_values(0):
+            raise ValueError("MultiIndex data must have 'close' as first level column")
+
+        close_data = data["close"]  # DataFrame with symbols as columns
+        returns_df = close_data.pct_change(lookback)
+
+        signals = pd.Series(0.0, index=data.index, dtype=float)
+
+        for date in data.index[lookback:]:
+            row = returns_df.loc[date].dropna()
+            if len(row) == 0:
+                continue
+
+            n_assets = len(row)
+            n_long = max(1, int(np.ceil(n_assets * top_quantile)))
+            n_short = max(1, int(np.ceil(n_assets * bottom_quantile)))
+
+            ranked = row.rank(ascending=False, method="first")
+            long_symbols = ranked[ranked <= n_long].index
+            short_symbols = ranked[ranked > n_assets - n_short].index
+
+            signals.loc[date] = (len(long_symbols) - len(short_symbols)) / n_assets
+
+        return signals
+
+    def _generate_single_asset_signals(
+        self,
+        data: pd.DataFrame,
+        lookback: int,
+        top_quantile: float,
+        bottom_quantile: float,
+    ) -> pd.Series:
+        """Backward-compatible single-asset momentum filter using rolling quantiles."""
         returns = data["close"].pct_change(lookback)
         signals = pd.Series(0, index=data.index)
 
-        # Compute rolling quantiles of returns to make parameters meaningful
-        # for single-asset series
         rolling_window = min(lookback * 2, len(returns)) if len(returns) > lookback else lookback
         upper = returns.rolling(rolling_window).quantile(1 - top_quantile)
         lower = returns.rolling(rolling_window).quantile(bottom_quantile)
@@ -368,7 +491,7 @@ def list_strategies() -> Dict[str, str]:
         "bollinger_bands": "Bollinger Bands Mean Reversion",
         "rsi_mean_reversion": "RSI Mean Reversion",
         "donchian_breakout": "Donchian Channel Breakout (Trend Following)",
-        "cross_sectional_momentum": "Cross-Sectional Momentum (Multi-Asset)",
+        "cross_sectional_momentum": "Cross-Sectional Momentum (Multi-Asset Panel Data)",
         "dual_momentum": "Dual Momentum (Absolute + Relative)",
         "zscore_mean_reversion": "Z-Score Mean Reversion (Pairs Style)",
     }

@@ -64,12 +64,15 @@ strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 3
 
 ### Cross-Sectional Momentum (`cross_sectional_momentum`)
 
-- **Signal**: Ranks assets by past return; long top quantile, short bottom
-  quantile. For single-asset use, acts as a simple momentum filter.
+- **Signal**: Ranks assets by past return each period; long top quantile,
+  short bottom quantile. Requires multi-asset panel data (dict of
+  DataFrames or DataFrame with MultiIndex columns). For single-asset
+  use, falls back to a rolling quantile momentum filter with a warning.
 - **Parameters**: `lookback` (default 252), `top_quantile` (default 0.2),
   `bottom_quantile` (default 0.2).
-- **Use case**: Multi-asset portfolios; requires panel data at the portfolio
-  layer.
+- **Use case**: Multi-asset portfolios; requires panel data at the
+  portfolio layer. Returns a portfolio-level signal representing
+  (n_long - n_short) / n_assets per period.
 
 ### Dual Momentum (`dual_momentum`)
 
