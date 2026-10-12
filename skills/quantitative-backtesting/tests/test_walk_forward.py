@@ -19,6 +19,7 @@ sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 from walk_forward import (  # noqa: E402
     overfitting_check,
     parameter_optimization,
+    signals_active,
     walk_forward_analysis,
     monte_carlo_simulation,
 )
@@ -67,6 +68,19 @@ def test_parameter_optimization_skips_flat_combos():
     assert flat_params not in [r["params"] for r in results], (
         "flat combo (fast==slow) was not skipped"
     )
+
+
+def test_signals_active_detects_flat_and_active_series():
+    """signals_active returns False for all-zero signals, True otherwise."""
+    dates = pd.date_range("2020-01-01", periods=5, freq="B")
+    flat = pd.Series(0, index=dates, dtype=int)
+    assert signals_active(flat) is False
+
+    active = pd.Series([0, 0, 1, 1, 0], index=dates)
+    assert signals_active(active) is True
+
+    empty = pd.Series(dtype=int)
+    assert signals_active(empty) is False
 
 
 def test_walk_forward_skips_flat_combos_in_test_window():
@@ -191,6 +205,7 @@ def main() -> int:
         ("parameter_optimization_skips_flat_combos", test_parameter_optimization_skips_flat_combos),
         ("walk_forward_skips_flat_combos_in_test_window", test_walk_forward_skips_flat_combos_in_test_window),
         ("overfitting_check_handles_empty_oos", test_overfitting_check_handles_empty_oos),
+        ("signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
         ("monte_carlo_simulation_basic", test_monte_carlo_simulation_basic),
         ("monte_carlo_simulation_block_bootstrap", test_monte_carlo_simulation_block_bootstrap),
         ("monte_carlo_simulation_probability_of_ruin", test_monte_carlo_simulation_probability_of_ruin),

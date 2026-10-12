@@ -40,6 +40,17 @@ def run_backtest(data, strategy, args):
     signals = strategy.generate_signals(data)
     close = data["close"]
 
+    # Guard against strategies that never take a position (e.g. a lookback
+    # longer than the data window leaves every rolling indicator NaN, so the
+    # signal stays flat at 0). Such strategies produce no trades and their
+    # performance metrics are meaningless (division-by-zero Sharpe, etc.).
+    if (signals != 0).sum() == 0:
+        raise ValueError(
+            "Strategy never takes a position for the given data and "
+            "parameters. Reduce the lookback/period so the indicator is "
+            "defined over at least part of the window."
+        )
+
     # Trade at next period's open (avoid look-ahead bias)
     positions = signals.shift(1).fillna(0)
     raw_returns = close.pct_change()

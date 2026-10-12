@@ -106,7 +106,7 @@ def walk_forward_analysis(
                 # rolling indicator NaN, so the strategy stays flat). Without
                 # this guard the grid search silently selects such a combo as
                 # "optimal" and reports a flat (zero) out-of-sample return.
-                if (test_signals != 0).sum() == 0:
+                if not signals_active(test_signals):
                     continue
 
                 # Calculate returns for this parameter set
@@ -207,7 +207,7 @@ def parameter_optimization(
             # every rolling indicator NaN, so the strategy stays flat).
             # Without this guard such a combo reports a flat (zero) return
             # and can be ranked as "optimal" by the grid search.
-            if (signals != 0).sum() == 0:
+            if not signals_active(signals):
                 continue
 
             returns = _calculate_strategy_returns(
@@ -298,6 +298,17 @@ def overfitting_check(
             diagnostics["overfitting_risk"] = "medium"
 
     return diagnostics
+
+
+def signals_active(signals: pd.Series) -> bool:
+    """Return True if the signal series ever takes a non-zero position.
+
+    A strategy that never takes a position (e.g. a lookback longer than the
+    data window leaves every rolling indicator NaN, so the signal stays flat
+    at 0) produces no trades and meaningless zero returns. Callers should
+    skip such parameter sets rather than ranking them as "optimal".
+    """
+    return bool((signals != 0).any())
 
 
 def _calculate_strategy_returns(
