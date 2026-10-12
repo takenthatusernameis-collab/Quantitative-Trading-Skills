@@ -6,7 +6,9 @@ Run with: python3 skills/quantitative-backtesting/tests/test_walk_forward.py
 No third-party test framework is required; uses only the standard library.
 """
 
+import json
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -22,8 +24,14 @@ from walk_forward import (  # noqa: E402
     signals_active,
     walk_forward_analysis,
     monte_carlo_simulation,
+    run_walk_forward,
+    run_parameter_optimization,
+    run_monte_carlo,
+    _make_strategy_factory,
+    _parse_param_grid,
 )
 from strategy_builder import build_strategy  # noqa: E402
+from data_loader import load_data  # noqa: E402
 
 
 def _make_data(periods: int = 756, seed: int = 42) -> pd.DataFrame:
@@ -200,6 +208,158 @@ def test_monte_carlo_simulation_handles_short_series():
         assert "at least 2 return observations" in str(e)
 
 
+def _make_test_data_file(periods: int = 504, seed: int = 42) -> str:
+    """Create a temporary CSV file with test data."""
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2018-01-01", periods=periods, freq="B")
+    rets = rng.normal(0.0005, 0.015, periods)
+    prices = 100 * np.exp(np.cumsum(rets))
+    df = pd.DataFrame({
+        "date": dates,
+        "open": prices * rng.uniform(0.995, 1.005, periods),
+        "high": prices * rng.uniform(1.005, 1.02, periods),
+        "low": prices * rng.uniform(0.98, 0.995, periods),
+        "close": prices,
+        "volume": rng.integers(1_000_000, 10_000_000, periods),
+    })
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
+    df.to_csv(tmp.name, index=False)
+    return tmp.name
+
+
+class _CLIArgs:
+    """Mock CLI arguments namespace."""
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+
+def test_run_walk_forward_cli():
+    """Test walk-forward CLI function runs and produces output."""
+    data_file = _make_test_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                train_months=6,
+                test_months=2,
+                step_months=2,
+                initial_capital=100000,
+            )
+            result = run_walk_forward(args)
+            assert result == 0
+
+            # Check output files exist
+            summary_path = Path(tmpdir) / "walk_forward_summary.json"
+            assert summary_path.exists(), "Summary JSON not created"
+
+            with open(summary_path) as f:
+                summary = json.load(f)
+            assert "summary" in summary
+            assert "diagnostics" in summary
+            assert "best_params_per_period" in summary
+            assert summary["summary"]["n_periods"] > 0
+    finally:
+        Path(data_file).unlink()
+
+
+def test_run_parameter_optimization_cli():
+    """Test parameter optimization CLI function runs and produces output."""
+    data_file = _make_test_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                top_n=5,
+            )
+            result = run_parameter_optimization(args)
+            assert result == 0
+
+            # Check output files exist
+            results_path = Path(tmpdir) / "parameter_optimization.json"
+            assert results_path.exists(), "Results JSON not created"
+
+            with open(results_path) as f:
+                results = json.load(f)
+            assert len(results) > 0
+            assert "sharpe_ratio" in results[0]
+            assert "params" in results[0]
+    finally:
+        Path(data_file).unlink()
+
+
+def test_run_monte_carlo_cli():
+    """Test Monte Carlo CLI function runs and produces output."""
+    data_file = _make_test_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                n_simulations=50,
+                confidence_levels=[0.90, 0.95],
+                block_size=None,
+                initial_capital=100000,
+            )
+            result = run_monte_carlo(args)
+            assert result == 0
+
+            # Check output files exist
+            mc_path = Path(tmpdir) / "monte_carlo_results.json"
+            assert mc_path.exists(), "Monte Carlo results JSON not created"
+
+            with open(mc_path) as f:
+                mc = json.load(f)
+            assert "metric_distributions" in mc
+            assert "confidence_intervals" in mc
+            assert "probability_of_ruin" in mc
+            assert "summary" in mc
+            assert mc["n_simulations"] == 50
+    finally:
+        Path(data_file).unlink()
+
+
+def test_parse_param_grid():
+    """Test parameter grid parsing from JSON string."""
+    # Simple grid
+    grid = _parse_param_grid('{"fast_period": [10, 20], "slow_period": 50}')
+    assert grid == {"fast_period": [10, 20], "slow_period": [50]}
+
+    # Single values become lists
+    grid = _parse_param_grid('{"period": 20}')
+    assert grid == {"period": [20]}
+
+    # Invalid JSON raises error
+    try:
+        _parse_param_grid("not valid json")
+        assert False, "Expected ValueError for invalid JSON"
+    except ValueError as e:
+        assert "Invalid JSON" in str(e)
+
+
 def main() -> int:
     tests = [
         ("parameter_optimization_skips_flat_combos", test_parameter_optimization_skips_flat_combos),
@@ -210,6 +370,10 @@ def main() -> int:
         ("monte_carlo_simulation_block_bootstrap", test_monte_carlo_simulation_block_bootstrap),
         ("monte_carlo_simulation_probability_of_ruin", test_monte_carlo_simulation_probability_of_ruin),
         ("monte_carlo_simulation_handles_short_series", test_monte_carlo_simulation_handles_short_series),
+        ("run_walk_forward_cli", test_run_walk_forward_cli),
+        ("run_parameter_optimization_cli", test_run_parameter_optimization_cli),
+        ("run_monte_carlo_cli", test_run_monte_carlo_cli),
+        ("parse_param_grid", test_parse_param_grid),
     ]
 
     failures = 0

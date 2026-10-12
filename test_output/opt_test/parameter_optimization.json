@@ -1,0 +1,38 @@
+[
+  {
+    "params": {
+      "fast_period": 10,
+      "slow_period": 50
+    },
+    "sharpe_ratio": 0.500941147002102,
+    "total_return": 0.21310259234343198,
+    "n_periods": 502
+  },
+  {
+    "params": {
+      "fast_period": 10,
+      "slow_period": 30
+    },
+    "sharpe_ratio": 0.4704815466074435,
+    "total_return": 0.19132349813697136,
+    "n_periods": 502
+  },
+  {
+    "params": {
+      "fast_period": 20,
+      "slow_period": 50
+    },
+    "sharpe_ratio": 0.17827032582751662,
+    "total_return": 0.07425644326398784,
+    "n_periods": 502
+  },
+  {
+    "params": {
+      "fast_period": 20,
+      "slow_period": 30
+    },
+    "sharpe_ratio": 0.10328101519358136,
+    "total_return": 0.04601435851529212,
+    "n_periods": 502
+  }
+]

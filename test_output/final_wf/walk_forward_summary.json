@@ -1,0 +1,64 @@
+{
+  "summary": {
+    "n_periods": 3,
+    "total_oos_return": 0.19763926568518775,
+    "oos_sharpe": 1.5228344606759885,
+    "oos_volatility": 0.15241024600736128,
+    "avg_period_return": 0.0010003792650004556,
+    "n_positive_periods": 38,
+    "win_rate_periods": 0.20105820105820105
+  },
+  "diagnostics": {
+    "n_periods": 3,
+    "n_valid_periods": 3,
+    "param_stability": {
+      "slow_period": {
+        "unique_values": 2,
+        "most_common": 30,
+        "stability_ratio": 0.33333333333333337
+      },
+      "fast_period": {
+        "unique_values": 1,
+        "most_common": 10,
+        "stability_ratio": 0.6666666666666667
+      }
+    },
+    "oos_sharpe": 1.5228344606759885,
+    "oos_total_return": 0.19763926568518775,
+    "oos_volatility": 0.15241024600736128,
+    "overfitting_risk": "low"
+  },
+  "best_params_per_period": [
+    {
+      "fast_period": 10,
+      "slow_period": 50
+    },
+    {
+      "fast_period": 10,
+      "slow_period": 30
+    },
+    {
+      "fast_period": 10,
+      "slow_period": 30
+    }
+  ],
+  "config": {
+    "strategy": "sma_crossover",
+    "symbol": "SPY",
+    "train_months": 12,
+    "test_months": 3,
+    "step_months": 3,
+    "commission": 0.0002,
+    "slippage": 0.0001,
+    "param_grid": {
+      "fast_period": [
+        10,
+        20
+      ],
+      "slow_period": [
+        30,
+        50
+      ]
+    }
+  }
+}

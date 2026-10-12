@@ -6,12 +6,21 @@ Splits historical data into rolling training and testing windows to validate
 strategy robustness across market regimes.
 """
 
+import argparse
 import json
+import sys
 import numpy as np
 import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, List, Callable, Optional, Union
 from itertools import product
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from scripts.strategy_builder import build_strategy
+from scripts.data_loader import load_data, validate_data
+from scripts.performance import calculate_metrics, generate_report
+from scripts.reporting import generate_tear_sheet
 
 
 def walk_forward_analysis(
@@ -520,36 +529,52 @@ def monte_carlo_simulation(
     }
 
 
-if __name__ == "__main__":
-    import sys
-    from pathlib import Path
+def _make_strategy_factory(strategy_type: str):
+    """Create a strategy factory function for the given strategy type."""
+    def factory(params: Dict[str, Any]):
+        return build_strategy(strategy_type, json.dumps(params))
+    return factory
 
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from scripts.strategy_builder import build_strategy
 
-    # Generate sample data
-    np.random.seed(42)
-    dates = pd.date_range("2018-01-01", periods=756, freq="B")
-    returns = np.random.normal(0.0005, 0.015, 756)
-    prices = 100 * np.exp(np.cumsum(returns))
+def _load_and_validate_data(data_path: str, symbol: str, start: str, end: str) -> pd.DataFrame:
+    """Load and validate data from file."""
+    data = load_data(data_path, symbol=symbol, start=start, end=end)
+    if not validate_data(data):
+        raise ValueError("Data validation failed!")
+    return data
 
-    sample_data = pd.DataFrame({
-        "open": prices * np.random.uniform(0.995, 1.005, 756),
-        "high": prices * np.random.uniform(1.005, 1.02, 756),
-        "low": prices * np.random.uniform(0.98, 0.995, 756),
-        "close": prices,
-        "volume": np.random.randint(1000000, 10000000, 756),
-    }, index=dates)
 
-    # Run walk-forward analysis
-    print("Running walk-forward analysis...")
+def _parse_param_grid(param_grid_str: str) -> Dict[str, List[Any]]:
+    """Parse parameter grid from JSON string."""
+    try:
+        param_grid = json.loads(param_grid_str)
+        # Ensure all values are lists
+        for k, v in param_grid.items():
+            if not isinstance(v, list):
+                param_grid[k] = [v]
+        return param_grid
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON for param_grid: {e}")
+
+
+def run_walk_forward(args) -> int:
+    """Run walk-forward analysis from CLI args."""
+    print(f"Loading data from {args.data}...")
+    data = _load_and_validate_data(args.data, args.symbol, args.start, args.end)
+
+    param_grid = _parse_param_grid(args.param_grid)
+    strategy_factory = _make_strategy_factory(args.strategy)
+
+    print(f"Running walk-forward analysis with {args.strategy}...")
     results = walk_forward_analysis(
-        data=sample_data,
-        strategy_factory=lambda params: build_strategy("sma_crossover", json.dumps(params)),
-        param_grid={"fast_period": [10, 20, 50], "slow_period": [50, 100, 200]},
-        train_months=12,
-        test_months=3,
-        step_months=3,
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        train_months=args.train_months,
+        test_months=args.test_months,
+        step_months=args.step_months,
+        commission=args.commission,
+        slippage=args.slippage,
     )
 
     print(f"Number of walk-forward periods: {results['summary']['n_periods']}")
@@ -559,3 +584,222 @@ if __name__ == "__main__":
     # Check for overfitting
     diagnostics = overfitting_check(results)
     print(f"Overfitting Risk: {diagnostics['overfitting_risk']}")
+
+    # Save results
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save summary as JSON
+    summary_path = output_dir / "walk_forward_summary.json"
+    summary_data = {
+        "summary": results["summary"],
+        "diagnostics": diagnostics,
+        "best_params_per_period": results["best_params_per_period"],
+        "config": {
+            "strategy": args.strategy,
+            "symbol": args.symbol,
+            "train_months": args.train_months,
+            "test_months": args.test_months,
+            "step_months": args.step_months,
+            "commission": args.commission,
+            "slippage": args.slippage,
+            "param_grid": param_grid,
+        },
+    }
+    with open(summary_path, "w") as f:
+        json.dump(summary_data, f, indent=2, default=str)
+    print(f"Walk-forward summary saved to: {summary_path}")
+
+    # Generate full report if OOS returns available
+    if len(results["oos_returns"]) > 0:
+        equity = (1 + results["oos_returns"]).cumprod() * args.initial_capital
+        report_results = {
+            "equity_curve": equity,
+            "returns": results["oos_returns"],
+            "config": {
+                "initial_capital": args.initial_capital,
+                "commission": args.commission,
+                "slippage": args.slippage,
+                "strategy": args.strategy,
+                "symbol": args.symbol,
+            },
+        }
+        metrics = calculate_metrics(report_results)
+        generate_report(metrics, args.output, symbol=args.symbol, strategy_name=f"{args.strategy}_walk_forward")
+        generate_tear_sheet(report_results, metrics, args.output, symbol=args.symbol, strategy_name=f"{args.strategy}_walk_forward")
+        print(f"Detailed report saved to: {args.output}/")
+
+    return 0
+
+
+def run_parameter_optimization(args) -> int:
+    """Run parameter optimization from CLI args."""
+    print(f"Loading data from {args.data}...")
+    data = _load_and_validate_data(args.data, args.symbol, args.start, args.end)
+
+    param_grid = _parse_param_grid(args.param_grid)
+    strategy_factory = _make_strategy_factory(args.strategy)
+
+    print(f"Running parameter optimization with {args.strategy}...")
+    results = parameter_optimization(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        commission=args.commission,
+        slippage=args.slippage,
+    )
+
+    if not results:
+        print("No valid parameter combinations found!")
+        return 1
+
+    print(f"\nTop {min(args.top_n, len(results))} parameter combinations:")
+    print("-" * 80)
+    print(f"{'Rank':<5} {'Sharpe':<10} {'Total Return':<15} {'Params'}")
+    print("-" * 80)
+    for i, r in enumerate(results[:args.top_n]):
+        print(f"{i+1:<5} {r['sharpe_ratio']:<10.4f} {r['total_return']:<15.2%} {r['params']}")
+
+    # Save results
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    results_path = output_dir / "parameter_optimization.json"
+    with open(results_path, "w") as f:
+        json.dump(results, f, indent=2, default=str)
+    print(f"\nFull results saved to: {results_path}")
+
+    return 0
+
+
+def run_monte_carlo(args) -> int:
+    """Run Monte Carlo simulation from CLI args."""
+    print(f"Loading data from {args.data}...")
+    data = _load_and_validate_data(args.data, args.symbol, args.start, args.end)
+
+    # First run a backtest to get base returns
+    param_grid = _parse_param_grid(args.param_grid)
+    strategy_factory = _make_strategy_factory(args.strategy)
+
+    # Use best params from optimization or first combo
+    if param_grid:
+        # Try to get best params from optimization
+        opt_results = parameter_optimization(
+            data=data,
+            strategy_factory=strategy_factory,
+            param_grid=param_grid,
+            commission=args.commission,
+            slippage=args.slippage,
+        )
+        if opt_results:
+            best_params = opt_results[0]["params"]
+            print(f"Using best params from optimization: {best_params}")
+        else:
+            # Use first combo
+            param_names = list(param_grid.keys())
+            param_values = list(param_grid.values())
+            from itertools import product
+            first_combo = next(product(*param_values))
+            best_params = dict(zip(param_names, first_combo))
+            print(f"Using first param combo: {best_params}")
+    else:
+        best_params = {}
+
+    strategy = strategy_factory(best_params)
+    signals = strategy.generate_signals(data)
+    returns = _calculate_strategy_returns(data, signals, args.commission, args.slippage)
+
+    print(f"Running Monte Carlo simulation with {args.n_simulations} simulations...")
+    mc_results = monte_carlo_simulation(
+        base_returns=returns,
+        n_simulations=args.n_simulations,
+        confidence_levels=args.confidence_levels,
+        block_size=args.block_size,
+    )
+
+    print(f"Probability of Ruin (>50% drawdown): {mc_results['probability_of_ruin']:.2%}")
+
+    # Print confidence intervals for key metrics
+    print("\nKey Metric Confidence Intervals (95%):")
+    print("-" * 60)
+    for metric in ["sharpe_ratio", "total_return", "max_drawdown", "annualized_return"]:
+        if metric in mc_results["confidence_intervals"]:
+            ci = mc_results["confidence_intervals"][metric].get(0.95)
+            if ci:
+                mean_val = mc_results["summary"][metric]["mean"]
+                print(f"  {metric}: {mean_val:.4f} [{ci[0]:.4f}, {ci[1]:.4f}]")
+
+    # Save results
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    mc_path = output_dir / "monte_carlo_results.json"
+    # Convert numpy arrays to lists for JSON serialization
+    mc_save = {
+        "metric_distributions": {k: v.tolist() for k, v in mc_results["metric_distributions"].items()},
+        "confidence_intervals": mc_results["confidence_intervals"],
+        "probability_of_ruin": mc_results["probability_of_ruin"],
+        "ruin_threshold": mc_results["ruin_threshold"],
+        "summary": mc_results["summary"],
+        "n_simulations": mc_results["n_simulations"],
+        "base_observations": mc_results["base_observations"],
+        "config": {
+            "strategy": args.strategy,
+            "symbol": args.symbol,
+            "params": best_params,
+            "commission": args.commission,
+            "slippage": args.slippage,
+            "n_simulations": args.n_simulations,
+            "block_size": args.block_size,
+        },
+    }
+    with open(mc_path, "w") as f:
+        json.dump(mc_save, f, indent=2, default=str)
+    print(f"\nMonte Carlo results saved to: {mc_path}")
+
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Walk-forward analysis and validation tools")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # Common arguments
+    common_parser = argparse.ArgumentParser(add_help=False)
+    common_parser.add_argument("--data", type=str, required=True, help="Path to data file (CSV/Parquet)")
+    common_parser.add_argument("--strategy", type=str, default="sma_crossover", help="Strategy type")
+    common_parser.add_argument("--symbol", type=str, default="SPY", help="Symbol to analyze")
+    common_parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
+    common_parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
+    common_parser.add_argument("--commission", type=float, default=0.0002, help="Commission per trade (as decimal)")
+    common_parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (as decimal)")
+    common_parser.add_argument("--output", type=str, default="results", help="Output directory")
+    common_parser.add_argument("--param-grid", type=str, required=True, help="Parameter grid as JSON string")
+
+    # Walk-forward analysis
+    wf_parser = subparsers.add_parser("walk-forward", parents=[common_parser], help="Run walk-forward analysis")
+    wf_parser.add_argument("--train-months", type=int, default=12, help="Training window size in months")
+    wf_parser.add_argument("--test-months", type=int, default=3, help="Testing window size in months")
+    wf_parser.add_argument("--step-months", type=int, default=3, help="Step size between iterations in months")
+    wf_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
+    wf_parser.set_defaults(func=run_walk_forward)
+
+    # Parameter optimization
+    opt_parser = subparsers.add_parser("optimize", parents=[common_parser], help="Run parameter optimization")
+    opt_parser.add_argument("--top-n", type=int, default=10, help="Number of top results to display")
+    opt_parser.set_defaults(func=run_parameter_optimization)
+
+    # Monte Carlo simulation
+    mc_parser = subparsers.add_parser("monte-carlo", parents=[common_parser], help="Run Monte Carlo simulation")
+    mc_parser.add_argument("--n-simulations", type=int, default=2000, help="Number of simulations")
+    mc_parser.add_argument("--confidence-levels", type=float, nargs="+", default=[0.90, 0.95, 0.99], help="Confidence levels")
+    mc_parser.add_argument("--block-size", type=int, help="Block size for block bootstrap")
+    mc_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
+    mc_parser.set_defaults(func=run_monte_carlo)
+
+    args = parser.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
