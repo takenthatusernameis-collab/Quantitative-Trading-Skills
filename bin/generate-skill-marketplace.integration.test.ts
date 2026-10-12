@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { test, type TestContext } from "node:test";
 import * as yaml from "yaml";
 import { generateMarketplace } from "./marketplace-generator-utils.ts";
-import { validateLicensePath } from "./marketplace-generator-utils.ts";
+import { validateLicensePath, validateLicense } from "./marketplace-generator-utils.ts";
 import matter from "gray-matter";
 import {
   validateRequirements,
@@ -33,6 +33,25 @@ function writeSkill(
 ): void {
   const dir = skillDir(root, id);
   const skillMdPath = path.join(dir, "SKILL.md");
+  // Default to a valid top-level license so test fixtures stay green. Tests
+  // that exercise the "no license" rejection path opt out by setting
+  // `license: null` explicitly.
+  if (
+    frontmatter.license === undefined &&
+    !(
+      frontmatter.metadata &&
+      typeof frontmatter.metadata === "object" &&
+      (frontmatter.metadata as Record<string, unknown>).source &&
+      typeof (frontmatter.metadata as Record<string, unknown>).source ===
+        "object" &&
+      ((frontmatter.metadata as Record<string, unknown>).source as Record<
+        string,
+        unknown
+      >).license_path
+    )
+  ) {
+    frontmatter.license = "MIT";
+  }
   const content = `---\n${yaml.stringify(frontmatter)}---\n\n${body}\n`;
   fs.writeFileSync(skillMdPath, content);
 }
@@ -107,6 +126,7 @@ function generateSkillsMarketplace(skillsDir: string, mcpsDir: string) {
       { subgroup: "skills", id: dirName },
     );
     validateLicensePath(data, dirName, skillsDir);
+    validateLicense(data, dirName);
     items.push({
       id: dirName,
       description: data.description,
@@ -498,6 +518,64 @@ test("rejects license_path with .. segments", (t) => {
   assert.throws(
     () => generateSkillsMarketplace(root, mcpsDir),
     /must be a relative path/,
+  );
+});
+
+test("rejects skill with neither license nor license_path", (t) => {
+  const root = fixture(t);
+  const mcpsDir = createMcpsDir(root);
+
+  writeSkill(root, "test-skill", {
+    name: "test-skill",
+    description: "A test skill",
+    license: null,
+    metadata: { category: "development" },
+  });
+
+  assert.throws(
+    () => generateSkillsMarketplace(root, mcpsDir),
+    /must specify either top-level "license" \(SPDX identifier\) or "metadata.source.license_path"/,
+  );
+});
+
+test("accepts skill with top-level license field", (t) => {
+  const root = fixture(t);
+  const mcpsDir = createMcpsDir(root);
+
+  writeSkill(root, "test-skill", {
+    name: "test-skill",
+    description: "A test skill",
+    license: "MIT",
+    metadata: { category: "development" },
+  });
+
+  const items = generateSkillsMarketplace(root, mcpsDir);
+  assert.equal(items.length, 1);
+});
+
+test("rejects skill with both license and license_path", (t) => {
+  const root = fixture(t);
+  const mcpsDir = createMcpsDir(root);
+
+  const dir = skillDir(root, "test-skill");
+  fs.writeFileSync(path.join(dir, "LICENSE"), "MIT");
+
+  writeSkill(root, "test-skill", {
+    name: "test-skill",
+    description: "A test skill",
+    license: "MIT",
+    metadata: {
+      source: {
+        repository: "https://github.com/test/repo",
+        path: "skills/test-skill",
+        license_path: "LICENSE",
+      },
+    },
+  });
+
+  assert.throws(
+    () => generateSkillsMarketplace(root, mcpsDir),
+    /must not specify both/,
   );
 });
 
