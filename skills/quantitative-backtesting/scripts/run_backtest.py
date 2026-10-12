@@ -46,7 +46,7 @@ def run_backtest(data, strategy, args):
     # longer than the data window leaves every rolling indicator NaN, so the
     # signal stays flat at 0). Such strategies produce no trades and their
     # performance metrics are meaningless (division-by-zero Sharpe, etc.).
-    if not _signals_active(signals):
+    if not signals_active(signals):
         raise ValueError(
             "Strategy never takes a position for the given data and "
             "parameters. Reduce the lookback/period so the indicator is "
@@ -112,8 +112,14 @@ def run_backtest(data, strategy, args):
     }
 
 
-def _signals_active(signals: pd.Series) -> bool:
-    """Return True if the signal series ever takes a non-zero position."""
+def signals_active(signals: pd.Series) -> bool:
+    """Return True if the signal series ever takes a non-zero position.
+
+    A strategy that never takes a position (e.g. a lookback longer than the
+    data window leaves every rolling indicator NaN, so the signal stays flat
+    at 0) produces no trades and meaningless zero returns. Callers should
+    skip such parameter sets rather than ranking them as "optimal".
+    """
     return bool((signals != 0).any())
 
 

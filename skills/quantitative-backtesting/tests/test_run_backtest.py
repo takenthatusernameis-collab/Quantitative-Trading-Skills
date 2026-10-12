@@ -16,7 +16,7 @@ import pandas as pd
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
-from run_backtest import run_backtest  # noqa: E402
+from run_backtest import run_backtest, signals_active  # noqa: E402
 from strategy_builder import build_strategy  # noqa: E402
 
 
@@ -45,6 +45,19 @@ class _Args:
         self.initial_capital = initial_capital
         self.strategy = strategy
         self.symbol = symbol
+
+
+def test_signals_active_detects_flat_and_active_series():
+    """signals_active returns False for all-zero signals, True otherwise."""
+    dates = pd.date_range("2020-01-01", periods=5, freq="B")
+    flat = pd.Series(0, index=dates, dtype=int)
+    assert signals_active(flat) is False
+
+    active = pd.Series([0, 0, 1, 1, 0], index=dates)
+    assert signals_active(active) is True
+
+    empty = pd.Series(dtype=int)
+    assert signals_active(empty) is False
 
 
 def test_run_backtest_flat_strategy_raises():
@@ -104,6 +117,7 @@ def test_run_backtest_trade_analytics_populated():
 
 def main() -> int:
     tests = [
+        ("signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
         ("run_backtest_flat_strategy_raises", test_run_backtest_flat_strategy_raises),
         ("run_backtest_flat_long_lookback_raises", test_run_backtest_flat_long_lookback_raises),
         ("run_backtest_active_strategy_succeeds", test_run_backtest_active_strategy_succeeds),
