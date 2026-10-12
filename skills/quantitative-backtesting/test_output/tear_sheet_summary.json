@@ -19,6 +19,8 @@
     "winning_trades": 5,
     "losing_trades": 4,
     "win_rate": 0.5555555555555556,
+    "trades_closed_at_end": 1,
+    "pct_trades_closed_at_end": 0.1111111111111111,
     "avg_win": 0.06046131226705259,
     "avg_loss": 0.035746112794922694,
     "profit_factor": 2.066051892657145,

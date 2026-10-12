@@ -148,6 +148,40 @@ def test_trade_metrics_absent_when_no_trades():
         assert key not in metrics
 
 
+def test_closed_at_end_metrics_are_surfaced():
+    """Trades flagged `closed_at_end` (exit forced by end-of-sample, not by a
+    signal) are counted and surfaced as a fraction of the ledger.
+
+    Regression: the extractor writes `closed_at_end` to the trade dict, but
+    no consumer previously exposed it, so a backtest whose entire ledger is
+    end-of-sample artifact reported no indication of that. A 2-trade ledger
+    with one forced close must yield trades_closed_at_end=1 and
+    pct_trades_closed_at_end=0.5.
+    """
+    returns = _make_returns()
+    trades = [
+        {"pnl": 100, "return": 0.01, "entry_date": "2020-01-01", "exit_date": "2020-01-05"},
+        {"pnl": -50, "return": -0.005, "entry_date": "2020-01-06", "exit_date": "2020-01-10",
+         "closed_at_end": True},
+    ]
+    metrics = calculate_metrics({"returns": returns, "trades": trades})
+    assert metrics["trades_closed_at_end"] == 1
+    assert abs(metrics["pct_trades_closed_at_end"] - 0.5) < 1e-12
+
+
+def test_closed_at_end_metrics_absent_when_no_forced_closes():
+    """When no trade carries `closed_at_end`, the keys must still be present
+    (zeroed) so consumers can rely on them being defined whenever trades exist.
+    """
+    returns = _make_returns()
+    trades = [
+        {"pnl": 100, "return": 0.01, "entry_date": "2020-01-01", "exit_date": "2020-01-05"},
+    ]
+    metrics = calculate_metrics({"returns": returns, "trades": trades})
+    assert metrics["trades_closed_at_end"] == 0
+    assert metrics["pct_trades_closed_at_end"] == 0.0
+
+
 def main() -> int:
     tests = [
         ("calculate_metrics_empty_returns_returns_error", test_calculate_metrics_empty_returns_returns_error),

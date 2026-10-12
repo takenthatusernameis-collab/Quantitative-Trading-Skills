@@ -32,4 +32,8 @@ Avg Loss:              3.57%
 Profit Factor:         2.07
 Expectancy:            1.8876
 
+--- End-of-Sample Closes ---
+Trades Closed at End:      1
+% of Trades Closed at End: 11.11%
+
 ============================================================

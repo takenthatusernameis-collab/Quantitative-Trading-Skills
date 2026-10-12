@@ -81,6 +81,46 @@ class TestReporting(unittest.TestCase):
             self.assertIn("Return Metrics", content)
             self.assertIn("Trade-Level Analytics", content)
 
+    def test_generate_report_surfaces_end_of_sample_closes(self):
+        """When `trades_closed_at_end` is present, the report surfaces it.
+
+        Regression: the extractor flags a trade `closed_at_end` when its
+        exit was forced by the end of the sample rather than by a signal,
+        but no consumer previously exposed the flag, so a backtest whose
+        ledger is end-of-sample artifact reported nothing about it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            metrics = {
+                "total_return": 0.1,
+                "total_trades": 4,
+                "trades_closed_at_end": 1,
+                "pct_trades_closed_at_end": 0.25,
+            }
+            generate_report(metrics, tmpdir, symbol="SPY", strategy_name="Mom")
+
+            report_path = os.path.join(tmpdir, "report.txt")
+            with open(report_path, "r") as f:
+                content = f.read()
+
+            self.assertIn("End-of-Sample Closes", content)
+            self.assertIn("Trades Closed at End", content)
+            self.assertIn("% of Trades Closed at End", content)
+
+    def test_generate_report_omits_end_of_sample_section_when_absent(self):
+        """Without `trades_closed_at_end`, the section is omitted entirely."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            metrics = {
+                "total_return": 0.1,
+                "total_trades": 4,
+            }
+            generate_report(metrics, tmpdir, symbol="SPY", strategy_name="Mom")
+
+            report_path = os.path.join(tmpdir, "report.txt")
+            with open(report_path, "r") as f:
+                content = f.read()
+
+            self.assertNotIn("End-of-Sample Closes", content)
+
     def test_generate_report_handles_empty_metrics_dict(self):
         """Test that passing an empty metrics dict does not crash."""
         with tempfile.TemporaryDirectory() as tmpdir:

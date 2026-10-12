@@ -219,11 +219,11 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   from the strategy's own shifted signals).
 - `test_strategy_builder.py` - strategy registry, `build_strategy`, defaults,
   and binary long/flat signal generation with real crossovers.
-- `test_walk_forward.py` - walk-forward windowing, parameter grid parsing, and
+  - `test_walk_forward.py` - walk-forward windowing, parameter grid parsing, and
   train/test separation.
-- `test_cpcv.py` - CPCV fold structure, purge/embargo behavior, parameter
+  - `test_cpcv.py` - CPCV fold structure, purge/embargo behavior, parameter
   stability calculation, summary metrics, and CLI integration.
-- `test_generate_sample_data.py` - Sample data generation creates valid OHLCV
+  - `test_generate_sample_data.py` - Sample data generation creates valid OHLCV
   CSV with expected shape and constraints.
 
 The canonical rendered outputs in `test_output/` are regenerated from
@@ -232,3 +232,22 @@ The canonical rendered outputs in `test_output/` are regenerated from
 (the pinned snapshot uses `fast_period=10`/`slow_period=30`, not the
 20/50 defaults) and serve as a pinned regression snapshot; they are not
 proof of profitability.
+
+## End-of-Sample Trade Closes
+
+A position still open when the data ends is closed at the last bar's close
+and flagged `closed_at_end: True` in the trade dict (the exit is forced by
+the sample boundary, not by a signal). This keeps the trade ledger
+reconciling with the equity curve instead of silently dropping the leg.
+
+The flag is surfaced in consumers so a backtest whose ledger is largely
+end-of-sample artifact is not mistaken for genuine entry/exit activity:
+
+- `performance.calculate_metrics` exposes `trades_closed_at_end` (count) and
+  `pct_trades_closed_at_end` (fraction of the ledger).
+- `performance.generate_report` prints an "End-of-Sample Closes" section when
+  present, and omits it when there are no forced closes.
+- `reporting.generate_tear_sheet` renders both keys in the Trade Analytics
+  table.
+- Definitions are in `references/metrics_definitions.md` under
+  "Trades Closed at End of Sample".

@@ -177,6 +177,21 @@ avg_trade_duration = mean((exit_date - entry_date).days)
 The mean calendar days between entry and exit. Previously this incorrectly
 averaged per-trade *returns*; it now averages trade durations.
 
+### Trades Closed at End of Sample
+
+```
+trades_closed_at_end = count(t | t.closed_at_end == True)
+pct_trades_closed_at_end = trades_closed_at_end / total_trades
+```
+
+The number (and fraction) of trades whose exit was **not** signal-driven but
+forced because the data ended. The backtest extractor marks such a trade with
+`closed_at_end: True` and closes the still-open position at the last bar's
+close, so its PnL is in the equity curve and reconciles with the trade
+ledger. These legs are real PnL but are an artifact of the sample boundary,
+not of an entry/exit signal; surfacing the count lets consumers judge how
+much of the trade ledger is genuine activity vs. end-of-sample artifact.
+
 ## Benchmark Comparison
 
 ### Alpha and Beta (Jensen's)

@@ -180,6 +180,17 @@ def calculate_metrics(
         metrics["win_rate"] = float(
             metrics["winning_trades"] / len(trades) if trades else 0
         )
+        # Count trades whose exit was forced by the end of the sample
+        # rather than by a signal (flagged `closed_at_end` by the
+        # backtest extractor). These legs are real PnL in the equity
+        # curve but are not signal-driven, so surfacing the count lets
+        # consumers judge how much of the trade ledger is end-of-sample
+        # artifact vs. genuine entry/exit activity.
+        n_closed_at_end = sum(1 for t in trades if t.get("closed_at_end"))
+        metrics["trades_closed_at_end"] = int(n_closed_at_end)
+        metrics["pct_trades_closed_at_end"] = float(
+            n_closed_at_end / len(trades) if trades else 0.0
+        )
         metrics["avg_win"] = float(np.mean(win_returns)) if win_returns else 0.0
         metrics["avg_loss"] = float(np.mean(loss_returns)) if loss_returns else 0.0
         gross_profit = sum(p for p in trade_pnls if p > 0)
@@ -300,6 +311,18 @@ def generate_report(
             f"Expectancy:            {metrics.get('expectancy', 0):.4f}",
             "",
         ])
+        # End-of-sample forced closes: trades whose exit was not signal-
+        # driven but forced because the data ended. These are real PnL in
+        # the equity curve but are an artifact of the sample boundary, so
+        # surfacing the count lets consumers judge how much of the ledger
+        # is genuine entry/exit activity.
+        if "trades_closed_at_end" in metrics:
+            lines.extend([
+                "--- End-of-Sample Closes ---",
+                f"Trades Closed at End:      {metrics.get('trades_closed_at_end', 0)}",
+                f"% of Trades Closed at End: {metrics.get('pct_trades_closed_at_end', 0):.2%}",
+                "",
+            ])
 
     if "benchmark_total_return" in metrics:
         lines.extend([
