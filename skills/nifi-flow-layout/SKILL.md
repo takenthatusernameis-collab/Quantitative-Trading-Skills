@@ -100,3 +100,43 @@ python3 scripts/nifi_layout.py \
 - Treat visual X/T line crossings as hard defects; use wider bus lanes instead of ambiguous intersections.
 - Non-adjacent segments of the same connection must also keep wide spacing; self-overlapping U-turns are defects.
 - Reports include `topology_blockers` when a clean visual layout likely requires a graph decision, such as adding a funnel, collector processor, split sink, or separate process group.
+
+## Test Coverage
+
+This skill bundles a standard-library unit-test suite (no third-party test
+framework) under `tests/`, following the pattern established by
+`skills/quantitative-backtesting/tests/`. Run the test file directly with Python:
+
+```bash
+python3 skills/nifi-flow-layout/tests/test_nifi_layout.py
+```
+
+- `test_nifi_layout.py` - comprehensive geometry and routing tests (159 tests):
+  - `Rect` / `Node` / `Conn` dataclasses: construction, accessors, `inflate`, `intersects`, `as_dict`, `with_pos`, size/rect properties
+  - Constants: `SIZE`, `LABEL`, `MAIN_X`, `OUTER_LABEL_LANE_GAP` formulas match canvas constants
+  - Parsing: `node_from` / `conn_from` / `parse_group` handle all component kinds, defaults, nested config comments
+  - Visual identity: `visual_id` / `terminal_is_group_port` for cross-group port rendering
+  - Text classification: `is_failureish_text`, `is_sideish_text`, `is_errorish` with multilingual keywords
+  - Name/comment helpers: `strip_number` regex, `comment_for` per-kind templates, `relation_text`, `processor_has_side_hint`
+  - Layout classification: `classify_main` (main vs side lanes), `target_layout` (vertical chain, source-like first, final outputs, failure outputs right, side handlers beside nearest main step)
+  - Rect helpers: `rects` (inflated), `rects_actual` (exact), `segment_rect` (vertical/horizontal)
+  - Orthogonal segments: `orthogonal_segment` normalization, `segment_overlap_amount`, `segment_parallel_overlap`, `perpendicular_cross_point` with margin
+  - Route segments: `distinct_route_segment_pair` (adjacent vs non-adjacent), `route_points` (perimeter endpoints, bend preservation)
+  - Label sizing: `connection_label_size` (queued + group ports + relationships), `label_rect` (bend-centered vs segment-centered)
+  - Edge slots: `edge_slot` / `source_exit_point` / `spread_coord` for multi-connection fan-in/fan-out
+  - Target sides: `branch_target_side` (global geometry), `dense_fanin_target_side` (split by row)
+  - Candidate routes: `candidate_routes` (direct, bus, local, left, doglegs), `choose_route` (cost-scored)
+  - Side/output routing: `route_to_side` (horizontal/vertical branches, dense fan-in), `route_to_output` (side processor, bottom, local)
+  - Hit detection: `route_has_component_hit`, `clear_same_column_route`, `same_column_blocked`, `same_column_around_route`
+  - Nudge/clearance: `nudge_segment_coordinate` (collinear runs), `label_clearance_rect`
+  - Cost scoring: `route_cost` (diagonal penalty, component/label collisions, length + bend penalty)
+  - Label index: `best_label_index` / `best_label_index_avoiding` (component, label, segment obstacle avoidance)
+  - Far-side entry: `far_side_entry_is_clear` (pre-flight route validation)
+  - Lane finding: `find_clear_horizontal_lane` (scan with step, component intersection)
+  - Audit: `audit_names_comments` (missing comments exclude funnels, dot00 detection, named connections)
+  - Route report: `route_report` (diagonals, component/label intersections, segment overlaps, X/T crossings, parallel too close)
+  - Topology blockers: `infer_topology_blockers` (dense terminal fan-in)
+  - Full routing: `route_connections` (two-pass with label packing, line clearance nudging)
+  - Cert handling: `p12_cert_pair` (None, missing file error)
+  - Group iteration: `iter_groups` (recursive, top-down/api order, include/exclude root)
+  - CLI: `main` self-test mode, missing args error

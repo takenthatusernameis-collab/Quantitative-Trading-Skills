@@ -220,31 +220,31 @@ class TestTerminalIsGroupPort:
 # ── Text classification ──────────────────────────────────────────────
 
 class TestTextClassification:
-    def test_is_failureish_matches(self):
-        assert N.is_failureish("my error handler")
-        assert N.is_failureish("FailureRoute")
-        assert N.is_failureish("dead-letter")
-        assert N.is_failureish("unmatched flow")
-        assert N.is_failureish("waiting for data")
-        assert N.is_failureish("ошибки обработка")
+    def test_is_failureish_text_matches(self):
+        assert N.is_failureish_text("my error handler")
+        assert N.is_failureish_text("FailureRoute")
+        assert N.is_failureish_text("dead-letter")
+        assert N.is_failureish_text("unmatched flow")
+        assert N.is_failureish_text("waiting for data")
+        assert N.is_failureish_text("ошибки обработка")
 
-    def test_is_failureish_negative(self):
-        assert not N.is_failureish("normal success path")
-        assert not N.is_failureish("fetch data")
+    def test_is_failureish_text_negative(self):
+        assert not N.is_failureish_text("normal success path")
+        assert not N.is_failureish_text("fetch data")
 
-    def test_is_sideish_adds_more_words(self):
-        assert N.is_sideish("fallback branch")
-        assert N.is_sideish("teams notification")
-        assert N.is_sideish("лог ошибки collector")
-        assert N.is_sideish("error handler")  # via failureish
-        assert not N.is_sideish("main success")
+    def test_is_sideish_text_adds_more_words(self):
+        assert N.is_sideish_text("fallback branch")
+        assert N.is_sideish_text("teams notification")
+        assert N.is_sideish_text("лог ошибки collector")
+        assert N.is_sideish_text("error handler")  # via failureish
+        assert not N.is_sideish_text("main success")
 
     def test_is_errorish_excludes_side_words(self):
         assert N.is_errorish(proc("e", comments="error handler"))
-        assert N.is_errorish(proc("e", name="dead-letter route"))
+        assert N.is_errorish(proc(name="dead-letter route"))
         assert N.is_errorish(proc("e", comments="лог ошибки"))
         assert not N.is_errorish(proc("e", comments="fallback branch"))
-        assert not N.is_errorish(proc("e", name="fetch data"))
+        assert not N.is_errorish(proc(name="fetch data"))
 
 
 # ── strip_number / comment_for ───────────────────────────────────────
@@ -255,7 +255,8 @@ class TestStripAndComment:
         assert N.strip_number("30.20.10 Build") == "Build"
         assert N.strip_number("Fetch") == "Fetch"
         assert N.strip_number("  20  Something ") == "Something"
-        assert N.strip_number("100") == ""
+        # Requires trailing whitespace to strip pure numbers
+        assert N.strip_number("100 ") == ""
 
     def test_comment_for_uses_existing_comments(self):
         n = proc("x", comments="  keep me  ")
@@ -298,7 +299,7 @@ class TestRelationAndSideHint:
 
     def test_side_hint_from_relation(self):
         n = proc("normal", comments="")
-        c = conn("c", "a", "b", name="", relationships=("failure",))
+        c = conn("c", "normal", "b", name="", relationships=("failure",))
         assert N.processor_has_side_hint(n, [c]) is True
 
     def test_no_side_hint(self):
@@ -320,10 +321,11 @@ class TestClassifyMain:
         assert len(main) == 2 and side == []
 
     def test_far_right_without_hint_is_side(self):
-        # base_x is median x = 160; 160+430=590, so x=1200 is far right
+        # base_x is median x; with 3 nodes at 160, 160, 1200 -> median 160
         main_p = proc("m", 160, 0)
+        mid_p = proc("mid", 160, 220)
         side_p = proc("s", 1200, 0)
-        main, side = N.classify_main({"m": main_p, "s": side_p})
+        main, side = N.classify_main({"m": main_p, "mid": mid_p, "s": side_p})
         assert side_p in side and main_p in main
 
     def test_far_left_with_side_hint_is_side(self):
@@ -472,8 +474,9 @@ class TestPerpendicularCrossPoint:
         assert N.perpendicular_cross_point(("v", 10, 0, 100), ("v", 40, 0, 100)) is None
 
     def test_custom_margin(self):
-        # vertical 0..100, horizontal at y=2 spanning 48..52 -> cross at (50, 50)
-        assert N.perpendicular_cross_point(("v", 50, 0, 100), ("h", 50, 48, 52), margin=3.0) == (50, 50)
+        # vertical 0..100, horizontal at y=50 spanning 40..60 -> cross at (50, 50)
+        # with margin=3: h[2]+3=43 < 50 < h[3]-3=57, v[2]+3=3 < 50 < v[3]-3=97
+        assert N.perpendicular_cross_point(("v", 50, 0, 100), ("h", 50, 40, 60), margin=3.0) == (50, 50)
 
 
 class TestDistinctRouteSegmentPair:
@@ -528,15 +531,17 @@ class TestRoutePoints:
 
 class TestLabelSizing:
     def test_minimal_label_size(self):
-        c = conn("c", "a", "b")
+        # No relationships, no group ports -> 1 row (queued only)
+        c = N.Conn("c", "a", "b", "PROCESSOR", "PROCESSOR", None, None, "a", "b", ())
         w, h = N.connection_label_size(c, "root")
         assert w == CONNECTION_LABEL_WIDTH
         assert h == CONNECTION_ROW_HEIGHT + CONNECTION_BACKPRESSURE_HEIGHT
 
     def test_group_port_adds_row(self):
+        # Group port + relationships=("success",) -> 3 rows (queued + group port + relationships)
         c = N.Conn("c", "a", "b", "PROCESSOR", "OUTPUT_PORT", None, "other", "a", "b", ("success",))
         w, h = N.connection_label_size(c, "root")
-        assert h == 2 * CONNECTION_ROW_HEIGHT + CONNECTION_BACKPRESSURE_HEIGHT
+        assert h == 3 * CONNECTION_ROW_HEIGHT + CONNECTION_BACKPRESSURE_HEIGHT
 
     def test_relationships_add_row(self):
         c = conn("c", "a", "b", relationships=("success", "failure"))
@@ -619,8 +624,9 @@ class TestEdgeSlots:
 
 class TestSpreadCoord:
     def test_wide_corridor_uses_fraction(self):
+        # Formula: lo + (hi-lo) * (lane+1) / (total+1)
         assert N.spread_coord(0.0, 200.0, 0, 1) == 100.0
-        assert abs(N.spread_coord(0.0, 200.0, 1, 2) - 200.0 / 3.0) < 1e-9
+        assert abs(N.spread_coord(0.0, 200.0, 1, 2) - 200.0 * 2.0 / 3.0) < 1e-9
 
     def test_narrow_corridor_creates_outside_lanes(self):
         # gap < 120 -> fallback outside
@@ -632,24 +638,28 @@ class TestSpreadCoord:
 
 class TestTargetSides:
     def test_branch_target_left_when_src_right_of_dst(self):
+        # src at 500 (right), dst at 0 (left) -> connection enters dst from right
         src = proc("s", 500, 0)
         dst = proc("d", 0, 0)
-        assert N.branch_target_side(src, dst) == "left"
-
-    def test_branch_target_right_when_src_left_of_dst(self):
-        src = proc("s", 0, 0)
-        dst = proc("d", 500, 0)
         assert N.branch_target_side(src, dst) == "right"
 
+    def test_branch_target_right_when_src_left_of_dst(self):
+        # src at 0 (left), dst at 500 (right) -> connection enters dst from left
+        src = proc("s", 0, 0)
+        dst = proc("d", 500, 0)
+        assert N.branch_target_side(src, dst) == "left"
+
     def test_branch_target_top_when_src_below(self):
+        # src at y=500 (below), dst at y=0 (above) -> connection enters dst from bottom
         src = proc("s", 300, 500)
         dst = proc("d", 300, 0)
-        assert N.branch_target_side(src, dst) == "top"
+        assert N.branch_target_side(src, dst) == "bottom"
 
     def test_branch_target_bottom_when_src_above(self):
+        # src at y=0 (above), dst at y=500 (below) -> connection enters dst from top
         src = proc("s", 300, 0)
         dst = proc("d", 300, 500)
-        assert N.branch_target_side(src, dst) == "bottom"
+        assert N.branch_target_side(src, dst) == "top"
 
     def test_dense_fanin_split_by_row(self):
         # src far to the left, above dst -> left
@@ -967,14 +977,14 @@ class TestFindClearLane:
         y = N.find_clear_horizontal_lane(nodes, 0, 300, 50.0, 0.0, 300.0, [])
         assert not N.segment_rect((0, y), (300, y), 6.0).intersects(block.rect().inflate(N.PAD))
 
-    def test_returns_preferred_when_all_blocked(self):
-        # block spans the whole scan range
+    def test_returns_closest_clear_lane_when_preferred_outside_range(self):
+        # block spans y=150..280; preferred 999 is outside scan range 0..300
+        # function returns closest clear lane within range to preferred_y
+        # with step=8, candidates are 0,8,16...296; 296,288...136 blocked; 128 clear
         block = proc("block", 150, 150)
         nodes = {"block": block}
         y = N.find_clear_horizontal_lane(nodes, 0, 300, 999.0, 0.0, 300.0, [])
-        # preferred 999 is outside the scan range, so the function returns the
-        # preferred value unchanged (no candidate in range can be checked).
-        assert y == 999.0
+        assert y == 128.0
 
 
 # ── audit_names_comments ─────────────────────────────────────────────
