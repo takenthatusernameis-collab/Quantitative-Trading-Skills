@@ -76,11 +76,15 @@ strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 3
 
 ### Dual Momentum (`dual_momentum`)
 
-- **Signal**: Long when absolute momentum (asset return) is positive, flat
-  (cash) otherwise. Combines absolute and relative momentum in the full
-  implementation.
-- **Parameters**: `lookback` (default 252 = 12 months of trading days).
+- **Signal**: Combines absolute momentum (asset return vs risk-free rate) and
+  relative momentum (asset vs assets). For multi-asset panel data: filters
+  assets with positive absolute momentum, ranks by relative momentum, and
+  equal-weights the top quantile. Returns portfolio allocation fraction.
+  For single-asset use, falls back to absolute momentum only with a warning.
+- **Parameters**: `lookback` (default 252 = 12 months of trading days),
+  `top_quantile` (default 0.2), `risk_free_rate` (default 0.0, annualized).
 - **Use case**: Asset allocation; Gary Antonacci's dual momentum strategy.
+  Requires panel data at the portfolio layer for relative momentum.
 
 ## Position Sizing Overlays
 

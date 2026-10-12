@@ -247,6 +247,142 @@ def test_cross_sectional_momentum_respects_quantiles():
     assert abs(post_lookback2.mean() - 0.4) < 0.15
 
 
+def test_dual_momentum_multi_asset_dict():
+    """DualMomentumStrategy with dict of DataFrames produces portfolio signal."""
+    data_dict = _make_multi_asset_data(n=150, n_assets=6, seed=123)
+    # Use top_quantile to select subset of assets with positive absolute momentum
+    strategy = build_strategy("dual_momentum", '{"lookback": 20, "top_quantile": 0.4, "risk_free_rate": 0.0}')
+    signals = strategy.generate_signals(data_dict)
+
+    # Should return a Series with common date index
+    assert isinstance(signals, pd.Series)
+    assert len(signals) > 0
+    # Signal should be float representing n_selected / n_assets
+    assert signals.dtype in [np.float64, np.float32, float]
+    # Values should be in [0, 1] range (long-only)
+    assert (signals >= 0).all() and (signals <= 1.0).all()
+    # Should have some non-zero signals after lookback period
+    assert (signals != 0).any()
+
+
+def test_dual_momentum_multiindex_dataframe():
+    """DualMomentumStrategy with MultiIndex DataFrame produces portfolio signal."""
+    data = _make_multiindex_data(n=150, n_assets=6, seed=456)
+    strategy = build_strategy("dual_momentum", '{"lookback": 20, "top_quantile": 0.4, "risk_free_rate": 0.0}')
+    signals = strategy.generate_signals(data)
+
+    assert isinstance(signals, pd.Series)
+    assert len(signals) > 0
+    assert signals.dtype in [np.float64, np.float32, float]
+    assert (signals >= 0).all() and (signals <= 1.0).all()
+    assert (signals != 0).any()
+
+
+def test_dual_momentum_single_asset_fallback():
+    """DualMomentumStrategy with single-asset DataFrame warns and falls back."""
+    import warnings
+
+    data = _make_data(n=150)
+    strategy = build_strategy("dual_momentum", '{"lookback": 20, "top_quantile": 0.3, "risk_free_rate": 0.0}')
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        signals = strategy.generate_signals(data)
+
+        # Should emit UserWarning about single-asset fallback
+        assert len(w) == 1
+        assert issubclass(w[0].category, UserWarning)
+        assert "single-asset" in str(w[0].message).lower()
+        assert "falling back" in str(w[0].message).lower()
+
+    # Should still produce valid signals (binary: 0, 1)
+    assert isinstance(signals, pd.Series)
+    assert len(signals) == len(data)
+    assert set(signals.unique()).issubset({0, 1})
+
+
+def test_dual_momentum_absolute_momentum_filter():
+    """Dual momentum respects absolute momentum filter (risk-free rate)."""
+    # Create data where some assets have consistently negative returns
+    dates = pd.date_range("2020-01-01", periods=60, freq="B")
+    symbols = ["POS", "NEG", "FLAT"]  # 3 assets
+
+    data_dict = {}
+    # POS: strong positive drift, low volatility
+    np.random.seed(42)
+    rets_pos = np.random.normal(0.005, 0.002, 60)  # Strong positive drift
+    prices_pos = 100 * np.exp(np.cumsum(rets_pos))
+    data_dict["POS"] = pd.DataFrame(
+        {"open": prices_pos, "high": prices_pos * 1.01, "low": prices_pos * 0.99,
+         "close": prices_pos, "volume": [1000000] * 60}, index=dates)
+
+    # NEG: strong negative drift
+    np.random.seed(43)
+    rets_neg = np.random.normal(-0.005, 0.002, 60)  # Strong negative drift
+    prices_neg = 100 * np.exp(np.cumsum(rets_neg))
+    data_dict["NEG"] = pd.DataFrame(
+        {"open": prices_neg, "high": prices_neg * 1.01, "low": prices_neg * 0.99,
+         "close": prices_neg, "volume": [1000000] * 60}, index=dates)
+
+    # FLAT: zero drift
+    np.random.seed(44)
+    rets_flat = np.random.normal(0.0, 0.002, 60)
+    prices_flat = 100 * np.exp(np.cumsum(rets_flat))
+    data_dict["FLAT"] = pd.DataFrame(
+        {"open": prices_flat, "high": prices_flat * 1.01, "low": prices_flat * 0.99,
+         "close": prices_flat, "volume": [1000000] * 60}, index=dates)
+
+    # With risk_free_rate = 0, only POS should consistently pass absolute momentum filter
+    # top_quantile=1.0 means select all assets with positive abs momentum
+    strategy = build_strategy("dual_momentum", '{"lookback": 20, "top_quantile": 1.0, "risk_free_rate": 0.0}')
+    signals = strategy.generate_signals(data_dict)
+
+    # After lookback, only POS should be selected -> signal = 1/3
+    post_lookback = signals.iloc[20:]
+    # Mean should be close to 1/3 = 0.333...
+    assert abs(post_lookback.mean() - 1/3) < 0.15
+
+    # With higher risk_free_rate, fewer assets should pass -> lower signal
+    # POS has ~10% returns over 20 days, so use rf > 10% period rate
+    # rf=3.5 (350% annual) gives rf_period ≈ 0.11 > POS returns
+    strategy2 = build_strategy("dual_momentum", '{"lookback": 20, "top_quantile": 1.0, "risk_free_rate": 3.5}')
+    signals2 = strategy2.generate_signals(data_dict)
+    post_lookback2 = signals2.iloc[20:]
+    # Signal should be lower (ideally 0, but allow small noise)
+    assert post_lookback2.mean() < post_lookback.mean() * 0.5  # Significantly lower
+
+
+def test_dual_momentum_respects_top_quantile():
+    """Dual momentum relative momentum ranking respects top_quantile."""
+    # Create 5 assets with known return ordering and low volatility
+    dates = pd.date_range("2020-01-01", periods=60, freq="B")
+    symbols = ["A", "B", "C", "D", "E"]
+
+    data_dict = {}
+    for i, sym in enumerate(symbols):
+        drift = 0.003 * (2 - i)  # A=0.006, B=0.003, C=0.0, D=-0.003, E=-0.006
+        np.random.seed(42 + i)
+        rets = np.random.normal(drift, 0.001, 60)  # Low volatility
+        prices = 100 * np.exp(np.cumsum(rets))
+        data_dict[sym] = pd.DataFrame(
+            {"open": prices, "high": prices * 1.01, "low": prices * 0.99,
+             "close": prices, "volume": [1000000] * 60}, index=dates)
+
+    # With very negative risk_free_rate, all assets pass absolute momentum
+    # rf=-0.99 gives rf_period ≈ -0.31, well below even E's returns
+    # top_quantile=0.4 (2/5) -> select top 2: A, B -> signal = 2/5 = 0.4
+    strategy = build_strategy("dual_momentum", '{"lookback": 20, "top_quantile": 0.4, "risk_free_rate": -0.99}')
+    signals = strategy.generate_signals(data_dict)
+    post_lookback = signals.iloc[20:]
+    assert abs(post_lookback.mean() - 0.4) < 0.15
+
+    # top_quantile=0.6 (3/5) -> select top 3: A, B, C -> signal = 3/5 = 0.6
+    strategy2 = build_strategy("dual_momentum", '{"lookback": 20, "top_quantile": 0.6, "risk_free_rate": -0.99}')
+    signals2 = strategy2.generate_signals(data_dict)
+    post_lookback2 = signals2.iloc[20:]
+    assert abs(post_lookback2.mean() - 0.6) < 0.15
+
+
 def main() -> int:
     tests = [
         ("build_strategy_unknown_type_raises", test_build_strategy_unknown_type_raises),
@@ -259,6 +395,11 @@ def main() -> int:
         ("cross_sectional_momentum_multiindex_dataframe", test_cross_sectional_momentum_multiindex_dataframe),
         ("cross_sectional_momentum_single_asset_fallback", test_cross_sectional_momentum_single_asset_fallback),
         ("cross_sectional_momentum_respects_quantiles", test_cross_sectional_momentum_respects_quantiles),
+        ("dual_momentum_multi_asset_dict", test_dual_momentum_multi_asset_dict),
+        ("dual_momentum_multiindex_dataframe", test_dual_momentum_multiindex_dataframe),
+        ("dual_momentum_single_asset_fallback", test_dual_momentum_single_asset_fallback),
+        ("dual_momentum_absolute_momentum_filter", test_dual_momentum_absolute_momentum_filter),
+        ("dual_momentum_respects_top_quantile", test_dual_momentum_respects_top_quantile),
     ]
 
     failures = 0

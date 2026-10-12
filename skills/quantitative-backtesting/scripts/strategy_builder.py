@@ -359,18 +359,165 @@ class DualMomentumStrategy(StrategyBase):
     """Dual Momentum (Gary Antonacci).
 
     Combines absolute momentum (asset vs cash) and relative momentum (asset vs assets).
+
+    Multi-asset data formats:
+    - DataFrame with MultiIndex columns: (field, symbol) e.g. ('close', 'AAPL')
+    - Dict mapping symbol -> DataFrame with OHLCV columns
+
+    Single-asset DataFrame (backward compatible): uses absolute momentum only
+    (asset return vs risk-free rate) with a warning.
+
+    For multi-asset panel data:
+    1. Compute lookback returns for each asset
+    2. Absolute momentum filter: keep assets with return > risk_free_rate
+    3. Relative momentum: rank remaining assets by return, select top quantile
+    4. Portfolio signal: equal-weight selected assets (long-only), signal = n_selected / n_assets
     """
 
-    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+    def generate_signals(self, data: pd.DataFrame | dict) -> pd.Series:
         lookback = self.parameters.get("lookback", 12 * 21)  # ~12 months
+        top_quantile = self.parameters.get("top_quantile", 0.2)
+        risk_free_rate = self.parameters.get("risk_free_rate", 0.0)  # Annualized
 
-        # Absolute momentum: asset return > 0?
-        asset_return = data["close"].pct_change(lookback)
+        # Convert annualized risk-free rate to period rate
+        rf_period = (1 + risk_free_rate) ** (lookback / 252) - 1
 
-        # For single asset, simplified version
+        # Detect multi-asset panel data
+        if isinstance(data, dict):
+            return self._generate_multi_asset_signals_dict(data, lookback, top_quantile, rf_period)
+        elif isinstance(data.columns, pd.MultiIndex):
+            return self._generate_multi_asset_signals_multiindex(data, lookback, top_quantile, rf_period)
+        else:
+            # Single-asset fallback (backward compatible)
+            import warnings
+            warnings.warn(
+                "DualMomentumStrategy used with single-asset data; "
+                "falling back to absolute momentum only (asset vs cash). "
+                "For true dual momentum with relative momentum, provide panel data "
+                "(MultiIndex columns or dict of DataFrames).",
+                UserWarning,
+                stacklevel=2,
+            )
+            return self._generate_single_asset_signals(data, lookback, rf_period)
+
+    def _generate_multi_asset_signals_dict(
+        self,
+        data_dict: dict,
+        lookback: int,
+        top_quantile: float,
+        rf_period: float,
+    ) -> pd.Series:
+        """Generate signals from dict of symbol -> DataFrame."""
+        if not data_dict:
+            return pd.Series(dtype=float)
+
+        # Align all symbols to common date index
+        common_index = None
+        for df in data_dict.values():
+            if common_index is None:
+                common_index = df.index
+            else:
+                common_index = common_index.intersection(df.index)
+
+        if common_index is None or len(common_index) == 0:
+            return pd.Series(dtype=float)
+
+        common_index = common_index.sort_values()
+
+        # Compute lookback returns for each symbol
+        returns_dict = {}
+        for symbol, df in data_dict.items():
+            df_aligned = df.reindex(common_index)
+            close = df_aligned["close"]
+            returns_dict[symbol] = close.pct_change(lookback)
+
+        returns_df = pd.DataFrame(returns_dict, index=common_index)
+
+        # Dual momentum logic per period
+        signals = pd.Series(0.0, index=common_index, dtype=float)
+
+        for date in common_index[lookback:]:
+            row = returns_df.loc[date].dropna()
+            if len(row) == 0:
+                continue
+
+            n_assets = len(row)
+
+            # Absolute momentum: filter assets with return > risk-free rate
+            abs_momentum = row[row > rf_period]
+
+            if len(abs_momentum) == 0:
+                # No assets with positive absolute momentum -> cash (signal = 0)
+                signals.loc[date] = 0.0
+                continue
+
+            # Relative momentum: rank assets with positive absolute momentum
+            ranked = abs_momentum.rank(ascending=False, method="first")
+
+            # Select top quantile
+            n_select = max(1, int(np.ceil(len(abs_momentum) * top_quantile)))
+            selected_symbols = ranked[ranked <= n_select].index
+
+            # Portfolio signal: fraction of capital allocated (long-only)
+            # Equal weight among selected assets
+            signals.loc[date] = len(selected_symbols) / n_assets
+
+        return signals
+
+    def _generate_multi_asset_signals_multiindex(
+        self,
+        data: pd.DataFrame,
+        lookback: int,
+        top_quantile: float,
+        rf_period: float,
+    ) -> pd.Series:
+        """Generate signals from DataFrame with MultiIndex columns (field, symbol)."""
+        # Expect columns like ('close', 'AAPL'), ('close', 'MSFT'), etc.
+        if "close" not in data.columns.get_level_values(0):
+            raise ValueError("MultiIndex data must have 'close' as first level column")
+
+        close_data = data["close"]  # DataFrame with symbols as columns
+        returns_df = close_data.pct_change(lookback)
+
+        signals = pd.Series(0.0, index=data.index, dtype=float)
+
+        for date in data.index[lookback:]:
+            row = returns_df.loc[date].dropna()
+            if len(row) == 0:
+                continue
+
+            n_assets = len(row)
+
+            # Absolute momentum: filter assets with return > risk-free rate
+            abs_momentum = row[row > rf_period]
+
+            if len(abs_momentum) == 0:
+                signals.loc[date] = 0.0
+                continue
+
+            # Relative momentum: rank assets with positive absolute momentum
+            ranked = abs_momentum.rank(ascending=False, method="first")
+
+            # Select top quantile
+            n_select = max(1, int(np.ceil(len(abs_momentum) * top_quantile)))
+            selected_symbols = ranked[ranked <= n_select].index
+
+            # Portfolio signal: fraction of capital allocated (long-only)
+            signals.loc[date] = len(selected_symbols) / n_assets
+
+        return signals
+
+    def _generate_single_asset_signals(
+        self,
+        data: pd.DataFrame,
+        lookback: int,
+        rf_period: float,
+    ) -> pd.Series:
+        """Backward-compatible single-asset absolute momentum only."""
+        returns = data["close"].pct_change(lookback)
         signals = pd.Series(0, index=data.index)
-        signals[asset_return > 0] = 1
-        signals[asset_return <= 0] = 0  # Cash
+        signals[returns > rf_period] = 1
+        signals[returns <= rf_period] = 0  # Cash
 
         return signals
 
@@ -492,7 +639,7 @@ def list_strategies() -> Dict[str, str]:
         "rsi_mean_reversion": "RSI Mean Reversion",
         "donchian_breakout": "Donchian Channel Breakout (Trend Following)",
         "cross_sectional_momentum": "Cross-Sectional Momentum (Multi-Asset Panel Data)",
-        "dual_momentum": "Dual Momentum (Absolute + Relative)",
+        "dual_momentum": "Dual Momentum (Absolute + Relative, Multi-Asset Panel Data)",
         "zscore_mean_reversion": "Z-Score Mean Reversion (Pairs Style)",
     }
 
@@ -506,7 +653,7 @@ def get_strategy_defaults(strategy_type: str) -> Dict[str, Any]:
         "rsi_mean_reversion": {"period": 14, "oversold": 30, "overbought": 70, "neutral": 50},
         "donchian_breakout": {"period": 20, "exit_period": 10},
         "cross_sectional_momentum": {"lookback": 252, "top_quantile": 0.2, "bottom_quantile": 0.2},
-        "dual_momentum": {"lookback": 252},
+        "dual_momentum": {"lookback": 252, "top_quantile": 0.2, "risk_free_rate": 0.0},
         "zscore_mean_reversion": {"period": 20, "entry_z": 2.0, "exit_z": 0.5},
     }
     return defaults.get(strategy_type, {})
