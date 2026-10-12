@@ -556,6 +556,7 @@ pnpm install
 pnpm exec tsx generate-skill-marketplace.ts
 pnpm exec tsx generate-mcps-marketplace.ts
 pnpm test
+pnpm run typecheck:skills
 pnpm run typecheck:mcps
 pnpm run typecheck:plugins
 ```

@@ -2,6 +2,7 @@
   "type": "module",
   "scripts": {
     "test": "tsx --test *.test.ts",
+    "typecheck:skills": "tsc --noEmit --allowImportingTsExtensions --module nodenext --target es2022 generate-skill-marketplace.ts generate-skill-marketplace.test.ts generate-skill-marketplace.integration.test.ts",
     "typecheck:mcps": "tsc --noEmit --allowImportingTsExtensions --module nodenext --target es2022 generate-mcps-marketplace.ts generate-mcps-marketplace.test.ts generate-skill-marketplace.ts",
     "typecheck:plugins": "tsc --noEmit --allowImportingTsExtensions --module nodenext --target es2022 generate-plugins-marketplace.ts generate-plugins-marketplace.test.ts"
   },
