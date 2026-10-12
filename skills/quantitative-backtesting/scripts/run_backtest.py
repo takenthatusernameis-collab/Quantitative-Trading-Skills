@@ -11,6 +11,8 @@ import json
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -44,7 +46,7 @@ def run_backtest(data, strategy, args):
     # longer than the data window leaves every rolling indicator NaN, so the
     # signal stays flat at 0). Such strategies produce no trades and their
     # performance metrics are meaningless (division-by-zero Sharpe, etc.).
-    if (signals != 0).sum() == 0:
+    if not _signals_active(signals):
         raise ValueError(
             "Strategy never takes a position for the given data and "
             "parameters. Reduce the lookback/period so the indicator is "
@@ -108,6 +110,11 @@ def run_backtest(data, strategy, args):
             "symbol": args.symbol,
         },
     }
+
+
+def _signals_active(signals: pd.Series) -> bool:
+    """Return True if the signal series ever takes a non-zero position."""
+    return bool((signals != 0).any())
 
 
 def main():
