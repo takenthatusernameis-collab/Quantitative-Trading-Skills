@@ -440,15 +440,20 @@ def monte_carlo_simulation(
     for sim in range(n_simulations):
         # Resample returns with replacement
         if block_size is not None and block_size > 1:
-            # Simple block bootstrap: resample blocks of consecutive returns
-            n_blocks = int(np.ceil(n_obs / block_size))
-            block_starts = np.random.randint(0, n_obs - block_size + 1, n_blocks)
-            sim_returns_list = []
-            for start in block_starts:
-                end = min(start + block_size, n_obs)
-                sim_returns_list.append(base_returns.iloc[start:end].values)
-            sim_returns = np.concatenate(sim_returns_list)[:n_obs]
-            sim_returns = pd.Series(sim_returns, index=base_returns.index)
+            if block_size >= n_obs:
+                # Block larger than series - fall back to i.i.d. bootstrap
+                sim_returns = base_returns.sample(n=n_obs, replace=True).values
+                sim_returns = pd.Series(sim_returns, index=base_returns.index)
+            else:
+                # Simple block bootstrap: resample blocks of consecutive returns
+                n_blocks = int(np.ceil(n_obs / block_size))
+                block_starts = np.random.randint(0, n_obs - block_size + 1, n_blocks)
+                sim_returns_list = []
+                for start in block_starts:
+                    end = min(start + block_size, n_obs)
+                    sim_returns_list.append(base_returns.iloc[start:end].values)
+                sim_returns = np.concatenate(sim_returns_list)[:n_obs]
+                sim_returns = pd.Series(sim_returns, index=base_returns.index)
         else:
             # Simple i.i.d. bootstrap
             sim_returns = base_returns.sample(n=n_obs, replace=True).values

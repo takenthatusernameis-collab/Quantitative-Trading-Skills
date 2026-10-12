@@ -209,20 +209,25 @@ class CrossSectionalMomentum(StrategyBase):
     """Cross-Sectional Momentum Strategy.
 
     Ranks assets by past return, goes long top quantile, short bottom quantile.
-    Requires multi-asset data (handled at portfolio level).
+    For single-asset usage, uses rolling quantile thresholds on historical returns.
     """
 
     def generate_signals(self, data: pd.DataFrame) -> pd.Series:
-        # This is a placeholder - actual implementation requires panel data
         lookback = self.parameters.get("lookback", 252)
         top_quantile = self.parameters.get("top_quantile", 0.2)
         bottom_quantile = self.parameters.get("bottom_quantile", 0.2)
 
-        # For single asset, just return momentum signal
         returns = data["close"].pct_change(lookback)
         signals = pd.Series(0, index=data.index)
-        signals[returns > 0] = 1
-        signals[returns < 0] = -1
+
+        # Compute rolling quantiles of returns to make parameters meaningful
+        # for single-asset series
+        rolling_window = min(lookback * 2, len(returns)) if len(returns) > lookback else lookback
+        upper = returns.rolling(rolling_window).quantile(1 - top_quantile)
+        lower = returns.rolling(rolling_window).quantile(bottom_quantile)
+
+        signals[(returns > upper) & upper.notna()] = 1
+        signals[(returns < lower) & lower.notna()] = -1
 
         return signals
 

@@ -195,6 +195,8 @@ def main() -> int:
         ("avg_trade_duration_is_calendar_days", test_avg_trade_duration_is_calendar_days),
         ("trade_metrics_handle_missing_return_field", test_trade_metrics_handle_missing_return_field),
         ("trade_metrics_absent_when_no_trades", test_trade_metrics_absent_when_no_trades),
+        ("closed_at_end_metrics_are_surfaced", test_closed_at_end_metrics_are_surfaced),
+        ("closed_at_end_metrics_absent_when_no_forced_closes", test_closed_at_end_metrics_absent_when_no_forced_closes),
     ]
 
     failures = 0
