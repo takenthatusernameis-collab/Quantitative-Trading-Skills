@@ -212,6 +212,7 @@ with Python:
 ```bash
 python3 skills/senior-data-engineer/tests/test_data_quality_validator.py
 python3 skills/senior-data-engineer/tests/test_etl_performance_optimizer.py
+python3 skills/senior-data-engineer/tests/test_pipeline_orchestrator.py
 ```
 
 - `test_data_quality_validator.py` - stdlib-only tests for `scripts/data_quality_validator.py` (129 tests):
@@ -237,3 +238,12 @@ python3 skills/senior-data-engineer/tests/test_etl_performance_optimizer.py
   - `CostEstimator`: BigQuery/Snowflake/Redshift/Databricks estimates, minimum-billing floors, warehouse case-insensitivity, unknown-warehouse `ValueError`, and `_estimate_data_scanned` filter/projection discounts
   - `ReportGenerator`: text report sections, severity icons, and JSON report structure with severity summary counts
   - CLI: subcommand exit codes (1 for no-command/error, 2 for argparse errors), inline and file-based SQL input, text/JSON output, output-file writing with log-message capture, Spark job arrays with deduplication, partition recommendations, cost estimates, and template generation
+- `test_pipeline_orchestrator.py` - stdlib-only tests for `scripts/pipeline_orchestrator.py` (150 tests):
+  - Dataclasses: `SourceConfig`, `DestinationConfig`, `TaskConfig`, and `PipelineConfig` construction, defaults, `asdict` serialization, and dataclass-type checks
+  - `PipelineGenerator` (ABC): abstractness, non-instantiability, and required abstract methods (`generate`/`validate`)
+  - `AirflowGenerator`: import collection (base imports ordering, source/destination-driven operator imports, no duplicates, S3/Bash/Email operators), per-operator task generation (Python/Bash/SQL/Snowflake/generic), DAG definition and `default_args` rendering, dependency-arrow (`dep >> task`) generation, full codegen structure, `compile` correctness, and `validate` (missing `default_args`, missing DAG context, missing `schedule_interval` warning, syntax errors, dict-key shape, and the empty-tasks compile quirk where the `with DAG` body is only a comment)
+  - `PrefectGenerator`: header imports, flow-name dash replacement (`-`/`_`), `@task` decorators, retries/retry-delay/cache-expiration params, task function signatures, flow call-graph (root task vs. first-dependency input), `__main__` guard, `compile` correctness, custom `cache_hours`/`retries`, and `validate` (missing `@flow`/`@task`, syntax errors)
+  - `DagsterGenerator`: header imports, job-name dash replacement, ops with/without input (signature and `In`/`Out` declarations), asset-materialization blocks (with `row_count` metadata for input ops, bare for leaf ops), job call-graph, `result = {}` vs `result = input_data` rendering, `compile` correctness, and `validate` (missing `@job`/`@op`, syntax errors)
+  - `ETLPatternGenerator.generate_extract_load`: name/description/schedule/tags, source/destination configs and connection-id naming, incremental/full mode write-mode and `incremental_strategy` differences, extract/load/quality-check task naming and dependencies (2 tables -> 5 tasks, ordered), extract SQL (`prev_ds` incremental template vs. plain `SELECT *` for full)
+  - `ETLPatternGenerator.generate_transform_pipeline`: name/description/schedule/tags, per-source freshness sensors, `dbt_run` (120-min timeout, `wait_for_*` dependencies, `dbt run --select` command) and `dbt_test` (depends on `dbt_run`, `dbt test` command), task ordering, and absence of source/destination
+  - CLI: no-command and invalid/missing-argument exit codes (1 and 2), `generate` for all three frameworks with stdout and `--output`/`--name`/`--schedule`/`--mode`/`--tables` overrides, `generate --config` with scalar-only YAML (works) and nested-dict configs (quirk: exits 1 because nested dataclasses are not reconstructed), `validate` with valid/invalid DAGs and missing args producing JSON with exit codes, and `template` for `extract-load`/`transform`/`cdc` (including the unimplemented `cdc` exit-1 quirk and missing-required-args exit 2)
