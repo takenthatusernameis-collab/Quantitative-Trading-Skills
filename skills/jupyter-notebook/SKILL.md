@@ -116,6 +116,22 @@ The bundled scaffold script uses only the Python standard library and does not r
 ## Environment
 No required environment variables.
 
+## Test Coverage
+
+This skill bundles a standard-library unit-test suite (no third-party test
+framework) under `tests/`, following the pattern established by
+`skills/quantitative-backtesting/tests/`. Run the test file directly with Python:
+
+```bash
+python3 skills/jupyter-notebook/tests/test_new_notebook.py
+```
+
+- `test_new_notebook.py` - stdlib-only tests for `scripts/new_notebook.py` (16 tests):
+  - `slugify`: basic slugs, numbers/special chars, empty/whitespace defaults, leading/trailing hyphens, multiple spaces, unicode handling
+  - Template processing: experiment/tutorial title replacement, cell ID regeneration
+  - Force flag: overwrites with `--force`, refuses without `--force`
+  - CLI: missing `--title` errors, end-to-end experiment/tutorial creation
+
 ## Reference map
 - `references/experiment-patterns.md`: experiment structure and heuristics.
 - `references/tutorial-patterns.md`: tutorial structure and teaching flow.
