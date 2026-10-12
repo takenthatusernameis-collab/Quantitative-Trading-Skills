@@ -112,6 +112,28 @@ def run_backtest(data, strategy, args):
             entry_date = data.index[i]
             entry_direction = 1 if new_pos > 0 else -1
 
+    # Mark the final open position to market at the last bar's close.
+    # A strategy still holding a position when the data ends (common
+    # for long-lookback momentum strategies) would otherwise record no
+    # trade at all for that leg: its PnL is in the equity curve but
+    # missing from the trade ledger, so trade-level stats (win rate,
+    # expectancy, profit factor) understate activity and do not
+    # reconcile with the equity curve. The exit is forced by the end
+    # of the sample, not by a signal, so it is flagged via
+    # `closed_at_end`. A position opened on the very last bar has no
+    # later bar to close at and is left unrecorded.
+    if entry_idx is not None and entry_idx < len(data) - 1:
+        exit_price = close.iloc[-1]
+        exit_date = data.index[-1]
+        pnl = (exit_price - entry_price) * entry_direction
+        trades.append({
+            "pnl": float(pnl),
+            "return": float(pnl / entry_price),
+            "entry_date": str(entry_date.date()),
+            "exit_date": str(exit_date.date()),
+            "closed_at_end": True,
+        })
+
     return {
         "equity_curve": equity,
         "returns": strategy_returns,

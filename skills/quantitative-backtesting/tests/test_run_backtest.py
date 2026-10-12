@@ -258,6 +258,130 @@ def test_run_backtest_long_leg_pnl_moves_with_price():
     )
 
 
+def test_run_backtest_closes_final_open_position_at_end_of_data():
+    """A position still open at the end of the data is closed at the
+    last bar (mark-to-market) so the trade ledger reconciles with the
+    equity curve.
+
+    Regression test: a strategy that stays long from bar 2 to the end
+    previously recorded zero trades even though the equity curve
+    carried the leg's PnL, so trade-level stats (win rate, expectancy,
+    profit factor) silently understated activity. The forced close is
+    flagged via `closed_at_end` because it is not signal-driven.
+    """
+    dates = pd.date_range("2020-01-01", periods=6, freq="B")
+    close = pd.Series([100, 102, 104, 106, 108, 110], index=dates, dtype=float)
+    data = pd.DataFrame(
+        {"open": close, "high": close * 1.01, "low": close * 0.99,
+         "close": close, "volume": 1000},
+        index=dates,
+    )
+
+    class LongToEnd:
+        def __init__(self, config):
+            self.config = config
+            self.name = config.name
+            self.parameters = config.parameters
+
+        def generate_signals(self, data):
+            s = pd.Series(0, index=data.index)
+            s.iloc[1:] = 1
+            return s
+
+        def get_position_sizing(self, data, signals):
+            return signals.abs()
+
+    from strategy_builder import StrategyConfig
+    strategy = LongToEnd(StrategyConfig(name="long_to_end", parameters={}))
+    results = run_backtest(data, strategy, _Args())
+
+    # The leg opens at bar 2 (position = signal shifted by one bar,
+    # close 104) and is marked to market at the final bar (close 110).
+    assert len(results["trades"]) == 1, (
+        f"expected 1 trade, got {results['trades']}"
+    )
+    trade = results["trades"][0]
+    assert trade["entry_date"] == "2020-01-03"
+    assert trade["exit_date"] == "2020-01-08"
+    assert trade.get("closed_at_end") is True
+    assert abs(trade["pnl"] - (110 - 104)) < 1e-9, (
+        f"long leg held to end must profit from the rise, got {trade['pnl']}"
+    )
+    assert abs(trade["return"] - (110 - 104) / 104) < 1e-9
+
+
+# Parameters that keep each registered strategy active over the
+# 252-bar test window. The momentum strategies default to a 252-bar
+# lookback, which leaves every rolling indicator undefined over this
+# window (flat signal); a shorter lookback keeps them tradable.
+_AUDIT_PARAMS = {
+    "sma_crossover": None,
+    "ema_crossover": None,
+    "bollinger_bands": None,
+    "rsi_mean_reversion": None,
+    "donchian_breakout": None,
+    "cross_sectional_momentum": '{"lookback": 21}',
+    "dual_momentum": '{"lookback": 21}',
+    "zscore_mean_reversion": None,
+}
+
+
+def test_run_backtest_trade_ledger_valid_for_all_registered_strategies():
+    """Every registered strategy produces a valid trade ledger.
+
+    Parameterized audit across STRATEGY_REGISTRY: each strategy must
+    record at least one trade, every trade must carry a finite
+    pnl/return with entry_date < exit_date, and the pnl sign must be
+    consistent with the direction of the position taken at entry
+    (long follows price, short moves opposite). The expected pnl is
+    recomputed independently from the strategy's own shifted signals,
+    so a sign error in the extractor cannot pass by coincidence.
+    """
+    data = _make_data()
+    from strategy_builder import STRATEGY_REGISTRY
+
+    assert set(_AUDIT_PARAMS) == set(STRATEGY_REGISTRY), (
+        "audit params and strategy registry are out of sync"
+    )
+
+    for name, params_json in _AUDIT_PARAMS.items():
+        strategy = build_strategy(name, params_json)
+        results = run_backtest(data, strategy, _Args(strategy=name))
+
+        assert results["trades"], f"{name}: no trades recorded"
+
+        # Independent reconstruction of the position series to verify
+        # the sign convention of every recorded trade.
+        signals = strategy.generate_signals(data)
+        positions = signals.shift(1).fillna(0)
+        close = data["close"]
+
+        for trade in results["trades"]:
+            assert isinstance(trade["pnl"], float), f"{name}: non-float pnl"
+            assert np.isfinite(trade["pnl"]), f"{name}: non-finite pnl"
+            assert isinstance(trade["return"], float), f"{name}: non-float return"
+            assert np.isfinite(trade["return"]), f"{name}: non-finite return"
+            assert trade["entry_date"] < trade["exit_date"], (
+                f"{name}: entry_date must precede exit_date, got "
+                f"{trade['entry_date']} >= {trade['exit_date']}"
+            )
+
+            entry = pd.Timestamp(trade["entry_date"])
+            exit_ = pd.Timestamp(trade["exit_date"])
+            direction = np.sign(positions.loc[entry])
+            assert direction != 0, f"{name}: zero position at entry {entry}"
+            expected_pnl = (close.loc[exit_] - close.loc[entry]) * direction
+            assert abs(trade["pnl"] - expected_pnl) < 1e-9, (
+                f"{name}: pnl {trade['pnl']} inconsistent with direction "
+                f"{direction:+.0f} (expected {expected_pnl})"
+            )
+            expected_return = expected_pnl / close.loc[entry]
+            assert abs(trade["return"] - expected_return) < 1e-9, (
+                f"{name}: return {trade['return']} inconsistent with "
+                f"pnl/entry-price (expected {expected_return})"
+            )
+
+
 def test_parse_args_requires_data_argument():
     """parse_args must error when --data is missing."""
     parser = argparse.ArgumentParser(description="Run quantitative backtest")
@@ -384,6 +508,8 @@ def main() -> int:
         ("run_backtest_records_both_legs_of_direct_long_short_flip", test_run_backtest_records_both_legs_of_direct_long_short_flip),
         ("run_backtest_short_leg_pnl_moves_opposite_to_price", test_run_backtest_short_leg_pnl_moves_opposite_to_price),
         ("run_backtest_long_leg_pnl_moves_with_price", test_run_backtest_long_leg_pnl_moves_with_price),
+        ("run_backtest_closes_final_open_position_at_end_of_data", test_run_backtest_closes_final_open_position_at_end_of_data),
+        ("run_backtest_trade_ledger_valid_for_all_registered_strategies", test_run_backtest_trade_ledger_valid_for_all_registered_strategies),
         ("parse_args_requires_data_argument", test_parse_args_requires_data_argument),
         ("parse_args_accepts_valid_arguments", test_parse_args_accepts_valid_arguments),
         ("parse_args_custom_values", test_parse_args_custom_values),

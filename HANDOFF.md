@@ -1,40 +1,42 @@
 # Agent Handoff - Session Summary
 
 ## What changed
-Fixed a methodological defect in the quantitative-backtesting trade extractor and added regression tests.
+Closed the end-of-sample trade-ledger gap found by the strategy audit, and added the parameterized audit test.
 
-- `skills/quantitative-backtesting/scripts/run_backtest.py` — trade extraction rewritten. The old loop only fired when the position returned to zero, so a direct `+1 -> -1` flip (used by `bollinger_bands`, `donchian_breakout`, `rsi_mean_reversion`) never closed the long leg and never opened the short leg. Every position change is now treated as a trade boundary: the open leg is closed and the new one opened at the same bar, and each PnL is signed by the direction it was taken (long follows price, short moves opposite to price). The old `(exit_price - entry_price) * sign` formula also treated shorts as longs.
-- `skills/quantitative-backtesting/tests/test_run_backtest.py` — added 3 tests: `run_backtest_records_both_legs_of_direct_long_short_flip`, `run_backtest_short_leg_pnl_moves_opposite_to_price`, `run_backtest_long_leg_pnl_moves_with_price` (13/13 pass).
-- `skills/quantitative-backtesting/SKILL.md` — documented the trade-extraction regression coverage in the Test Coverage section.
-- `skills/quantitative-backtesting/test_output/*` — regenerated pinned regression snapshot from `assets/example_data/sample_ohlcv.csv` (now 8 real trades vs the previous 5 phantom trades).
+- `skills/quantitative-backtesting/scripts/run_backtest.py` — the trade extractor only recorded a trade when a position was closed by a *subsequent position change*. A position still open when the data ended was silently dropped: its PnL was in the equity curve but absent from `trades`, so `total_trades`, `win_rate`, `expectancy`, and `profit_factor` understated activity and did not reconcile with the equity curve. Demonstrated on the committed sample data: `cross_sectional_momentum` and `dual_momentum` (default 252-bar lookback) recorded **0 trades** despite being long for ~1 year of the 2-year sample. The extractor now marks the final open position to market at the last bar's close, flags it with `"closed_at_end": True` (the exit is forced by end-of-sample, not by a signal), and skips a position opened on the very last bar (no later bar to close at).
+- `skills/quantitative-backtesting/tests/test_run_backtest.py` — two new tests (13 → 15):
+  - `run_backtest_closes_final_open_position_at_end_of_data` — regression test: a strategy long from bar 2 to the end previously recorded 0 trades; now records 1 trade (entry 2020-01-03 close 104, exit 2020-01-08 close 110, pnl +6, `closed_at_end`).
+  - `run_backtest_trade_ledger_valid_for_all_registered_strategies` — parameterized audit across all 8 registered strategies (`sma_crossover`, `ema_crossover`, `bollinger_bands`, `rsi_mean_reversion`, `donchian_breakout`, `cross_sectional_momentum`, `dual_momentum`, `zscore_mean_reversion`). Asserts each records ≥1 trade and every trade has finite `pnl`/`return`, `entry_date < exit_date`, and a `pnl` sign consistent with the position direction at entry — the expected pnl is recomputed independently from the strategy's own shifted signals, so an extractor sign error cannot pass by coincidence. Momentum strategies use `lookback=21` because the default 252-bar lookback leaves every rolling indicator undefined over the 252-bar test window (flat signal, correctly caught by the `signals_active` guard).
+- `skills/quantitative-backtesting/SKILL.md` — Test Coverage section documents the end-of-sample MTM close and the parameterized audit; the snapshot regeneration command now includes the exact `--params '{"fast_period": 10, "slow_period": 30}'` the pinned snapshot actually uses (previously undocumented, which made the old snapshot unreproducible).
+- `skills/quantitative-backtesting/test_output/*` — pinned snapshot regenerated with the same `fast=10/slow=30` parameters as before. `total_return` is unchanged (0.1913), confirming the fix alters only the trade ledger, not the equity curve; `total_trades` 8 → 9 (the previously dropped final long leg is now recorded).
 
 ## What was actually verified
-- All quant-backtesting tests pass: `test_data_loader.py` 6/6, `test_performance.py` 11/11, `test_reporting.py` 8/8, `test_run_backtest.py` 13/13, `test_strategy_builder.py` 5/5, `test_walk_forward.py` 12/12, `test_cpcv.py` 10/10, `test_generate_sample_data.py` 1/1. Total 66 tests, all passing.
-- chdb-datastore tests still pass: `test_verify_install.py` 11/11.
-- The defect was reproduced before the fix: a synthetic flip strategy (long → short → flat, no zero bar between legs) produced only 1 phantom trade; after the fix it produces the full round turn.
-- Short-leg PnL sign verified numerically: short opened at 102, closed at 106 on a rising market → pnl = -4 (loss), not +4.
-- Long-leg PnL sign verified numerically: long opened at 102, closed at 106 → pnl = +4.
+- Full quant-backtesting suite passes: `test_data_loader.py` 6/6, `test_performance.py` 11/11, `test_reporting.py` 8/8 (exit 0), `test_run_backtest.py` 15/15, `test_strategy_builder.py` 5/5, `test_walk_forward.py` 12/12, `test_cpcv.py` 10/10, `test_generate_sample_data.py` 1/1. Total 68 tests.
+- Regression test fails on the unfixed extractor (0 trades for the long-to-end strategy) and passes with the fix — verified by temporarily reverting `run_backtest.py` and re-running.
+- Audit finding resolved: `cross_sectional_momentum` and `dual_momentum` on the sample data now record their final leg (1 trade each, 2018-12-20 → 2019-12-05, pnl +22.19, `closed_at_end=true`) instead of 0 trades.
+- Snapshot reproduction: the committed snapshot (pre-session) matched the old code only with `--params '{"fast_period": 10, "slow_period": 30}'` (8 trades, total_return 0.1913), not the documented defaults (5 trades, 0.0743). The regenerated snapshot preserves total_return exactly.
+- No claims about profitability are made; the snapshot is a regression guard on synthetic data.
 
 ## What remains unresolved
 - Changes are NOT committed (repository policy: only commit when explicitly requested).
-- The previous handoff's suggested task (chdb-datastore test coverage) was already completed and committed in an earlier session; this session picked a different, higher-value task instead.
-- No claims about profitability are made. The regenerated snapshot shows the corrected trade accounting on synthetic data; it is a regression guard, not evidence of a profitable strategy.
+- **Audit finding (not fixed, out of scope):** `DonchianChannelBreakout` includes the current bar in its rolling channel (`data["high"].rolling(period).max()`), so `high >= upper` is equivalent to "today's high >= prior (period-1)-day max" — an off-by-one vs. the documented "breaks above N-period high". Bounded fix: shift the channel by one bar (`upper = data["high"].rolling(period).max().shift(1)`; same for `lower`, `exit_upper`, `exit_lower`) and add a regression test. This changes signal timing, so the pinned snapshot would need regeneration.
+- `cross_sectional_momentum` is a single-asset placeholder despite its "Multi-Asset" description; its `top_quantile`/`bottom_quantile` parameters are unused. A real implementation needs panel data and is a larger task.
+- The `closed_at_end` flag is written to the trade dict but not surfaced in `performance.py`/`reporting.py` output; consumers that care can read it from `results["trades"]`.
 
 ## Which approaches have already failed and why
-- Initial test for the short-leg PnL used a strategy that held the short to the end of the data with no exit bar, so no trade was recorded and the assertion failed. Fixed by using a short-then-flat strategy so the position is fully closed and recorded.
-- The old trade-extractor approach (exit only on `positions == 0`) was the root cause of the defect and is now replaced, not patched.
+- Regenerating the snapshot with the documented default command (no `--params`) produced metrics that did not match the committed snapshot (5 trades / total_return 0.0743 vs 8 / 0.1913). Root cause was not a code defect but an undocumented parameter choice; resolved by reproducing with `fast=10/slow=30` and documenting the exact command in SKILL.md.
+- Initial audit run used default parameters for the momentum strategies on the 252-bar test window, which correctly raised "never takes a position"; switched to `lookback=21` in the audit parameter map (with a comment explaining why).
 
 ## One precise next task, with relevant evidence and constraints
-**Task:** Audit the remaining strategy classes in `skills/quantitative-backtesting/scripts/strategy_builder.py` for the same position-flip / PnL-sign issues, and add a parameterized test that runs `run_backtest` through each registered strategy (`sma_crossover`, `ema_crossover`, `bollinger_bands`, `rsi_mean_reversion`, `donchian_breakout`, `cross_sectional_momentum`, `dual_momentum`, `zscore_mean_reversion`) asserting that every recorded trade has a finite `pnl`/`return`, `entry_date < exit_date`, and that the sign of `pnl` is consistent with the direction of the position taken.
+**Task:** Fix the Donchian channel off-by-one in `skills/quantitative-backtesting/scripts/strategy_builder.py:176-179` (self-inclusive rolling window makes the breakout/exit conditions use a period-1 lookback) by shifting each channel by one bar, add a regression test in `tests/test_strategy_builder.py` asserting the signal cannot fire on the same bar the channel is computed from, and regenerate the pinned snapshot with `python3 skills/quantitative-backtesting/scripts/run_backtest.py --data skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv --params '{"fast_period": 10, "slow_period": 30}' --output skills/quantitative-backtesting/test_output`.
 
 Evidence supporting this choice:
-- The flip defect was found by testing `run_backtest` with a synthetic long/short flip; the long/short strategies in the registry are exactly the ones that produce direct flips, so they are the ones most likely to carry a similar accounting bug.
-- It is bounded (one file to audit, one new test file or addition to `test_run_backtest.py`), directly serves the mission's emphasis on reproducible, verified backtests and honest trade-level reporting, and follows the existing stdlib test conventions.
-- All 66 quant tests currently pass, so this is additive verification, not a blocker fix.
+- The audit in this session verified trade-level accounting for all strategies but could not validate signal *timing*; the Donchian self-inclusion is a demonstrable look-ahead-adjacent defect in signal definition (the documented "N-period high" includes today's bar).
+- It is bounded (one strategy class, 4 lines, one test) and directly serves the mission's look-ahead-bias-controls requirement.
 
 Constraints / notes for the next agent:
 - Use the stdlib runner pattern (`def main()`, `if __name__ == "__main__": sys.exit(main())`).
 - Reuse the `_make_data`/`_Args` helpers already in `test_run_backtest.py`.
 - Do not commit unless explicitly asked.
 
-(End of file - total 48 lines)
+(End of file - total 78 lines)

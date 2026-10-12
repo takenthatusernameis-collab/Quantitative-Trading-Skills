@@ -23,13 +23,13 @@ Skewness:              0.14
 Kurtosis:              2.15
 
 --- Trade-Level Analytics ---
-Total Trades:          8
-Winning Trades:        4
+Total Trades:          9
+Winning Trades:        5
 Losing Trades:         4
-Win Rate:              50.00%
-Avg Win:               7.24%
+Win Rate:              55.56%
+Avg Win:               6.05%
 Avg Loss:              3.57%
-Profit Factor:         1.96
-Expectancy:            1.9078
+Profit Factor:         2.07
+Expectancy:            1.8876
 
 ============================================================

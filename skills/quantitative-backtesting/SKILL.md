@@ -209,6 +209,14 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   never recorded. The fix treats every position change as a trade boundary,
   closes the open leg and opens the new one at the same bar, and signs each
   PnL by the direction it was taken (long follows price, short moves opposite).
+  Also covers **end-of-sample mark-to-market**: a position still open when the
+  data ends (common for long-lookback momentum strategies) is closed at the
+  last bar and flagged `closed_at_end`, so the trade ledger reconciles with
+  the equity curve instead of silently dropping the leg. Finally, a
+  parameterized audit runs every registered strategy and asserts each trade
+  has finite `pnl`/`return`, `entry_date < exit_date`, and a `pnl` sign
+  consistent with the position direction at entry (recomputed independently
+  from the strategy's own shifted signals).
 - `test_strategy_builder.py` - strategy registry, `build_strategy`, defaults,
   and binary long/flat signal generation with real crossovers.
 - `test_walk_forward.py` - walk-forward windowing, parameter grid parsing, and
@@ -220,5 +228,7 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
 
 The canonical rendered outputs in `test_output/` are regenerated from
 `assets/example_data/sample_ohlcv.csv` via
-`python3 skills/quantitative-backtesting/scripts/run_backtest.py` and serve as
-a pinned regression snapshot; they are not proof of profitability.
+`python3 skills/quantitative-backtesting/scripts/run_backtest.py --data skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv --params '{"fast_period": 10, "slow_period": 30}' --output skills/quantitative-backtesting/test_output`
+(the pinned snapshot uses `fast_period=10`/`slow_period=30`, not the
+20/50 defaults) and serve as a pinned regression snapshot; they are not
+proof of profitability.
