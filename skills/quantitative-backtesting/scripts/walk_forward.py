@@ -101,6 +101,14 @@ def walk_forward_analysis(
                 train_signals = strategy.generate_signals(train_data)
                 test_signals = strategy.generate_signals(test_data)
 
+                # Skip parameter sets that take no position in the test window
+                # (e.g. a lookback longer than the window itself leaves every
+                # rolling indicator NaN, so the strategy stays flat). Without
+                # this guard the grid search silently selects such a combo as
+                # "optimal" and reports a flat (zero) out-of-sample return.
+                if (test_signals != 0).sum() == 0:
+                    continue
+
                 # Calculate returns for this parameter set
                 test_returns = _calculate_strategy_returns(
                     test_data, test_signals, commission, slippage
