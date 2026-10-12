@@ -7,16 +7,17 @@ with various strategies, data sources, and configuration options.
 """
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 # Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent))
 
-from scripts.data_loader import load_data, validate_data
-from scripts.strategy_builder import build_strategy
-from scripts.performance import calculate_metrics, generate_report
-from scripts.reporting import generate_tear_sheet
+from data_loader import load_data, validate_data
+from strategy_builder import build_strategy
+from performance import calculate_metrics, generate_report
+from reporting import generate_tear_sheet
 
 
 def parse_args():
@@ -26,12 +27,76 @@ def parse_args():
     parser.add_argument("--symbol", type=str, default="SPY", help="Symbol to backtest")
     parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
-    parser.add_argument("--commission", type=float, default=0.0002, help="Commission per trade (bps)")
-    parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (bps)")
+    parser.add_argument("--commission", type=float, default=0.0002, help="Commission per trade (as decimal)")
+    parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (as decimal)")
     parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     parser.add_argument("--output", type=str, default="results", help="Output directory")
     parser.add_argument("--params", type=str, help="Strategy parameters as JSON string")
     return parser.parse_args()
+
+
+def run_backtest(data, strategy, args):
+    """Run a vectorized backtest and return results with equity curve and trades."""
+    signals = strategy.generate_signals(data)
+    close = data["close"]
+
+    # Trade at next period's open (avoid look-ahead bias)
+    positions = signals.shift(1).fillna(0)
+    raw_returns = close.pct_change()
+
+    # Transaction costs: apply on position changes
+    position_changes = positions.diff().abs()
+    costs = position_changes * (args.commission + args.slippage)
+
+    strategy_returns = positions * raw_returns - costs
+    strategy_returns = strategy_returns.dropna()
+
+    # Build equity curve
+    equity = (1 + strategy_returns).cumprod() * args.initial_capital
+    equity.name = "equity"
+
+    # Extract trade-level statistics
+    position_changes_bool = positions.diff().fillna(0) != 0
+    entry_mask = position_changes_bool & (positions != 0)
+    exit_mask = position_changes_bool & (positions == 0)
+
+    trades = []
+    entry_idx = None
+    entry_price = None
+    entry_date = None
+    for i in range(len(data)):
+        if entry_mask.iloc[i] and entry_idx is None:
+            entry_idx = i
+            entry_price = close.iloc[i]
+            entry_date = data.index[i]
+        elif exit_mask.iloc[i] and entry_idx is not None:
+            exit_price = close.iloc[i]
+            exit_date = data.index[i]
+            pnl = (exit_price - entry_price) * (positions.iloc[entry_idx] / abs(positions.iloc[entry_idx]))
+            trades.append({
+                "pnl": float(pnl),
+                "return": float(pnl / entry_price),
+                "entry_date": str(entry_date.date()),
+                "exit_date": str(exit_date.date()),
+            })
+            entry_idx = None
+            entry_price = None
+            entry_date = None
+
+    return {
+        "equity_curve": equity,
+        "returns": strategy_returns,
+        "data": data,
+        "strategy": strategy,
+        "trades": trades,
+        "config": {
+            "initial_capital": args.initial_capital,
+            "commission": args.commission,
+            "slippage": args.slippage,
+            "strategy": args.strategy,
+            "symbol": args.symbol,
+        },
+    }
 
 
 def main():
@@ -48,33 +113,17 @@ def main():
     strategy = build_strategy(args.strategy, args.params)
 
     print("Running backtest...")
-    # This would use vectorbt or similar for actual backtesting
-    # For now, we simulate the workflow
     results = run_backtest(data, strategy, args)
 
     print("Calculating performance metrics...")
     metrics = calculate_metrics(results)
 
     print("Generating report...")
-    generate_report(metrics, args.output)
-    generate_tear_sheet(results, metrics, args.output)
+    generate_report(metrics, args.output, symbol=args.symbol, strategy_name=args.strategy)
+    generate_tear_sheet(results, metrics, args.output, symbol=args.symbol, strategy_name=args.strategy)
 
     print(f"Backtest complete! Results saved to {args.output}/")
     return 0
-
-
-def run_backtest(data, strategy, args):
-    """Placeholder for actual backtest execution."""
-    # In a real implementation, this would use vectorbt:
-    # import vectorbt as vbt
-    # pf = vbt.Portfolio.from_signals(...)
-    # return pf
-
-    return {
-        "data": data,
-        "strategy": strategy,
-        "config": vars(args)
-    }
 
 
 if __name__ == "__main__":

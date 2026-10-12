@@ -1,0 +1,51 @@
+# Default configuration template for quantitative backtests.
+# Copy this file and adjust values for your strategy.
+
+# --- Data Settings ---
+data:
+  path: "data/spy_ohlcv.csv"      # Path to CSV or Parquet file
+  symbol: "SPY"                   # Ticker symbol (for multi-symbol files)
+  start: "2010-01-01"            # Start date (YYYY-MM-DD), optional
+  end: "2024-01-01"              # End date (YYYY-MM-DD), optional
+  date_column: "date"            # Name of the date column
+  resample: null                 # Target frequency (e.g. "1H", "1D", "1W"), or null
+
+# --- Strategy Settings ---
+strategy:
+  type: "sma_crossover"          # See strategy_builder.py for available types
+  params:
+    fast_period: 20
+    slow_period: 50
+  # Alternative strategies and defaults:
+  # ema_crossover:        {fast_period: 12, slow_period: 26}
+  # bollinger_bands:      {period: 20, std_dev: 2.0}
+  # rsi_mean_reversion:   {period: 14, oversold: 30, overbought: 70, neutral: 50}
+  # donchian_breakout:    {period: 20, exit_period: 10}
+  # dual_momentum:        {lookback: 252}
+  # zscore_mean_reversion: {period: 20, entry_z: 2.0, exit_z: 0.5}
+
+# --- Backtest Costs ---
+costs:
+  commission: 0.0002             # Commission per trade (as decimal, 2 bps)
+  slippage: 0.0001               # Slippage per trade (as decimal, 1 bps)
+  initial_capital: 100000.0      # Starting portfolio value
+
+# --- Output ---
+output:
+  directory: "results"           # Where to save reports and tear sheets
+  save_plots: true              # Generate PNG plots (requires matplotlib)
+  save_metrics_json: true       # Save metrics as JSON
+  save_report_txt: true         # Save human-readable report
+
+# --- Validation (Walk-Forward) ---
+validation:
+  enabled: false                 # Set true to run walk-forward analysis
+  train_months: 12
+  test_months: 3
+  step_months: 3
+  param_grid:
+    fast_period: [10, 20, 50]
+    slow_period: [50, 100, 200]
+
+# --- Risk-Free Rate ---
+risk_free_rate: 0.02            # Annual risk-free rate for Sharpe/Sortino

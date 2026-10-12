@@ -122,6 +122,7 @@ Risk Metrics:
 - `performance.py` - Comprehensive performance analytics and metric calculation
 - `walk_forward.py` - Walk-forward analysis and parameter optimization
 - `reporting.py` - Automated tear sheet and report generation
+- `generate_sample_data.py` - Generates a sample OHLCV dataset for testing
 
 ### references/
 - `data_schema.md` - Expected data formats and column specifications
@@ -132,7 +133,7 @@ Risk Metrics:
 
 ### assets/
 - `config_template.yaml` - Default configuration for backtest parameters
-- `example_data/` - Sample OHLCV data for testing
+- `example_data/sample_ohlcv.csv` - Sample OHLCV data for testing
 
 ## Tips
 
