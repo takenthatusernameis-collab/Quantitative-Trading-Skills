@@ -335,10 +335,10 @@ export function validateLicensePath(
     );
   }
 
-  const resolved = path.resolve(skillsDir, itemId, licensePath);
+  const resolved = path.resolve(skillsDir, itemId, path.basename(licensePath));
   if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
     throw new Error(
-      `${itemId}/SKILL.md: metadata.source.license_path "${licensePath}" does not exist`,
+      `${itemId}/SKILL.md: metadata.source.license_path "${licensePath}" does not exist (expected ${path.basename(licensePath)} in skill directory)`,
     );
   }
 }

@@ -40,6 +40,55 @@ diff -rN -U0 --ignore-trailing-space a/skill-creator/SKILL.md b/skill-creator/SK
 @@ -182 +182 @@
 -3. In practice, how should Claude use the skill? All reusable skill contents developed above should be referenced so that Claude knows how to use them.
 +3. In practice, how should the agent use the skill? All reusable skill contents developed above should be referenced so that the agent knows how to use them.
+@@ -218,0 +219,48 @@
++
++## Test Coverage
++
++The `tests/` directory contains unit tests for all three bundled scripts, using only the Python standard library (no third-party test framework required).
++
++Run the full suite with:
++
++```bash
++python3 skills/skill-creator/tests/test_init_skill.py
++python3 skills/skill-creator/tests/test_quick_validate.py
++python3 skills/skill-creator/tests/test_package_skill.py
++```
++
++### init_skill Tests
++**File:** `tests/test_init_skill.py`
++
++Tests cover:
++- Directory creation and return value
++- SKILL.md generation with YAML frontmatter (name + description)
++- Creation of `scripts/`, `references/`, and `assets/` directories with example files
++- Executable bit on the generated example script
++- Refusal to overwrite an existing skill directory
++- `title_case_skill_name` hyphen-to-Title-Case conversion
++
++### quick_validate Tests
++**File:** `tests/test_quick_validate.py`
++
++Tests cover:
++- Acceptance of a freshly scaffolded valid skill
++- Rejection of missing SKILL.md
++- Rejection of missing YAML frontmatter
++- Rejection of missing `name` and `description` frontmatter fields
++- Rejection of non-hyphen-case names (uppercase, underscores)
++- Rejection of names with leading/trailing hyphens
++- Rejection of angle brackets in descriptions
++
++### package_skill Tests
++**File:** `tests/test_package_skill.py`
++
++Tests cover:
++- Zip creation for a valid skill with the expected filename
++- Zip contents include SKILL.md, example script, reference doc, and asset placeholder
++- Rejection of nonexistent paths and file paths (non-directories)
++- Rejection of directories missing SKILL.md
++- Rejection of invalid skills (validation failure aborts packaging)
++- Default output directory behavior (zip written to current working directory)
++
++All 21 tests (6 init_skill + 8 quick_validate + 7 package_skill) pass.
 diff -rN -U0 --ignore-trailing-space a/skill-creator/scripts/init_skill.py b/skill-creator/scripts/init_skill.py
 --- a/skill-creator/scripts/init_skill.py	2000-01-01 00:00:00.000000000 +0000
 +++ b/skill-creator/scripts/init_skill.py	2000-01-01 00:00:00.000000000 +0000
@@ -58,3 +107,395 @@ diff -rN -U0 --ignore-trailing-space a/skill-creator/scripts/init_skill.py b/ski
 @@ -168 +168 @@
 -the output Claude produces.
 +the output the agent produces.
+diff -rN -U0 --ignore-trailing-space a/skill-creator/tests/__init__.py b/skill-creator/tests/__init__.py
+--- a/skill-creator/tests/__init__.py	1970-01-01 00:00:00.000000000 +0000
++++ b/skill-creator/tests/__init__.py	2000-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1 @@
++
+diff -rN -U0 --ignore-trailing-space a/skill-creator/tests/test_init_skill.py b/skill-creator/tests/test_init_skill.py
+--- a/skill-creator/tests/test_init_skill.py	1970-01-01 00:00:00.000000000 +0000
++++ b/skill-creator/tests/test_init_skill.py	2000-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,105 @@
++#!/usr/bin/env python3
++"""
++Unit tests for init_skill.py: skill directory scaffolding.
++
++Run with: python3 skills/skill-creator/tests/test_init_skill.py
++No third-party test framework is required; uses only the standard library.
++"""
++
++import os
++import sys
++import tempfile
++import traceback
++from pathlib import Path
++
++SKILLS_DIR = Path(__file__).resolve().parent.parent
++sys.path.insert(0, str(SKILLS_DIR / "scripts"))
++
++from init_skill import init_skill, title_case_skill_name  # noqa: E402
++
++
++def test_init_skill_creates_directory():
++    """init_skill.py must create the target skill directory."""
++    with tempfile.TemporaryDirectory() as tmp:
++        result = init_skill("my-new-skill", tmp)
++        assert result is not None, "init_skill should return a path"
++        assert result.exists() and result.is_dir()
++        assert result.name == "my-new-skill"
++
++
++def test_init_skill_creates_skill_md():
++    """The scaffolded skill must contain a SKILL.md with frontmatter."""
++    with tempfile.TemporaryDirectory() as tmp:
++        result = init_skill("my-new-skill", tmp)
++        skill_md = result / "SKILL.md"
++        assert skill_md.exists(), "SKILL.md missing"
++        content = skill_md.read_text()
++        assert content.startswith("---"), "SKILL.md must start with YAML frontmatter"
++        assert "name: my-new-skill" in content
++        assert "description:" in content
++
++
++def test_init_skill_creates_resource_dirs():
++    """scripts/, references/, and assets/ must be created with example files."""
++    with tempfile.TemporaryDirectory() as tmp:
++        result = init_skill("my-new-skill", tmp)
++        for sub in ("scripts", "references", "assets"):
++            sub_dir = result / sub
++            assert sub_dir.exists() and sub_dir.is_dir(), f"{sub}/ missing"
++        assert (result / "scripts" / "example.py").exists()
++        assert (result / "references" / "api_reference.md").exists()
++        assert (result / "assets" / "example_asset.txt").exists()
++
++
++def test_init_skill_example_script_is_executable():
++    """The generated example script must be executable."""
++    with tempfile.TemporaryDirectory() as tmp:
++        result = init_skill("my-new-skill", tmp)
++        example = result / "scripts" / "example.py"
++        assert example.exists()
++        mode = example.stat().st_mode
++        assert mode & 0o111, "example.py should be executable"
++
++
++def test_init_skill_rejects_existing_directory():
++    """Re-running init on an existing skill must fail rather than overwrite."""
++    with tempfile.TemporaryDirectory() as tmp:
++        first = init_skill("my-new-skill", tmp)
++        assert first is not None
++        second = init_skill("my-new-skill", tmp)
++        assert second is None, "init_skill should refuse to overwrite an existing skill"
++
++
++def test_title_case_skill_name():
++    """title_case_skill_name must convert hyphen-case to Title Case."""
++    assert title_case_skill_name("my-cool-skill") == "My Cool Skill"
++    assert title_case_skill_name("single") == "Single"
++    assert title_case_skill_name("a-b") == "A B"
++
++
++def main() -> int:
++    tests = [
++        ("init_skill_creates_directory", test_init_skill_creates_directory),
++        ("init_skill_creates_skill_md", test_init_skill_creates_skill_md),
++        ("init_skill_creates_resource_dirs", test_init_skill_creates_resource_dirs),
++        ("init_skill_example_script_is_executable", test_init_skill_example_script_is_executable),
++        ("init_skill_rejects_existing_directory", test_init_skill_rejects_existing_directory),
++        ("title_case_skill_name", test_title_case_skill_name),
++    ]
++
++    failures = 0
++    for name, fn in tests:
++        try:
++            fn()
++            print(f"PASS  {name}")
++        except Exception:
++            failures += 1
++            print(f"FAIL  {name}")
++            traceback.print_exc()
++
++    print(f"\n{len(tests) - failures}/{len(tests)} tests passed")
++    return 1 if failures else 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff -rN -U0 --ignore-trailing-space a/skill-creator/tests/test_package_skill.py b/skill-creator/tests/test_package_skill.py
+--- a/skill-creator/tests/test_package_skill.py	1970-01-01 00:00:00.000000000 +0000
++++ b/skill-creator/tests/test_package_skill.py	2000-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,125 @@
++#!/usr/bin/env python3
++"""
++Unit tests for package_skill.py: skill packaging into a zip archive.
++
++Run with: python3 skills/skill-creator/tests/test_package_skill.py
++No third-party test framework is required; uses only the standard library.
++"""
++
++import os
++import sys
++import tempfile
++import traceback
++import zipfile
++from pathlib import Path
++
++SKILLS_DIR = Path(__file__).resolve().parent.parent
++sys.path.insert(0, str(SKILLS_DIR / "scripts"))
++
++from init_skill import init_skill  # noqa: E402
++from package_skill import package_skill  # noqa: E402
++
++
++def test_package_skill_creates_zip_for_valid_skill():
++    """A valid skill must be packaged into a zip file."""
++    with tempfile.TemporaryDirectory() as tmp:
++        skill_path = init_skill("my-new-skill", tmp)
++        out_dir = Path(tmp) / "dist"
++        result = package_skill(skill_path, str(out_dir))
++        assert result is not None, "package_skill should return a zip path"
++        assert result.exists(), f"zip not found at {result}"
++        assert result.suffix == ".zip"
++        assert result.name == "my-new-skill.zip"
++
++
++def test_package_skill_zip_contains_expected_files():
++    """The produced zip must contain SKILL.md and resource directories."""
++    with tempfile.TemporaryDirectory() as tmp:
++        skill_path = init_skill("my-new-skill", tmp)
++        out_dir = Path(tmp) / "dist"
++        result = package_skill(skill_path, str(out_dir))
++        with zipfile.ZipFile(result) as zf:
++            names = zf.namelist()
++        assert any(n.endswith("SKILL.md") for n in names), f"SKILL.md missing: {names}"
++        assert any(n.endswith("scripts/example.py") for n in names), f"example.py missing: {names}"
++        assert any(n.endswith("references/api_reference.md") for n in names)
++        assert any(n.endswith("assets/example_asset.txt") for n in names)
++
++
++def test_package_skill_rejects_nonexistent_path():
++    """Packaging a path that does not exist must fail."""
++    with tempfile.TemporaryDirectory() as tmp:
++        result = package_skill(Path(tmp) / "does-not-exist")
++        assert result is None, "package_skill should return None for missing path"
++
++
++def test_package_skill_rejects_file_not_directory():
++    """Packaging a file path (not a directory) must fail."""
++    with tempfile.TemporaryDirectory() as tmp:
++        some_file = Path(tmp) / "file.txt"
++        some_file.write_text("hello")
++        result = package_skill(some_file)
++        assert result is None, "package_skill should return None for a file path"
++
++
++def test_package_skill_rejects_missing_skill_md():
++    """A directory without SKILL.md must fail packaging."""
++    with tempfile.TemporaryDirectory() as tmp:
++        bare_dir = Path(tmp) / "bare"
++        bare_dir.mkdir()
++        result = package_skill(bare_dir)
++        assert result is None, "package_skill should return None when SKILL.md is missing"
++
++
++def test_package_skill_rejects_invalid_skill():
++    """An invalid skill (bad frontmatter) must fail packaging."""
++    with tempfile.TemporaryDirectory() as tmp:
++        bad_dir = Path(tmp) / "bad-skill"
++        bad_dir.mkdir()
++        (bad_dir / "SKILL.md").write_text("no frontmatter at all")
++        result = package_skill(bad_dir)
++        assert result is None, "package_skill should return None for invalid skill"
++
++
++def test_package_skill_default_output_dir():
++    """When no output dir is given, the zip is written to the current directory."""
++    with tempfile.TemporaryDirectory() as tmp:
++        cwd = Path.cwd()
++        try:
++            os_chdir = Path(tmp)
++            os.chdir(os_chdir)
++            skill_path = init_skill("my-new-skill", str(Path(tmp) / "src"))
++            result = package_skill(skill_path)
++            assert result is not None
++            assert result.parent == os_chdir
++        finally:
++            os.chdir(cwd)
++
++
++def main() -> int:
++    tests = [
++        ("package_skill_creates_zip_for_valid_skill", test_package_skill_creates_zip_for_valid_skill),
++        ("package_skill_zip_contains_expected_files", test_package_skill_zip_contains_expected_files),
++        ("package_skill_rejects_nonexistent_path", test_package_skill_rejects_nonexistent_path),
++        ("package_skill_rejects_file_not_directory", test_package_skill_rejects_file_not_directory),
++        ("package_skill_rejects_missing_skill_md", test_package_skill_rejects_missing_skill_md),
++        ("package_skill_rejects_invalid_skill", test_package_skill_rejects_invalid_skill),
++        ("package_skill_default_output_dir", test_package_skill_default_output_dir),
++    ]
++
++    failures = 0
++    for name, fn in tests:
++        try:
++            fn()
++            print(f"PASS  {name}")
++        except Exception:
++            failures += 1
++            print(f"FAIL  {name}")
++            traceback.print_exc()
++
++    print(f"\n{len(tests) - failures}/{len(tests)} tests passed")
++    return 1 if failures else 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff -rN -U0 --ignore-trailing-space a/skill-creator/tests/test_quick_validate.py b/skill-creator/tests/test_quick_validate.py
+--- a/skill-creator/tests/test_quick_validate.py	1970-01-01 00:00:00.000000000 +0000
++++ b/skill-creator/tests/test_quick_validate.py	2000-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,145 @@
++#!/usr/bin/env python3
++"""
++Unit tests for quick_validate.py: skill structure validation.
++
++Run with: python3 skills/skill-creator/tests/test_quick_validate.py
++No third-party test framework is required; uses only the standard library.
++"""
++
++import sys
++import tempfile
++import traceback
++from pathlib import Path
++
++SKILLS_DIR = Path(__file__).resolve().parent.parent
++sys.path.insert(0, str(SKILLS_DIR / "scripts"))
++
++from init_skill import init_skill  # noqa: E402
++from quick_validate import validate_skill  # noqa: E402
++
++
++def _make_skill(tmpdir, name="my-new-skill"):
++    """Helper: scaffold a valid skill and return its path."""
++    return init_skill(name, tmpdir)
++
++
++def test_validate_skill_accepts_valid_skill():
++    """A freshly scaffolded skill must pass validation."""
++    with tempfile.TemporaryDirectory() as tmp:
++        skill_path = _make_skill(tmp)
++        valid, message = validate_skill(skill_path)
++        assert valid is True, f"expected valid, got: {message}"
++        assert "valid" in message.lower()
++
++
++def test_validate_skill_rejects_missing_skill_md():
++    """A directory without SKILL.md must fail validation."""
++    with tempfile.TemporaryDirectory() as tmp:
++        valid, message = validate_skill(Path(tmp))
++        assert valid is False
++        assert "SKILL.md" in message
++
++
++def test_validate_skill_rejects_missing_frontmatter():
++    """A SKILL.md without YAML frontmatter must fail."""
++    with tempfile.TemporaryDirectory() as tmp:
++        skill_dir = Path(tmp) / "bad-skill"
++        skill_dir.mkdir()
++        (skill_dir / "SKILL.md").write_text("# No frontmatter here\n")
++        valid, message = validate_skill(skill_dir)
++        assert valid is False
++        assert "frontmatter" in message.lower()
++
++
++def test_validate_skill_rejects_missing_name():
++    """Frontmatter without a name field must fail."""
++    with tempfile.TemporaryDirectory() as tmp:
++        skill_dir = Path(tmp) / "bad-skill"
++        skill_dir.mkdir()
++        (skill_dir / "SKILL.md").write_text(
++            "---\ndescription: A skill without a name\n---\n# Bad\n"
++        )
++        valid, message = validate_skill(skill_dir)
++        assert valid is False
++        assert "name" in message.lower()
++
++
++def test_validate_skill_rejects_missing_description():
++    """Frontmatter without a description field must fail."""
++    with tempfile.TemporaryDirectory() as tmp:
++        skill_dir = Path(tmp) / "bad-skill"
++        skill_dir.mkdir()
++        (skill_dir / "SKILL.md").write_text(
++            "---\nname: bad-skill\n---\n# Bad\n"
++        )
++        valid, message = validate_skill(skill_dir)
++        assert valid is False
++        assert "description" in message.lower()
++
++
++def test_validate_skill_rejects_non_hyphen_case_name():
++    """Names with uppercase letters or underscores must fail."""
++    with tempfile.TemporaryDirectory() as tmp:
++        skill_dir = Path(tmp) / "BadSkill"
++        skill_dir.mkdir()
++        (skill_dir / "SKILL.md").write_text(
++            "---\nname: BadSkill\ndescription: Bad name\n---\n# Bad\n"
++        )
++        valid, message = validate_skill(skill_dir)
++        assert valid is False
++        assert "hyphen-case" in message.lower() or "lowercase" in message.lower()
++
++
++def test_validate_skill_rejects_leading_hyphen_in_name():
++    """Names that start or end with a hyphen must fail."""
++    with tempfile.TemporaryDirectory() as tmp:
++        skill_dir = Path(tmp) / "-leading"
++        skill_dir.mkdir()
++        (skill_dir / "SKILL.md").write_text(
++            "---\nname: -leading\ndescription: Bad name\n---\n# Bad\n"
++        )
++        valid, message = validate_skill(skill_dir)
++        assert valid is False
++
++
++def test_validate_skill_rejects_angle_brackets_in_description():
++    """Descriptions containing angle brackets must fail."""
++    with tempfile.TemporaryDirectory() as tmp:
++        skill_dir = Path(tmp) / "bad-skill"
++        skill_dir.mkdir()
++        (skill_dir / "SKILL.md").write_text(
++            "---\nname: bad-skill\ndescription: A <weird> description\n---\n# Bad\n"
++        )
++        valid, message = validate_skill(skill_dir)
++        assert valid is False
++        assert "angle bracket" in message.lower() or "<" in message
++
++
++def main() -> int:
++    tests = [
++        ("validate_skill_accepts_valid_skill", test_validate_skill_accepts_valid_skill),
++        ("validate_skill_rejects_missing_skill_md", test_validate_skill_rejects_missing_skill_md),
++        ("validate_skill_rejects_missing_frontmatter", test_validate_skill_rejects_missing_frontmatter),
++        ("validate_skill_rejects_missing_name", test_validate_skill_rejects_missing_name),
++        ("validate_skill_rejects_missing_description", test_validate_skill_rejects_missing_description),
++        ("validate_skill_rejects_non_hyphen_case_name", test_validate_skill_rejects_non_hyphen_case_name),
++        ("validate_skill_rejects_leading_hyphen_in_name", test_validate_skill_rejects_leading_hyphen_in_name),
++        ("validate_skill_rejects_angle_brackets_in_description", test_validate_skill_rejects_angle_brackets_in_description),
++    ]
++
++    failures = 0
++    for name, fn in tests:
++        try:
++            fn()
++            print(f"PASS  {name}")
++        except Exception:
++            failures += 1
++            print(f"FAIL  {name}")
++            traceback.print_exc()
++
++    print(f"\n{len(tests) - failures}/{len(tests)} tests passed")
++    return 1 if failures else 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())

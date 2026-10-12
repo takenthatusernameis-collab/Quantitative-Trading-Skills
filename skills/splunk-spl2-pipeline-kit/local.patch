@@ -1,0 +1,667 @@
+diff -rN -U0 --ignore-trailing-space a/splunk-spl2-pipeline-kit/SKILL.md b/splunk-spl2-pipeline-kit/SKILL.md
+--- a/splunk-spl2-pipeline-kit/SKILL.md	2000-01-01 00:00:00.000000000 +0000
++++ b/splunk-spl2-pipeline-kit/SKILL.md	2000-01-01 00:00:00.000000000 +0000
+@@ -93,0 +94,44 @@
++
++## Test Coverage
++
++This skill bundles a standard-library unit-test suite (no third-party test
++framework) under `tests/`, following the pattern established by
++`skills/quantitative-backtesting/tests/`. Run either file directly with Python:
++
++```bash
++python3 skills/splunk-spl2-pipeline-kit/tests/test_kit_lint.py
++python3 skills/splunk-spl2-pipeline-kit/tests/test_kit_render.py
++```
++
++- `test_kit_lint.py` - pure lint/parsing helpers:
++  - `strip_comments` removes `//` comments inline while preserving pipeline text
++  - `command_names` extracts piped commands and ignores commented-out pipes
++  - `import_names` parses `import <name> from` blocks
++  - `LintFinding.as_dict` serializes severity/code/message
++  - `lint_text` emits each finding branch: `SPL2-MISSING-PIPELINE`,
++    `SPL2-MISSING-SOURCE`, `SPL2-MISSING-DESTINATION`, `SPL2-PROFILE-INCOMPATIBLE`
++    (ingest-only command under `edgeProcessor`), `SPL2-METRICS-IMPORT`,
++    `SPL2-UNKNOWN-COMMAND` (warning vs. error under `--strict`), `SPL2-STATS-AVG`,
++    `SPL2-STATS-FUNCTION`, `SPL2-DEPRECATED-FUNCTION`, `SPL2-PCRE2-NAMED-CAPTURE`
++    (rejects bare `(?<`) while accepting Splunk `(?P<`, and
++    `SPL2-PCRE2-BACKREFERENCE`)
++  - `lint_file` returns `PASS` for a clean template and `FAIL` for one missing `$pipeline`
++  - `status_from_reports` rolls up `PASS` / `PASS_WITH_WARNINGS` / `FAIL`
++- `test_kit_render.py` - argument parsing, rendering, and orchestration:
++  - `parse_args` defaults, `--profile both`, `--strict`/`--json`, and
++    `--pipeline-file` append behavior
++  - `profiles_for` and the profile-command catalog definitions stay consistent
++  - `render_templates` writes every starter and the custom template app
++  - `render_coverage` emits a JSON array with `rendered`/`lint` statuses
++  - `render_lint_reports` writes JSON and Markdown and renders findings
++  - `render_readme` lists profiles and the secret-policy notice
++  - `collect_lint_targets` prefers `--pipeline-file`, then rendered assets,
++    then globs `templates/**/*.spl2`
++  - `run_lint` reports `SPL2-FILE-MISSING` for absent files, `PASS` for clean
++    files, and detects the profile from the template path
++  - `main` flows for `--phase all`, `--phase render`, `--phase lint`, and
++    `--json` output, plus the offline `run_smoke` integration check
++
++The end-to-end path (`main` invoking the kit) is also exercised via
++`scripts/smoke_offline.sh` and `scripts/validate.sh`; those remain the
++authoritative offline regression gates.
+diff -rN -U0 --ignore-trailing-space a/splunk-spl2-pipeline-kit/tests/__init__.py b/splunk-spl2-pipeline-kit/tests/__init__.py
+--- a/splunk-spl2-pipeline-kit/tests/__init__.py	1970-01-01 00:00:00.000000000 +0000
++++ b/splunk-spl2-pipeline-kit/tests/__init__.py	2000-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1 @@
++
+diff -rN -U0 --ignore-trailing-space a/splunk-spl2-pipeline-kit/tests/test_kit_lint.py b/splunk-spl2-pipeline-kit/tests/test_kit_lint.py
+--- a/splunk-spl2-pipeline-kit/tests/test_kit_lint.py	1970-01-01 00:00:00.000000000 +0000
++++ b/splunk-spl2-pipeline-kit/tests/test_kit_lint.py	2000-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,280 @@
++#!/usr/bin/env python3
++"""Unit tests for spl2_pipeline_kit.py: parsing, linting, and lint reporting.
++
++Run with: python3 skills/splunk-spl2-pipeline-kit/tests/test_kit_lint.py
++No third-party test framework is required; uses only the standard library.
++"""
++
++import sys
++import tempfile
++import traceback
++from pathlib import Path
++
++SKILLS_DIR = Path(__file__).resolve().parent.parent
++sys.path.insert(0, str(SKILLS_DIR / "scripts"))
++
++from spl2_pipeline_kit import (  # noqa: E402
++    BASE_COMMANDS,
++    INGEST_ONLY_COMMANDS,
++    LintFinding,
++    PROFILE_COMMANDS,
++    command_names,
++    import_names,
++    lint_file,
++    lint_text,
++    status_from_reports,
++    strip_comments,
++)
++
++
++VALID_IP = """$pipeline = | from $source
++              | where sourcetype != "noisy:type"
++              | into $destination;
++"""
++
++
++def _has_code(findings, code):
++    """True if any finding (LintFinding or dict) carries the given code."""
++    for finding in findings:
++        value = finding.code if hasattr(finding, "code") else finding.get("code")
++        if value == code:
++            return True
++    return False
++
++
++def test_strip_comments_removes_inline_comments():
++    out = strip_comments("// header\n$src // trailing\nplain")
++    assert "header" not in out
++    assert "//" not in out
++    assert "$src " in out
++
++
++def test_command_names_extracts_piped_commands():
++    assert command_names(VALID_IP) == ["from", "where", "into"]
++
++
++def test_command_names_ignores_commented_pipes():
++    text = "// | table\n$pipeline = | from $source | into $destination;"
++    names = command_names(text)
++    assert "table" not in names
++    assert names == ["from", "into"]
++
++
++def test_import_names_parses_import_block():
++    text = "import logs_to_metrics from /splunk.ingest.commands;\n$pipeline = | from $source | into $dst;"
++    assert import_names(text) == {"logs_to_metrics"}
++
++
++def test_import_names_empty_without_import():
++    assert import_names(VALID_IP) == set()
++
++
++def test_base_commands_contain_core_catalog():
++    for name in ("from", "into", "where", "branch", "eval", "stats", "rex", "thru"):
++        assert name in BASE_COMMANDS
++
++
++def test_ingest_only_disjoint_from_edge_profile():
++    assert INGEST_ONLY_COMMANDS.isdisjoint(BASE_COMMANDS)
++    edge = PROFILE_COMMANDS["edgeProcessor"]
++    assert INGEST_ONLY_COMMANDS.isdisjoint(edge)
++
++
++def test_lint_finding_as_dict():
++    finding = LintFinding("error", "SPL2-X", "boom")
++    assert finding.as_dict() == {
++        "severity": "error",
++        "code": "SPL2-X",
++        "message": "boom",
++    }
++
++
++def test_lint_text_valid_pipeline_has_no_findings():
++    assert lint_text(VALID_IP, "ingestProcessor") == []
++
++
++def test_lint_text_missing_pipeline_var():
++    findings = lint_text("| from $source | into $destination;", "ingestProcessor")
++    assert _has_code(findings, "SPL2-MISSING-PIPELINE")
++
++
++def test_lint_text_missing_source():
++    findings = lint_text("$pipeline = | where x | into $destination;", "ingestProcessor")
++    assert _has_code(findings, "SPL2-MISSING-SOURCE")
++
++
++def test_lint_text_missing_destination():
++    findings = lint_text("$pipeline = | from $source;", "ingestProcessor")
++    assert _has_code(findings, "SPL2-MISSING-DESTINATION")
++
++
++def test_lint_text_ingest_only_incompatible_for_edge():
++    text = "$pipeline = | from $source | decrypt x AS y WITH k | into $destination;"
++    findings = lint_text(text, "edgeProcessor")
++    assert _has_code(findings, "SPL2-PROFILE-INCOMPATIBLE")
++
++
++def test_lint_text_logs_to_metrics_requires_import():
++    text = '$pipeline = | from $source | logs_to_metrics metric_name="x" | into $destination;'
++    findings = lint_text(text, "ingestProcessor")
++    assert _has_code(findings, "SPL2-METRICS-IMPORT")
++
++
++def test_lint_text_imported_command_skips_unknown_warning():
++    text = (
++        "import mything from /custom.flows;\n"
++        "$pipeline = | from $source | mything | into $destination;"
++    )
++    findings = lint_text(text, "ingestProcessor")
++    assert not _has_code(findings, "SPL2-UNKNOWN-COMMAND")
++
++
++def test_lint_text_unknown_command_is_warning_when_not_strict():
++    text = "$pipeline = | from $source | bogus_cmd | into $destination;"
++    findings = lint_text(text, "ingestProcessor", strict=False)
++    unknown = [f for f in findings if f.code == "SPL2-UNKNOWN-COMMAND"]
++    assert unknown
++    assert all(f.severity == "warning" for f in unknown)
++
++
++def test_lint_text_unknown_command_is_error_when_strict():
++    text = "$pipeline = | from $source | bogus_cmd | into $destination;"
++    findings = lint_text(text, "ingestProcessor", strict=True)
++    unknown = [f for f in findings if f.code == "SPL2-UNKNOWN-COMMAND"]
++    assert unknown
++    assert unknown[0].severity == "error"
++
++
++def test_lint_text_stats_avg_is_error():
++    text = '$pipeline = | from $source | stats avg(bytes) by sourcetype | into $destination;'
++    findings = lint_text(text, "ingestProcessor")
++    assert _has_code(findings, "SPL2-STATS-AVG")
++
++
++def test_lint_text_stats_unknown_function_is_warning():
++    text = "$pipeline = | from $source | stats bogus(bytes) | into $destination;"
++    findings = lint_text(text, "ingestProcessor")
++    assert _has_code(findings, "SPL2-STATS-FUNCTION")
++
++
++def test_lint_text_stats_builtin_functions_are_clean():
++    text = "$pipeline = | from $source | stats count() as c, sum(bytes) as s by sourcetype | into $destination;"
++    findings = lint_text(text, "ingestProcessor")
++    assert not _has_code(findings, "SPL2-STATS-FUNCTION")
++    assert not _has_code(findings, "SPL2-STATS-AVG")
++
++
++def test_lint_text_object_to_array_is_deprecated():
++    text = "$pipeline = | from $source | eval x = object_to_array(y) | into $destination;"
++    findings = lint_text(text, "ingestProcessor")
++    assert _has_code(findings, "SPL2-DEPRECATED-FUNCTION")
++
++
++def test_lint_text_pcre2_named_capture_warning():
++    text = '$pipeline = | from $source | rex field=_raw "(?<user>[^ ]+)" | into $destination;'
++    findings = lint_text(text, "ingestProcessor")
++    assert _has_code(findings, "SPL2-PCRE2-NAMED-CAPTURE")
++
++
++def test_lint_text_pcre2_sp_named_capture_is_clean():
++    text = '$pipeline = | from $source | rex field=_raw "(?P<user>[^ ]+)" | into $destination;'
++    findings = lint_text(text, "ingestProcessor")
++    assert not _has_code(findings, "SPL2-PCRE2-NAMED-CAPTURE")
++
++
++def test_lint_text_pcre2_backreference_warning():
++    text = '$pipeline = | from $source | rex field=_raw "([a-z]+)\\1" | into $destination;'
++    findings = lint_text(text, "ingestProcessor")
++    assert _has_code(findings, "SPL2-PCRE2-BACKREFERENCE")
++
++
++def test_lint_text_index_predicate_warning():
++    text = "$pipeline = | from $source | where index=main | into $destination;"
++    findings = lint_text(text, "ingestProcessor")
++    assert _has_code(findings, "SPL2-SPL1-INDEX-PREDICATE")
++
++
++def test_lint_text_spl1_command_warning():
++    text = "$pipeline = | from $source | table x | into $destination;"
++    findings = lint_text(text, "ingestProcessor")
++    assert _has_code(findings, "SPL2-SPL1-COMMAND")
++
++
++def test_lint_file_valid_returns_pass():
++    with tempfile.TemporaryDirectory() as tmp:
++        path = Path(tmp) / "ok.spl2"
++        path.write_text(VALID_IP, encoding="utf-8")
++        report = lint_file(path, "ingestProcessor")
++    assert report["status"] == "PASS"
++    assert report["findings"] == []
++    assert report["profile"] == "ingestProcessor"
++    assert report["commands"] == ["from", "where", "into"]
++    assert report["imports"] == []
++
++
++def test_lint_file_invalid_returns_fail():
++    with tempfile.TemporaryDirectory() as tmp:
++        path = Path(tmp) / "bad.spl2"
++        path.write_text("| from $source | into $destination;", encoding="utf-8")
++        report = lint_file(path, "ingestProcessor")
++    assert report["status"] == "FAIL"
++    assert _has_code(report["findings"], "SPL2-MISSING-PIPELINE")
++
++
++def test_status_from_reports():
++    assert status_from_reports([]) == "PASS"
++    assert status_from_reports([{"status": "PASS"}]) == "PASS"
++    assert status_from_reports([{"status": "PASS_WITH_WARNINGS"}]) == "PASS_WITH_WARNINGS"
++    assert status_from_reports([{"status": "PASS"}, {"status": "FAIL"}]) == "FAIL"
++    assert status_from_reports([{"status": "FAIL"}, {"status": "PASS_WITH_WARNINGS"}]) == "FAIL"
++
++
++def main() -> int:
++    tests = [
++        ("strip_comments_removes_inline_comments", test_strip_comments_removes_inline_comments),
++        ("command_names_extracts_piped_commands", test_command_names_extracts_piped_commands),
++        ("command_names_ignores_commented_pipes", test_command_names_ignores_commented_pipes),
++        ("import_names_parses_import_block", test_import_names_parses_import_block),
++        ("import_names_empty_without_import", test_import_names_empty_without_import),
++        ("base_commands_contain_core_catalog", test_base_commands_contain_core_catalog),
++        ("ingest_only_disjoint_from_edge_profile", test_ingest_only_disjoint_from_edge_profile),
++        ("lint_finding_as_dict", test_lint_finding_as_dict),
++        ("lint_text_valid_pipeline_has_no_findings", test_lint_text_valid_pipeline_has_no_findings),
++        ("lint_text_missing_pipeline_var", test_lint_text_missing_pipeline_var),
++        ("lint_text_missing_source", test_lint_text_missing_source),
++        ("lint_text_missing_destination", test_lint_text_missing_destination),
++        ("lint_text_ingest_only_incompatible_for_edge", test_lint_text_ingest_only_incompatible_for_edge),
++        ("lint_text_logs_to_metrics_requires_import", test_lint_text_logs_to_metrics_requires_import),
++        ("lint_text_imported_command_skips_unknown_warning", test_lint_text_imported_command_skips_unknown_warning),
++        ("lint_text_unknown_command_is_warning_when_not_strict", test_lint_text_unknown_command_is_warning_when_not_strict),
++        ("lint_text_unknown_command_is_error_when_strict", test_lint_text_unknown_command_is_error_when_strict),
++        ("lint_text_stats_avg_is_error", test_lint_text_stats_avg_is_error),
++        ("lint_text_stats_unknown_function_is_warning", test_lint_text_stats_unknown_function_is_warning),
++        ("lint_text_stats_builtin_functions_are_clean", test_lint_text_stats_builtin_functions_are_clean),
++        ("lint_text_object_to_array_is_deprecated", test_lint_text_object_to_array_is_deprecated),
++        ("lint_text_pcre2_named_capture_warning", test_lint_text_pcre2_named_capture_warning),
++        ("lint_text_pcre2_sp_named_capture_is_clean", test_lint_text_pcre2_sp_named_capture_is_clean),
++        ("lint_text_pcre2_backreference_warning", test_lint_text_pcre2_backreference_warning),
++        ("lint_text_index_predicate_warning", test_lint_text_index_predicate_warning),
++        ("lint_text_spl1_command_warning", test_lint_text_spl1_command_warning),
++        ("lint_file_valid_returns_pass", test_lint_file_valid_returns_pass),
++        ("lint_file_invalid_returns_fail", test_lint_file_invalid_returns_fail),
++        ("status_from_reports", test_status_from_reports),
++    ]
++
++    failures = 0
++    for name, fn in tests:
++        try:
++            fn()
++            print(f"PASS  {name}")
++        except Exception:
++            failures += 1
++            print(f"FAIL  {name}")
++            traceback.print_exc()
++
++    print(f"\n{len(tests) - failures}/{len(tests)} tests passed")
++    return 1 if failures else 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff -rN -U0 --ignore-trailing-space a/splunk-spl2-pipeline-kit/tests/test_kit_render.py b/splunk-spl2-pipeline-kit/tests/test_kit_render.py
+--- a/splunk-spl2-pipeline-kit/tests/test_kit_render.py	1970-01-01 00:00:00.000000000 +0000
++++ b/splunk-spl2-pipeline-kit/tests/test_kit_render.py	2000-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,326 @@
++#!/usr/bin/env python3
++"""Unit tests for spl2_pipeline_kit.py: argument parsing, rendering, and orchestration.
++
++Run with: python3 skills/splunk-spl2-pipeline-kit/tests/test_kit_render.py
++No third-party test framework is required; uses only the standard library.
++"""
++
++import contextlib
++import io
++import json
++import sys
++import tempfile
++import traceback
++from argparse import Namespace
++from pathlib import Path
++
++SKILLS_DIR = Path(__file__).resolve().parent.parent
++sys.path.insert(0, str(SKILLS_DIR / "scripts"))
++
++from spl2_pipeline_kit import (  # noqa: E402
++    DEFAULT_OUTPUT_DIR,
++    EDGE_ONLY_COMMANDS,
++    INGEST_ONLY_COMMANDS,
++    PROFILES,
++    PROFILE_COMMANDS,
++    TEMPLATES,
++    collect_lint_targets,
++    main as kit_main,
++    parse_args,
++    profiles_for,
++    render_coverage,
++    render_lint_reports,
++    render_readme,
++    render_templates,
++    run_lint,
++    run_smoke,
++)
++
++
++VALID_IP = """$pipeline = | from $source
++              | where sourcetype != "noisy:type"
++              | into $destination;
++"""
++
++
++def test_parse_args_defaults():
++    args = parse_args([])
++    assert args.phase == "render"
++    assert args.profile == "ingestProcessor"
++    assert args.pipeline_file == []
++    assert args.strict is False
++    assert args.json is False
++    assert args.output_dir == str(DEFAULT_OUTPUT_DIR)
++
++
++def test_parse_args_all_profile_both_strict_json():
++    args = parse_args(["--phase", "all", "--profile", "both", "--strict", "--json"])
++    assert args.phase == "all"
++    assert args.profile == "both"
++    assert args.strict is True
++    assert args.json is True
++
++
++def test_parse_args_pipeline_file_appends():
++    args = parse_args(
++        ["--pipeline-file", "a.spl2", "--pipeline-file", "b.spl2"]
++    )
++    assert args.pipeline_file == ["a.spl2", "b.spl2"]
++
++
++def test_profiles_for_resolves_both():
++    assert profiles_for("both") == ["ingestProcessor", "edgeProcessor"]
++    assert profiles_for("ingestProcessor") == ["ingestProcessor"]
++    assert profiles_for("edgeProcessor") == ["edgeProcessor"]
++
++
++def test_profile_definitions_are_consistent():
++    assert PROFILES == ("ingestProcessor", "edgeProcessor")
++    assert set(PROFILE_COMMANDS) == set(PROFILES)
++    assert INGEST_ONLY_COMMANDS.isdisjoint(PROFILE_COMMANDS["edgeProcessor"])
++    assert EDGE_ONLY_COMMANDS.isdisjoint(PROFILE_COMMANDS["ingestProcessor"])
++
++
++def test_templates_defined_for_both_profiles():
++    assert set(TEMPLATES) == set(PROFILES)
++    assert len(TEMPLATES["ingestProcessor"]) >= 1
++    assert len(TEMPLATES["edgeProcessor"]) >= 1
++
++
++def test_render_templates_writes_all_starter_files():
++    with tempfile.TemporaryDirectory() as tmp:
++        out = Path(tmp)
++        rendered = render_templates(out, list(PROFILES))
++        expected = sum(len(TEMPLATES[p]) for p in PROFILES)
++        assert len(rendered) == expected
++        assert all(path.is_file() for path in rendered)
++        assert (out / "templates/ingestProcessor/metrics.spl2").is_file()
++        assert (out / "templates/ingestProcessor/decrypt.spl2").is_file()
++        assert (out / "templates/edgeProcessor/route.spl2").is_file()
++        assert (out / "custom-template-app/default/data/spl2/ip_route_redact_template.spl2").is_file()
++
++
++def test_render_coverage_json_structure():
++    with tempfile.TemporaryDirectory() as tmp:
++        render_coverage(Path(tmp), ["ingestProcessor", "edgeProcessor"])
++        data = json.loads((Path(tmp) / "coverage-report.json").read_text(encoding="utf-8"))
++    assert isinstance(data, list)
++    assert len(data) > 0
++    statuses = {row["coverage_status"] for row in data}
++    assert statuses <= {"rendered", "lint"}
++    features = {row["feature"] for row in data}
++    for name in ("filter", "route", "decrypt", "stats", "ocsf", "spl_to_spl2_lint", "pcre2_lint"):
++        assert name in features
++    for row in data:
++        assert "profiles" in row
++
++
++def test_render_lint_reports_writes_json_and_markdown():
++    reports = [
++        {
++            "path": "/tmp/x.spl2",
++            "profile": "ingestProcessor",
++            "status": "PASS",
++            "commands": ["from"],
++            "imports": [],
++            "findings": [],
++        }
++    ]
++    with tempfile.TemporaryDirectory() as tmp:
++        out = Path(tmp)
++        render_lint_reports(out, reports)
++        loaded = json.loads((out / "lint-report.json").read_text(encoding="utf-8"))
++        md = (out / "lint-report.md").read_text(encoding="utf-8")
++    assert loaded == reports
++    assert "# SPL2 Lint Report" in md
++    assert "## /tmp/x.spl2" in md
++    assert "Status:" in md
++
++
++def test_render_lint_reports_renders_findings():
++    reports = [
++        {
++            "path": "a.spl2",
++            "profile": "ingestProcessor",
++            "status": "FAIL",
++            "commands": [],
++            "imports": [],
++            "findings": [
++                {"severity": "error", "code": "SPL2-X", "message": "boom"}
++            ],
++        }
++    ]
++    with tempfile.TemporaryDirectory() as tmp:
++        render_lint_reports(Path(tmp), reports)
++        md = (Path(tmp) / "lint-report.md").read_text(encoding="utf-8")
++    assert "ERROR SPL2-X: boom" in md
++
++
++def test_render_readme_lists_profiles_and_secret_policy():
++    with tempfile.TemporaryDirectory() as tmp:
++        render_readme(Path(tmp), ["ingestProcessor", "edgeProcessor"])
++        md = (Path(tmp) / "README.md").read_text(encoding="utf-8")
++    assert "Profiles: ingestProcessor, edgeProcessor" in md
++    assert "Secret policy" in md
++    assert "lookup" in md.lower()
++
++
++def test_collect_lint_targets_prefers_pipeline_file():
++    with tempfile.TemporaryDirectory() as tmp:
++        args = Namespace(pipeline_file=["/a/b.spl2"], output_dir=tmp)
++        targets = collect_lint_targets(args, [])
++    assert targets == [Path("/a/b.spl2").expanduser().resolve()]
++
++
++def test_collect_lint_targets_falls_back_to_rendered():
++    rendered = [Path("/tmp/rendered.spl2")]
++    args = Namespace(pipeline_file=[], output_dir="/tmp")
++    assert collect_lint_targets(args, rendered) == rendered
++
++
++def test_collect_lint_targets_globs_templates_when_none_given():
++    with tempfile.TemporaryDirectory() as tmp:
++        out = Path(tmp)
++        (out / "templates" / "ingestProcessor").mkdir(parents=True)
++        (out / "templates" / "ingestProcessor" / "a.spl2").write_text("x")
++        (out / "templates" / "edgeProcessor").mkdir(parents=True)
++        (out / "templates" / "edgeProcessor" / "b.spl2").write_text("x")
++        args = Namespace(pipeline_file=[], output_dir=str(out))
++        targets = collect_lint_targets(args, [])
++    positions = {t.name for t in targets}
++    assert positions == {"a.spl2", "b.spl2"}
++
++
++def test_run_lint_missing_file_reports_fail():
++    args = Namespace(profile="ingestProcessor", strict=False)
++    reports = run_lint(args, [Path("/nonexistent.spl2")])
++    assert len(reports) == 1
++    assert reports[0]["status"] == "FAIL"
++    assert reports[0]["findings"][0]["code"] == "SPL2-FILE-MISSING"
++
++
++def test_run_lint_existing_valid_file_passes():
++    with tempfile.TemporaryDirectory() as tmp:
++        path = Path(tmp) / "ok.spl2"
++        path.write_text(VALID_IP, encoding="utf-8")
++        args = Namespace(profile="ingestProcessor", strict=False)
++        reports = run_lint(args, [path])
++    assert reports[0]["status"] == "PASS"
++
++
++def test_run_lint_detects_template_profile_from_path():
++    with tempfile.TemporaryDirectory() as tmp:
++        path = Path(tmp) / "templates" / "ingestProcessor" / "ok.spl2"
++        path.parent.mkdir(parents=True)
++        path.write_text(VALID_IP, encoding="utf-8")
++        args = Namespace(profile="both", strict=False)
++        reports = run_lint(args, [path])
++    assert len(reports) == 1
++    assert reports[0]["profile"] == "ingestProcessor"
++    assert reports[0]["status"] == "PASS"
++
++
++def test_main_all_profile_both_renders_and_lints_clean():
++    with tempfile.TemporaryDirectory() as tmp:
++        args = parse_args(["--phase", "all", "--profile", "both", "--output-dir", tmp])
++        buf = io.StringIO()
++        with contextlib.redirect_stdout(buf):
++            code = kit_main(args)
++        reports = json.loads((Path(tmp) / "lint-report.json").read_text(encoding="utf-8"))
++        assert code == 0
++        assert (Path(tmp) / "README.md").is_file()
++        assert (Path(tmp) / "coverage-report.json").is_file()
++        assert all(report["status"] == "PASS" for report in reports)
++
++
++def test_main_render_phase_writes_templates_and_reports():
++    with tempfile.TemporaryDirectory() as tmp:
++        args = parse_args(["--phase", "render", "--profile", "ingestProcessor", "--output-dir", tmp])
++        code = kit_main(args)
++        assert (Path(tmp) / "templates/ingestProcessor/filter.spl2").is_file()
++        assert (Path(tmp) / "coverage-report.json").is_file()
++        assert (Path(tmp) / "lint-report.json").is_file()
++    assert code == 0
++
++
++def test_main_json_output_reports_status():
++    with tempfile.TemporaryDirectory() as tmp:
++        args = parse_args(
++            ["--phase", "render", "--profile", "ingestProcessor", "--output-dir", tmp, "--json"]
++        )
++        buf = io.StringIO()
++        with contextlib.redirect_stdout(buf):
++            code = kit_main(args)
++        data = json.loads(buf.getvalue().strip())
++    assert code == 0
++    assert data["status"] == "PASS"
++    assert "output_dir" in data
++
++
++def test_main_lint_missing_pipeline_exits_fail():
++    with tempfile.TemporaryDirectory() as tmp:
++        args = parse_args(
++            [
++                "--phase", "lint",
++                "--profile", "ingestProcessor",
++                "--output-dir", tmp,
++                "--pipeline-file", "/no/such/pipeline.spl2",
++            ]
++        )
++        buf = io.StringIO()
++        with contextlib.redirect_stdout(buf):
++            code = kit_main(args)
++    assert code == 1
++    assert "FAIL" in buf.getvalue()
++
++
++def test_run_smoke_returns_ok():
++    buf = io.StringIO()
++    with contextlib.redirect_stdout(buf):
++        code = run_smoke()
++    assert code == 0
++    assert "smoke_offline: OK" in buf.getvalue()
++
++
++def main() -> int:
++    tests = [
++        ("parse_args_defaults", test_parse_args_defaults),
++        ("parse_args_all_profile_both_strict_json", test_parse_args_all_profile_both_strict_json),
++        ("parse_args_pipeline_file_appends", test_parse_args_pipeline_file_appends),
++        ("profiles_for_resolves_both", test_profiles_for_resolves_both),
++        ("profile_definitions_are_consistent", test_profile_definitions_are_consistent),
++        ("templates_defined_for_both_profiles", test_templates_defined_for_both_profiles),
++        ("render_templates_writes_all_starter_files", test_render_templates_writes_all_starter_files),
++        ("render_coverage_json_structure", test_render_coverage_json_structure),
++        ("render_lint_reports_writes_json_and_markdown", test_render_lint_reports_writes_json_and_markdown),
++        ("render_lint_reports_renders_findings", test_render_lint_reports_renders_findings),
++        ("render_readme_lists_profiles_and_secret_policy", test_render_readme_lists_profiles_and_secret_policy),
++        ("collect_lint_targets_prefers_pipeline_file", test_collect_lint_targets_prefers_pipeline_file),
++        ("collect_lint_targets_falls_back_to_rendered", test_collect_lint_targets_falls_back_to_rendered),
++        ("collect_lint_targets_globs_templates_when_none_given", test_collect_lint_targets_globs_templates_when_none_given),
++        ("run_lint_missing_file_reports_fail", test_run_lint_missing_file_reports_fail),
++        ("run_lint_existing_valid_file_passes", test_run_lint_existing_valid_file_passes),
++        ("run_lint_detects_template_profile_from_path", test_run_lint_detects_template_profile_from_path),
++        ("main_all_profile_both_renders_and_lints_clean", test_main_all_profile_both_renders_and_lints_clean),
++        ("main_render_phase_writes_templates_and_reports", test_main_render_phase_writes_templates_and_reports),
++        ("main_json_output_reports_status", test_main_json_output_reports_status),
++        ("main_lint_missing_pipeline_exits_fail", test_main_lint_missing_pipeline_exits_fail),
++        ("run_smoke_returns_ok", test_run_smoke_returns_ok),
++    ]
++
++    failures = 0
++    for name, fn in tests:
++        try:
++            fn()
++            print(f"PASS  {name}")
++        except Exception:
++            failures += 1
++            print(f"FAIL  {name}")
++            traceback.print_exc()
++
++    print(f"\n{len(tests) - failures}/{len(tests)} tests passed")
++    return 1 if failures else 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())

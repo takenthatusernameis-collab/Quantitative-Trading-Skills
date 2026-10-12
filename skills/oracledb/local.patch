@@ -1,3 +1,23 @@
+diff -rN -U0 --ignore-trailing-space a/oracledb/SKILL.md b/oracledb/SKILL.md
+--- a/oracledb/SKILL.md	2000-01-01 00:00:00.000000000 +0000
++++ b/oracledb/SKILL.md	2000-01-01 00:00:00.000000000 +0000
+@@ -35 +35 @@
+-Executes any SQL statement.
++Executes one read-only `SELECT` or `WITH` query by default. The wrapper rejects multiple statements, DDL, DML, transaction control, PL/SQL, `CALL`, `COPY`, `DO`, `SELECT INTO`, and row-locking queries before starting the database tool.
+@@ -41 +41,9 @@
+-| sql | string | The SQL to execute. | Yes |  |
++| sql | string | One read-only SQL query to execute. | Yes |  |
++
++A non-read statement requires both explicit CLI acknowledgements and should be used only after the user confirms the exact SQL:
++
++```bash
++node <skill_dir>/scripts/execute_sql.js \
++  --dangerous --confirm-dangerous-sql=EXECUTE \
++  '{"sql":"<confirmed non-read SQL>"}'
++```
+@@ -48 +56 @@
+-Generate a full execution plan for a single SQL statement using EXPLAIN PLAN. This can be used to analyze query performance without execution. Requires the SQL statement as input as a parameter.
++Generate a full execution plan for one `SELECT` or `WITH` query using EXPLAIN PLAN. The wrapper applies the same read-only statement validation and the same two-flag dangerous override as `execute_sql` before invoking the tool.
 diff -rN -U0 --ignore-trailing-space a/oracledb/scripts/execute_sql.js b/oracledb/scripts/execute_sql.js
 --- a/oracledb/scripts/execute_sql.js	2000-01-01 00:00:00.000000000 +0000
 +++ b/oracledb/scripts/execute_sql.js	2000-01-01 00:00:00.000000000 +0000
@@ -799,23 +819,3 @@ diff -rN -U0 --ignore-trailing-space a/oracledb/scripts/list_top_sql_by_resource
 @@ -80 +64 @@
 -	return { env, userAgent };
 +    return { env, userAgent };
-diff -rN -U0 --ignore-trailing-space a/oracledb/SKILL.md b/oracledb/SKILL.md
---- a/oracledb/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/oracledb/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-@@ -35 +35 @@
--Executes any SQL statement.
-+Executes one read-only `SELECT` or `WITH` query by default. The wrapper rejects multiple statements, DDL, DML, transaction control, PL/SQL, `CALL`, `COPY`, `DO`, `SELECT INTO`, and row-locking queries before starting the database tool.
-@@ -41 +41,9 @@
--| sql | string | The SQL to execute. | Yes |  |
-+| sql | string | One read-only SQL query to execute. | Yes |  |
-+
-+A non-read statement requires both explicit CLI acknowledgements and should be used only after the user confirms the exact SQL:
-+
-+```bash
-+node <skill_dir>/scripts/execute_sql.js \
-+  --dangerous --confirm-dangerous-sql=EXECUTE \
-+  '{"sql":"<confirmed non-read SQL>"}'
-+```
-@@ -48 +56 @@
--Generate a full execution plan for a single SQL statement using EXPLAIN PLAN. This can be used to analyze query performance without execution. Requires the SQL statement as input as a parameter.
-+Generate a full execution plan for one `SELECT` or `WITH` query using EXPLAIN PLAN. The wrapper applies the same read-only statement validation and the same two-flag dangerous override as `execute_sql` before invoking the tool.

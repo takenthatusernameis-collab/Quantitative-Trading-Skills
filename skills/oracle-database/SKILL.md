@@ -15,7 +15,7 @@ metadata:
   source:
     repository: 'https://github.com/oracle/skills'
     path: db
-    license_path: LICENSE
+    license_path: LICENSE.txt
     commit: 69af8ce3d655b4c2d92882cd64d94b39736924a7
 ---
 

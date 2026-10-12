@@ -1,13 +1,3 @@
-diff -rN -U0 --ignore-trailing-space a/mysql/references/isolation-levels.md b/mysql/references/isolation-levels.md
---- a/mysql/references/isolation-levels.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/mysql/references/isolation-levels.md	2000-01-01 00:00:00.000000000 +0000
-@@ -42 +41,0 @@
--
-diff -rN -U0 --ignore-trailing-space a/mysql/references/json-column-patterns.md b/mysql/references/json-column-patterns.md
---- a/mysql/references/json-column-patterns.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/mysql/references/json-column-patterns.md	2000-01-01 00:00:00.000000000 +0000
-@@ -70 +69,0 @@
--
 diff -rN -U0 --ignore-trailing-space a/mysql/SKILL.md b/mysql/SKILL.md
 --- a/mysql/SKILL.md	2000-01-01 00:00:00.000000000 +0000
 +++ b/mysql/SKILL.md	2000-01-01 00:00:00.000000000 +0000
@@ -53,3 +43,13 @@ diff -rN -U0 --ignore-trailing-space a/mysql/SKILL.md b/mysql/SKILL.md
 +- [online-ddl](references/online-ddl.md)
 +- [connection-management](references/connection-management.md)
 +- [replication-lag](references/replication-lag.md)
+diff -rN -U0 --ignore-trailing-space a/mysql/references/isolation-levels.md b/mysql/references/isolation-levels.md
+--- a/mysql/references/isolation-levels.md	2000-01-01 00:00:00.000000000 +0000
++++ b/mysql/references/isolation-levels.md	2000-01-01 00:00:00.000000000 +0000
+@@ -42 +41,0 @@
+-
+diff -rN -U0 --ignore-trailing-space a/mysql/references/json-column-patterns.md b/mysql/references/json-column-patterns.md
+--- a/mysql/references/json-column-patterns.md	2000-01-01 00:00:00.000000000 +0000
++++ b/mysql/references/json-column-patterns.md	2000-01-01 00:00:00.000000000 +0000
+@@ -70 +69,0 @@
+-

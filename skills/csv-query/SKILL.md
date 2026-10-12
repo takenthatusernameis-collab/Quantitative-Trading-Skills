@@ -25,7 +25,7 @@ metadata:
   source:
     repository: 'https://github.com/dathere/qsv'
     path: .claude/skills/skills/csv-query
-    license_path: LICENSE
+    license_path: COPYING
     commit: 63cc4d3970065272d0e52c5c4779b52b9bc12998
 ---
 

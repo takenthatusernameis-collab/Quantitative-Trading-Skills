@@ -9,7 +9,7 @@ metadata:
   source:
     repository: 'https://github.com/anthropics/skills'
     path: skills/frontend-design
-    license_path: LICENSE
+    license_path: skills/frontend-design/LICENSE.txt
     commit: dbd4588f9e1033efb41dad4bef2f7947c8993d44
 ---
 

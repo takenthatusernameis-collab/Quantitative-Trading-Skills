@@ -1,66 +1,3 @@
-diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/alerts/SKILL.md b/newrelic-cli-skills/alerts/SKILL.md
---- a/newrelic-cli-skills/alerts/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/newrelic-cli-skills/alerts/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-@@ -0,0 +1,11 @@
-+---
-+name: "newrelic-cli-alerts"
-+description: "This subskill should be used when managing New Relic alert policies, APM or NRQL conditions, notification channels, or open incidents with the New Relic CLI. Use the parent newrelic-cli-skills skill for setup and routing."
-+metadata:
-+  category: observability
-+  source:
-+    repository: "https://github.com/vince-winkintel/newrelic-cli-skills"
-+    path: "alerts"
-+    license_path: "LICENSE"
-+---
-+
-diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/apm/SKILL.md b/newrelic-cli-skills/apm/SKILL.md
---- a/newrelic-cli-skills/apm/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/newrelic-cli-skills/apm/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-@@ -0,0 +1,11 @@
-+---
-+name: "newrelic-cli-apm"
-+description: "This subskill should be used when triaging New Relic APM latency, throughput, database time, transaction errors, or performance regressions with the New Relic CLI and NRQL. Use the parent newrelic-cli-skills skill for setup and routing."
-+metadata:
-+  category: observability
-+  source:
-+    repository: "https://github.com/vince-winkintel/newrelic-cli-skills"
-+    path: "apm"
-+    license_path: "LICENSE"
-+---
-+
-diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/deployments/SKILL.md b/newrelic-cli-skills/deployments/SKILL.md
---- a/newrelic-cli-skills/deployments/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/newrelic-cli-skills/deployments/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-@@ -0,0 +1,11 @@
-+---
-+name: "newrelic-cli-deployments"
-+description: "This subskill should be used when recording, listing, or automating New Relic APM deployment markers and correlating releases with performance changes. Use the parent newrelic-cli-skills skill for setup and routing."
-+metadata:
-+  category: observability
-+  source:
-+    repository: "https://github.com/vince-winkintel/newrelic-cli-skills"
-+    path: "deployments"
-+    license_path: "LICENSE"
-+---
-+
-@@ -101 +112 @@
--  --user "steven-openclaw"
-+  --user "ci-bot"
-diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/diagnostics/SKILL.md b/newrelic-cli-skills/diagnostics/SKILL.md
---- a/newrelic-cli-skills/diagnostics/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/newrelic-cli-skills/diagnostics/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-@@ -0,0 +1,11 @@
-+---
-+name: "newrelic-cli-diagnostics"
-+description: "This subskill should be used when diagnosing New Relic agent configuration, API connectivity, profile authentication, or missing telemetry with the New Relic CLI. Use the parent newrelic-cli-skills skill for setup and routing."
-+metadata:
-+  category: observability
-+  source:
-+    repository: "https://github.com/vince-winkintel/newrelic-cli-skills"
-+    path: "diagnostics"
-+    license_path: "LICENSE"
-+---
-+
 diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/.gitattributes b/newrelic-cli-skills/.gitattributes
 --- a/newrelic-cli-skills/.gitattributes	2000-01-01 00:00:00.000000000 +0000
 +++ b/newrelic-cli-skills/.gitattributes	1970-01-01 00:00:00.000000000 +0000
@@ -77,36 +14,6 @@ diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/.gitignore b/newrelic
 -.DS_Store
 -*.env
 -*.local
-diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/infrastructure/SKILL.md b/newrelic-cli-skills/infrastructure/SKILL.md
---- a/newrelic-cli-skills/infrastructure/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/newrelic-cli-skills/infrastructure/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-@@ -0,0 +1,11 @@
-+---
-+name: "newrelic-cli-infrastructure"
-+description: "This subskill should be used when investigating New Relic Infrastructure host CPU, memory, disk, network, process, or capacity metrics with the New Relic CLI and NRQL. Use the parent newrelic-cli-skills skill for setup and routing."
-+metadata:
-+  category: observability
-+  source:
-+    repository: "https://github.com/vince-winkintel/newrelic-cli-skills"
-+    path: "infrastructure"
-+    license_path: "LICENSE"
-+---
-+
-diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/nrql/SKILL.md b/newrelic-cli-skills/nrql/SKILL.md
---- a/newrelic-cli-skills/nrql/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/newrelic-cli-skills/nrql/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-@@ -0,0 +1,11 @@
-+---
-+name: "newrelic-cli-nrql"
-+description: "This subskill should be used when composing or running ad hoc NRQL queries for New Relic telemetry, facets, time windows, rates, and comparisons. Use newrelic-nrql-debug-ladder instead for failing, empty, or schema-mismatched queries."
-+metadata:
-+  category: observability
-+  source:
-+    repository: "https://github.com/vince-winkintel/newrelic-cli-skills"
-+    path: "nrql"
-+    license_path: "LICENSE"
-+---
-+
 diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/README.md b/newrelic-cli-skills/README.md
 --- a/newrelic-cli-skills/README.md	2000-01-01 00:00:00.000000000 +0000
 +++ b/newrelic-cli-skills/README.md	1970-01-01 00:00:00.000000000 +0000
@@ -187,6 +94,152 @@ diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/README.md b/newrelic-
 -## License
 -
 -MIT
+diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/SKILL.md b/newrelic-cli-skills/SKILL.md
+--- a/newrelic-cli-skills/SKILL.md	2000-01-01 00:00:00.000000000 +0000
++++ b/newrelic-cli-skills/SKILL.md	2000-01-01 00:00:00.000000000 +0000
+@@ -3 +3 @@
+-description: >
++description: >-
+@@ -11,30 +10,0 @@
+-  openclaw:
+-    purpose: >
+-      New Relic observability skill for both read and targeted write workflows.
+-      Reads APM metrics, NRQL query results, alert policies/conditions,
+-      incidents, and infrastructure host data from the New Relic API. Write
+-      operations in this repo include deployment marker creation plus alert
+-      policy, condition, and notification channel creation; the alerts sub-skill
+-      also documents alert condition deletion. Helper scripts execute newrelic
+-      CLI commands only and should validate untrusted inputs before embedding
+-      them in NRQL.
+-    requires:
+-      env:
+-        - NEW_RELIC_API_KEY
+-        - NEW_RELIC_ACCOUNT_ID
+-      binaries:
+-        - newrelic
+-      notes: |
+-        NEW_RELIC_API_KEY must be a User Key (starts with NRAK-).
+-        NEW_RELIC_ACCOUNT_ID is the numeric account ID from the NR UI.
+-        See README.md for CLI installation instructions.
+-        Use an API key scoped to the minimum required accounts.
+-  upstream:
+-    version: 1.0.3
+-    tags:
+-      - newrelic
+-      - observability
+-      - apm
+-      - monitoring
+-      - performance
+-      - nrql
+@@ -149 +119 @@
+-## Scripts
++## Bundled Guidance
+@@ -151,11 +121 @@
+-| Script | Purpose |
+-|---|---|
+-| [`scripts/check-performance.sh`](scripts/check-performance.sh) | Quick health check across all apps |
+-| [`scripts/deployment-marker.sh`](scripts/deployment-marker.sh) | Record a deployment event |
+-| [`scripts/top-slow-transactions.sh`](scripts/top-slow-transactions.sh) | Find the 10 slowest transactions |
+-| [`scripts/error-report.sh`](scripts/error-report.sh) | Recent errors with stack traces |
+-
+-## References
+-
+-- [`references/nrql-patterns.md`](references/nrql-patterns.md) — Common NRQL query patterns
+-- [`references/performance-triage.md`](references/performance-triage.md) — Step-by-step triage guide
++The package contains the six sub-skills listed above. It does not bundle helper scripts or a separate references directory. Use the inline CLI and NRQL examples in the relevant sub-skill, inspect `newrelic --help` for the installed CLI version, and adapt commands to the user's account and region.
+diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/alerts/SKILL.md b/newrelic-cli-skills/alerts/SKILL.md
+--- a/newrelic-cli-skills/alerts/SKILL.md	2000-01-01 00:00:00.000000000 +0000
++++ b/newrelic-cli-skills/alerts/SKILL.md	2000-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,11 @@
++---
++name: "newrelic-cli-alerts"
++description: "This subskill should be used when managing New Relic alert policies, APM or NRQL conditions, notification channels, or open incidents with the New Relic CLI. Use the parent newrelic-cli-skills skill for setup and routing."
++metadata:
++  category: observability
++  source:
++    repository: "https://github.com/vince-winkintel/newrelic-cli-skills"
++    path: "alerts"
++    license_path: "LICENSE"
++---
++
+diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/apm/SKILL.md b/newrelic-cli-skills/apm/SKILL.md
+--- a/newrelic-cli-skills/apm/SKILL.md	2000-01-01 00:00:00.000000000 +0000
++++ b/newrelic-cli-skills/apm/SKILL.md	2000-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,11 @@
++---
++name: "newrelic-cli-apm"
++description: "This subskill should be used when triaging New Relic APM latency, throughput, database time, transaction errors, or performance regressions with the New Relic CLI and NRQL. Use the parent newrelic-cli-skills skill for setup and routing."
++metadata:
++  category: observability
++  source:
++    repository: "https://github.com/vince-winkintel/newrelic-cli-skills"
++    path: "apm"
++    license_path: "LICENSE"
++---
++
+diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/deployments/SKILL.md b/newrelic-cli-skills/deployments/SKILL.md
+--- a/newrelic-cli-skills/deployments/SKILL.md	2000-01-01 00:00:00.000000000 +0000
++++ b/newrelic-cli-skills/deployments/SKILL.md	2000-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,11 @@
++---
++name: "newrelic-cli-deployments"
++description: "This subskill should be used when recording, listing, or automating New Relic APM deployment markers and correlating releases with performance changes. Use the parent newrelic-cli-skills skill for setup and routing."
++metadata:
++  category: observability
++  source:
++    repository: "https://github.com/vince-winkintel/newrelic-cli-skills"
++    path: "deployments"
++    license_path: "LICENSE"
++---
++
+@@ -101 +112 @@
+-  --user "steven-openclaw"
++  --user "ci-bot"
+diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/diagnostics/SKILL.md b/newrelic-cli-skills/diagnostics/SKILL.md
+--- a/newrelic-cli-skills/diagnostics/SKILL.md	2000-01-01 00:00:00.000000000 +0000
++++ b/newrelic-cli-skills/diagnostics/SKILL.md	2000-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,11 @@
++---
++name: "newrelic-cli-diagnostics"
++description: "This subskill should be used when diagnosing New Relic agent configuration, API connectivity, profile authentication, or missing telemetry with the New Relic CLI. Use the parent newrelic-cli-skills skill for setup and routing."
++metadata:
++  category: observability
++  source:
++    repository: "https://github.com/vince-winkintel/newrelic-cli-skills"
++    path: "diagnostics"
++    license_path: "LICENSE"
++---
++
+diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/infrastructure/SKILL.md b/newrelic-cli-skills/infrastructure/SKILL.md
+--- a/newrelic-cli-skills/infrastructure/SKILL.md	2000-01-01 00:00:00.000000000 +0000
++++ b/newrelic-cli-skills/infrastructure/SKILL.md	2000-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,11 @@
++---
++name: "newrelic-cli-infrastructure"
++description: "This subskill should be used when investigating New Relic Infrastructure host CPU, memory, disk, network, process, or capacity metrics with the New Relic CLI and NRQL. Use the parent newrelic-cli-skills skill for setup and routing."
++metadata:
++  category: observability
++  source:
++    repository: "https://github.com/vince-winkintel/newrelic-cli-skills"
++    path: "infrastructure"
++    license_path: "LICENSE"
++---
++
+diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/nrql/SKILL.md b/newrelic-cli-skills/nrql/SKILL.md
+--- a/newrelic-cli-skills/nrql/SKILL.md	2000-01-01 00:00:00.000000000 +0000
++++ b/newrelic-cli-skills/nrql/SKILL.md	2000-01-01 00:00:00.000000000 +0000
+@@ -0,0 +1,11 @@
++---
++name: "newrelic-cli-nrql"
++description: "This subskill should be used when composing or running ad hoc NRQL queries for New Relic telemetry, facets, time windows, rates, and comparisons. Use newrelic-nrql-debug-ladder instead for failing, empty, or schema-mismatched queries."
++metadata:
++  category: observability
++  source:
++    repository: "https://github.com/vince-winkintel/newrelic-cli-skills"
++    path: "nrql"
++    license_path: "LICENSE"
++---
++
 diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/references/nrql-patterns.md b/newrelic-cli-skills/references/nrql-patterns.md
 --- a/newrelic-cli-skills/references/nrql-patterns.md	2000-01-01 00:00:00.000000000 +0000
 +++ b/newrelic-cli-skills/references/nrql-patterns.md	1970-01-01 00:00:00.000000000 +0000
@@ -868,56 +921,3 @@ diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/scripts/top-slow-tran
 -  LIMIT 10
 -  ORDER BY average(duration) DESC
 -"
-diff -rN -U0 --ignore-trailing-space a/newrelic-cli-skills/SKILL.md b/newrelic-cli-skills/SKILL.md
---- a/newrelic-cli-skills/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/newrelic-cli-skills/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-@@ -3 +3 @@
--description: >
-+description: >-
-@@ -11,30 +10,0 @@
--  openclaw:
--    purpose: >
--      New Relic observability skill for both read and targeted write workflows.
--      Reads APM metrics, NRQL query results, alert policies/conditions,
--      incidents, and infrastructure host data from the New Relic API. Write
--      operations in this repo include deployment marker creation plus alert
--      policy, condition, and notification channel creation; the alerts sub-skill
--      also documents alert condition deletion. Helper scripts execute newrelic
--      CLI commands only and should validate untrusted inputs before embedding
--      them in NRQL.
--    requires:
--      env:
--        - NEW_RELIC_API_KEY
--        - NEW_RELIC_ACCOUNT_ID
--      binaries:
--        - newrelic
--      notes: |
--        NEW_RELIC_API_KEY must be a User Key (starts with NRAK-).
--        NEW_RELIC_ACCOUNT_ID is the numeric account ID from the NR UI.
--        See README.md for CLI installation instructions.
--        Use an API key scoped to the minimum required accounts.
--  upstream:
--    version: 1.0.3
--    tags:
--      - newrelic
--      - observability
--      - apm
--      - monitoring
--      - performance
--      - nrql
-@@ -149 +119 @@
--## Scripts
-+## Bundled Guidance
-@@ -151,11 +121 @@
--| Script | Purpose |
--|---|---|
--| [`scripts/check-performance.sh`](scripts/check-performance.sh) | Quick health check across all apps |
--| [`scripts/deployment-marker.sh`](scripts/deployment-marker.sh) | Record a deployment event |
--| [`scripts/top-slow-transactions.sh`](scripts/top-slow-transactions.sh) | Find the 10 slowest transactions |
--| [`scripts/error-report.sh`](scripts/error-report.sh) | Recent errors with stack traces |
--
--## References
--
--- [`references/nrql-patterns.md`](references/nrql-patterns.md) — Common NRQL query patterns
--- [`references/performance-triage.md`](references/performance-triage.md) — Step-by-step triage guide
-+The package contains the six sub-skills listed above. It does not bundle helper scripts or a separate references directory. Use the inline CLI and NRQL examples in the relevant sub-skill, inspect `newrelic --help` for the installed CLI version, and adapt commands to the user's account and region.

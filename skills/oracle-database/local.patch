@@ -1,3 +1,102 @@
+diff -rN -U0 --ignore-trailing-space a/oracle-database/SKILL.md b/oracle-database/SKILL.md
+--- a/oracle-database/SKILL.md	2000-01-01 00:00:00.000000000 +0000
++++ b/oracle-database/SKILL.md	2000-01-01 00:00:00.000000000 +0000
+@@ -34,19 +34,18 @@
+-db/
+-├── admin/
+-├── agent/
+-├── appdev/
+-├── architecture/
+-├── backup-recovery/
+-├── containers/
+-├── design/
+-├── devops/
+-├── features/
+-├── frameworks/
+-├── migrations/
+-├── monitoring/
+-├── ords/
+-├── performance/
+-├── plsql/
+-├── security/
+-├── sql-dev/
+-└── sqlcl/
++admin/
++agent/
++appdev/
++architecture/
++backup-recovery/
++containers/
++design/
++devops/
++features/
++frameworks/
++migrations/
++monitoring/
++ords/
++performance/
++plsql/
++security/
++sql-dev/
++sqlcl/
+@@ -59,18 +58,18 @@
+-| Data Guard, redo/undo logs, users | `db/admin/` |
+-| Safe DML, destructive operation guards, idempotency, schema discovery, ORA- error handling | `db/agent/` |
+-| JDBC, pooling, JSON, XML, spatial, Oracle Text, transactions, MLE, language drivers | `db/appdev/` |
+-| RAC, Multitenant, Exadata, In-Memory, OCI database services, Data Guard architecture | `db/architecture/` |
+-| Backup, recovery, RMAN, Autonomous Recovery Service, Cloud Protect | `db/backup-recovery/` |
+-| OCR database-category container images and pull guidance | `db/containers/` |
+-| ERD, data modeling, partitioning, tablespaces | `db/design/` |
+-| Schema migrations, online operations, edition-based redefinition, testing, version control | `db/devops/` |
+-| AQ, DBMS_SCHEDULER, materialized views, DBLinks, APEX, vector search, SELECT AI | `db/features/` |
+-| SQLAlchemy, Django, Pandas, Spring JPA, MyBatis, TypeORM, Sequelize, Dapper, GORM | `db/frameworks/` |
+-| Migrations from PostgreSQL, MySQL, SQL Server, MongoDB, Snowflake, and more | `db/migrations/` |
+-| Alert log, ADR, health monitor, space management, top SQL | `db/monitoring/` |
+-| ORDS architecture, installation, REST design, authentication, monitoring, ORDS Concert Sample App | `db/ords/` |
+-| AWR, ASH, explain plan, indexes, optimizer stats, wait events, memory | `db/performance/` |
+-| Package design, error handling, performance, collections, cursors, debugging | `db/plsql/` |
+-| Privileges, VPD, masking, auditing, encryption, network security | `db/security/` |
+-| SQL tuning, SQL patterns, dynamic SQL, injection avoidance | `db/sql-dev/` |
+-| SQLcl basics, scripting, Liquibase, formatting, DDL generation, data loading, MCP server, scheduler daemon, AWR, background jobs, schema comparison with DIFF | `db/sqlcl/` |
++| Data Guard, redo/undo logs, users | `admin/` |
++| Safe DML, destructive operation guards, idempotency, schema discovery, ORA- error handling | `agent/` |
++| JDBC, pooling, JSON, XML, spatial, Oracle Text, transactions, MLE, language drivers | `appdev/` |
++| RAC, Multitenant, Exadata, In-Memory, OCI database services, Data Guard architecture | `architecture/` |
++| Backup, recovery, RMAN, Autonomous Recovery Service, Cloud Protect | `backup-recovery/` |
++| OCR database-category container images and pull guidance | `containers/` |
++| ERD, data modeling, partitioning, tablespaces | `design/` |
++| Schema migrations, online operations, edition-based redefinition, testing, version control | `devops/` |
++| AQ, DBMS_SCHEDULER, materialized views, DBLinks, APEX, vector search, SELECT AI | `features/` |
++| SQLAlchemy, Django, Pandas, Spring JPA, MyBatis, TypeORM, Sequelize, Dapper, GORM | `frameworks/` |
++| Migrations from PostgreSQL, MySQL, SQL Server, MongoDB, Snowflake, and more | `migrations/` |
++| Alert log, ADR, health monitor, space management, top SQL | `monitoring/` |
++| ORDS architecture, installation, REST design, authentication, monitoring, ORDS Concert Sample App | `ords/` |
++| AWR, ASH, explain plan, indexes, optimizer stats, wait events, memory | `performance/` |
++| Package design, error handling, performance, collections, cursors, debugging | `plsql/` |
++| Privileges, VPD, masking, auditing, encryption, network security | `security/` |
++| SQL tuning, SQL patterns, dynamic SQL, injection avoidance | `sql-dev/` |
++| SQLcl basics, scripting, Liquibase, formatting, DDL generation, data loading, MCP server, scheduler daemon, AWR, background jobs, schema comparison with DIFF | `sqlcl/` |
+@@ -80,10 +79,10 @@
+-- `db/sqlcl/sqlcl-mcp-server.md`
+-- `db/migrations/migration-assessment.md`
+-- `db/performance/explain-plan.md`
+-- `db/plsql/plsql-package-design.md`
+-- `db/appdev/java-oracle-jdbc.md`
+-- `db/devops/schema-migrations.md`
+-- `db/agent/schema-discovery.md`
+-- `db/containers/container-selection-matrix.md`
+-- `db/backup-recovery/autonomous-recovery-service.md`
+-- `db/backup-recovery/cloud-protect.md`
++- `sqlcl/sqlcl-mcp-server.md`
++- `migrations/migration-assessment.md`
++- `performance/explain-plan.md`
++- `plsql/plsql-package-design.md`
++- `appdev/java-oracle-jdbc.md`
++- `devops/schema-migrations.md`
++- `agent/schema-discovery.md`
++- `containers/container-selection-matrix.md`
++- `backup-recovery/autonomous-recovery-service.md`
++- `backup-recovery/cloud-protect.md`
 diff -rN -U0 --ignore-trailing-space a/oracle-database/agent/client-identification.md b/oracle-database/agent/client-identification.md
 --- a/oracle-database/agent/client-identification.md	2000-01-01 00:00:00.000000000 +0000
 +++ b/oracle-database/agent/client-identification.md	2000-01-01 00:00:00.000000000 +0000
@@ -202,105 +301,6 @@ diff -rN -U0 --ignore-trailing-space a/oracle-database/ords/ords-metadata-catalo
 +mkdir -p swagger-ui-src
 +tar -xzf swagger-ui.tar.gz --strip-components=1 -C swagger-ui-src
 +cp -r swagger-ui-src/dist/* /opt/oracle/ords/config/ords/standalone/doc_root/swagger/
-diff -rN -U0 --ignore-trailing-space a/oracle-database/SKILL.md b/oracle-database/SKILL.md
---- a/oracle-database/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/oracle-database/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-@@ -34,19 +34,18 @@
--db/
--├── admin/
--├── agent/
--├── appdev/
--├── architecture/
--├── backup-recovery/
--├── containers/
--├── design/
--├── devops/
--├── features/
--├── frameworks/
--├── migrations/
--├── monitoring/
--├── ords/
--├── performance/
--├── plsql/
--├── security/
--├── sql-dev/
--└── sqlcl/
-+admin/
-+agent/
-+appdev/
-+architecture/
-+backup-recovery/
-+containers/
-+design/
-+devops/
-+features/
-+frameworks/
-+migrations/
-+monitoring/
-+ords/
-+performance/
-+plsql/
-+security/
-+sql-dev/
-+sqlcl/
-@@ -59,18 +58,18 @@
--| Data Guard, redo/undo logs, users | `db/admin/` |
--| Safe DML, destructive operation guards, idempotency, schema discovery, ORA- error handling | `db/agent/` |
--| JDBC, pooling, JSON, XML, spatial, Oracle Text, transactions, MLE, language drivers | `db/appdev/` |
--| RAC, Multitenant, Exadata, In-Memory, OCI database services, Data Guard architecture | `db/architecture/` |
--| Backup, recovery, RMAN, Autonomous Recovery Service, Cloud Protect | `db/backup-recovery/` |
--| OCR database-category container images and pull guidance | `db/containers/` |
--| ERD, data modeling, partitioning, tablespaces | `db/design/` |
--| Schema migrations, online operations, edition-based redefinition, testing, version control | `db/devops/` |
--| AQ, DBMS_SCHEDULER, materialized views, DBLinks, APEX, vector search, SELECT AI | `db/features/` |
--| SQLAlchemy, Django, Pandas, Spring JPA, MyBatis, TypeORM, Sequelize, Dapper, GORM | `db/frameworks/` |
--| Migrations from PostgreSQL, MySQL, SQL Server, MongoDB, Snowflake, and more | `db/migrations/` |
--| Alert log, ADR, health monitor, space management, top SQL | `db/monitoring/` |
--| ORDS architecture, installation, REST design, authentication, monitoring, ORDS Concert Sample App | `db/ords/` |
--| AWR, ASH, explain plan, indexes, optimizer stats, wait events, memory | `db/performance/` |
--| Package design, error handling, performance, collections, cursors, debugging | `db/plsql/` |
--| Privileges, VPD, masking, auditing, encryption, network security | `db/security/` |
--| SQL tuning, SQL patterns, dynamic SQL, injection avoidance | `db/sql-dev/` |
--| SQLcl basics, scripting, Liquibase, formatting, DDL generation, data loading, MCP server, scheduler daemon, AWR, background jobs, schema comparison with DIFF | `db/sqlcl/` |
-+| Data Guard, redo/undo logs, users | `admin/` |
-+| Safe DML, destructive operation guards, idempotency, schema discovery, ORA- error handling | `agent/` |
-+| JDBC, pooling, JSON, XML, spatial, Oracle Text, transactions, MLE, language drivers | `appdev/` |
-+| RAC, Multitenant, Exadata, In-Memory, OCI database services, Data Guard architecture | `architecture/` |
-+| Backup, recovery, RMAN, Autonomous Recovery Service, Cloud Protect | `backup-recovery/` |
-+| OCR database-category container images and pull guidance | `containers/` |
-+| ERD, data modeling, partitioning, tablespaces | `design/` |
-+| Schema migrations, online operations, edition-based redefinition, testing, version control | `devops/` |
-+| AQ, DBMS_SCHEDULER, materialized views, DBLinks, APEX, vector search, SELECT AI | `features/` |
-+| SQLAlchemy, Django, Pandas, Spring JPA, MyBatis, TypeORM, Sequelize, Dapper, GORM | `frameworks/` |
-+| Migrations from PostgreSQL, MySQL, SQL Server, MongoDB, Snowflake, and more | `migrations/` |
-+| Alert log, ADR, health monitor, space management, top SQL | `monitoring/` |
-+| ORDS architecture, installation, REST design, authentication, monitoring, ORDS Concert Sample App | `ords/` |
-+| AWR, ASH, explain plan, indexes, optimizer stats, wait events, memory | `performance/` |
-+| Package design, error handling, performance, collections, cursors, debugging | `plsql/` |
-+| Privileges, VPD, masking, auditing, encryption, network security | `security/` |
-+| SQL tuning, SQL patterns, dynamic SQL, injection avoidance | `sql-dev/` |
-+| SQLcl basics, scripting, Liquibase, formatting, DDL generation, data loading, MCP server, scheduler daemon, AWR, background jobs, schema comparison with DIFF | `sqlcl/` |
-@@ -80,10 +79,10 @@
--- `db/sqlcl/sqlcl-mcp-server.md`
--- `db/migrations/migration-assessment.md`
--- `db/performance/explain-plan.md`
--- `db/plsql/plsql-package-design.md`
--- `db/appdev/java-oracle-jdbc.md`
--- `db/devops/schema-migrations.md`
--- `db/agent/schema-discovery.md`
--- `db/containers/container-selection-matrix.md`
--- `db/backup-recovery/autonomous-recovery-service.md`
--- `db/backup-recovery/cloud-protect.md`
-+- `sqlcl/sqlcl-mcp-server.md`
-+- `migrations/migration-assessment.md`
-+- `performance/explain-plan.md`
-+- `plsql/plsql-package-design.md`
-+- `appdev/java-oracle-jdbc.md`
-+- `devops/schema-migrations.md`
-+- `agent/schema-discovery.md`
-+- `containers/container-selection-matrix.md`
-+- `backup-recovery/autonomous-recovery-service.md`
-+- `backup-recovery/cloud-protect.md`
 diff -rN -U0 --ignore-trailing-space a/oracle-database/sqlcl/sqlcl-cicd.md b/oracle-database/sqlcl/sqlcl-cicd.md
 --- a/oracle-database/sqlcl/sqlcl-cicd.md	2000-01-01 00:00:00.000000000 +0000
 +++ b/oracle-database/sqlcl/sqlcl-cicd.md	2000-01-01 00:00:00.000000000 +0000

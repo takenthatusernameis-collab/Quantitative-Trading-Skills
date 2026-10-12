@@ -14,7 +14,7 @@ metadata:
     repository: 'https://github.com/oracle-samples/oracle-aidp-samples'
     path: >-
       ai/claude-code-plugins/oracle-ai-data-platform-workbench-spark-connectors/skills/aidp-object-storage
-    license_path: LICENSE
+    license_path: LICENSE.txt
     commit: 54b6695919e3196072b788466c96a5db89202e5c
 ---
 

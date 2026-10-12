@@ -1,3 +1,14 @@
+diff -rN -U0 --ignore-trailing-space a/tableau-dashboard-creator/SKILL.md b/tableau-dashboard-creator/SKILL.md
+--- a/tableau-dashboard-creator/SKILL.md	2000-01-01 00:00:00.000000000 +0000
++++ b/tableau-dashboard-creator/SKILL.md	2000-01-01 00:00:00.000000000 +0000
+@@ -11,2 +10,0 @@
+-  upstream:
+-    disable-model-invocation: true
+@@ -134,2 +132,2 @@
+-   - PostgreSQL: run the installed skill's `scripts/query_postgresql.py`
+-   - Other databases: add a `query_<dbtype>.py` script following the PostgreSQL pattern
++   - PostgreSQL: run the installed skill's `scripts/query_postgresql.py`; it permits one read-only `SELECT`, `WITH`, or plain `EXPLAIN` query and enforces a hard 500-row cap
++   - Other databases: add a `query_<dbtype>.py` script following the same read-only-by-default pattern
 diff -rN -U0 --ignore-trailing-space a/tableau-dashboard-creator/examples/top-level-workbook-example.twb b/tableau-dashboard-creator/examples/top-level-workbook-example.twb
 --- a/tableau-dashboard-creator/examples/top-level-workbook-example.twb	2000-01-01 00:00:00.000000000 +0000
 +++ b/tableau-dashboard-creator/examples/top-level-workbook-example.twb	2000-01-01 00:00:00.000000000 +0000
@@ -417,14 +428,3 @@ diff -rN -U0 --ignore-trailing-space a/tableau-dashboard-creator/scripts/query_p
 @@ -114 +231 @@
 -    print(f"Executing query (LIMIT {MAX_ROWS} enforced)...")
 +    print(f"Executing read-only query (maximum {MAX_ROWS} rows)...")
-diff -rN -U0 --ignore-trailing-space a/tableau-dashboard-creator/SKILL.md b/tableau-dashboard-creator/SKILL.md
---- a/tableau-dashboard-creator/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-+++ b/tableau-dashboard-creator/SKILL.md	2000-01-01 00:00:00.000000000 +0000
-@@ -11,2 +10,0 @@
--  upstream:
--    disable-model-invocation: true
-@@ -134,2 +132,2 @@
--   - PostgreSQL: run the installed skill's `scripts/query_postgresql.py`
--   - Other databases: add a `query_<dbtype>.py` script following the PostgreSQL pattern
-+   - PostgreSQL: run the installed skill's `scripts/query_postgresql.py`; it permits one read-only `SELECT`, `WITH`, or plain `EXPLAIN` query and enforces a hard 500-row cap
-+   - Other databases: add a `query_<dbtype>.py` script following the same read-only-by-default pattern
