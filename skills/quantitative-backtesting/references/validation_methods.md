@@ -91,6 +91,70 @@ the optimizer is chasing noise.
 The diagnostics also include OOS Sharpe, total return, and volatility
 computed on the concatenated out-of-sample returns.
 
+## Monte Carlo Simulation
+
+`monte_carlo_simulation` performs bootstrap resampling on strategy returns to
+generate synthetic equity curves and compute the distribution of performance
+metrics. This helps assess the statistical significance and robustness of
+backtest results.
+
+### Parameters
+
+| Parameter            | Default  | Description                                              |
+| -------------------- | -------- | -------------------------------------------------------- |
+| `base_returns`       | (required) | Series of strategy returns from a backtest              |
+| `n_simulations`      | 2000     | Number of Monte Carlo paths to generate                  |
+| `confidence_levels`  | [0.90, 0.95, 0.99] | Confidence levels for percentile bands           |
+| `block_size`         | None     | Block size for stationary block bootstrap (preserves autocorrelation). None = simple i.i.d. resampling. |
+
+### Algorithm
+
+1. Take the base strategy returns from a backtest.
+2. For each simulation, resample the returns with replacement (optionally using block bootstrap).
+3. Construct a synthetic equity curve from the resampled returns.
+4. Compute performance metrics (total return, Sharpe, max drawdown, etc.) for each path.
+5. Aggregate the metric distributions and compute confidence intervals.
+
+### Output
+
+The result dictionary contains:
+
+- `simulated_equity_curves`: List of equity curve Series for each simulation
+- `metric_distributions`: Dict mapping metric name to array of simulated values
+- `confidence_intervals`: Dict of metric -> {confidence_level: (lower, upper)}
+- `probability_of_ruin`: Fraction of simulations where equity falls below 50% of initial capital
+- `summary`: Mean, std, median, min, max for each metric
+- `n_simulations`: Number of simulations run
+- `base_observations`: Number of observations in base returns
+
+### Usage Example
+
+```python
+# After running a backtest
+from walk_forward import monte_carlo_simulation
+
+mc_results = monte_carlo_simulation(
+    base_returns=backtest_returns,
+    n_simulations=2000,
+    confidence_levels=[0.90, 0.95, 0.99],
+    block_size=5,  # Optional: preserve autocorrelation
+)
+
+# Check probability of ruin
+print(f"Probability of 50% drawdown: {mc_results['probability_of_ruin']:.2%}")
+
+# Check Sharpe ratio confidence interval
+sharpe_ci = mc_results['confidence_intervals']['sharpe_ratio'][0.95]
+print(f"95% CI for Sharpe: [{sharpe_ci[0]:.2f}, {sharpe_ci[1]:.2f}]")
+```
+
+### Interpretation
+
+- **Narrow confidence intervals** indicate stable, robust performance.
+- **Wide intervals** suggest the strategy's performance is highly sensitive to the specific sequence of returns.
+- **Probability of ruin** quantifies tail risk: the chance of a catastrophic drawdown under resampled conditions.
+- If the observed Sharpe ratio falls outside the 95% confidence interval of the Monte Carlo distribution, the result may be statistically unusual (either positively or negatively).
+
 ## Combinatorially Purged Cross-Validation (CPCV)
 
 CPCV is referenced in the SKILL.md as an advanced technique but is not yet
@@ -103,13 +167,3 @@ implemented in the scripts. The recommended approach:
 
 For implementation guidance, see Lopez de Prado's *Advances in Financial
 Machine Learning*.
-
-## Monte Carlo Simulation
-
-Monte Carlo simulation is also listed as a planned capability. The typical
-workflow:
-
-1. Fit a return distribution (e.g. normal, Student's t, or empirical).
-2. Resample returns with replacement to generate synthetic price paths.
-3. Re-run the strategy on each path.
-4. Analyze the distribution of performance metrics to assess robustness.

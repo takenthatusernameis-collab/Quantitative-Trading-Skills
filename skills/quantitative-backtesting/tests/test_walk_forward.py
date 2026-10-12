@@ -20,6 +20,7 @@ from walk_forward import (  # noqa: E402
     overfitting_check,
     parameter_optimization,
     walk_forward_analysis,
+    monte_carlo_simulation,
 )
 from strategy_builder import build_strategy  # noqa: E402
 
@@ -103,11 +104,97 @@ def test_overfitting_check_handles_empty_oos():
     assert diagnostics["overfitting_risk"] in {"low", "medium", "high"}
 
 
+def test_monte_carlo_simulation_basic():
+    """monte_carlo_simulation runs and returns expected structure."""
+    data = _make_data(periods=252)
+    returns = data["close"].pct_change().dropna()
+
+    mc = monte_carlo_simulation(
+        base_returns=returns,
+        n_simulations=100,
+        confidence_levels=[0.90, 0.95],
+    )
+
+    assert "simulated_equity_curves" in mc
+    assert "metric_distributions" in mc
+    assert "confidence_intervals" in mc
+    assert "probability_of_ruin" in mc
+    assert "summary" in mc
+    assert mc["n_simulations"] == 100
+    assert mc["base_observations"] == len(returns)
+    assert len(mc["simulated_equity_curves"]) == 100
+
+    # Check all expected metrics are present
+    expected_metrics = [
+        "total_return", "annualized_return", "annualized_volatility",
+        "sharpe_ratio", "sortino_ratio", "max_drawdown", "calmar_ratio"
+    ]
+    for metric in expected_metrics:
+        assert metric in mc["metric_distributions"], f"missing metric: {metric}"
+        assert metric in mc["confidence_intervals"], f"missing CI for: {metric}"
+        assert metric in mc["summary"], f"missing summary for: {metric}"
+        # Check CI structure
+        for level in [0.90, 0.95]:
+            assert level in mc["confidence_intervals"][metric]
+            lower, upper = mc["confidence_intervals"][metric][level]
+            assert lower <= upper, f"CI bounds inverted for {metric}"
+
+
+def test_monte_carlo_simulation_block_bootstrap():
+    """monte_carlo_simulation works with block_size parameter."""
+    data = _make_data(periods=252)
+    returns = data["close"].pct_change().dropna()
+
+    mc = monte_carlo_simulation(
+        base_returns=returns,
+        n_simulations=50,
+        block_size=10,
+    )
+
+    assert mc["n_simulations"] == 50
+    assert len(mc["simulated_equity_curves"]) == 50
+    # Block bootstrap should still produce valid metrics
+    for metric in mc["metric_distributions"]:
+        vals = mc["metric_distributions"][metric]
+        assert len(vals) == 50
+        assert not np.any(np.isnan(vals))
+
+
+def test_monte_carlo_simulation_probability_of_ruin():
+    """Probability of ruin is between 0 and 1."""
+    data = _make_data(periods=252)
+    returns = data["close"].pct_change().dropna()
+
+    mc = monte_carlo_simulation(
+        base_returns=returns,
+        n_simulations=200,
+    )
+
+    prob_ruin = mc["probability_of_ruin"]
+    assert 0.0 <= prob_ruin <= 1.0
+    assert mc["ruin_threshold"] == 0.5
+
+
+def test_monte_carlo_simulation_handles_short_series():
+    """Monte Carlo should raise ValueError for too few observations."""
+    returns = pd.Series([0.01], index=pd.date_range("2020-01-01", periods=1, freq="B"))
+
+    try:
+        monte_carlo_simulation(base_returns=returns, n_simulations=10)
+        assert False, "Expected ValueError for < 2 observations"
+    except ValueError as e:
+        assert "at least 2 return observations" in str(e)
+
+
 def main() -> int:
     tests = [
         ("parameter_optimization_skips_flat_combos", test_parameter_optimization_skips_flat_combos),
         ("walk_forward_skips_flat_combos_in_test_window", test_walk_forward_skips_flat_combos_in_test_window),
         ("overfitting_check_handles_empty_oos", test_overfitting_check_handles_empty_oos),
+        ("monte_carlo_simulation_basic", test_monte_carlo_simulation_basic),
+        ("monte_carlo_simulation_block_bootstrap", test_monte_carlo_simulation_block_bootstrap),
+        ("monte_carlo_simulation_probability_of_ruin", test_monte_carlo_simulation_probability_of_ruin),
+        ("monte_carlo_simulation_handles_short_series", test_monte_carlo_simulation_handles_short_series),
     ]
 
     failures = 0
