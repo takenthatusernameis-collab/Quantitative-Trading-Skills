@@ -181,21 +181,27 @@ function findLicenseFile(skillDir: string): string | undefined {
 
 async function main() {
   const args = process.argv.slice(2);
+  const dryRun = args.includes("--dry-run");
+  const filteredArgs = args.filter((arg) => arg !== "--dry-run");
 
-  if (args.length < 1) {
+  if (filteredArgs.length < 1) {
     console.error(
-      "Usage: npx tsx bin/add-remote-skill.ts <github-url-with-path>",
+      "Usage: npx tsx bin/add-remote-skill.ts [--dry-run] <github-url-with-path>",
     );
     console.error(
       "\nExample: npx tsx bin/add-remote-skill.ts https://github.com/vercel-labs/agent-skills/tree/main/skills/claude.ai/web-design-guidelines",
     );
     console.error(
-      "         npx tsx bin/add-remote-skill.ts https://github.com/google-gemini/gemini-cli/tree/main/.gemini/skills/pr-creator",
+      "         npx tsx bin/add-remote-skill.ts --dry-run https://github.com/google-gemini/gemini-cli/tree/main/.gemini/skills/pr-creator",
     );
     process.exit(1);
   }
 
-  const [fullUrl] = args;
+  const [fullUrl] = filteredArgs;
+
+  if (dryRun) {
+    console.log("DRY RUN MODE - No changes will be made\n");
+  }
 
   const { owner, repo, ref, skillPath } = parseGitHubUrl(fullUrl);
   const skillName = getSkillName(skillPath);
@@ -270,6 +276,67 @@ async function main() {
 
     if (!fs.existsSync(sourceDir)) {
       throw new Error(`Skill directory not found in repository: ${skillPath}`);
+    }
+
+    if (dryRun) {
+      console.log("\n--- DRY RUN: Preview of changes ---");
+      console.log(`Would copy skill from: ${sourceDir}`);
+      console.log(`Would create directory: ${targetDir}`);
+
+      // Show what files would be copied
+      const files = fs.readdirSync(sourceDir, { recursive: true, withFileTypes: true });
+      console.log("\nFiles that would be copied:");
+      for (const file of files) {
+        if (file.isFile()) {
+          const relPath = path.relative(sourceDir, path.join(file.parentPath, file.name));
+          console.log(`  ${relPath}`);
+        }
+      }
+
+      // Check for license files
+      let licenseFile = findLicenseFile(sourceDir);
+      let licenseSource = "skill directory";
+      if (!licenseFile) {
+        const rootLicenseFile = findLicenseFile(tempDir);
+        if (rootLicenseFile) {
+          licenseFile = rootLicenseFile;
+          licenseSource = "repository root";
+        }
+      }
+      if (licenseFile) {
+        console.log(`\nLicense file found: ${licenseFile} (from ${licenseSource})`);
+        console.log("Would add metadata.source.license_path to frontmatter");
+      } else {
+        console.log("\nWarning: No LICENSE file found in skill directory or repository root");
+        console.log("metadata.source.license_path would not be set (see CONTRIBUTING.md)");
+      }
+
+      // Show frontmatter changes
+      const skillMdPath = path.join(sourceDir, "SKILL.md");
+      if (fs.existsSync(skillMdPath)) {
+        const content = fs.readFileSync(skillMdPath, "utf-8");
+        const { data: frontmatter } = matter(content);
+
+        console.log("\nFrontmatter changes that would be made:");
+        if (!frontmatter.metadata) {
+          console.log("  Would add metadata object");
+        }
+        if (!frontmatter.metadata?.category) {
+          console.log("  Would add category: unknown");
+        }
+        console.log("  Would add metadata.source:");
+        console.log(`    repository: https://github.com/${owner}/${repo}`);
+        console.log(`    path: ${skillPath}`);
+        console.log(`    ref: ${ref}`);
+        console.log(`    commit: ${sourceCommit}`);
+        if (licenseFile) {
+          console.log(`    license_path: ${licenseFile}`);
+        }
+      }
+
+      console.log("\n--- DRY RUN COMPLETE ---");
+      console.log("No changes were made. Run without --dry-run to apply changes.");
+      return;
     }
 
     // Copy the skill directory
