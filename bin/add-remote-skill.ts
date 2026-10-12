@@ -229,10 +229,26 @@ async function main() {
       stdio: "pipe",
     });
 
-    // Set up sparse checkout for just the skill directory
+    // Set up sparse checkout for the skill directory AND common license file locations
+    // at the repository root (license files are often at the root, not in the skill dir)
+    const licensePatterns = [
+      "LICENSE",
+      "LICENSE.md",
+      "LICENSE.txt",
+      "COPYING",
+      "COPYING.md",
+      "COPYING.txt",
+      "license",
+      "license.md",
+      "license.txt",
+      "copying",
+      "copying.md",
+      "copying.txt",
+    ];
+    const sparseCheckoutPaths = [skillPath, ...licensePatterns].join("\n") + "\n";
     fs.writeFileSync(
       path.join(tempDir, ".git", "info", "sparse-checkout"),
-      skillPath + "\n",
+      sparseCheckoutPaths,
     );
 
     // Fetch and checkout the URL's requested ref
@@ -294,16 +310,30 @@ async function main() {
     console.log(`  Added commit: ${sourceCommit}`);
 
     // CONTRIBUTING.md requires metadata.source.license_path for every
-    // contributed skill. Copy the license file alongside the skill and
-    // record it; if none is present, warn so the importer can add it
-    // rather than shipping a silently non-compliant entry.
-    const licenseFile = findLicenseFile(targetDir);
+    // contributed skill. Check for license files in both the skill directory
+    // and the repository root (fetched via sparse checkout above), copy any
+    // found to the skill directory, and record the path.
+    let licenseFile = findLicenseFile(targetDir);
+    let licenseSource = "skill directory";
+    if (!licenseFile) {
+      // Check repository root for license files
+      const rootLicenseFile = findLicenseFile(tempDir);
+      if (rootLicenseFile) {
+        // Copy the license file from repo root to skill directory
+        fs.copyFileSync(
+          path.join(tempDir, rootLicenseFile),
+          path.join(targetDir, rootLicenseFile),
+        );
+        licenseFile = rootLicenseFile;
+        licenseSource = "repository root";
+      }
+    }
     if (licenseFile) {
       frontmatter.metadata.source.license_path = licenseFile;
-      console.log(`  Added license_path: ${licenseFile}`);
+      console.log(`  Added license_path: ${licenseFile} (from ${licenseSource})`);
     } else {
       console.log(
-        `  Warning: no LICENSE file found in ${targetDir}; ` +
+        `  Warning: no LICENSE file found in ${targetDir} or repository root; ` +
           "metadata.source.license_path was not set (see CONTRIBUTING.md).",
       );
     }
