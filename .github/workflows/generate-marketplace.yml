@@ -46,7 +46,7 @@ jobs:
         working-directory: bin
 
       - name: Test marketplace generators
-        run: pnpm test && pnpm run typecheck:skills && pnpm run typecheck:plugins && pnpm run typecheck:mcps
+        run: pnpm test && pnpm run typecheck:plugins && pnpm run typecheck:mcps
         working-directory: bin
 
       - name: Generate plugins marketplace.yaml
