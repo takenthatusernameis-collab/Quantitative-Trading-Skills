@@ -1626,6 +1626,15 @@ items:
     githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/pr-creator
     rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/pr-creator/SKILL.md
     content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/pr-creator.tar.gz
+  - id: quantitative-backtesting
+    description: >-
+      This skill should be used when users want to design, implement, and validate systematic trading strategies through
+      historical simulation. It provides workflows for data preparation, strategy development, performance evaluation,
+      and risk analysis using Python libraries like pandas, numpy, and vectorbt.
+    category: development
+    githubUrl: https://github.com/Kilo-Org/kilo-marketplace/tree/main/skills/quantitative-backtesting
+    rawUrl: https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/quantitative-backtesting/SKILL.md
+    content: https://github.com/Kilo-Org/kilo-marketplace/releases/download/skills-latest/quantitative-backtesting.tar.gz
   - id: secrets-vault-manager
     description: >-
       Use when the user asks to set up secret management infrastructure, integrate HashiCorp Vault, configure cloud
