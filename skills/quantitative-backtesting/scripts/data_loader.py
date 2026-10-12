@@ -152,7 +152,10 @@ def validate_data(df: pd.DataFrame, strict: bool = False) -> bool:
 
     # Check for gaps in trading days (warn only)
     if isinstance(df.index, pd.DatetimeIndex):
-        freq = pd.infer_freq(df.index)
+        try:
+            freq = pd.infer_freq(df.index)
+        except ValueError:
+            freq = None  # too few dates to infer; not a validation failure
         if freq and freq not in ["B", "D", "W"]:
             messages.append(f"Unusual frequency detected: {freq}")
 

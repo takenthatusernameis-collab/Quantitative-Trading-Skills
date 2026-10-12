@@ -128,6 +128,8 @@ Risk Metrics:
 ### tests/
 - `test_walk_forward.py` - Unit tests for walk-forward and parameter optimization
 - `test_run_backtest.py` - Unit tests for the run_backtest CLI entry point
+- `test_strategy_builder.py` - Unit tests for the strategy factory and registry
+- `test_data_loader.py` - Unit tests for data loading and validation
 
 ### references/
 - `data_schema.md` - Expected data formats and column specifications
