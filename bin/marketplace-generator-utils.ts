@@ -342,3 +342,44 @@ export function validateLicensePath(
     );
   }
 }
+
+/**
+ * Validates that a skill has a license identifier, either as a top-level
+ * `license` field (SPDX identifier) or as `metadata.source.license_path`
+ * pointing to a license file. Exactly one must be present (not both).
+ */
+export function validateLicense(
+  data: Record<string, unknown>,
+  itemId: string,
+): void {
+  const hasTopLevelLicense =
+    typeof data.license === "string" && data.license.trim().length > 0;
+  const source =
+    data.metadata && typeof data.metadata === "object"
+      ? (data.metadata as Record<string, unknown>).source
+      : undefined;
+  let hasLicensePath = false;
+  if (
+    source &&
+    typeof source === "object" &&
+    !Array.isArray(source)
+  ) {
+    const sourceObj = source as Record<string, unknown>;
+    const licensePath = sourceObj.license_path;
+    if (typeof licensePath === "string" && licensePath.trim().length > 0) {
+      hasLicensePath = true;
+    }
+  }
+
+  if (hasTopLevelLicense && hasLicensePath) {
+    throw new Error(
+      `${itemId}/SKILL.md: must not specify both top-level "license" and "metadata.source.license_path"`,
+    );
+  }
+
+  if (!hasTopLevelLicense && !hasLicensePath) {
+    throw new Error(
+      `${itemId}/SKILL.md: must specify either top-level "license" (SPDX identifier) or "metadata.source.license_path" (path to license file)`,
+    );
+  }
+}

@@ -1,6 +1,7 @@
 ---
 name: quantitative-backtesting
 description: This skill should be used when users want to design, implement, and validate systematic trading strategies through historical simulation. It provides workflows for data preparation, strategy development, performance evaluation, and risk analysis using Python libraries like pandas, numpy, and vectorbt.
+license: Apache-2.0
 metadata:
   category: development
 ---

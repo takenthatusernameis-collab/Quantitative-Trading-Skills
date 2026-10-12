@@ -15,6 +15,7 @@ import {
   listVisibleDirectories,
   loadMcpIds,
   repoPathFromBin,
+  validateLicense,
   validateLicensePath,
   validateRequirements,
   validateSuggestFor,
@@ -54,6 +55,7 @@ generateMarketplace({
       mcpIds,
       { subgroup: "skills", id: dirName },
     );
+    validateLicense(data, dirName);
     validateLicensePath(data, dirName, skillsDir);
     console.log(`Added: ${data.name}`);
     return {

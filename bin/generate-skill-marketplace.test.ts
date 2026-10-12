@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test, type TestContext } from "node:test";
-import { validateLicensePath } from "./marketplace-generator-utils.ts";
+import { validateLicense, validateLicensePath } from "./marketplace-generator-utils.ts";
 
 function fixture(t: TestContext) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "skill-marketplace-"));
@@ -159,5 +159,60 @@ test("validateLicensePath accepts a valid symlinked license_path", (t) => {
       "x",
       root,
     ),
+  );
+});
+
+test("validateLicense accepts top-level license field", (t) => {
+  assert.doesNotThrow(() =>
+    validateLicense({ license: "MIT" }, "test"),
+  );
+});
+
+test("validateLicense accepts metadata.source.license_path", (t) => {
+  assert.doesNotThrow(() =>
+    validateLicense({ metadata: { source: { license_path: "LICENSE" } } }, "test"),
+  );
+});
+
+test("validateLicense rejects when both license and license_path are present", (t) => {
+  assert.throws(
+    () =>
+      validateLicense(
+        { license: "MIT", metadata: { source: { license_path: "LICENSE" } } },
+        "test",
+      ),
+    /must not specify both/,
+  );
+});
+
+test("validateLicense rejects when neither license nor license_path is present", (t) => {
+  assert.throws(
+    () => validateLicense({}, "test"),
+    /must specify either/,
+  );
+});
+
+test("validateLicense rejects empty license string", (t) => {
+  assert.throws(
+    () => validateLicense({ license: "   " }, "test"),
+    /must specify either/,
+  );
+});
+
+test("validateLicense rejects empty license_path string", (t) => {
+  assert.throws(
+    () =>
+      validateLicense(
+        { metadata: { source: { license_path: "   " } } },
+        "test",
+      ),
+    /must specify either/,
+  );
+});
+
+test("validateLicense rejects when metadata.source is absent", (t) => {
+  assert.throws(
+    () => validateLicense({ metadata: {} }, "test"),
+    /must specify either/,
   );
 });
