@@ -46,6 +46,22 @@ The result dictionary contains:
 using `n_splits`-style evaluation. Results are sorted by Sharpe ratio
 (descending) and include total return and period count.
 
+### Flat parameter sets
+
+Both `walk_forward_analysis` and `parameter_optimization` skip parameter
+combinations that take no position:
+
+- In `walk_forward_analysis`, a combo is skipped when `(test_signals != 0).sum() == 0`
+  in the test window (e.g. `slow_period=200` on a ~64-day window leaves every
+  rolling indicator NaN, so the strategy stays flat). Without this guard the
+  grid search would silently select such a combo as "optimal" and report a
+  flat (zero) out-of-sample return for every period.
+- In `parameter_optimization`, a combo is skipped when
+  `(signals != 0).sum() == 0` across the full dataset (e.g. `fast_period == slow_period`,
+  which produces a flat signal everywhere).
+
+Skipped combos are excluded from the returned results; they are never ranked.
+
 ## Overfitting Detection
 
 `overfitting_check` analyzes walk-forward results to flag overfitting risk:

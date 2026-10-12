@@ -201,6 +201,15 @@ def parameter_optimization(
         try:
             strategy = strategy_factory(params)
             signals = strategy.generate_signals(data)
+
+            # Skip parameter sets that take no position across the entire
+            # dataset (e.g. a lookback longer than the data itself leaves
+            # every rolling indicator NaN, so the strategy stays flat).
+            # Without this guard such a combo reports a flat (zero) return
+            # and can be ranked as "optimal" by the grid search.
+            if (signals != 0).sum() == 0:
+                continue
+
             returns = _calculate_strategy_returns(
                 data, signals, commission, slippage
             )

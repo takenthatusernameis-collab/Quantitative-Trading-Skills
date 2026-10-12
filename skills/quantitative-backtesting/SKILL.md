@@ -124,6 +124,9 @@ Risk Metrics:
 - `reporting.py` - Automated tear sheet and report generation
 - `generate_sample_data.py` - Generates a sample OHLCV dataset for testing
 
+### tests/
+- `test_walk_forward.py` - Unit tests for walk-forward and parameter optimization
+
 ### references/
 - `data_schema.md` - Expected data formats and column specifications
 - `strategy_templates.md` - Pre-built strategy patterns and customization guide
