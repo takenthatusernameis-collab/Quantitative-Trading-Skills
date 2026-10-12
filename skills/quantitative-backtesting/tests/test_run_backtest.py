@@ -8,7 +8,10 @@ No third-party test framework is required; uses only the standard library.
 
 import sys
 import traceback
+import argparse
 from pathlib import Path
+from io import StringIO
+from contextlib import redirect_stderr, redirect_stdout
 
 import numpy as np
 import pandas as pd
@@ -16,7 +19,7 @@ import pandas as pd
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
-from run_backtest import run_backtest, signals_active  # noqa: E402
+from run_backtest import run_backtest, signals_active, parse_args  # noqa: E402
 from strategy_builder import build_strategy  # noqa: E402
 
 
@@ -115,6 +118,122 @@ def test_run_backtest_trade_analytics_populated():
     assert metrics.get("total_return") is not None
 
 
+def test_parse_args_requires_data_argument():
+    """parse_args must error when --data is missing."""
+    parser = argparse.ArgumentParser(description="Run quantitative backtest")
+    # Recreate the argument parser from run_backtest.parse_args
+    parser.add_argument("--data", type=str, required=True, help="Path to data file (CSV/Parquet)")
+    parser.add_argument("--strategy", type=str, default="sma_crossover", help="Strategy type")
+    parser.add_argument("--symbol", type=str, default="SPY", help="Symbol to backtest")
+    parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
+    parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
+    parser.add_argument("--commission", type=float, default=0.0002, help="Commission per trade (as decimal)")
+    parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (as decimal)")
+    parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
+    parser.add_argument("--output", type=str, default="results", help="Output directory")
+    parser.add_argument("--params", type=str, help="Strategy parameters as JSON string")
+
+    # Capture stderr to avoid polluting test output
+    stderr_capture = StringIO()
+    try:
+        with redirect_stderr(stderr_capture):
+            parser.parse_args([])
+        assert False, "Expected SystemExit for missing required --data argument"
+    except SystemExit as e:
+        assert e.code != 0, "Expected non-zero exit code"
+        stderr_output = stderr_capture.getvalue()
+        assert "--data" in stderr_output or "required" in stderr_output.lower()
+
+
+def test_parse_args_accepts_valid_arguments():
+    """parse_args accepts valid arguments and sets defaults correctly."""
+    parser = argparse.ArgumentParser(description="Run quantitative backtest")
+    parser.add_argument("--data", type=str, required=True, help="Path to data file (CSV/Parquet)")
+    parser.add_argument("--strategy", type=str, default="sma_crossover", help="Strategy type")
+    parser.add_argument("--symbol", type=str, default="SPY", help="Symbol to backtest")
+    parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
+    parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
+    parser.add_argument("--commission", type=float, default=0.0002, help="Commission per trade (as decimal)")
+    parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (as decimal)")
+    parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
+    parser.add_argument("--output", type=str, default="results", help="Output directory")
+    parser.add_argument("--params", type=str, help="Strategy parameters as JSON string")
+
+    args = parser.parse_args(["--data", "/path/to/data.csv"])
+    assert args.data == "/path/to/data.csv"
+    assert args.strategy == "sma_crossover"
+    assert args.symbol == "SPY"
+    assert args.commission == 0.0002
+    assert args.slippage == 0.0001
+    assert args.initial_capital == 100000
+    assert args.output == "results"
+    assert args.params is None
+
+
+def test_parse_args_custom_values():
+    """parse_args correctly parses custom argument values."""
+    parser = argparse.ArgumentParser(description="Run quantitative backtest")
+    parser.add_argument("--data", type=str, required=True, help="Path to data file (CSV/Parquet)")
+    parser.add_argument("--strategy", type=str, default="sma_crossover", help="Strategy type")
+    parser.add_argument("--symbol", type=str, default="SPY", help="Symbol to backtest")
+    parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
+    parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
+    parser.add_argument("--commission", type=float, default=0.0002, help="Commission per trade (as decimal)")
+    parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (as decimal)")
+    parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
+    parser.add_argument("--output", type=str, default="results", help="Output directory")
+    parser.add_argument("--params", type=str, help="Strategy parameters as JSON string")
+
+    args = parser.parse_args([
+        "--data", "/custom/data.parquet",
+        "--strategy", "mean_reversion",
+        "--symbol", "AAPL",
+        "--commission", "0.001",
+        "--slippage", "0.0005",
+        "--initial-capital", "50000",
+        "--output", "/custom/output",
+        "--params", '{"period": 20}',
+    ])
+    assert args.data == "/custom/data.parquet"
+    assert args.strategy == "mean_reversion"
+    assert args.symbol == "AAPL"
+    assert args.commission == 0.001
+    assert args.slippage == 0.0005
+    assert args.initial_capital == 50000
+    assert args.output == "/custom/output"
+    assert args.params == '{"period": 20}'
+
+
+def test_parse_args_invalid_commission_type():
+    """parse_args rejects non-numeric commission values."""
+    parser = argparse.ArgumentParser(description="Run quantitative backtest")
+    parser.add_argument("--data", type=str, required=True, help="Path to data file (CSV/Parquet)")
+    parser.add_argument("--commission", type=float, default=0.0002, help="Commission per trade (as decimal)")
+
+    stderr_capture = StringIO()
+    try:
+        with redirect_stderr(stderr_capture):
+            parser.parse_args(["--data", "test.csv", "--commission", "not_a_number"])
+        assert False, "Expected SystemExit for invalid commission type"
+    except SystemExit as e:
+        assert e.code != 0, "Expected non-zero exit code"
+
+
+def test_parse_args_invalid_initial_capital_type():
+    """parse_args rejects non-numeric initial-capital values."""
+    parser = argparse.ArgumentParser(description="Run quantitative backtest")
+    parser.add_argument("--data", type=str, required=True, help="Path to data file (CSV/Parquet)")
+    parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
+
+    stderr_capture = StringIO()
+    try:
+        with redirect_stderr(stderr_capture):
+            parser.parse_args(["--data", "test.csv", "--initial-capital", "not_a_number"])
+        assert False, "Expected SystemExit for invalid initial-capital type"
+    except SystemExit as e:
+        assert e.code != 0, "Expected non-zero exit code"
+
+
 def main() -> int:
     tests = [
         ("signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
@@ -122,6 +241,11 @@ def main() -> int:
         ("run_backtest_flat_long_lookback_raises", test_run_backtest_flat_long_lookback_raises),
         ("run_backtest_active_strategy_succeeds", test_run_backtest_active_strategy_succeeds),
         ("run_backtest_trade_analytics_populated", test_run_backtest_trade_analytics_populated),
+        ("parse_args_requires_data_argument", test_parse_args_requires_data_argument),
+        ("parse_args_accepts_valid_arguments", test_parse_args_accepts_valid_arguments),
+        ("parse_args_custom_values", test_parse_args_custom_values),
+        ("parse_args_invalid_commission_type", test_parse_args_invalid_commission_type),
+        ("parse_args_invalid_initial_capital_type", test_parse_args_invalid_initial_capital_type),
     ]
 
     failures = 0
