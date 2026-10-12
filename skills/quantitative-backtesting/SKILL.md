@@ -183,6 +183,7 @@ python3 skills/quantitative-backtesting/tests/test_run_backtest.py
 python3 skills/quantitative-backtesting/tests/test_strategy_builder.py
 python3 skills/quantitative-backtesting/tests/test_walk_forward.py
 python3 skills/quantitative-backtesting/tests/test_cpcv.py
+python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
 ```
 
 - `test_data_loader.py` - CSV/Parquet loading, column/date handling, symbol
@@ -207,6 +208,8 @@ python3 skills/quantitative-backtesting/tests/test_cpcv.py
   train/test separation.
 - `test_cpcv.py` - CPCV fold structure, purge/embargo behavior, parameter
   stability calculation, summary metrics, and CLI integration.
+- `test_generate_sample_data.py` - Sample data generation creates valid OHLCV
+  CSV with expected shape and constraints.
 
 The canonical rendered outputs in `test_output/` are regenerated from
 `assets/example_data/sample_ohlcv.csv` via
