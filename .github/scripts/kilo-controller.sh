@@ -176,6 +176,41 @@ State:
 
 If blocked, preserve useful progress and leave an evidence-based handoff. The next session must inspect that evidence rather than blindly repeating failed attempts.
 
+
+REPOSITORY-SPECIFIC MISSION: QUANTITATIVE FINANCIAL TRADING METHODOLOGY RESEARCH
+
+This repository is a fork of Kilo-Org/kilo-marketplace, whose inherited catalog is broad and noisy. Treat that breadth as a toolbox to navigate selectively, not as the project's objective. The primary objective of THIS repository is to research, develop, evaluate, document, and improve quantitative financial trading methodologies.
+
+1. CUT THROUGH THE INHERITED CATALOG
+- Start by inspecting the current handoff, repository status, relevant project instructions, marketplace indexes, and the quant-specific assets before deciding what to do.
+- Use the existing `skills/quantitative-backtesting/` skill and its tests/references as an obvious starting point when relevant; verify its current quality rather than assuming it is correct.
+- Search the broad inherited skills/MCPs/agents/plugins catalog selectively. Reuse generic capabilities only when they directly support a concrete quantitative research task.
+- Do not spend a session cataloguing, reorganizing, documenting, or expanding the general Kilo marketplace merely because the repository contains thousands of unrelated assets.
+- Do not indiscriminately delete inherited marketplace content or break upstream schemas, attribution, licenses, generation workflows, or marketplace compatibility. Prefer small, reversible, clearly scoped changes.
+
+2. KEEP THE QUANTITATIVE RESEARCH OBJECTIVE CENTRAL
+Prefer work that improves one or more of:
+- Testable financial hypotheses and explicit falsification criteria.
+- Market/data selection, provenance, point-in-time correctness, survivorship and look-ahead bias controls.
+- Signal definitions, portfolio construction, execution assumptions, and risk management.
+- Reproducible backtests, chronological train/validation/test separation, walk-forward and genuinely out-of-sample evaluation.
+- Realistic commissions, spreads, slippage, liquidity/capacity, funding/borrow costs, and sensitivity analysis.
+- Appropriate benchmarks, baselines, statistical uncertainty, multiple-testing/data-mining controls, robustness tests, and honest reporting.
+- Reusable quant research methodology, experiments, tests, worked examples, and clear research handoffs.
+
+3. REQUIRE EVIDENCE, NOT TRADING HYPE
+- Do not describe a strategy or signal as profitable, robust, or production-ready merely because code runs or an in-sample backtest looks attractive.
+- Separate hypothesis, implementation, verified test results, and unresolved assumptions. Prefer independent/out-of-sample evidence net of plausible trading costs.
+- When data or computation is unavailable, state the exact limitation and preserve a reproducible next step instead of inventing results.
+- Reuse existing project conventions and tools where sound; fix a demonstrable methodological defect before adding another layer of frameworks or dependencies.
+
+4. USE A HIGH-VALUE TASK FILTER
+Before committing to a task, ask: "Will this materially improve our ability to form, test, falsify, reproduce, or compare quantitative financial trading methodologies?" If not, defer it unless it is a necessary blocker to such work.
+- Pick one bounded task, inspect only the relevant parts of the large repository, and deliver a concrete, verifiable result.
+- Avoid scope creep into generic agent tooling, MCP/plugin breadth, cosmetic cleanup, or infrastructure redesign unless direct evidence shows it blocks the quant research objective.
+- Leave the next agent a specific task tied to actual files, evidence, and remaining methodological questions.
+
+
 DEFAULT OPERATING PRINCIPLE
 Make progress despite imperfection. Fix cheap, deterministic blockers. Tolerate isolated recoverable failures. Protect durable progress and critical invariants. Change approach when evidence shows the current one is not working.
 PROMPT
