@@ -201,3 +201,27 @@ See `references/dataops_best_practices.md` for:
 
 ## Troubleshooting
 → See references/troubleshooting.md for details
+
+## Test Coverage
+
+This skill bundles a standard-library unit-test suite (no third-party test
+framework) under `tests/`, following the pattern established by
+`skills/quantitative-backtesting/tests/`. Run the test file directly with Python:
+
+```bash
+python3 skills/senior-data-engineer/tests/test_data_quality_validator.py
+```
+
+- `test_data_quality_validator.py` - stdlib-only tests for `scripts/data_quality_validator.py` (129 tests):
+  - Dataclasses: `ColumnSchema`, `DataSchema`, `ValidationResult`, `ColumnProfile`, `QualityScore` construction, defaults, and `asdict` serialization
+  - `TypeDetector`: type inference for email, uuid, phone, url, ipv4, datetime, integer, float, boolean, and string samples; pattern-detection thresholds
+  - `SchemaValidator`: not-null, uniqueness, data-type, value-range, string-length, pattern, allowed-values, primary-key, row-count, and missing-column checks, plus the `_validate_type`/`_validate_range`/`_validate_length`/`_validate_pattern`/`_validate_primary_key` helpers
+  - `AnomalyDetector`: z-score and IQR outlier detection, custom thresholds, non-numeric columns, and small-sample guards
+  - `DataProfiler`: null/unique statistics, numeric and string stats, top values, duplicate-row counting, and memory estimation
+  - `GreatExpectationsGenerator`: suite structure, table-level expectations, and type-specific column expectations (integer, float, email, date, string length, categorical sets, `mostly` computation)
+  - `QualityScoreCalculator`: completeness, uniqueness, validity, consistency, accuracy, and weighted overall scoring for populated and empty profiles
+  - `DataContractValidator`: contract validation (type mismatch, missing columns, nullability, SLA row bounds), type-compatibility groups, simple YAML parsing, and JSON/YAML contract loading
+  - `ReportGenerator`: text report sections and JSON report structure
+  - `DataLoader`: CSV, JSON (list/object/data-key/scalar), and JSONL loading, plus missing-file and unsupported-format errors
+  - `SchemaLoader`: full schema loading and default values
+  - CLI: subcommand exit codes, `--detect-anomalies` flag, text/JSON output, and log-message capture via a custom logging handler
