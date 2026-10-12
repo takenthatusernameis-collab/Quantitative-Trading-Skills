@@ -40,7 +40,22 @@ def parse_args():
 def run_backtest(data, strategy, args):
     """Run a vectorized backtest and return results with equity curve and trades."""
     signals = strategy.generate_signals(data)
-    close = data["close"]
+    if isinstance(data, dict):
+        common_index = None
+        for df in data.values():
+            if common_index is None:
+                common_index = df.index
+            else:
+                common_index = common_index.intersection(df.index)
+        common_index = common_index.sort_values()
+        close_list = []
+        for df in data.values():
+            close_list.append(df.reindex(common_index)["close"])
+        close = pd.concat(close_list, axis=1).mean(axis=1)
+    elif isinstance(data.columns, pd.MultiIndex):
+        close = data["close"].mean(axis=1)
+    else:
+        close = data["close"]
 
     # Guard against strategies that never take a position (e.g. a lookback
     # longer than the data window leaves every rolling indicator NaN, so the

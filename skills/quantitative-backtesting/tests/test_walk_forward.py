@@ -51,6 +51,44 @@ def _make_data(periods: int = 756, seed: int = 42) -> pd.DataFrame:
     )
 
 
+
+def _make_multiasset_multiindex(n=500, n_assets=4, seed=42):
+    """Create MultiIndex panel data for multi-asset testing."""
+    dates = pd.date_range("2020-01-01", periods=n, freq="B")
+    symbols = [f"ASSET_{i}" for i in range(n_assets)]
+    cols = pd.MultiIndex.from_product([["open", "high", "low", "close", "volume"], symbols])
+    df = pd.DataFrame(0, index=dates, columns=cols)
+    rng = np.random.default_rng(seed)
+    for i, sym in enumerate(symbols):
+        drift = 0.0005 * (i + 1)
+        rets = rng.normal(drift, 0.01, n)
+        prices = 100 * np.exp(np.cumsum(rets))
+        df[("open", sym)] = prices * rng.uniform(0.995, 1.005, n)
+        df[("high", sym)] = prices * rng.uniform(1.005, 1.02, n)
+        df[("low", sym)] = prices * rng.uniform(0.98, 0.995, n)
+        df[("close", sym)] = prices
+        df[("volume", sym)] = rng.integers(1_000_000, 10_000_000, n)
+    return df
+
+
+def _make_multiasset_dict(n=500, n_assets=4, seed=42):
+    """Create dict of DataFrames for multi-asset testing."""
+    dates = pd.date_range("2020-01-01", periods=n, freq="B")
+    symbols = [f"ASSET_{i}" for i in range(n_assets)]
+    data_dict = {}
+    rng = np.random.default_rng(seed)
+    for i, sym in enumerate(symbols):
+        drift = 0.0005 * (i + 1)
+        rets = rng.normal(drift, 0.01, n)
+        prices = 100 * np.exp(np.cumsum(rets))
+        data_dict[sym] = pd.DataFrame({
+            "open": prices * rng.uniform(0.995, 1.005, n),
+            "high": prices * rng.uniform(1.005, 1.02, n),
+            "low": prices * rng.uniform(0.98, 0.995, n),
+            "close": prices,
+            "volume": rng.integers(1_000_000, 10_000_000, n),
+        }, index=dates)
+    return data_dict
 def _factory(strategy_type: str, params: dict):
     import json
 
@@ -434,6 +472,9 @@ def main() -> int:
         ("run_parameter_optimization_cli", test_run_parameter_optimization_cli),
         ("run_monte_carlo_cli", test_run_monte_carlo_cli),
         ("parse_param_grid", test_parse_param_grid),
+        ("walk_forward_multi_asset_cross_sectional_momentum", test_walk_forward_multi_asset_cross_sectional_momentum),
+        ("walk_forward_multi_asset_dual_momentum", test_walk_forward_multi_asset_dual_momentum),
+        ("monte_carlo_multi_asset_integration", test_monte_carlo_multi_asset_integration),
     ]
 
     failures = 0
@@ -450,5 +491,98 @@ def main() -> int:
     return 1 if failures else 0
 
 
+def test_walk_forward_multi_asset_cross_sectional_momentum():
+    """Walk-forward analysis works with multi-asset panel data (MultiIndex)."""
+    data = _make_multiasset_multiindex(n=600, n_assets=5, seed=123)
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=lambda p: _factory("cross_sectional_momentum", p),
+        param_grid={
+            "lookback": [20, 40],
+            "top_quantile": [0.3, 0.4],
+            "bottom_quantile": [0.2, 0.1],
+        },
+        train_months=12,
+        test_months=3,
+        step_months=3,
+    )
+    assert results["summary"]["n_periods"] > 0
+    assert len(results["oos_returns"]) > 0
+    assert results["summary"]["total_oos_return"] is not None
+
+
+def test_walk_forward_multi_asset_dual_momentum():
+    """Walk-forward analysis works with multi-asset panel data for dual momentum."""
+    data = _make_multiasset_multiindex(n=800, n_assets=5, seed=456)
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=lambda p: _factory("dual_momentum", p),
+        param_grid={
+            "lookback": [60, 90],
+            "top_quantile": [0.3, 0.4],
+            "risk_free_rate": [0.0],
+        },
+        train_months=12,
+        test_months=6,
+        step_months=6,
+    )
+    assert results["summary"]["n_periods"] > 0
+    assert len(results["oos_returns"]) > 0
+
+def test_monte_carlo_multi_asset_integration():
+    """Monte Carlo simulation works with multi-asset strategy returns."""
+    data = _make_multiasset_multiindex(n=500, n_assets=5, seed=789)
+    strategy = build_strategy("cross_sectional_momentum",
+                               json.dumps({"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}))
+    signals = strategy.generate_signals(data)
+    from scripts.walk_forward import _calculate_strategy_returns
+    returns = _calculate_strategy_returns(data, signals, commission=0.0002, slippage=0.0001)
+    mc_results = monte_carlo_simulation(
+        base_returns=returns,
+        n_simulations=50,
+        confidence_levels=[0.95],
+        block_size=10,
+    )
+    assert "metric_distributions" in mc_results
+    assert "confidence_intervals" in mc_results
+    assert mc_results["n_simulations"] == 50
+
 if __name__ == "__main__":
     sys.exit(main())
+def test_walk_forward_multi_asset_cross_sectional_momentum():
+    """Walk-forward analysis works with multi-asset panel data (MultiIndex)."""
+    data = _make_multiasset_multiindex(n=600, n_assets=5, seed=123)
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=lambda p: _factory("cross_sectional_momentum", p),
+        param_grid={
+            "lookback": [20, 40],
+            "top_quantile": [0.3, 0.4],
+            "bottom_quantile": [0.2, 0.1],
+        },
+        train_months=12,
+        test_months=3,
+        step_months=3,
+    )
+    assert results["summary"]["n_periods"] > 0
+    assert len(results["oos_returns"]) > 0
+    assert results["summary"]["total_oos_return"] is not None
+
+
+def test_walk_forward_multi_asset_dual_momentum():
+    """Walk-forward analysis works with multi-asset panel data for dual momentum."""
+    data = _make_multiasset_multiindex(n=800, n_assets=5, seed=456)
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=lambda p: _factory("dual_momentum", p),
+        param_grid={
+            "lookback": [60, 90],
+            "top_quantile": [0.3, 0.4],
+            "risk_free_rate": [0.0],
+        },
+        train_months=12,
+        test_months=6,
+        step_months=6,
+    )
+    assert results["summary"]["n_periods"] > 0
+    assert len(results["oos_returns"]) > 0

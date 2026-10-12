@@ -24,7 +24,7 @@ from scripts.reporting import generate_tear_sheet
 
 
 def walk_forward_analysis(
-    data: pd.DataFrame,
+    data: Union[pd.DataFrame, dict],
     strategy_factory: Callable,
     param_grid: Dict[str, List[Any]],
     train_months: int = 12,
@@ -55,10 +55,34 @@ def walk_forward_analysis(
             - 'oos_returns': out-of-sample returns across all periods
             - 'summary': aggregate metrics
     """
-    if not isinstance(data.index, pd.DatetimeIndex):
-        raise ValueError("Data must be indexed by DatetimeIndex")
-
-    data = data.sort_index()
+    if isinstance(data, dict):
+        # For dict, get common index
+        common_index = None
+        for df in data.values():
+            if common_index is None:
+                common_index = df.index
+            else:
+                common_index = common_index.intersection(df.index)
+        if common_index is None or len(common_index) == 0:
+            raise ValueError("No common index found")
+        common_index = common_index.sort_values()
+        if not isinstance(common_index, pd.DatetimeIndex):
+            # Try to convert if possible
+            try:
+                common_index = pd.DatetimeIndex(common_index)
+            except Exception:
+                pass  # Keep as is
+    elif isinstance(data.columns, pd.MultiIndex):
+        if not isinstance(data.index, pd.DatetimeIndex):
+            try:
+                data.index = pd.DatetimeIndex(data.index)
+            except Exception:
+                pass
+        data = data.sort_index()
+    else:
+        if not isinstance(data.index, pd.DatetimeIndex):
+            raise ValueError("Data must be indexed by DatetimeIndex")
+        data = data.sort_index()
     start_date = data.index.min()
     end_date = data.index.max()
 
@@ -172,7 +196,7 @@ def walk_forward_analysis(
 
 
 def parameter_optimization(
-    data: pd.DataFrame,
+    data: Union[pd.DataFrame, dict],
     strategy_factory: Callable,
     param_grid: Dict[str, List[Any]],
     initial_capital: float = 100000,
@@ -195,10 +219,34 @@ def parameter_optimization(
     Returns:
         List of result dictionaries sorted by Sharpe ratio (descending)
     """
-    if not isinstance(data.index, pd.DatetimeIndex):
-        raise ValueError("Data must be indexed by DatetimeIndex")
-
-    data = data.sort_index()
+    if isinstance(data, dict):
+        # For dict, get common index
+        common_index = None
+        for df in data.values():
+            if common_index is None:
+                common_index = df.index
+            else:
+                common_index = common_index.intersection(df.index)
+        if common_index is None or len(common_index) == 0:
+            raise ValueError("No common index found")
+        common_index = common_index.sort_values()
+        if not isinstance(common_index, pd.DatetimeIndex):
+            # Try to convert if possible
+            try:
+                common_index = pd.DatetimeIndex(common_index)
+            except Exception:
+                pass  # Keep as is
+    elif isinstance(data.columns, pd.MultiIndex):
+        if not isinstance(data.index, pd.DatetimeIndex):
+            try:
+                data.index = pd.DatetimeIndex(data.index)
+            except Exception:
+                pass
+        data = data.sort_index()
+    else:
+        if not isinstance(data.index, pd.DatetimeIndex):
+            raise ValueError("Data must be indexed by DatetimeIndex")
+        data = data.sort_index()
     param_names = list(param_grid.keys())
     param_values = list(param_grid.values())
 
@@ -322,15 +370,35 @@ def signals_active(signals: pd.Series) -> bool:
 
 
 def _calculate_strategy_returns(
-    data: pd.DataFrame,
+    data: Union[pd.DataFrame, dict],
     signals: pd.Series,
     commission: float,
     slippage: float,
 ) -> pd.Series:
     """Calculate strategy returns from signals and market data."""
-    close = data["close"]
+    if isinstance(data, dict):
+        # For dict of dataframes, compute equal-weighted portfolio returns
+        # Use first key's index as reference
+        common_index = None
+        for df in data.values():
+            if common_index is None:
+                common_index = df.index
+            else:
+                common_index = common_index.intersection(df.index)
+        common_index = common_index.sort_values()
+        rets = []
+        for df in data.values():
+            rets.append(df.reindex(common_index)["close"].pct_change())
+        raw_returns = pd.concat(rets, axis=1).mean(axis=1)
+    elif isinstance(data.columns, pd.MultiIndex):
+        # For panel data, compute equal-weighted portfolio returns
+        close = data["close"]
+        raw_returns = close.pct_change().mean(axis=1)
+    else:
+        close = data["close"]
+        raw_returns = close.pct_change()
+
     positions = signals.shift(1)  # Trade at next period's open
-    raw_returns = close.pct_change()
 
     # Transaction costs: apply on position changes
     position_changes = positions.diff().abs()
@@ -548,7 +616,7 @@ def monte_carlo_simulation(
 
 
 def cpcv_analysis(
-    data: pd.DataFrame,
+    data: Union[pd.DataFrame, dict],
     strategy_factory: Callable,
     param_grid: Dict[str, List[Any]],
     n_splits: int = 10,
@@ -589,10 +657,34 @@ def cpcv_analysis(
             - 'summary': aggregate metrics
             - 'param_stability': parameter stability across folds
     """
-    if not isinstance(data.index, pd.DatetimeIndex):
-        raise ValueError("Data must be indexed by DatetimeIndex")
-
-    data = data.sort_index()
+    if isinstance(data, dict):
+        # For dict, get common index
+        common_index = None
+        for df in data.values():
+            if common_index is None:
+                common_index = df.index
+            else:
+                common_index = common_index.intersection(df.index)
+        if common_index is None or len(common_index) == 0:
+            raise ValueError("No common index found")
+        common_index = common_index.sort_values()
+        if not isinstance(common_index, pd.DatetimeIndex):
+            # Try to convert if possible
+            try:
+                common_index = pd.DatetimeIndex(common_index)
+            except Exception:
+                pass  # Keep as is
+    elif isinstance(data.columns, pd.MultiIndex):
+        if not isinstance(data.index, pd.DatetimeIndex):
+            try:
+                data.index = pd.DatetimeIndex(data.index)
+            except Exception:
+                pass
+        data = data.sort_index()
+    else:
+        if not isinstance(data.index, pd.DatetimeIndex):
+            raise ValueError("Data must be indexed by DatetimeIndex")
+        data = data.sort_index()
     n_obs = len(data)
 
     if n_splits < 2:

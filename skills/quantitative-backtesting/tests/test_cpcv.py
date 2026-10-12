@@ -21,6 +21,7 @@ from walk_forward import (  # noqa: E402
     signals_active,
     _calculate_cpcv_summary,
     run_cpcv,
+    _make_strategy_factory,
 )
 
 
@@ -40,6 +41,24 @@ def _make_sample_data(n_days: int = 500) -> pd.DataFrame:
     }, index=dates)
 
 
+
+def _make_multiasset_multiindex(n=500, n_assets=4, seed=42):
+    """Create MultiIndex panel data for multi-asset testing."""
+    dates = pd.date_range("2020-01-01", periods=n, freq="B")
+    symbols = [f"ASSET_{i}" for i in range(n_assets)]
+    cols = pd.MultiIndex.from_product([["open", "high", "low", "close", "volume"], symbols])
+    df = pd.DataFrame(0, index=dates, columns=cols)
+    rng = np.random.default_rng(seed)
+    for i, sym in enumerate(symbols):
+        drift = 0.0005 * (i + 1)
+        rets = rng.normal(drift, 0.01, n)
+        prices = 100 * np.exp(np.cumsum(rets))
+        df[("open", sym)] = prices * rng.uniform(0.995, 1.005, n)
+        df[("high", sym)] = prices * rng.uniform(1.005, 1.02, n)
+        df[("low", sym)] = prices * rng.uniform(0.98, 0.995, n)
+        df[("close", sym)] = prices
+        df[("volume", sym)] = rng.integers(1_000_000, 10_000_000, n)
+    return df
 def _make_strategy_factory(strategy_type: str = "sma_crossover"):
     """Create a simple strategy factory for testing."""
     sys.path.insert(0, str(SKILLS_DIR / "scripts"))
@@ -303,6 +322,8 @@ def main() -> int:
         ("signals_active_helper", test_signals_active_helper),
         ("cpcv_different_strategies", test_cpcv_different_strategies),
         ("cpcv_cli_help", test_cpcv_cli_help),
+        ("cpcv_multi_asset_cross_sectional_momentum", test_cpcv_multi_asset_cross_sectional_momentum),
+        ("cpcv_multi_asset_dual_momentum", test_cpcv_multi_asset_dual_momentum),
     ]
 
     failures = 0
@@ -319,5 +340,81 @@ def main() -> int:
     return 1 if failures else 0
 
 
+def test_cpcv_multi_asset_cross_sectional_momentum():
+    """CPCV works with multi-asset panel data."""
+    data = _make_multiasset_multiindex(n=500, n_assets=5, seed=42)
+    strategy_factory = _make_strategy_factory("cross_sectional_momentum")
+    param_grid = {
+        "lookback": [20, 30],
+        "top_quantile": [0.3, 0.4],
+        "bottom_quantile": [0.2, 0.1],
+    }
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+    )
+    assert len(results["folds"]) > 0
+    assert len(results["oos_returns"]) > 0
+
+
+def test_cpcv_multi_asset_dual_momentum():
+    """CPCV works with multi-asset panel data for dual momentum."""
+    data = _make_multiasset_multiindex(n=600, n_assets=5, seed=123)
+    strategy_factory = _make_strategy_factory("dual_momentum")
+    param_grid = {
+        "lookback": [40, 60],
+        "top_quantile": [0.3, 0.4],
+        "risk_free_rate": [0.0],
+    }
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=3,
+        test_size=0.3,
+    )
+    assert len(results["folds"]) > 0
+    assert len(results["oos_returns"]) > 0
 if __name__ == "__main__":
     sys.exit(main())
+def test_cpcv_multi_asset_cross_sectional_momentum():
+    """CPCV works with multi-asset panel data."""
+    data = _make_multiasset_multiindex(n=500, n_assets=5, seed=42)
+    strategy_factory = _make_strategy_factory("cross_sectional_momentum")
+    param_grid = {
+        "lookback": [20, 30],
+        "top_quantile": [0.3, 0.4],
+        "bottom_quantile": [0.2, 0.1],
+    }
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+    )
+    assert len(results["folds"]) > 0
+    assert len(results["oos_returns"]) > 0
+
+
+def test_cpcv_multi_asset_dual_momentum():
+    """CPCV works with multi-asset panel data for dual momentum."""
+    data = _make_multiasset_multiindex(n=600, n_assets=5, seed=123)
+    strategy_factory = _make_strategy_factory("dual_momentum")
+    param_grid = {
+        "lookback": [40, 60],
+        "top_quantile": [0.3, 0.4],
+        "risk_free_rate": [0.0],
+    }
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=3,
+        test_size=0.3,
+    )
+    assert len(results["folds"]) > 0
+    assert len(results["oos_returns"]) > 0

@@ -515,6 +515,8 @@ def main() -> int:
         ("parse_args_custom_values", test_parse_args_custom_values),
         ("parse_args_invalid_commission_type", test_parse_args_invalid_commission_type),
         ("parse_args_invalid_initial_capital_type", test_parse_args_invalid_initial_capital_type),
+        ("run_backtest_multi_asset_cross_sectional_momentum", test_run_backtest_multi_asset_cross_sectional_momentum),
+        ("run_backtest_multi_asset_dual_momentum", test_run_backtest_multi_asset_dual_momentum),
     ]
 
     failures = 0
@@ -531,5 +533,64 @@ def main() -> int:
     return 1 if failures else 0
 
 
+def _make_multiasset_multiindex(n=300, n_assets=4, seed=42):
+    """Create MultiIndex panel data for multi-asset testing."""
+    dates = pd.date_range("2020-01-01", periods=n, freq="B")
+    symbols = [f"ASSET_{i}" for i in range(n_assets)]
+    cols = pd.MultiIndex.from_product([["open", "high", "low", "close", "volume"], symbols])
+    df = pd.DataFrame(0, index=dates, columns=cols)
+    rng = np.random.default_rng(seed)
+    for i, sym in enumerate(symbols):
+        drift = 0.001 * (i + 1)
+        rets = rng.normal(drift, 0.015, n)
+        prices = 100 * np.exp(np.cumsum(rets))
+        df[("open", sym)] = prices * rng.uniform(0.995, 1.005, n)
+        df[("high", sym)] = prices * rng.uniform(1.005, 1.02, n)
+        df[("low", sym)] = prices * rng.uniform(0.98, 0.995, n)
+        df[("close", sym)] = prices
+        df[("volume", sym)] = rng.integers(1_000_000, 10_000_000, n)
+    return df
+
+
+def test_run_backtest_multi_asset_cross_sectional_momentum():
+    """Run backtest works with multi-asset cross-sectional momentum."""
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    strategy = build_strategy("cross_sectional_momentum",
+                             '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}')
+    results = run_backtest(data, strategy, _Args())
+    assert "equity_curve" in results
+    assert "returns" in results
+    assert len(results["returns"]) > 0
+
+
+def test_run_backtest_multi_asset_dual_momentum():
+    """Run backtest works with multi-asset dual momentum."""
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=123)
+    strategy = build_strategy("dual_momentum",
+                             '{"lookback": 60, "top_quantile": 0.3, "risk_free_rate": 0.0}')
+    results = run_backtest(data, strategy, _Args())
+    assert "equity_curve" in results
+    assert "returns" in results
+    assert len(results["returns"]) > 0
 if __name__ == "__main__":
     sys.exit(main())
+def test_run_backtest_multi_asset_cross_sectional_momentum():
+    """Run backtest works with multi-asset cross-sectional momentum."""
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    strategy = build_strategy("cross_sectional_momentum",
+                             '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}')
+    results = run_backtest(data, strategy, _Args())
+    assert "equity_curve" in results
+    assert "returns" in results
+    assert len(results["returns"]) > 0
+
+
+def test_run_backtest_multi_asset_dual_momentum():
+    """Run backtest works with multi-asset dual momentum."""
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=123)
+    strategy = build_strategy("dual_momentum",
+                             '{"lookback": 60, "top_quantile": 0.3, "risk_free_rate": 0.0}')
+    results = run_backtest(data, strategy, _Args())
+    assert "equity_curve" in results
+    assert "returns" in results
+    assert len(results["returns"]) > 0
