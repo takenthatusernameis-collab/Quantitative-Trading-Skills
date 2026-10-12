@@ -1,42 +1,42 @@
 # Agent Handoff - Session Summary
 
 ## What changed
-- Added `skills/skill-creator/tests/__init__.py` (empty package marker)
-- Added `skills/skill-creator/tests/test_init_skill.py` — 6 unit tests for `scripts/init_skill.py`:
-  - `test_init_skill_creates_directory` — directory creation and return value
-  - `test_init_skill_creates_skill_md` — SKILL.md with YAML frontmatter (name + description)
-  - `test_init_skill_creates_resource_dirs` — scripts/, references/, assets/ with example files
-  - `test_init_skill_example_script_is_executable` — generated example.py has executable bit
-  - `test_init_skill_rejects_existing_directory` — refuses to overwrite existing skill
-  - `test_title_case_skill_name` — hyphen-to-Title-Case conversion
-- Added `skills/skill-creator/tests/test_quick_validate.py` — 8 unit tests for `scripts/quick_validate.py`:
-  - Accepts a freshly scaffolded valid skill
-  - Rejects missing SKILL.md, missing frontmatter, missing name/description
-  - Rejects non-hyphen-case names, leading/trailing hyphens, angle brackets in description
-- Added `skills/skill-creator/tests/test_package_skill.py` — 7 unit tests for `scripts/package_skill.py`:
-  - Zip creation for valid skill with expected filename
-  - Zip contents include SKILL.md, example script, reference doc, asset placeholder
-  - Rejects nonexistent paths, file paths, directories missing SKILL.md, invalid skills
-  - Default output-dir behavior (zip written to cwd)
-- Updated `skills/skill-creator/SKILL.md` with a "Test Coverage" section documenting all three suites
+- Added `skills/splunk-ingest-processor-setup/tests/__init__.py` (empty package marker)
+- Added `skills/splunk-ingest-processor-setup/tests/test_render_assets.py` — 18 unit tests for `scripts/render_assets.py`:
+  - `csv_list` strips whitespace and drops empty entries
+  - `split_specs` passes through to `csv_list`
+  - `safe_name` replaces whitespace/symbols, preserves allowed chars (`:` `.` `-` `_`), falls back to `unnamed`
+  - `parse_spec_list` parses name + key=value fields, treats bare fields as `true`, splits multiple specs by comma, drops empty items
+  - `validate_secret_fields` rejects raw `password`/`secret`/`token` keys, allows `*_file` suffixes, rejects raw secret-like values, accepts bool-like and path-like values
+- Added `skills/splunk-ingest-processor-setup/tests/test_render_helpers.py` — 12 unit tests for the pure render functions:
+  - `render_source_type` includes name and sample raw/csv paths, sanitizes unsafe chars
+  - `render_lifecycle` produces apply and rollback runbooks
+  - `render_known_issues` lists every known issue guardrail and every AFE region
+  - `render_coverage` emits a JSON array of feature/coverage rows with valid statuses
+  - `render_readiness` renders findings (or the no-blocking-findings line)
+  - `render_ui_handoff` lists source types, destinations, and pipelines
+  - `render_monitoring_searches` includes sourcetype and index clauses plus mstats aggregation
+  - `render_usage_handoff` mentions DLQ and branch fan-out
+- Updated `skills/splunk-ingest-processor-setup/SKILL.md` with a "Test Coverage" section documenting both suites
 
 ## What was actually verified
-- `python3 skills/skill-creator/tests/test_init_skill.py`: 6/6 passed
-- `python3 skills/skill-creator/tests/test_quick_validate.py`: 8/8 passed
-- `python3 skills/skill-creator/tests/test_package_skill.py`: 7/7 passed
-- All 21 new tests pass; all 46 quantitative-backtesting tests still pass (regression check)
+- `python3 skills/splunk-ingest-processor-setup/tests/test_render_assets.py`: 18/18 passed
+- `python3 skills/splunk-ingest-processor-setup/tests/test_render_helpers.py`: 12/12 passed
+- `bash skills/splunk-ingest-processor-setup/scripts/smoke_offline.sh`: PASS (offline smoke test still passes)
+- Regression check on `quantitative-backtesting`: all 46 tests still pass (10 + 5 + 5 + 6 + 12 + 8)
 - Tests use stdlib only (unittest-style main() runners), no third-party test framework
-- Manual smoke test: `init_skill.py` scaffolds a skill, `quick_validate.py` accepts it, `package_skill.py` produces a valid zip
 
 ## What remains unresolved
 - Changes are NOT committed (per repo policy: only commit when explicitly requested). Working tree contains the new tests and SKILL.md update.
-- `skills/skill-creator/scripts/quick_validate.py` is a minimal validator; a stricter validator exists elsewhere in the repo (bin/) but is out of scope for this skill's bundled tests.
+- `render_assets.py` calls `spl2_pipeline_kit.py` via subprocess in `run_kit`; that path is not covered by unit tests (only by `smoke_offline.sh`). It is out of scope for the bundled tests.
+- `smoke_offline.sh` line 37 uses `rg` (ripgrep), which is not installed in this environment; the script still reports OK because the `if rg ...` guard falls through. This is pre-existing and unrelated to the new tests.
 
 ## Which approaches have already failed and why
-- `test_package_skill_default_output_dir` initially failed with `NameError: name 'os' is not defined` — a bug in the test itself (missing `import os`), fixed by adding the import. The script under test was correct.
+- `test_validate_secret_fields_allows_bool_like_values` initially failed: the test assumed `token: "true"` would be allowed, but `validate_secret_fields` rejects any key matching the secret regex (including `token`) regardless of value. Fixed by testing with a non-secret key (`note`) and bool-like value instead. The script under test was correct.
+- `test_render_source_type_contains_name_and_sample_paths` initially failed: assumed `safe_name` would convert `:` to `_`, but `safe_name` preserves `:`. Fixed the assertion to expect `samples/aws:cloudtrail.raw`. The script under test was correct.
 - No failures in the scripts under test.
 
 ## One precise next task, with relevant evidence and constraints
-**Task:** The `skill-creator` skill now has full unit test coverage for its three bundled scripts (init_skill, quick_validate, package_skill), matching the pattern established by `quantitative-backtesting`. If continuing the test-coverage theme, the next highest-value target is another skill with executable scripts but no tests — e.g. `skills/cortex-code` (6 scripts), `skills/kafka-streams-programming` (4 scripts), or `skills/splunk-ingest-processor-setup` (4 scripts). Verify the scripts' dependencies are available in this environment before writing tests, and follow the existing stdlib-unittest pattern in `skills/quantitative-backtesting/tests/`.
+**Task:** The `splunk-ingest-processor-setup` skill now has unit test coverage for its main Python script, matching the pattern established by `quantitative-backtesting` and `skill-creator`. If continuing the test-coverage theme, the next highest-value target is another skill with executable scripts but no tests — e.g. `skills/cortex-code` (6 Python scripts, some already have `__pycache__` suggesting prior runs), `skills/kafka-streams-programming` (4 shell scripts), or `skills/splunk-spl2-pipeline-kit` (the dependency `render_assets.py` shells out to). Verify the scripts' dependencies are available in this environment before writing tests, and follow the existing stdlib-unittest pattern in `skills/quantitative-backtesting/tests/`.
 
-(End of file - total 38 lines)
+(End of file - total 55 lines)

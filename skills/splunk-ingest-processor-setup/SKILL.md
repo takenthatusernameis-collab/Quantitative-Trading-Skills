@@ -98,3 +98,49 @@ The default output directory is `splunk-ingest-processor-rendered/`:
   delivery guarantees under high back pressure or destination outages,
   single-browser-session editing, forwarder `useACK=false`, HEC indexer
   acknowledgement off, and CIDR lookup matching unsupported.
+
+## Test Coverage
+
+The `tests/` directory contains unit tests for `scripts/render_assets.py`,
+using only the Python standard library (no third-party test framework
+required). The bundled shell scripts (`setup.sh`, `validate.sh`,
+`smoke_offline.sh`) are exercised by `validate.sh` itself.
+
+Run the full suite with:
+
+```bash
+python3 skills/splunk-ingest-processor-setup/tests/test_render_assets.py
+python3 skills/splunk-ingest-processor-setup/tests/test_render_helpers.py
+```
+
+### test_render_assets Tests
+**File:** `tests/test_render_assets.py`
+
+Tests cover:
+- `csv_list` strips whitespace and drops empty entries
+- `split_specs` passes through to `csv_list`
+- `safe_name` replaces whitespace and symbols, preserves allowed chars
+  (`:` `.` `-` `_`), and falls back to `unnamed` for blank input
+- `parse_spec_list` parses name + key=value fields, treats bare fields as
+  `true`, splits multiple specs by comma, and drops empty items
+- `validate_secret_fields` rejects raw `password`/`secret`/`token` keys,
+  allows `*_file` suffixes, rejects raw secret-like values, and accepts
+  bool-like values and path-like values
+
+### test_render_helpers Tests
+**File:** `tests/test_render_helpers.py`
+
+Tests cover:
+- `render_source_type` includes the name and sample raw/csv paths, and
+  sanitizes unsafe characters
+- `render_lifecycle` produces apply and rollback runbooks
+- `render_known_issues` lists every known issue guardrail and every AFE region
+- `render_coverage` emits a JSON array of feature/coverage rows with valid
+  statuses
+- `render_readiness` renders findings (or the no-blocking-findings line)
+- `render_ui_handoff` lists source types, destinations, and pipelines
+- `render_monitoring_searches` includes sourcetype and index clauses plus
+  mstats aggregation
+- `render_usage_handoff` mentions DLQ and branch fan-out
+
+All 30 tests (18 + 12) pass.
