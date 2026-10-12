@@ -139,11 +139,26 @@ The ratio of the 90th percentile gain to the 10th percentile loss.
 win_rate = winning_trades / total_trades
 ```
 
+### Average Win / Average Loss
+
+```
+avg_win = mean(return[t | pnl[t] > 0])
+avg_loss = abs(mean(return[t | pnl[t] < 0]))
+```
+
+The mean **return** (a fraction of entry price, e.g. 0.05 = 5%) over winning
+and losing trades respectively. These are *not* PnL averages: a trade with
+`pnl = 1000` and `return = 0.01` contributes `0.01` to `avg_win`, not `1000`.
+The values are displayed as percentages in reports.
+
 ### Profit Factor
 
 ```
 profit_factor = sum(pnl[pnl > 0]) / abs(sum(pnl[pnl < 0]))
 ```
+
+Gross profit divided by gross loss, computed from **PnL** (currency units).
+A value above 1 indicates the strategy's gross gains exceed its gross losses.
 
 ### Expectancy
 
@@ -151,7 +166,16 @@ profit_factor = sum(pnl[pnl > 0]) / abs(sum(pnl[pnl < 0]))
 expectancy = mean(pnl)
 ```
 
-The average profit (or loss) per trade.
+The average profit (or loss) per trade, in currency units.
+
+### Average Trade Duration
+
+```
+avg_trade_duration = mean((exit_date - entry_date).days)
+```
+
+The mean calendar days between entry and exit. Previously this incorrectly
+averaged per-trade *returns*; it now averages trade durations.
 
 ## Benchmark Comparison
 

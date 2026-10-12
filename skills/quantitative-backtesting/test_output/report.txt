@@ -27,9 +27,9 @@ Total Trades:          5
 Winning Trades:        3
 Losing Trades:         2
 Win Rate:              60.00%
-Avg Win:               577.46%
-Avg Loss:              503.14%
-Profit Factor:         1.15
+Avg Win:               5.46%
+Avg Loss:              5.39%
+Profit Factor:         1.72
 Expectancy:            1.4522
 
 ============================================================

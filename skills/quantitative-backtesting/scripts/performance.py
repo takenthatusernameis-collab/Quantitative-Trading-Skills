@@ -147,27 +147,50 @@ def calculate_metrics(
 
     # --- Trade-Level Analytics ---
     if trades:
-        trade_pnls = [t.get("pnl", 0) for t in trades]
-        trade_returns = [t.get("return", 0) for t in trades if "return" in t]
+        # Trade PnL is an absolute currency amount; trade return is a fraction
+        # of entry price. These are different units and must not be conflated:
+        # avg_win/avg_loss are return fractions (displayed as %), while
+        # expectancy/profit_factor are PnL aggregates (currency units). Each
+        # trade is classified once by its PnL so a missing `return` on one trade
+        # cannot desync the win/loss buckets.
+        trade_pnls: list[float] = []
+        win_returns: list[float] = []
+        loss_returns: list[float] = []
+        durations: list[float] = []
+        for trade in trades:
+            pnl = float(trade.get("pnl", 0))
+            trade_pnls.append(pnl)
+            trade_return = trade.get("return")
+            if pnl > 0:
+                if trade_return is not None:
+                    win_returns.append(float(trade_return))
+            elif pnl < 0:
+                if trade_return is not None:
+                    loss_returns.append(abs(float(trade_return)))
+            entry = trade.get("entry_date")
+            exit_ = trade.get("exit_date")
+            if entry and exit_:
+                durations.append(
+                    (pd.Timestamp(exit_) - pd.Timestamp(entry)).days
+                )
+
         metrics["total_trades"] = len(trades)
         metrics["winning_trades"] = sum(1 for p in trade_pnls if p > 0)
         metrics["losing_trades"] = sum(1 for p in trade_pnls if p < 0)
         metrics["win_rate"] = float(
             metrics["winning_trades"] / len(trades) if trades else 0
         )
-        metrics["avg_win"] = float(
-            np.mean([p for p in trade_pnls if p > 0]) if any(p > 0 for p in trade_pnls) else 0.0
-        )
-        metrics["avg_loss"] = float(
-            np.mean([abs(p) for p in trade_pnls if p < 0]) if any(p < 0 for p in trade_pnls) else 0.0
-        )
-        if metrics["avg_loss"] > 0:
-            metrics["profit_factor"] = float(metrics["avg_win"] / metrics["avg_loss"])
+        metrics["avg_win"] = float(np.mean(win_returns)) if win_returns else 0.0
+        metrics["avg_loss"] = float(np.mean(loss_returns)) if loss_returns else 0.0
+        gross_profit = sum(p for p in trade_pnls if p > 0)
+        gross_loss = abs(sum(p for p in trade_pnls if p < 0))
+        if gross_loss > 0:
+            metrics["profit_factor"] = float(gross_profit / gross_loss)
         else:
             metrics["profit_factor"] = 0.0
         metrics["expectancy"] = float(np.mean(trade_pnls))
-        if trade_returns:
-            metrics["avg_trade_duration"] = float(np.mean(trade_returns))
+        if durations:
+            metrics["avg_trade_duration"] = float(np.mean(durations))
 
     # --- Benchmark Comparison ---
     if benchmark_returns is not None and len(benchmark_returns) > 0:

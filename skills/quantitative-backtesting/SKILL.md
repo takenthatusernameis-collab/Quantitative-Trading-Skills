@@ -168,3 +168,44 @@ Risk Metrics:
 - **Inspired by**: Quantitative trading frameworks from QuantConnect, Zipline, and vectorbt
 - **Key Libraries**: pandas, numpy, vectorbt, empyrical, pyfolio
 - **Methodology**: Based on Marcos López de Prado's "Advances in Financial Machine Learning"
+
+## Test Coverage
+
+This skill bundles a standard-library unit-test suite under `tests/` (pandas/numpy
+are the only third-party imports, required by the scripts under test). Run each
+file directly with Python:
+
+```bash
+python3 skills/quantitative-backtesting/tests/test_data_loader.py
+python3 skills/quantitative-backtesting/tests/test_performance.py
+python3 skills/quantitative-backtesting/tests/test_reporting.py
+python3 skills/quantitative-backtesting/tests/test_run_backtest.py
+python3 skills/quantitative-backtesting/tests/test_strategy_builder.py
+python3 skills/quantitative-backtesting/tests/test_walk_forward.py
+```
+
+- `test_data_loader.py` - CSV/Parquet loading, column/date handling, symbol
+  filtering, and `validate_data` quality checks (missing columns, non-positive
+  prices, high < low, duplicate dates, short series).
+- `test_performance.py` - `calculate_metrics` and `_annualization_factor`:
+  total/annualized return, volatility, Sharpe/Sortino/Calmar, drawdown, VaR/CVaR,
+  skew/kurtosis, and **trade-level metrics**. The trade suite is a regression
+  guard for a defect where `avg_win`/`avg_loss`/`avg_trade_duration` were
+  computed from `pnl` (currency) and then formatted as percent, producing
+  impossible values such as "Avg Win: 577.46%". They are now derived from
+  per-trade `return` fractions, `avg_trade_duration` is calendar days, and
+  `profit_factor` follows the documented `sum(pnl>0)/abs(sum(pnl<0))` formula.
+- `test_reporting.py` - `generate_report` file/header/trade-section output and
+  `generate_tear_sheet` HTML + JSON summary generation (matplotlib optional).
+  Uses the stdlib `unittest` framework rather than the custom runner.
+- `test_run_backtest.py` - `run_backtest` end-to-end on synthetic data, the
+  `signals_active` flat-strategy guard, and `parse_args` CLI behavior.
+- `test_strategy_builder.py` - strategy registry, `build_strategy`, defaults,
+  and binary long/flat signal generation with real crossovers.
+- `test_walk_forward.py` - walk-forward windowing, parameter grid parsing, and
+  train/test separation.
+
+The canonical rendered outputs in `test_output/` are regenerated from
+`assets/example_data/sample_ohlcv.csv` via
+`python3 skills/quantitative-backtesting/scripts/run_backtest.py` and serve as
+a pinned regression snapshot; they are not proof of profitability.
