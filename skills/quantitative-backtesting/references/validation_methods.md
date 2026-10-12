@@ -164,13 +164,107 @@ print(f"95% CI for Sharpe: [{sharpe_ci[0]:.2f}, {sharpe_ci[1]:.2f}]")
 
 ## Combinatorially Purged Cross-Validation (CPCV)
 
-CPCV is referenced in the SKILL.md as an advanced technique but is not yet
-implemented in the scripts. The recommended approach:
+`cpcv_analysis` implements Combinatorially Purged Cross-Validation (CPCV) as
+described in Lopez de Prado's *Advances in Financial Machine Learning*. CPCV
+addresses look-ahead bias and multiple-testing issues by:
 
-- Purge overlapping training observations to prevent look-ahead bias.
-- Use combinatorial splits to generate multiple train/test folds.
-- Evaluate parameter stability across folds rather than relying on a single
-  split.
+1. Splitting data into `n_splits` sequential groups
+2. For each fold, using `n_splits-1` groups for training, 1 group for testing
+3. Purging (removing) observations around the test set from training to prevent
+   look-ahead bias (e.g., due to overlapping rolling windows)
+4. Adding an embargo period after the test set to prevent contamination
 
-For implementation guidance, see Lopez de Prado's *Advances in Financial
-Machine Learning*.
+### Parameters
+
+| Parameter       | Default | Description                                       |
+| --------------- | ------- | ------------------------------------------------- |
+| `n_splits`      | 10      | Number of sequential groups to split data into    |
+| `test_size`     | 0.1     | Fraction of each group to use as test set         |
+| `purge_size`    | 0.0     | Fraction of observations to purge from training   |
+| `embargo_size`  | 0.0     | Fraction of observations to embargo after test    |
+
+### Algorithm
+
+1. Split the data into `n_splits` sequential groups of equal size.
+2. For each group `i` (0 to `n_splits-1`):
+   a. Define test set as first `test_size` fraction of group `i`.
+   b. Define training set as all other groups, with:
+      - **Purge**: Remove `purge_size` observations before test set from
+        preceding groups' training data.
+      - **Embargo**: Remove `embargo_size` observations after test set from
+        following groups' training data.
+   c. Grid search over `param_grid` on training set, select best params by Sharpe.
+   d. Evaluate best params on test set, record out-of-sample returns.
+3. Aggregate results across all folds.
+
+### Output
+
+The result dictionary contains:
+
+- `folds`: Per-fold details including train/test boundaries, selected
+  parameters, and test returns.
+- `best_params_per_fold`: List of optimal parameters for each fold.
+- `oos_returns`: Concatenated out-of-sample returns across all folds.
+- `summary`: Aggregate metrics (total return, Sharpe, volatility, win rate,
+  parameter stability, overfitting risk).
+- `param_stability`: Per-parameter stability analysis with `unique_values`,
+  `most_common`, and `stability_ratio`.
+
+### Parameter Stability
+
+For each parameter, compute:
+
+```
+stability_ratio = 1 - unique_values / total_folds
+```
+
+A high stability ratio (close to 1.0) means the same parameter value is
+selected across most folds, suggesting robustness. A low ratio indicates
+the optimizer is chasing noise.
+
+### Overfitting Risk Classification
+
+| Average Stability | Risk Level |
+| ----------------- | ---------- |
+| >= 0.5            | low        |
+| 0.3 to 0.5        | medium     |
+| < 0.3             | high       |
+
+### Usage Example
+
+```python
+from walk_forward import cpcv_analysis
+from strategy_builder import build_strategy
+import json
+
+def strategy_factory(params):
+    return build_strategy("sma_crossover", json.dumps(params))
+
+results = cpcv_analysis(
+    data=ohlcv_data,
+    strategy_factory=strategy_factory,
+    param_grid={"fast_period": [5, 10, 20], "slow_period": [15, 30, 50]},
+    n_splits=10,
+    test_size=0.1,
+    purge_size=0.02,  # Purge ~2% of group size
+    embargo_size=0.02,  # Embargo ~2% of group size
+)
+
+print(f"OOS Sharpe: {results['summary']['oos_sharpe']:.2f}")
+print(f"Parameter Stability: {results['summary']['avg_param_stability']:.2f}")
+print(f"Overfitting Risk: {results['summary']['overfitting_risk']}")
+```
+
+### CLI Usage
+
+```bash
+python3 scripts/walk_forward.py cpcv \
+    --data data.csv \
+    --strategy sma_crossover \
+    --param-grid '{"fast_period": [5, 10], "slow_period": [15, 20]}' \
+    --n-splits 10 \
+    --test-size 0.1 \
+    --purge-size 0.02 \
+    --embargo-size 0.02 \
+    --output results/
+```

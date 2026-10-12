@@ -317,7 +317,8 @@ def signals_active(signals: pd.Series) -> bool:
     at 0) produces no trades and meaningless zero returns. Callers should
     skip such parameter sets rather than ranking them as "optimal".
     """
-    return bool((signals != 0).any())
+    # NaN != 0 evaluates to True in pandas, so we must explicitly exclude NaN
+    return bool((signals.notna() & (signals != 0)).any())
 
 
 def _calculate_strategy_returns(
@@ -527,6 +528,338 @@ def monte_carlo_simulation(
         "n_simulations": n_simulations,
         "base_observations": n_obs,
     }
+
+
+def cpcv_analysis(
+    data: pd.DataFrame,
+    strategy_factory: Callable,
+    param_grid: Dict[str, List[Any]],
+    n_splits: int = 10,
+    test_size: float = 0.1,
+    purge_size: float = 0.0,
+    embargo_size: float = 0.0,
+    initial_capital: float = 100000,
+    commission: float = 0.0002,
+    slippage: float = 0.0001,
+) -> Dict[str, Any]:
+    """
+    Perform Combinatorially Purged Cross-Validation (CPCV).
+
+    CPCV addresses look-ahead bias and multiple-testing issues by:
+    1. Splitting data into n_splits sequential groups
+    2. For each fold, using n_splits-1 groups for training, 1 group for testing
+    3. Purging (removing) observations around test set from training to prevent
+       look-ahead bias (e.g., due to overlapping rolling windows)
+    4. Adding embargo period after test set to prevent contamination
+
+    Args:
+        data: DataFrame with OHLCV data indexed by date
+        strategy_factory: Function that creates a strategy from params dict
+        param_grid: Dictionary of parameter name -> list of values to search
+        n_splits: Number of sequential groups to split data into
+        test_size: Fraction of each group to use as test set (within the group)
+        purge_size: Fraction of observations to purge from training around test
+        embargo_size: Fraction of observations to embargo after test set
+        initial_capital: Starting portfolio value
+        commission: Commission rate per trade
+        slippage: Slippage rate per trade
+
+    Returns:
+        Dictionary with CPCV results including:
+            - 'folds': list of fold results
+            - 'best_params_per_fold': list of optimal params per fold
+            - 'oos_returns': out-of-sample returns across all folds
+            - 'summary': aggregate metrics
+            - 'param_stability': parameter stability across folds
+    """
+    if not isinstance(data.index, pd.DatetimeIndex):
+        raise ValueError("Data must be indexed by DatetimeIndex")
+
+    data = data.sort_index()
+    n_obs = len(data)
+
+    if n_splits < 2:
+        raise ValueError("n_splits must be at least 2")
+
+    # Split indices into n_splits sequential groups
+    group_size = n_obs // n_splits
+    group_indices = []
+    for i in range(n_splits):
+        start = i * group_size
+        end = (i + 1) * group_size if i < n_splits - 1 else n_obs
+        group_indices.append((start, end))
+
+    # For each group, create a test set (fraction test_size of the group)
+    # and training set (all other groups, purged)
+    folds = []
+    purge_n = int(purge_size * group_size)
+    embargo_n = int(embargo_size * group_size)
+
+    for test_group_idx in range(n_splits):
+        test_start, test_end = group_indices[test_group_idx]
+        # Use a fraction of the group as test set
+        test_n = int((test_end - test_start) * test_size)
+        test_start_idx = test_start
+        test_end_idx = test_start + test_n
+
+        if test_end_idx <= test_start_idx:
+            continue
+
+        test_indices = list(range(test_start_idx, test_end_idx))
+
+        # Training indices: all other groups, with purge/embargo
+        train_indices = []
+        for train_group_idx in range(n_splits):
+            if train_group_idx == test_group_idx:
+                continue
+            tr_start, tr_end = group_indices[train_group_idx]
+
+            # Apply purge: remove observations near test set
+            # For groups before test group, purge the end
+            # For groups after test group, purge the start
+            if train_group_idx < test_group_idx:
+                purged_end = min(tr_end, test_start_idx - purge_n)
+                if purged_end > tr_start:
+                    train_indices.extend(range(tr_start, purged_end))
+            else:  # train_group_idx > test_group_idx
+                purged_start = max(tr_start, test_end_idx + embargo_n)
+                if purged_start < tr_end:
+                    train_indices.extend(range(purged_start, tr_end))
+
+        if len(train_indices) == 0 or len(test_indices) == 0:
+            continue
+
+        train_data = data.iloc[train_indices]
+        test_data = data.iloc[test_indices]
+
+        folds.append({
+            "fold": len(folds),
+            "test_group": test_group_idx,
+            "train_start": train_data.index[0],
+            "train_end": train_data.index[-1],
+            "test_start": test_data.index[0],
+            "test_end": test_data.index[-1],
+            "train_data": train_data,
+            "test_data": test_data,
+            "train_indices": train_indices,
+            "test_indices": test_indices,
+        })
+
+    # Grid search for best params on each training fold
+    best_params_per_fold = []
+    oos_returns_list = []
+
+    for fold in folds:
+        train_data = fold["train_data"]
+        test_data = fold["test_data"]
+
+        best_sharpe = -np.inf
+        best_params = None
+        best_test_returns = None
+
+        # Generate all parameter combinations
+        param_names = list(param_grid.keys())
+        param_values = list(param_grid.values())
+
+        for combo in product(*param_values):
+            params = dict(zip(param_names, combo))
+
+            try:
+                strategy = strategy_factory(params)
+                train_signals = strategy.generate_signals(train_data)
+                test_signals = strategy.generate_signals(test_data)
+
+                # Skip parameter sets that take no position in the test window
+                if not signals_active(test_signals):
+                    continue
+
+                # Calculate returns for this parameter set
+                test_returns = _calculate_strategy_returns(
+                    test_data, test_signals, commission, slippage
+                )
+
+                # Evaluate on training set
+                train_returns = _calculate_strategy_returns(
+                    train_data, train_signals, commission, slippage
+                )
+
+                if len(train_returns) > 1 and train_returns.std() > 0:
+                    ann_factor = _annualization_factor(train_returns.index)
+                    excess = train_returns - 0.02 / ann_factor
+                    sharpe = excess.mean() / excess.std() * np.sqrt(ann_factor)
+                else:
+                    sharpe = -np.inf
+
+                if sharpe > best_sharpe:
+                    best_sharpe = sharpe
+                    best_params = params
+                    best_test_returns = test_returns
+
+            except Exception:
+                continue
+
+        best_params_per_fold.append(best_params)
+        if best_test_returns is not None and len(best_test_returns) > 0:
+            oos_returns_list.append(best_test_returns)
+            fold["best_params"] = best_params
+            fold["best_sharpe"] = best_sharpe
+            fold["test_returns"] = best_test_returns
+        else:
+            fold["best_params"] = None
+            fold["best_sharpe"] = None
+            fold["test_returns"] = pd.Series(dtype=float)
+
+    # Combine all out-of-sample returns
+    if oos_returns_list:
+        oos_returns = pd.concat(oos_returns_list)
+    else:
+        oos_returns = pd.Series(dtype=float)
+
+    # Parameter stability analysis
+    valid_params = [p for p in best_params_per_fold if p is not None]
+    param_stability = {}
+    if valid_params:
+        param_names = set()
+        for params in valid_params:
+            param_names.update(params.keys())
+
+        for name in param_names:
+            values = [p.get(name) for p in valid_params if name in p]
+            if values:
+                unique_count = len(set(values))
+                param_stability[name] = {
+                    "unique_values": unique_count,
+                    "most_common": max(set(values), key=values.count) if values else None,
+                    "stability_ratio": 1.0 - unique_count / len(values),
+                }
+
+    # Summary metrics
+    summary = _calculate_cpcv_summary(oos_returns, folds, param_stability)
+
+    return {
+        "folds": folds,
+        "best_params_per_fold": best_params_per_fold,
+        "oos_returns": oos_returns,
+        "summary": summary,
+        "param_stability": param_stability,
+    }
+
+
+def _calculate_cpcv_summary(
+    oos_returns: pd.Series,
+    folds: List[Dict[str, Any]],
+    param_stability: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Calculate summary metrics for CPCV results."""
+    summary = {
+        "n_folds": len(folds),
+        "total_oos_return": float((1 + oos_returns).prod() - 1) if len(oos_returns) > 0 else 0.0,
+    }
+
+    if len(oos_returns) > 1:
+        ann_factor = _annualization_factor(oos_returns.index)
+        excess = oos_returns - 0.02 / ann_factor
+        if oos_returns.std() > 0:
+            summary["oos_sharpe"] = float(excess.mean() / oos_returns.std() * np.sqrt(ann_factor))
+            summary["oos_volatility"] = float(oos_returns.std() * np.sqrt(ann_factor))
+        else:
+            summary["oos_sharpe"] = 0.0
+            summary["oos_volatility"] = 0.0
+
+        summary["avg_fold_return"] = float(oos_returns.mean())
+        summary["n_positive_folds"] = int((oos_returns > 0).sum())
+        summary["win_rate_folds"] = float((oos_returns > 0).sum() / len(oos_returns)) if len(oos_returns) > 0 else 0.0
+
+    # Average parameter stability
+    if param_stability:
+        stability_ratios = [v["stability_ratio"] for v in param_stability.values()]
+        summary["avg_param_stability"] = float(np.mean(stability_ratios))
+        if summary["avg_param_stability"] >= 0.5:
+            summary["overfitting_risk"] = "low"
+        elif summary["avg_param_stability"] >= 0.3:
+            summary["overfitting_risk"] = "medium"
+        else:
+            summary["overfitting_risk"] = "high"
+    else:
+        summary["avg_param_stability"] = 0.0
+        summary["overfitting_risk"] = "high"
+
+    return summary
+
+
+def run_cpcv(args) -> int:
+    """Run CPCV analysis from CLI args."""
+    print(f"Loading data from {args.data}...")
+    data = _load_and_validate_data(args.data, args.symbol, args.start, args.end)
+
+    param_grid = _parse_param_grid(args.param_grid)
+    strategy_factory = _make_strategy_factory(args.strategy)
+
+    print(f"Running CPCV analysis with {args.strategy} (n_splits={args.n_splits})...")
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=args.n_splits,
+        test_size=args.test_size,
+        purge_size=args.purge_size,
+        embargo_size=args.embargo_size,
+        commission=args.commission,
+        slippage=args.slippage,
+    )
+
+    print(f"Number of CPCV folds: {results['summary']['n_folds']}")
+    print(f"Total OOS Return: {results['summary']['total_oos_return']:.2%}")
+    print(f"OOS Sharpe Ratio: {results['summary'].get('oos_sharpe', 'N/A')}")
+    print(f"Avg Parameter Stability: {results['summary'].get('avg_param_stability', 'N/A'):.2f}")
+    print(f"Overfitting Risk: {results['summary'].get('overfitting_risk', 'N/A')}")
+
+    # Save results
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save summary as JSON
+    summary_path = output_dir / "cpcv_summary.json"
+    summary_data = {
+        "summary": results["summary"],
+        "param_stability": results["param_stability"],
+        "best_params_per_fold": results["best_params_per_fold"],
+        "config": {
+            "strategy": args.strategy,
+            "symbol": args.symbol,
+            "n_splits": args.n_splits,
+            "test_size": args.test_size,
+            "purge_size": args.purge_size,
+            "embargo_size": args.embargo_size,
+            "commission": args.commission,
+            "slippage": args.slippage,
+            "param_grid": param_grid,
+        },
+    }
+    with open(summary_path, "w") as f:
+        json.dump(summary_data, f, indent=2, default=str)
+    print(f"CPCV summary saved to: {summary_path}")
+
+    # Generate full report if OOS returns available
+    if len(results["oos_returns"]) > 0:
+        equity = (1 + results["oos_returns"]).cumprod() * args.initial_capital
+        report_results = {
+            "equity_curve": equity,
+            "returns": results["oos_returns"],
+            "config": {
+                "initial_capital": args.initial_capital,
+                "commission": args.commission,
+                "slippage": args.slippage,
+                "strategy": args.strategy,
+                "symbol": args.symbol,
+            },
+        }
+        metrics = calculate_metrics(report_results)
+        generate_report(metrics, args.output, symbol=args.symbol, strategy_name=f"{args.strategy}_cpcv")
+        generate_tear_sheet(report_results, metrics, args.output, symbol=args.symbol, strategy_name=f"{args.strategy}_cpcv")
+        print(f"Detailed report saved to: {args.output}/")
+
+    return 0
 
 
 def _make_strategy_factory(strategy_type: str):
@@ -796,6 +1129,15 @@ def main():
     mc_parser.add_argument("--block-size", type=int, help="Block size for block bootstrap")
     mc_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     mc_parser.set_defaults(func=run_monte_carlo)
+
+    # CPCV analysis
+    cpcv_parser = subparsers.add_parser("cpcv", parents=[common_parser], help="Run Combinatorially Purged Cross-Validation")
+    cpcv_parser.add_argument("--n-splits", type=int, default=10, help="Number of sequential groups (folds)")
+    cpcv_parser.add_argument("--test-size", type=float, default=0.1, help="Fraction of each group to use as test set")
+    cpcv_parser.add_argument("--purge-size", type=float, default=0.0, help="Fraction of observations to purge from training around test set")
+    cpcv_parser.add_argument("--embargo-size", type=float, default=0.0, help="Fraction of observations to embargo after test set")
+    cpcv_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
+    cpcv_parser.set_defaults(func=run_cpcv)
 
     args = parser.parse_args()
     return args.func(args)

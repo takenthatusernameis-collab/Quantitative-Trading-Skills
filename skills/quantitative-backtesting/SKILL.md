@@ -182,6 +182,7 @@ python3 skills/quantitative-backtesting/tests/test_reporting.py
 python3 skills/quantitative-backtesting/tests/test_run_backtest.py
 python3 skills/quantitative-backtesting/tests/test_strategy_builder.py
 python3 skills/quantitative-backtesting/tests/test_walk_forward.py
+python3 skills/quantitative-backtesting/tests/test_cpcv.py
 ```
 
 - `test_data_loader.py` - CSV/Parquet loading, column/date handling, symbol
@@ -204,6 +205,8 @@ python3 skills/quantitative-backtesting/tests/test_walk_forward.py
   and binary long/flat signal generation with real crossovers.
 - `test_walk_forward.py` - walk-forward windowing, parameter grid parsing, and
   train/test separation.
+- `test_cpcv.py` - CPCV fold structure, purge/embargo behavior, parameter
+  stability calculation, summary metrics, and CLI integration.
 
 The canonical rendered outputs in `test_output/` are regenerated from
 `assets/example_data/sample_ohlcv.csv` via
