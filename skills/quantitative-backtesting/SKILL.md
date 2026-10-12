@@ -131,7 +131,7 @@ Risk Metrics:
 - `test_strategy_builder.py` - Unit tests for the strategy factory and registry
 - `test_data_loader.py` - Unit tests for data loading and validation
 - `test_performance.py` - Unit tests for performance metric calculation and annualization
-- `test_reporting.py` - Unit tests for report generation and file output
+- `test_reporting.py` - Unit tests for report generation, file output, and tear sheet generation
 
 ### references/
 - `data_schema.md` - Expected data formats and column specifications

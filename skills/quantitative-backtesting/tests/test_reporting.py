@@ -3,15 +3,20 @@
 Tests for report generation functionality in performance module.
 """
 
+import json
 import os
 import sys
 import tempfile
 import unittest
 
+import numpy as np
+import pandas as pd
+
 # Add scripts directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from performance import generate_report
+from reporting import generate_tear_sheet
 
 
 class TestReporting(unittest.TestCase):
@@ -98,6 +103,57 @@ class TestReporting(unittest.TestCase):
             self.assertTrue(os.path.exists(nested_dir))
             self.assertTrue(os.path.exists(os.path.join(nested_dir, "metrics.json")))
             self.assertTrue(os.path.exists(os.path.join(nested_dir, "report.txt")))
+
+
+class TestTearSheet(unittest.TestCase):
+    """Smoke tests for generate_tear_sheet (matplotlib optional)."""
+
+    def _make_results(self, periods: int = 60, seed: int = 7) -> dict:
+        rng = np.random.default_rng(seed)
+        dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+        returns = pd.Series(rng.normal(0.0005, 0.015, periods), index=dates)
+        equity = (1 + returns).cumprod() * 100000
+        return {
+            "equity_curve": equity,
+            "returns": returns,
+            "config": {"initial_capital": 100000},
+        }
+
+    def test_generate_tear_sheet_creates_html_and_summary(self):
+        """Tear sheet writes HTML and JSON summary files even without matplotlib."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            metrics = {"total_return": 0.1, "total_trades": 5, "win_rate": 0.6}
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir, symbol="SPY", strategy_name="SMA"
+            )
+            self.assertTrue(os.path.exists(html_path))
+            self.assertTrue(html_path.endswith("tear_sheet.html"))
+            self.assertTrue(os.path.exists(os.path.join(tmpdir, "tear_sheet_summary.json")))
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertEqual(summary["symbol"], "SPY")
+            self.assertEqual(summary["strategy"], "SMA")
+
+    def test_generate_tear_sheet_handles_missing_equity(self):
+        """Tear sheet does not crash when results lack equity_curve."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = {"returns": pd.Series([0.01, -0.02, 0.005])}
+            html_path = generate_tear_sheet(
+                results, {}, tmpdir, symbol="ES", strategy_name="Breakout"
+            )
+            self.assertTrue(os.path.exists(html_path))
+
+    def test_generate_tear_sheet_creates_output_dir(self):
+        """Tear sheet creates nested output directories."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nested = os.path.join(tmpdir, "a", "b", "c")
+            results = self._make_results()
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.05}, nested, symbol="QQQ"
+            )
+            self.assertTrue(os.path.exists(nested))
+            self.assertTrue(os.path.exists(html_path))
 
 
 if __name__ == "__main__":
