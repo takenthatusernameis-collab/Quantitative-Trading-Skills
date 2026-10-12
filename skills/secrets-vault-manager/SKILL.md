@@ -405,6 +405,42 @@ Eliminate long-lived secrets in CI by using OIDC federation:
 
 ---
 
+## Test Coverage
+
+This skill bundles a standard-library unit-test suite (no third-party test
+framework) under `tests/`, following the pattern established by
+`skills/quantitative-backtesting/tests/`. Run each file directly with Python:
+
+```bash
+python3 skills/secrets-vault-manager/tests/test_audit_log_analyzer.py
+python3 skills/secrets-vault-manager/tests/test_rotation_planner.py
+python3 skills/secrets-vault-manager/tests/test_vault_config_generator.py
+```
+
+- `test_audit_log_analyzer.py` - log loading, field extraction, anomaly detection:
+  - `load_logs` handles JSON array, JSON lines, empty files, and malformed lines
+  - `extract_fields` normalizes timestamps, identities, paths, operations, status codes, and IPs with alternative key fallbacks
+  - `analyze` detects volume spikes, multi-IP access, failed access attempts, off-hours access, and broad path access
+  - `print_human` renders the report without error
+  - `main` runs the `--sample` embedded synthetic log flow
+
+- `test_rotation_planner.py` - inventory loading, schedule computation, summary building:
+  - `load_inventory` validates JSON arrays, parses dates, handles missing/invalid `last_rotated`, and rejects non-list input
+  - `compute_schedule` applies policy vs. type defaults, classifies urgency (CRITICAL/HIGH/MEDIUM/LOW), and sorts by severity
+  - `build_summary` aggregates counts by urgency, type, and owner
+  - `print_human` renders the plan without error
+  - `main` runs with a temporary inventory file and `--policy`
+
+- `test_vault_config_generator.py` - secret parsing, HCL generation, auth config, and output building:
+  - `parse_secrets` splits comma-separated types, filters valid/unknown, and handles empty input
+  - `generate_policy_hcl` produces HCL with per-secret paths, capabilities, and a deny rule for `sys/*`
+  - `generate_auth_config` emits correct commands for `approle` (3 commands), `kubernetes` (1 command), and `oidc` (1 command)
+  - `build_output` assembles full result with policy HCL, auth commands, secret details, and warnings for unknown types
+  - `print_human` renders output without error
+  - `main` exercises success, `--json` output, and invalid secret type (exit code 1)
+
+---
+
 ## Cross-References
 
 - **env-secrets-manager** — Local `.env` file hygiene, leak detection, drift awareness
