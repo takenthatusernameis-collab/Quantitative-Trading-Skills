@@ -1,23 +1,84 @@
 {
   "symbol": "SPY",
-  "strategy": "SMA Crossover",
+  "strategy": "sma_crossover",
   "metrics": {
-    "total_return": 0.08917200415200055,
-    "annualized_return": 0.08917200415200055,
-    "annualized_volatility": 0.23031100631183563,
-    "sharpe_ratio": 0.39845590058689306,
-    "sortino_ratio": 0.720604978323938,
-    "max_drawdown": -0.20659875922389445,
-    "avg_drawdown": -0.12231230187352622,
-    "calmar_ratio": 0.43161926280188057,
-    "max_drawdown_recovery_days": 149,
-    "var_95": -0.021923025187160862,
-    "cvar_95": -0.02726743592056375,
-    "skewness": 0.30199507230910366,
-    "kurtosis": 0.6154534203768973,
-    "omega_ratio": 1.7990429934115286,
-    "tail_ratio": 0.9374566544078212,
+    "total_return": 0.19132349813697136,
+    "annualized_return": 0.09166762355210678,
+    "annualized_volatility": 0.17762761064812366,
+    "sharpe_ratio": 0.46979009252241277,
+    "sortino_ratio": 0.6781191280921454,
+    "max_drawdown": -0.1583226948630372,
+    "avg_drawdown": -0.05697440544435971,
+    "calmar_ratio": 0.5789923145977725,
+    "max_drawdown_recovery_days": null,
+    "var_95": -0.01909518241307915,
+    "cvar_95": -0.025288734337871318,
+    "skewness": 0.1413813128986018,
+    "kurtosis": 2.148031136519368,
+    "total_trades": 9,
+    "winning_trades": 5,
+    "losing_trades": 4,
+    "win_rate": 0.5555555555555556,
+    "trades_closed_at_end": 1,
+    "pct_trades_closed_at_end": 0.1111111111111111,
+    "avg_win": 0.06046131226705259,
+    "avg_loss": 0.035746112794922694,
+    "profit_factor": 2.066051892657145,
+    "expectancy": 1.8876033756011736,
+    "avg_trade_duration": 43.44444444444444,
+    "omega_ratio": 1.7533696731790283,
+    "tail_ratio": 1.0899788357404592,
     "initial_capital": 100000
   },
-  "plot_files": []
+  "plot_files": [
+    "test_output/equity_curve.png",
+    "test_output/returns_distribution.png"
+  ],
+  "data_provenance": {
+    "source_path": "skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv",
+    "load_timestamp": "2026-10-13T23:28:43.647730Z",
+    "file_format": ".csv",
+    "file_size_bytes": 46815,
+    "symbol_filter": "SPY",
+    "start_date_filter": null,
+    "end_date_filter": null,
+    "original_shape": [
+      504,
+      6
+    ],
+    "final_shape": [
+      504,
+      5
+    ],
+    "columns_original": [
+      "date",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "columns_final": [
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "date_range_original": null,
+    "date_range_final": [
+      "2018-01-01 00:00:00",
+      "2019-12-05 00:00:00"
+    ],
+    "validation_passed": true,
+    "validation_messages": [],
+    "transformations_applied": [
+      "column_names_lowercase_stripped",
+      "set_index_from_date",
+      "sorted_index",
+      "coerced_numeric_types"
+    ],
+    "checksum": "1cb22a22248f2e56",
+    "total_return_type": "price"
+  }
 }

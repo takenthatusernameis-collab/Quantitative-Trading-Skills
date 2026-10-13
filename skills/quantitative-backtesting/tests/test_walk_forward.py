@@ -7,6 +7,7 @@ No third-party test framework is required; uses only the standard library.
 """
 
 import json
+import os
 import sys
 import tempfile
 import traceback
@@ -2347,6 +2348,9 @@ def main() -> int:
         ("run_walk_forward_cli_with_benchmark", test_run_walk_forward_cli_with_benchmark),
         ("run_cpcv_cli_with_benchmark", test_run_cpcv_cli_with_benchmark),
         ("run_monte_carlo_cli_with_benchmark", test_run_monte_carlo_cli_with_benchmark),
+        ("run_walk_forward_cli_with_total_return_benchmark", test_run_walk_forward_cli_with_total_return_benchmark),
+        ("run_cpcv_cli_with_total_return_benchmark", test_run_cpcv_cli_with_total_return_benchmark),
+        ("run_monte_carlo_cli_with_total_return_benchmark", test_run_monte_carlo_cli_with_total_return_benchmark),
     ]
 
     failures = 0
@@ -2479,6 +2483,33 @@ def _make_benchmark_data(periods: int = 756, seed: int = 99) -> str:
             "low": prices * rng.uniform(0.98, 0.995, periods),
             "close": prices,
             "volume": rng.integers(1_000_000, 10_000_000, periods),
+        }
+    )
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
+    df.to_csv(tmp.name, index=False)
+    return tmp.name
+
+
+def _make_benchmark_data_with_dividends(periods: int = 756, seed: int = 99) -> str:
+    """Create a temporary benchmark data file with dividends column."""
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2018-01-01", periods=periods, freq="B")
+    rets = rng.normal(0.0004, 0.012, periods)
+    prices = 100 * np.exp(np.cumsum(rets))
+    # Add quarterly dividends
+    dividends = np.zeros(periods)
+    for i in range(periods):
+        if dates[i].month in [3, 6, 9, 12] and dates[i].day <= 5:
+            dividends[i] = 0.50
+    df = pd.DataFrame(
+        {
+            "date": dates,
+            "open": prices * rng.uniform(0.995, 1.005, periods),
+            "high": prices * rng.uniform(1.005, 1.02, periods),
+            "low": prices * rng.uniform(0.98, 0.995, periods),
+            "close": prices,
+            "volume": rng.integers(1_000_000, 10_000_000, periods),
+            "dividends": dividends,
         }
     )
     tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
@@ -2643,6 +2674,210 @@ def test_run_monte_carlo_cli_with_benchmark():
                 tear_summary = json.load(f)
             assert "benchmark_total_return" in tear_summary["metrics"]
             assert "correlation_with_benchmark" in tear_summary["metrics"]
+    finally:
+        Path(data_file).unlink()
+        Path(bench_file).unlink()
+
+
+def test_run_walk_forward_cli_with_total_return_benchmark():
+    """Walk-forward CLI with --total-return-benchmark records total_return_type=total
+    and produces different benchmark metrics vs price-only benchmark.
+    """
+    data_file = _make_test_data_file()
+    bench_file = _make_benchmark_data_with_dividends()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Price-only benchmark run
+            args_price = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=os.path.join(tmpdir, "out_price"),
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                train_months=6,
+                test_months=2,
+                step_months=2,
+                initial_capital=100000,
+                deflate=False,
+                benchmark=bench_file,
+            )
+            result = run_walk_forward(args_price)
+            assert result == 0
+
+            summary_path_price = Path(tmpdir) / "out_price" / "walk_forward_summary.json"
+            with open(summary_path_price) as f:
+                summary_price = json.load(f)
+
+            # Total-return benchmark run
+            args_total = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=os.path.join(tmpdir, "out_total"),
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                train_months=6,
+                test_months=2,
+                step_months=2,
+                initial_capital=100000,
+                deflate=False,
+                benchmark=bench_file,
+                total_return_benchmark=True,
+            )
+            result = run_walk_forward(args_total)
+            assert result == 0
+
+            summary_path_total = Path(tmpdir) / "out_total" / "walk_forward_summary.json"
+            with open(summary_path_total) as f:
+                summary_total = json.load(f)
+
+            # Provenance records total_return_type=total
+            assert summary_total["benchmark_provenance"]["total_return_type"] == "total"
+
+            # Metrics show benchmark_total_return_type correctly
+            assert summary_price["summary"]["benchmark_total_return_type"] == "price"
+            assert summary_total["summary"]["benchmark_total_return_type"] == "total"
+
+            # Total-return benchmark has higher total return (dividends add value)
+            assert summary_total["summary"]["benchmark_total_return"] > summary_price["summary"]["benchmark_total_return"]
+
+            # Alpha and beta differ between price-only and total-return
+            assert abs(summary_total["summary"]["alpha"] - summary_price["summary"]["alpha"]) > 1e-6
+            assert abs(summary_total["summary"]["beta"] - summary_price["summary"]["beta"]) > 1e-6
+    finally:
+        Path(data_file).unlink()
+        Path(bench_file).unlink()
+
+
+def test_run_cpcv_cli_with_total_return_benchmark():
+    """CPCV CLI with --total-return-benchmark records total_return_type=total in provenance."""
+    data_file = _make_test_data_file()
+    bench_file = _make_benchmark_data_with_dividends()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=os.path.join(tmpdir, "out_total"),
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                n_splits=4,
+                test_size=0.2,
+                purge_size=0.0,
+                embargo_size=0.0,
+                initial_capital=100000,
+                deflate=False,
+                benchmark=bench_file,
+                total_return_benchmark=True,
+            )
+            result = run_cpcv(args)
+            assert result == 0
+
+            summary_path = Path(tmpdir) / "out_total" / "cpcv_summary.json"
+            with open(summary_path) as f:
+                summary = json.load(f)
+
+            # Benchmark config recorded
+            assert summary["config"]["benchmark"] == bench_file
+            assert summary["config"]["total_return_benchmark"] is True
+
+            # Provenance records total_return_type=total
+            assert summary["benchmark_provenance"]["total_return_type"] == "total"
+    finally:
+        Path(data_file).unlink()
+        Path(bench_file).unlink()
+
+
+def test_run_monte_carlo_cli_with_total_return_benchmark():
+    """Monte Carlo CLI with --total-return-benchmark records total_return_type=total
+    and produces different benchmark metrics vs price-only benchmark.
+    """
+    data_file = _make_test_data_file()
+    bench_file = _make_benchmark_data_with_dividends()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Price-only benchmark run
+            args_price = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                impact_coefficient=0.0,
+                adv_window=20,
+                borrow_cost=0.0,
+                funding_cost=0.0,
+                output=os.path.join(tmpdir, "out_price"),
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                n_simulations=50,
+                confidence_levels=[0.95],
+                block_size=10,
+                initial_capital=100000,
+                n_trials=None,
+                benchmark=bench_file,
+            )
+            result = run_monte_carlo(args_price)
+            assert result == 0
+
+            results_path_price = Path(tmpdir) / "out_price" / "monte_carlo_results.json"
+            with open(results_path_price) as f:
+                mc_price = json.load(f)
+
+            # Total-return benchmark run
+            args_total = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                impact_coefficient=0.0,
+                adv_window=20,
+                borrow_cost=0.0,
+                funding_cost=0.0,
+                output=os.path.join(tmpdir, "out_total"),
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                n_simulations=50,
+                confidence_levels=[0.95],
+                block_size=10,
+                initial_capital=100000,
+                n_trials=None,
+                benchmark=bench_file,
+                total_return_benchmark=True,
+            )
+            result = run_monte_carlo(args_total)
+            assert result == 0
+
+            results_path_total = Path(tmpdir) / "out_total" / "monte_carlo_results.json"
+            with open(results_path_total) as f:
+                mc_total = json.load(f)
+
+            # Provenance records total_return_type=total
+            assert mc_total["benchmark_provenance"]["total_return_type"] == "total"
+
+            # Metrics show benchmark_total_return_type correctly
+            assert mc_price["summary"]["benchmark_total_return_type"] == "price"
+            assert mc_total["summary"]["benchmark_total_return_type"] == "total"
+
+            # Total-return benchmark has higher total return (dividends add value)
+            assert mc_total["summary"]["benchmark_total_return"] > mc_price["summary"]["benchmark_total_return"]
+
+            # Alpha differs between price-only and total-return
+            assert abs(mc_total["summary"]["alpha"] - mc_price["summary"]["alpha"]) > 1e-6
     finally:
         Path(data_file).unlink()
         Path(bench_file).unlink()

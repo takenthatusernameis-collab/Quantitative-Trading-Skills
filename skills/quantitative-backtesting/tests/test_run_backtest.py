@@ -1008,6 +1008,8 @@ def main() -> int:
         ("run_backtest_without_benchmark_omits_key", test_run_backtest_without_benchmark_omits_key),
         ("benchmark_superset_aligns_correctly", test_benchmark_superset_aligns_correctly),
         ("cli_benchmark_writes_artifact_and_metrics", test_cli_benchmark_writes_artifact_and_metrics),
+        ("cli_total_return_benchmark_writes_provenance_and_differs_from_price", test_cli_total_return_benchmark_writes_provenance_and_differs_from_price),
+        ("cli_total_return_benchmark_alpha_differs", test_cli_total_return_benchmark_alpha_differs),
     ]
 
     failures = 0
@@ -1267,6 +1269,188 @@ def test_cli_benchmark_writes_artifact_and_metrics():
         assert np.isfinite(metrics["alpha_tstat"])
         assert 0.0 <= metrics["alpha_pvalue"] <= 1.0
         assert 0.0 <= metrics["r_squared"] <= 1.0
+
+
+def _write_ohlcv_csv_with_dividends(path: str, periods: int = 252, seed: int = 42) -> None:
+    """Write OHLCV CSV with dividends column for total-return benchmark testing."""
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    rets = rng.normal(0.0005, 0.015, periods)
+    prices = 100 * np.exp(np.cumsum(rets))
+    # Add quarterly dividends
+    dividends = np.zeros(periods)
+    for i in range(periods):
+        if dates[i].month in [3, 6, 9, 12] and dates[i].day <= 5:
+            dividends[i] = 0.50
+    pd.DataFrame({
+        "date": dates.strftime("%Y-%m-%d"),
+        "open": prices * rng.uniform(0.995, 1.005, periods),
+        "high": prices * rng.uniform(1.005, 1.02, periods),
+        "low": prices * rng.uniform(0.98, 0.995, periods),
+        "close": prices,
+        "volume": rng.integers(1_000_000, 10_000_000, periods),
+        "dividends": dividends,
+    }).to_csv(path, index=False)
+
+
+def test_cli_total_return_benchmark_writes_provenance_and_differs_from_price():
+    """CLI with --total-return-benchmark records total_return_type=total in provenance
+    and produces different benchmark metrics vs price-only benchmark.
+    """
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        bench_path = os.path.join(tmpdir, "benchmark.csv")
+        _write_ohlcv_csv(csv_path)
+        _write_ohlcv_csv_with_dividends(bench_path, seed=99)
+
+        # Run with price-only benchmark
+        out_dir_price = os.path.join(tmpdir, "out_price")
+        argv_price = [
+            "run_backtest", "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 10, "slow_period": 30}',
+            "--output", out_dir_price, "--benchmark", bench_path,
+        ]
+        with patch.object(sys, "argv", argv_price), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0
+
+        with open(os.path.join(out_dir_price, "metrics.json")) as f:
+            metrics_price = json.load(f)
+        with open(os.path.join(out_dir_price, "benchmark_provenance.json")) as f:
+            prov_price = json.load(f)
+
+        # Run with total-return benchmark
+        out_dir_total = os.path.join(tmpdir, "out_total")
+        argv_total = [
+            "run_backtest", "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 10, "slow_period": 30}',
+            "--output", out_dir_total, "--benchmark", bench_path,
+            "--total-return-benchmark",
+        ]
+        with patch.object(sys, "argv", argv_total), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0
+
+        with open(os.path.join(out_dir_total, "metrics.json")) as f:
+            metrics_total = json.load(f)
+        with open(os.path.join(out_dir_total, "benchmark_provenance.json")) as f:
+            prov_total = json.load(f)
+
+        # Provenance records total_return_type=total
+        assert prov_total["total_return_type"] == "total"
+        # Price-only run also records total_return_type=total (data has dividends)
+        # but the metrics should show benchmark_total_return_type="price"
+        assert metrics_price["benchmark_total_return_type"] == "price"
+        assert metrics_total["benchmark_total_return_type"] == "total"
+
+        # Total-return benchmark has higher total return (dividends add value)
+        assert metrics_total["benchmark_total_return"] > metrics_price["benchmark_total_return"]
+
+        # Alpha differs between price-only and total-return benchmark
+        assert abs(metrics_total["alpha"] - metrics_price["alpha"]) > 1e-6
+
+        # Beta also differs
+        assert abs(metrics_total["beta"] - metrics_price["beta"]) > 1e-6
+
+
+def test_cli_total_return_benchmark_alpha_differs():
+    """Synthetic test demonstrating that price-only and total-return benchmarks
+    produce meaningfully different alpha estimates when dividends are present.
+
+    This highlights the methodological importance of using total-return benchmarks
+    for accurate alpha measurement.
+    """
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        bench_path = os.path.join(tmpdir, "benchmark.csv")
+
+        # Strategy data: moderate upward drift
+        dates = pd.date_range("2020-01-01", periods=252, freq="B")
+        rng = np.random.default_rng(42)
+        strat_rets = np.full(252, 0.0003) + rng.normal(0, 0.001, 252)
+        strat_prices = 100 * np.exp(np.cumsum(strat_rets))
+        pd.DataFrame({
+            "date": dates.strftime("%Y-%m-%d"),
+            "open": strat_prices * rng.uniform(0.995, 1.005, 252),
+            "high": strat_prices * rng.uniform(1.005, 1.02, 252),
+            "low": strat_prices * rng.uniform(0.98, 0.995, 252),
+            "close": strat_prices,
+            "volume": rng.integers(1_000_000, 10_000_000, 252),
+        }).to_csv(csv_path, index=False)
+
+        # Benchmark data: slight downward price drift but large quarterly dividends
+        bench_rng = np.random.default_rng(99)
+        bench_price_rets = np.full(252, -0.0002) + bench_rng.normal(0, 0.001, 252)
+        bench_prices = 100 * np.exp(np.cumsum(bench_price_rets))
+        dividends = np.zeros(252)
+        for i in range(252):
+            if dates[i].month in [3, 6, 9, 12] and dates[i].day <= 5:
+                dividends[i] = 1.5  # Very large dividend
+        pd.DataFrame({
+            "date": dates.strftime("%Y-%m-%d"),
+            "open": bench_prices * bench_rng.uniform(0.995, 1.005, 252),
+            "high": bench_prices * bench_rng.uniform(1.005, 1.02, 252),
+            "low": bench_prices * bench_rng.uniform(0.98, 0.995, 252),
+            "close": bench_prices,
+            "volume": bench_rng.integers(1_000_000, 10_000_000, 252),
+            "dividends": dividends,
+        }).to_csv(bench_path, index=False)
+
+        # Price-only benchmark run
+        out_dir_price = os.path.join(tmpdir, "out_price")
+        argv_price = [
+            "run_backtest", "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 10, "slow_period": 30}',
+            "--output", out_dir_price, "--benchmark", bench_path,
+        ]
+        with patch.object(sys, "argv", argv_price), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0
+        with open(os.path.join(out_dir_price, "metrics.json")) as f:
+            metrics_price = json.load(f)
+
+        # Total-return benchmark run
+        out_dir_total = os.path.join(tmpdir, "out_total")
+        argv_total = [
+            "run_backtest", "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 10, "slow_period": 30}',
+            "--output", out_dir_total, "--benchmark", bench_path,
+            "--total-return-benchmark",
+        ]
+        with patch.object(sys, "argv", argv_total), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0
+        with open(os.path.join(out_dir_total, "metrics.json")) as f:
+            metrics_total = json.load(f)
+
+        # Verify benchmark total return is substantially higher with dividends
+        bench_diff = metrics_total["benchmark_total_return"] - metrics_price["benchmark_total_return"]
+        assert bench_diff > 0.15, f"Benchmark return difference too small: {bench_diff:.4f}"
+
+        # Alpha differs between price-only and total-return benchmark
+        # (may not flip sign, but should be meaningfully different)
+        alpha_diff = abs(metrics_total["alpha"] - metrics_price["alpha"])
+        assert alpha_diff > 0.001, f"Alpha difference too small: {alpha_diff:.4f}"
+
+        # Beta also differs
+        beta_diff = abs(metrics_total["beta"] - metrics_price["beta"])
+        assert beta_diff > 0.01, f"Beta difference too small: {beta_diff:.4f}"
+
+        # Total-return benchmark type is correctly recorded
+        assert metrics_total["benchmark_total_return_type"] == "total"
+        assert metrics_price["benchmark_total_return_type"] == "price"
 
 
 if __name__ == "__main__":
