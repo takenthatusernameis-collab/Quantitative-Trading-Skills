@@ -572,15 +572,47 @@ class DualMomentumStrategy(StrategyBase):
 class MeanReversionZScore(StrategyBase):
     """Z-Score Mean Reversion (Pairs Trading style).
 
-    Uses rolling z-score of price (or spread) for entry/exit.
+    Uses rolling z-score for mean reversion. For two-asset spreads, it
+    constructs a spread (log price ratio by default) from panel data and
+    z-scores the spread. For single-asset data, it falls back to z-scoring
+    the close price with a warning for backward compatibility.
     """
 
-    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+    def generate_signals(self, data) -> pd.Series:
         period = self.parameters.get("period", 20)
         entry_z = self.parameters.get("entry_z", 2.0)
         exit_z = self.parameters.get("exit_z", 0.5)
+        spread_method = self.parameters.get("spread_method", "log_ratio")
+        hedge_ratio = self.parameters.get("hedge_ratio", 1.0)
 
-        # Use close price z-score (for single asset, typically use spread)
+        # Detect multi-asset panel data for pairs trading
+        if isinstance(data, dict):
+            return self._generate_pairs_signals_dict(
+                data, period, entry_z, exit_z, spread_method, hedge_ratio
+            )
+        elif hasattr(data.columns, "levels") and len(getattr(data.columns, "levels", [])) > 1:
+            # MultiIndex columns
+            return self._generate_pairs_signals_multiindex(
+                data, period, entry_z, exit_z, spread_method, hedge_ratio
+            )
+        else:
+            # Single-asset fallback (backward compatible)
+            import warnings
+
+            warnings.warn(
+                "MeanReversionZScore used with single-asset data; "
+                "z-scoring the close price. For true pairs trading, provide "
+                "panel data with exactly two assets (dict of DataFrames or "
+                "MultiIndex columns).",
+                UserWarning,
+                stacklevel=2,
+            )
+            return self._generate_single_asset_signals(data, period, entry_z, exit_z)
+
+    def _generate_single_asset_signals(
+        self, data: pd.DataFrame, period: int, entry_z: float, exit_z: float
+    ) -> pd.Series:
+        """Backward-compatible single-asset z-score on close price."""
         rolling_mean = data["close"].rolling(period).mean()
         rolling_std = data["close"].rolling(period).std()
         zscore = (data["close"] - rolling_mean) / rolling_std
@@ -590,6 +622,9 @@ class MeanReversionZScore(StrategyBase):
 
         for i in range(len(data)):
             z = zscore.iloc[i]
+            if pd.isna(z):
+                signals.iloc[i] = position
+                continue
 
             if position == 0:
                 if z <= -entry_z:
@@ -605,6 +640,102 @@ class MeanReversionZScore(StrategyBase):
 
         return signals
 
+    def _construct_spread(self, series1: pd.Series, series2: pd.Series, spread_method: str, hedge_ratio: float) -> pd.Series:
+        """Construct spread between two price series."""
+        if spread_method == "log_ratio":
+            # Log price ratio: spread = log(p1) - hedge_ratio * log(p2)
+            spread = np.log(series1) - hedge_ratio * np.log(series2)
+        else:
+            # Price difference: spread = p1 - hedge_ratio * p2
+            spread = series1 - hedge_ratio * series2
+        return spread
+
+    def _generate_pairs_signals_from_two_series(
+        self, series1: pd.Series, series2: pd.Series, period: int, entry_z: float, exit_z: float,
+        spread_method: str, hedge_ratio: float
+    ) -> pd.Series:
+        """Generate signals from two aligned price series."""
+        spread = self._construct_spread(series1, series2, spread_method, hedge_ratio)
+        rolling_mean = spread.rolling(period).mean()
+        rolling_std = spread.rolling(period).std()
+        zscore = (spread - rolling_mean) / rolling_std
+
+        signals = pd.Series(0.0, index=spread.index)
+        position = 0
+
+        for i in range(len(spread)):
+            z = zscore.iloc[i]
+            if pd.isna(z):
+                signals.iloc[i] = position
+                continue
+
+            if position == 0:
+                if z <= -entry_z:
+                    position = 1
+                elif z >= entry_z:
+                    position = -1
+            elif position == 1 and z >= -exit_z:
+                position = 0
+            elif position == -1 and z <= exit_z:
+                position = 0
+
+            signals.iloc[i] = position
+
+        return signals
+
+    def _generate_pairs_signals_dict(
+        self, data_dict: dict, period: int, entry_z: float, exit_z: float,
+        spread_method: str, hedge_ratio: float
+    ) -> pd.Series:
+        """Generate signals from dict of symbol -> DataFrame for pairs trading."""
+        symbols = list(data_dict.keys())
+        if len(symbols) != 2:
+            raise ValueError(
+                f"MeanReversionZScore with panel data requires exactly 2 assets; got {len(symbols)}"
+            )
+
+        sym1, sym2 = symbols[0], symbols[1]
+        df1 = data_dict[sym1]
+        df2 = data_dict[sym2]
+
+        # Align to common index
+        common_index = df1.index.intersection(df2.index).sort_values()
+        if len(common_index) == 0:
+            return pd.Series(dtype=float)
+
+        series1 = df1.loc[common_index, "close"]
+        series2 = df2.loc[common_index, "close"]
+
+        return self._generate_pairs_signals_from_two_series(
+            series1, series2, period, entry_z, exit_z, spread_method, hedge_ratio
+        )
+
+    def _generate_pairs_signals_multiindex(
+        self, data: pd.DataFrame, period: int, entry_z: float, exit_z: float,
+        spread_method: str, hedge_ratio: float
+    ) -> pd.Series:
+        """Generate signals from MultiIndex DataFrame for pairs trading."""
+        # Get symbols from second level
+        try:
+            symbols = sorted(set(data.columns.get_level_values(1)))
+        except Exception:
+            symbols = sorted(set(data.columns.get_level_values(1)))
+
+        if len(symbols) != 2:
+            raise ValueError(
+                f"MeanReversionZScore with panel data requires exactly 2 assets; got {len(symbols)}"
+            )
+
+        sym1, sym2 = symbols[0], symbols[1]
+        if "close" not in data.columns.get_level_values(0):
+            raise ValueError("MultiIndex data must have 'close' as first level column")
+
+        series1 = data[("close", sym1)]
+        series2 = data[("close", sym2)]
+
+        return self._generate_pairs_signals_from_two_series(
+            series1, series2, period, entry_z, exit_z, spread_method, hedge_ratio
+        )
 
 class VolatilityTargeting(StrategyBase):
     """Volatility Targeting Position Sizing.

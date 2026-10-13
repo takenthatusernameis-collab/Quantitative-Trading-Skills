@@ -54,11 +54,19 @@ strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 3
 
 ### Z-Score Mean Reversion (`zscore_mean_reversion`)
 
-- **Signal**: Long when z-score <= -entry_z, short when z-score >= entry_z.
-  Exit when z-score crosses back toward zero.
+- **Signal**: For two-asset panel data (dict of DataFrames or DataFrame with
+  MultiIndex columns), constructs a spread and z-scores it; long when spread
+  z-score <= -entry_z, short when spread z-score >= entry_z. Exit when
+  |z-score| crosses back below exit_z (z >= -exit_z for long, z <= exit_z
+  for short). For single-asset data, falls back to z-scoring the close price
+  with a `UserWarning` for backward compatibility.
 - **Parameters**: `period` (default 20), `entry_z` (default 2.0),
-  `exit_z` (default 0.5).
+  `exit_z` (default 0.5), `spread_method` (default `"log_ratio"`, also accepts
+  `"price_difference"`), `hedge_ratio` (default 1.0).
 - **Use case**: Pairs trading and statistical arbitrage overlays.
+- **Notes**: Panel data must contain exactly two assets. The default spread is
+  the log price ratio `log(p1) - hedge_ratio * log(p2)`. For price difference,
+  use `spread_method="price_difference"`.
 
 ## Momentum
 

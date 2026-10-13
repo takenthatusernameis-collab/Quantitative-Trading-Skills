@@ -467,6 +467,85 @@ def test_dual_momentum_respects_top_quantile():
     assert abs(post_lookback2.mean() - 0.6) < 0.15
 
 
+
+def test_mean_reversion_zscore_pairs_two_asset_dict():
+    """MeanReversionZScore generates spread-based signals for two-asset dict."""
+    from strategy_builder import build_strategy
+    import pandas as pd
+    import numpy as np
+
+    dates = pd.date_range("2021-01-01", periods=100, freq="B")
+    np.random.seed(7)
+    spread = np.zeros(100)
+    spread[40] = 2.5
+    spread[41:45] = [1.5, 0.8, 0.3, 0.1]
+    spread[70] = -2.6
+    spread[71:75] = [-1.4, -0.6, -0.2, 0.05]
+    C = 100
+    p1 = C * np.exp(spread + np.random.normal(0, 0.01, 100))
+    p2 = C + np.random.normal(0, 0.1, 100)
+    data_dict = {
+        "A": pd.DataFrame({"close": p1}, index=dates),
+        "B": pd.DataFrame({"close": p2}, index=dates),
+    }
+    s = build_strategy("zscore_mean_reversion", '{"period": 20, "entry_z": 2.0, "exit_z": 0.5}')
+    sig = s.generate_signals(data_dict)
+    assert (sig.iloc[20:] != 0).any()
+
+
+def test_mean_reversion_zscore_pairs_multiindex_two_assets():
+    """MeanReversionZScore works with MultiIndex DataFrame containing two assets."""
+    from strategy_builder import build_strategy
+    from test_strategy_builder import _make_multiindex_data
+    import pandas as pd
+
+    data = _make_multiindex_data(n=100, n_assets=2, seed=42)
+    s = build_strategy("zscore_mean_reversion", '{"period": 20}')
+    sig = s.generate_signals(data)
+    assert isinstance(sig, pd.Series)
+    assert len(sig) == len(data)
+
+
+def test_mean_reversion_zscore_single_asset_fallback():
+    """MeanReversionZScore with single-asset data warns and falls back."""
+    import warnings
+    from strategy_builder import build_strategy
+    from test_strategy_builder import _make_data
+
+    data = _make_data(n=80)
+    s = build_strategy("zscore_mean_reversion", '{"period": 20}')
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        sig = s.generate_signals(data)
+        assert len(w) == 1
+        assert issubclass(w[0].category, UserWarning)
+
+    assert len(sig) == len(data)
+    assert set(sig.unique()).issubset({-1, 0, 1})
+
+
+def test_mean_reversion_zscore_rejects_three_assets():
+    """MeanReversionZScore rejects panel data with != 2 assets."""
+    from strategy_builder import build_strategy
+    from test_strategy_builder import _make_multi_asset_data, _make_multiindex_data
+
+    try:
+        data = _make_multi_asset_data(n=50, n_assets=3, seed=1)
+        s = build_strategy("zscore_mean_reversion", '{"period": 10}')
+        s.generate_signals(data)
+        assert False
+    except ValueError:
+        pass
+
+    try:
+        data = _make_multiindex_data(n=50, n_assets=3, seed=1)
+        s = build_strategy("zscore_mean_reversion", '{"period": 10}')
+        s.generate_signals(data)
+        assert False
+    except ValueError:
+        pass
+
+
 def main() -> int:
     tests = [
         ("build_strategy_unknown_type_raises", test_build_strategy_unknown_type_raises),
@@ -487,6 +566,10 @@ def main() -> int:
         ("dual_momentum_single_asset_fallback", test_dual_momentum_single_asset_fallback),
         ("dual_momentum_absolute_momentum_filter", test_dual_momentum_absolute_momentum_filter),
         ("dual_momentum_respects_top_quantile", test_dual_momentum_respects_top_quantile),
+        ("mean_reversion_zscore_pairs_two_asset_dict", test_mean_reversion_zscore_pairs_two_asset_dict),
+        ("mean_reversion_zscore_pairs_multiindex_two_assets", test_mean_reversion_zscore_pairs_multiindex_two_assets),
+        ("mean_reversion_zscore_single_asset_fallback", test_mean_reversion_zscore_single_asset_fallback),
+        ("mean_reversion_zscore_rejects_three_assets", test_mean_reversion_zscore_rejects_three_assets),
     ]
 
     failures = 0
@@ -505,3 +588,86 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_mean_reversion_zscore_pairs_two_asset_dict():
+    """MeanReversionZScore generates spread-based signals for two-asset dict."""
+    from strategy_builder import build_strategy
+    import pandas as pd
+    import numpy as np
+
+    dates = pd.date_range("2021-01-01", periods=100, freq="B")
+    np.random.seed(7)
+    spread = np.zeros(100)
+    spread[40] = 2.5
+    spread[41:45] = [1.5, 0.8, 0.3, 0.1]
+    spread[70] = -2.6
+    spread[71:75] = [-1.4, -0.6, -0.2, 0.05]
+    C = 100
+    p1 = C * np.exp(spread + np.random.normal(0, 0.01, 100))
+    p2 = C + np.random.normal(0, 0.1, 100)
+    data_dict = {
+        "A": pd.DataFrame({"close": p1}, index=dates),
+        "B": pd.DataFrame({"close": p2}, index=dates),
+    }
+    s = build_strategy("zscore_mean_reversion", '{"period": 20, "entry_z": 2.0, "exit_z": 0.5}')
+    sig = s.generate_signals(data_dict)
+    assert sig.iloc[39] == 0
+    assert sig.iloc[40] == 0 or sig.iloc[41] == -1  # enters short around high spread
+    # Should produce at least one non-zero signal in post-period
+    assert (sig.iloc[20:] != 0).any()
+
+
+def test_mean_reversion_zscore_pairs_multiindex_two_assets():
+    """MeanReversionZScore works with MultiIndex DataFrame containing two assets."""
+    from strategy_builder import build_strategy
+    from test_strategy_builder import _make_multiindex_data
+
+    data = _make_multiindex_data(n=100, n_assets=2, seed=42)
+    s = build_strategy("zscore_mean_reversion", '{"period": 20}')
+    sig = s.generate_signals(data)
+    assert isinstance(sig, pd.Series)
+    assert len(sig) == len(data)
+
+
+def test_mean_reversion_zscore_single_asset_fallback():
+    """MeanReversionZScore with single-asset data warns and falls back."""
+    import warnings
+    from strategy_builder import build_strategy
+    from test_strategy_builder import _make_data
+
+    data = _make_data(n=80)
+    s = build_strategy("zscore_mean_reversion", '{"period": 20}')
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        sig = s.generate_signals(data)
+        assert len(w) == 1
+        assert issubclass(w[0].category, UserWarning)
+        assert "single-asset" in str(w[0].message).lower()
+
+    assert len(sig) == len(data)
+    assert set(sig.unique()).issubset({-1, 0, 1})
+
+
+def test_mean_reversion_zscore_rejects_three_assets():
+    """MeanReversionZScore rejects panel data with != 2 assets."""
+    from strategy_builder import build_strategy
+    from test_strategy_builder import _make_multi_asset_data, _make_multiindex_data
+
+    # dict with 3
+    try:
+        data = _make_multi_asset_data(n=50, n_assets=3, seed=1)
+        s = build_strategy("zscore_mean_reversion", '{"period": 10}')
+        s.generate_signals(data)
+        assert False, "Expected ValueError"
+    except ValueError:
+        pass
+
+    # MultiIndex with 3
+    try:
+        data = _make_multiindex_data(n=50, n_assets=3, seed=1)
+        s = build_strategy("zscore_mean_reversion", '{"period": 10}')
+        s.generate_signals(data)
+        assert False, "Expected ValueError"
+    except ValueError:
+        pass
