@@ -78,6 +78,15 @@ strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 3
   equal-weight portfolio returns; a net-zero signal is flat, which differs
   from "equal long/short books" in cost/slippage realization depending on
   execution model. The test suite uses asymmetric quantiles to avoid this.
+- **Validation** (multi-asset paths only): `generate_signals` emits a
+  `UserWarning` when `top_quantile == bottom_quantile` (flat net signal by
+  construction — this is the default 0.2/0.2 case) and when
+  `top_quantile + bottom_quantile > 1.0` (the top and bottom selections
+  overlap, so an asset is simultaneously long and short). Use asymmetric,
+  non-overlapping quantiles (e.g. `top_quantile=0.4, bottom_quantile=0.2`)
+  to take a directional net position, or model the long and short books
+  separately. The single-asset fallback uses the quantiles as rolling
+  thresholds, where symmetric values are valid, so it does not warn.
 
 ### Dual Momentum (`dual_momentum`)
 

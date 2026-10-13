@@ -223,8 +223,18 @@ def test_cross_sectional_momentum_respects_quantiles():
     # With top_quantile=0.4 (2/5) and bottom_quantile=0.4 (2/5):
     # Top 2: A, B -> long; Bottom 2: D, E -> short; C -> flat
     # Net signal = (2 - 2) / 5 = 0
+    # Symmetric quantiles make the net signal flat by construction, so
+    # generate_signals must warn about it (regression guard).
+    import warnings
+
     strategy = build_strategy("cross_sectional_momentum", '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.4}')
-    signals = strategy.generate_signals(data_dict)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        signals = strategy.generate_signals(data_dict)
+
+    assert len(w) == 1
+    assert issubclass(w[0].category, UserWarning)
+    assert "top_quantile == bottom_quantile" in str(w[0].message)
 
     # After lookback, signal should be near 0 (2 longs - 2 shorts) / 5 = 0
     post_lookback = signals.iloc[20:]
@@ -238,6 +248,87 @@ def test_cross_sectional_momentum_respects_quantiles():
     post_lookback2 = signals2.iloc[20:]
     # Average should be close to 0.4
     assert abs(post_lookback2.mean() - 0.4) < 0.15
+
+
+def test_cross_sectional_momentum_symmetric_quantiles_flat():
+    """Symmetric quantiles (incl. defaults) produce a flat signal and warn.
+
+    Regression guard for the net-exposure convention: when
+    top_quantile == bottom_quantile the long and short books are the
+    same size every period, so (n_long - n_short) / n_assets is zero
+    by construction and the strategy never takes a position. The
+    default parameters (0.2 / 0.2) hit this case.
+    """
+    import warnings
+
+    data_dict = _make_multi_asset_data(n=150, n_assets=6, seed=123)
+
+    # The published defaults are symmetric (0.2 / 0.2).
+    defaults = get_strategy_defaults("cross_sectional_momentum")
+    assert defaults["top_quantile"] == defaults["bottom_quantile"]
+
+    strategy = build_strategy("cross_sectional_momentum",
+                              '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}')
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        signals = strategy.generate_signals(data_dict)
+
+    assert len(w) == 1
+    assert issubclass(w[0].category, UserWarning)
+    assert "top_quantile == bottom_quantile" in str(w[0].message)
+
+    # Net signal is zero everywhere by construction.
+    assert (signals == 0).all()
+
+
+def test_cross_sectional_momentum_overlapping_quantiles_warn():
+    """top_quantile + bottom_quantile > 1.0 warns about overlapping books.
+
+    When the quantiles sum above 1.0 the top and bottom selections
+    overlap, so at least one asset is simultaneously long and short.
+    """
+    import warnings
+
+    data_dict = _make_multi_asset_data(n=150, n_assets=6, seed=123)
+
+    # 0.6 + 0.6 = 1.2 > 1.0 (also symmetric, so both warnings fire).
+    strategy = build_strategy("cross_sectional_momentum",
+                              '{"lookback": 20, "top_quantile": 0.6, "bottom_quantile": 0.6}')
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        strategy.generate_signals(data_dict)
+
+    messages = [str(x.message) for x in w if issubclass(x.category, UserWarning)]
+    assert any("top_quantile == bottom_quantile" in m for m in messages)
+    assert any("overlap" in m.lower() for m in messages)
+
+    # 0.5 + 0.8 = 1.3 > 1.0 but asymmetric: only the overlap warning fires.
+    strategy2 = build_strategy("cross_sectional_momentum",
+                               '{"lookback": 20, "top_quantile": 0.5, "bottom_quantile": 0.8}')
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        strategy2.generate_signals(data_dict)
+
+    messages2 = [str(x.message) for x in w if issubclass(x.category, UserWarning)]
+    assert len(messages2) == 1
+    assert "overlap" in messages2[0].lower()
+
+
+def test_cross_sectional_momentum_asymmetric_no_warning():
+    """Asymmetric, non-overlapping quantiles produce no warnings."""
+    import warnings
+
+    data_dict = _make_multi_asset_data(n=150, n_assets=6, seed=123)
+
+    strategy = build_strategy("cross_sectional_momentum",
+                              '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}')
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        signals = strategy.generate_signals(data_dict)
+
+    assert len(w) == 0
+    assert (signals != 0).any()
 
 
 def test_dual_momentum_multi_asset_dict():
@@ -388,6 +479,9 @@ def main() -> int:
         ("cross_sectional_momentum_multiindex_dataframe", test_cross_sectional_momentum_multiindex_dataframe),
         ("cross_sectional_momentum_single_asset_fallback", test_cross_sectional_momentum_single_asset_fallback),
         ("cross_sectional_momentum_respects_quantiles", test_cross_sectional_momentum_respects_quantiles),
+        ("cross_sectional_momentum_symmetric_quantiles_flat", test_cross_sectional_momentum_symmetric_quantiles_flat),
+        ("cross_sectional_momentum_overlapping_quantiles_warn", test_cross_sectional_momentum_overlapping_quantiles_warn),
+        ("cross_sectional_momentum_asymmetric_no_warning", test_cross_sectional_momentum_asymmetric_no_warning),
         ("dual_momentum_multi_asset_dict", test_dual_momentum_multi_asset_dict),
         ("dual_momentum_multiindex_dataframe", test_dual_momentum_multiindex_dataframe),
         ("dual_momentum_single_asset_fallback", test_dual_momentum_single_asset_fallback),

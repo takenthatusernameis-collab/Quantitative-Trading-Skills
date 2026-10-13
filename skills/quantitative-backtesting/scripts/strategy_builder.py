@@ -227,8 +227,10 @@ class CrossSectionalMomentum(StrategyBase):
 
         # Detect multi-asset panel data
         if isinstance(data, dict):
+            self._validate_quantiles(top_quantile, bottom_quantile)
             return self._generate_multi_asset_signals_dict(data, lookback, top_quantile, bottom_quantile)
         elif isinstance(data.columns, pd.MultiIndex):
+            self._validate_quantiles(top_quantile, bottom_quantile)
             return self._generate_multi_asset_signals_multiindex(data, lookback, top_quantile, bottom_quantile)
         else:
             # Single-asset fallback (backward compatible)
@@ -242,6 +244,51 @@ class CrossSectionalMomentum(StrategyBase):
                 stacklevel=2,
             )
             return self._generate_single_asset_signals(data, lookback, top_quantile, bottom_quantile)
+
+    def _validate_quantiles(self, top_quantile: float, bottom_quantile: float) -> None:
+        """Warn about quantile choices that make the portfolio signal flat or ill-defined.
+
+        The portfolio signal is the net exposure (n_long - n_short) / n_assets.
+        Two parameter choices make that signal uninformative:
+
+        - ``top_quantile == bottom_quantile``: the long and short books are the
+          same size every period, so the net signal is exactly 0 (flat) by
+          construction and the strategy never takes a position. This is the
+          case for the default parameters (0.2 / 0.2).
+        - ``top_quantile + bottom_quantile > 1.0``: the top and bottom
+          selections overlap, so at least one asset is simultaneously long and
+          short.
+
+        These warnings apply to the multi-asset panel paths only; the
+        single-asset fallback uses the quantiles as rolling-threshold
+        boundaries, where symmetric values are valid.
+        """
+        import warnings
+
+        if top_quantile == bottom_quantile:
+            warnings.warn(
+                "CrossSectionalMomentum: top_quantile == bottom_quantile "
+                f"({top_quantile}). With the net-exposure convention "
+                "((n_long - n_short) / n_assets), symmetric quantiles produce a "
+                "flat (zero) portfolio signal by construction, so the strategy "
+                "never takes a position. Use asymmetric quantiles (e.g. "
+                "top_quantile=0.4, bottom_quantile=0.2) to take a directional "
+                "net position, or model the long and short books separately.",
+                UserWarning,
+                stacklevel=3,
+            )
+
+        if top_quantile + bottom_quantile > 1.0:
+            warnings.warn(
+                "CrossSectionalMomentum: top_quantile + bottom_quantile > 1.0 "
+                f"({top_quantile} + {bottom_quantile} = "
+                f"{top_quantile + bottom_quantile}). The top and bottom "
+                "selections overlap, so at least one asset is simultaneously "
+                "long and short. Reduce the quantiles so that "
+                "top_quantile + bottom_quantile <= 1.0.",
+                UserWarning,
+                stacklevel=3,
+            )
 
     def _generate_multi_asset_signals_dict(
         self,
