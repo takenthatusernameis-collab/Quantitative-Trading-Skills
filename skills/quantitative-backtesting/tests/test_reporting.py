@@ -388,6 +388,52 @@ class TestTearSheet(unittest.TestCase):
                 summary = json.load(f)
             self.assertNotIn("deflated_sharpe", summary)
 
+    def test_generate_tear_sheet_includes_benchmark_section(self):
+        """The tear sheet renders the Benchmark Comparison section (including
+        annualized return) and surfaces benchmark metrics in the JSON summary
+        when benchmark_total_return is present in metrics."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            metrics = {
+                "total_return": 0.10,
+                "benchmark_total_return": 0.12,
+                "benchmark_annualized_return": 0.18,
+                "correlation_with_benchmark": 0.85,
+                "alpha": 0.02,
+                "beta": 1.1,
+            }
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Benchmark Comparison", html)
+            self.assertIn("Benchmark Total Return", html)
+            self.assertIn("Benchmark Annualized Return", html)
+            self.assertIn("Correlation", html)
+            self.assertIn("Alpha", html)
+            self.assertIn("Beta", html)
+
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            for key in ("benchmark_total_return", "benchmark_annualized_return",
+                        "correlation_with_benchmark", "alpha", "beta"):
+                self.assertIn(key, summary["metrics"])
+
+    def test_generate_tear_sheet_omits_benchmark_when_absent(self):
+        """Without benchmark metrics, the Benchmark Comparison section is omitted."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            metrics = {"total_return": 0.10}
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertNotIn("Benchmark Comparison", html)
+
     def _make_provenance(self, symbol="SPY", checksum="abc123def456"):
         """Build a DataProvenance-style dict matching DataProvenance.to_dict()."""
         return {

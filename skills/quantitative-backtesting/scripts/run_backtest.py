@@ -50,7 +50,8 @@ def parse_args():
     parser.add_argument("--risk-free-rate", type=float, default=None, help="Annual risk-free rate (as decimal, e.g., 0.02 for 2%)")
     parser.add_argument("--validate-point-in-time", action="store_true", help="Run point-in-time validation on the loaded data and strategy signals (temporal ordering, duplicate timestamps, signal/next-return correlation for look-ahead bias screening)")
     parser.add_argument("--point-in-time-strict", action="store_true", help="Abort with a non-zero exit code when point-in-time validation finds violations (default: warn only)")
-    parser.add_argument("--multi-symbol", action="store_true", help="Load every symbol in a multi-symbol file (with a 'symbol' or 'ticker' column) as a panel, run survivorship-bias detection, and backtest the panel. Requires a panel strategy such as cross_sectional_momentum or dual_momentum.")
+    parser.add_argument("--multi-symbol", action="store_true", help="Load every symbol in a multi-symbol file (with a 'symbol' or 'ticker' column) as a panel, run survivorship-bias detection, and backtest a panel. Requires a panel strategy such as cross_sectional_momentum or dual_momentum.")
+    parser.add_argument("--benchmark", type=str, default=None, help="Path to benchmark OHLCV file (e.g. SPY) for buy-and-hold baseline comparison (alpha/beta, correlation)")
     return parser.parse_args()
 
 
@@ -132,12 +133,21 @@ def _print_survivorship_report(survivorship: Dict[str, Any]) -> None:
         )
 
 
-def run_backtest(data, strategy, args, data_provenance=None):
+def run_backtest(data, strategy, args, data_provenance=None, benchmark=None):
     """Run a vectorized backtest and return results with equity curve and trades.
 
     data_provenance: optional DataProvenance (or dict of them for
         multi-symbol panels) captured at load time; serialized into
         the results so the backtest is reproducible.
+    benchmark: optional DataFrame of benchmark OHLCV indexed by date
+        (e.g. a market index or buy-and-hold baseline). When provided,
+        buy-and-hold returns are computed from the benchmark close,
+        aligned to the strategy returns index on common trading dates,
+        and attached as ``results["benchmark"]`` so
+        ``calculate_metrics`` can report alpha/beta/correlation vs the
+        market. The benchmark return for period t is the close-to-close
+        return from t-1 to t (no shift), matching the strategy's
+        next-period-open trading convention.
     """
     signals = strategy.generate_signals(data)
 
@@ -335,6 +345,7 @@ def run_backtest(data, strategy, args, data_provenance=None):
             "symbol": args.symbol,
             "n_trials": getattr(args, "n_trials", None),
             "risk_free_rate": getattr(args, "risk_free_rate", None),
+            "benchmark": getattr(args, "benchmark", None),
         },
     }
 
@@ -351,6 +362,19 @@ def run_backtest(data, strategy, args, data_provenance=None):
     # Optional point-in-time validation outcome.
     if pit_result is not None:
         results["point_in_time_validation"] = pit_result
+
+    # Optional buy-and-hold benchmark baseline.
+    # The benchmark return for period t is the close-to-close return
+    # from t-1 to t (no shift): the strategy already trades at the next
+    # period's open, so this is an apples-to-apples comparison window.
+    # Align to the strategy returns index on common trading dates (inner
+    # join handles a benchmark that is a strict superset of the strategy
+    # date range without misaligning).
+    if benchmark is not None:
+        benchmark_returns = benchmark["close"].pct_change()
+        _, aligned_benchmark = strategy_returns.align(benchmark_returns, join="inner")
+        if len(aligned_benchmark) > 0:
+            results["benchmark"] = aligned_benchmark
 
     return results
 
@@ -408,11 +432,27 @@ def main():
         print("Data validation failed!")
         return 1
 
+    # Optional benchmark baseline (buy-and-hold comparison).
+    benchmark = None
+    benchmark_provenance = None
+    if getattr(args, "benchmark", None):
+        print(f"Loading benchmark data from {args.benchmark}...")
+        benchmark, benchmark_provenance = load_data(
+            args.benchmark, return_provenance=True,
+        )
+        print(
+            f"Loaded benchmark: {benchmark_provenance.final_shape[0]} rows "
+            f"(checksum {benchmark_provenance.checksum})"
+        )
+        if not validate_data(benchmark):
+            print("Benchmark data validation failed!")
+            return 1
+
     print(f"Building strategy: {args.strategy}...")
     strategy = build_strategy(args.strategy, args.params)
 
     print("Running backtest...")
-    results = run_backtest(data, strategy, args, data_provenance=provenance)
+    results = run_backtest(data, strategy, args, data_provenance=provenance, benchmark=benchmark)
 
     # Surface point-in-time validation results in the logs and
     # abort in strict mode before investing more in the run.
@@ -449,6 +489,12 @@ def main():
     with open(prov_path, "w") as f:
         json.dump(results.get("data_provenance"), f, indent=2, default=str)
     print(f"Data provenance saved to: {prov_path}")
+
+    if benchmark_provenance is not None:
+        bench_prov_path = output_dir / "benchmark_provenance.json"
+        with open(bench_prov_path, "w") as f:
+            json.dump(benchmark_provenance.to_dict(), f, indent=2, default=str)
+        print(f"Benchmark provenance saved to: {bench_prov_path}")
 
     if survivorship is not None:
         surv_path = output_dir / "survivorship_bias.json"

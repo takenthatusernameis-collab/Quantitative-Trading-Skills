@@ -52,7 +52,7 @@ class _Args:
                  impact_coefficient=0.0, adv_window=20,
                  borrow_cost=0.0, funding_cost=0.0,
                  validate_point_in_time=False, point_in_time_strict=False,
-                 multi_symbol=False):
+                 multi_symbol=False, benchmark=None, risk_free_rate=None):
         self.commission = commission
         self.slippage = slippage
         self.initial_capital = initial_capital
@@ -66,6 +66,8 @@ class _Args:
         self.validate_point_in_time = validate_point_in_time
         self.point_in_time_strict = point_in_time_strict
         self.multi_symbol = multi_symbol
+        self.benchmark = benchmark
+        self.risk_free_rate = risk_free_rate
 
 
 def test_signals_active_detects_flat_and_active_series():
@@ -1002,6 +1004,10 @@ def main() -> int:
         ("parse_args_accepts_validation_and_multi_symbol_flags", test_parse_args_accepts_validation_and_multi_symbol_flags),
         ("cli_writes_data_provenance_artifact", test_cli_writes_data_provenance_artifact),
         ("cli_multi_symbol_writes_survivorship_artifact", test_cli_multi_symbol_writes_survivorship_artifact),
+        ("run_backtest_with_benchmark_attaches_aligned_returns", test_run_backtest_with_benchmark_attaches_aligned_returns),
+        ("run_backtest_without_benchmark_omits_key", test_run_backtest_without_benchmark_omits_key),
+        ("benchmark_superset_aligns_correctly", test_benchmark_superset_aligns_correctly),
+        ("cli_benchmark_writes_artifact_and_metrics", test_cli_benchmark_writes_artifact_and_metrics),
     ]
 
     failures = 0
@@ -1121,6 +1127,141 @@ def test_run_backtest_multi_asset_dict_dual_momentum():
         assert isinstance(trade["pnl"], float)
         assert isinstance(trade["return"], float)
         assert trade["entry_date"] < trade["exit_date"]
+
+
+# ---------------------------------------------------------------------------
+# Buy-and-hold benchmark baseline tests
+# ---------------------------------------------------------------------------
+
+
+def test_run_backtest_with_benchmark_attaches_aligned_returns():
+    """run_backtest with a benchmark DataFrame attaches aligned buy-and-hold returns.
+
+    The benchmark return for period t is the close-to-close return from
+    t-1 to t (no shift), matching the strategy's next-period-open trading
+    convention. The aligned benchmark index is a subset of the strategy
+    returns index (inner join on common dates).
+    """
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    benchmark = _make_data(periods=252, seed=99)  # same date range, different prices
+
+    results = run_backtest(data, strategy, _Args(), benchmark=benchmark)
+
+    assert "benchmark" in results, "results[\"benchmark\"] should be set when a benchmark is provided"
+    bench_returns = results["benchmark"]
+    strat_returns = results["returns"]
+
+    # The benchmark index is a subset of the strategy returns index.
+    assert set(bench_returns.index).issubset(set(strat_returns.index))
+
+    # Values match close-to-close pct_change on common dates (no shift, no
+    # look-ahead — the benchmark return for period t is close[t]/close[t-1]-1).
+    expected = benchmark["close"].pct_change()
+    common = bench_returns.index.intersection(expected.index)
+    for ts in common:
+        assert abs(bench_returns.loc[ts] - expected.loc[ts]) < 1e-12, (
+            f"benchmark return mismatch at {ts}"
+        )
+
+
+def test_run_backtest_without_benchmark_omits_key():
+    """Without a benchmark, results[\"benchmark\"] is absent (backward compat)."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    results = run_backtest(data, strategy, _Args())
+    assert "benchmark" not in results
+
+
+def test_benchmark_superset_aligns_correctly():
+    """A benchmark with a superset date index aligns via inner join.
+
+    The benchmark starts a month earlier and ends a month later than the
+    strategy data, so its index is a strict superset. The aligned benchmark
+    must not contain the extra dates, must not crash, and its alpha/beta/correlation
+    metrics must be computed only on common dates.
+    """
+    data = _make_data(periods=252)
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+
+    # Benchmark: starts earlier and extends later than the strategy data.
+    bench_dates = pd.date_range("2019-12-01", periods=292, freq="B")
+    rng = np.random.default_rng(99)
+    bench_rets = rng.normal(0.0003, 0.012, len(bench_dates))
+    bench_prices = 100 * np.exp(np.cumsum(bench_rets))
+    benchmark = pd.DataFrame({
+        "open": bench_prices * rng.uniform(0.995, 1.005, len(bench_dates)),
+        "high": bench_prices * rng.uniform(1.005, 1.02, len(bench_dates)),
+        "low": bench_prices * rng.uniform(0.98, 0.995, len(bench_dates)),
+        "close": bench_prices,
+        "volume": rng.integers(1_000_000, 10_000_000, len(bench_dates)),
+    }, index=bench_dates)
+
+    results = run_backtest(data, strategy, _Args(), benchmark=benchmark)
+
+    assert "benchmark" in results
+    bench_returns = results["benchmark"]
+    strat_returns = results["returns"]
+
+    # The aligned benchmark index is a subset of strategy returns (inner join).
+    assert set(bench_returns.index).issubset(set(strat_returns.index))
+
+    # Extra benchmark-only dates (before strategy start) did not leak in.
+    assert not (bench_returns.index < data.index[0]).any(), (
+        "superset benchmark dates leaked into aligned returns"
+    )
+
+    # metrics calculate correctly on the aligned series
+    from performance import calculate_metrics
+    metrics = calculate_metrics(results)
+    assert "benchmark_total_return" in metrics
+    assert "correlation_with_benchmark" in metrics
+    assert "alpha" in metrics
+    assert "beta" in metrics
+
+
+def test_cli_benchmark_writes_artifact_and_metrics():
+    """CLI end-to-end with --benchmark writes benchmark_provenance.json
+    and the metrics JSON contains benchmark_total_return,
+    benchmark_annualized_return, correlation_with_benchmark, alpha, beta.
+    """
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        bench_path = os.path.join(tmpdir, "benchmark.csv")
+        _write_ohlcv_csv(csv_path)
+        _write_ohlcv_csv(bench_path, seed=99)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest", "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 10, "slow_period": 30}',
+            "--output", out_dir, "--benchmark", bench_path,
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+
+        assert rc == 0, "CLI with --benchmark should exit 0"
+
+        # benchmark_provenance.json artifact written with provenance fields
+        bench_prov_path = os.path.join(out_dir, "benchmark_provenance.json")
+        assert os.path.exists(bench_prov_path), "benchmark_provenance.json not written"
+        with open(bench_prov_path) as f:
+            bprov = json.load(f)
+        assert bprov["source_path"] == bench_path
+        assert bprov["checksum"], "benchmark provenance missing checksum"
+        assert bprov["validation_passed"] is True
+        assert bprov["date_range_final"] is not None
+
+        # metrics JSON contains the full benchmark comparison block
+        metrics_path = os.path.join(out_dir, "metrics.json")
+        with open(metrics_path) as f:
+            metrics = json.load(f)
+        for key in ("benchmark_total_return", "benchmark_annualized_return",
+                     "correlation_with_benchmark", "alpha", "beta"):
+            assert key in metrics, f"metrics missing {key}"
 
 
 if __name__ == "__main__":

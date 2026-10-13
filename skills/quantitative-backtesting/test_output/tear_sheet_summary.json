@@ -36,7 +36,7 @@
   ],
   "data_provenance": {
     "source_path": "skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv",
-    "load_timestamp": "2026-10-13T20:44:48.412808Z",
+    "load_timestamp": "2026-10-13T21:16:10.428342Z",
     "file_format": ".csv",
     "file_size_bytes": 46815,
     "symbol_filter": "SPY",

@@ -375,6 +375,7 @@ def generate_tear_sheet(
         html_parts.append("<table><tr><th>Metric</th><th>Value</th></tr>")
         bench_metrics = [
             ("Benchmark Total Return", "benchmark_total_return", fmt_pct),
+            ("Benchmark Annualized Return", "benchmark_annualized_return", fmt_pct),
             ("Correlation", "correlation_with_benchmark", fmt_num),
             ("Alpha", "alpha", fmt_pct),
             ("Beta", "beta", fmt_num),
