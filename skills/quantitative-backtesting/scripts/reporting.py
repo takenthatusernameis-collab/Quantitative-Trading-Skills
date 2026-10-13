@@ -432,11 +432,18 @@ def generate_tear_sheet(
                 html_parts.append(f"<tr><td>{label}</td><td class='metric'>{display}</td></tr>")
             html_parts.append("</table>")
 
-    # Data provenance
+    # Data provenance: surface source path, checksum, date range, filters,
+    # transformations, and validation outcome so each tear sheet is
+    # traceable to its input. Handles the single-asset (flat dict) and
+    # per-symbol panel (dict of {symbol: prov_dict}) provenance forms, and
+    # also surfaces the point-in-time validation outcome captured at the
+    # results level (not inside the DataProvenance dict itself).
     data_prov = results.get("data_provenance")
-    if data_prov:
+    pit_val = results.get("point_in_time_validation")
+    if data_prov or pit_val:
         html_parts.append("<h2>Data Provenance</h2>")
         html_parts.append("<table><tr><th>Field</th><th>Value</th></tr>")
+
         def fmt_prov(v):
             if v is None:
                 return "N/A"
@@ -447,11 +454,44 @@ def generate_tear_sheet(
             if isinstance(v, (int, float)):
                 return str(v)
             return str(v)
-        for key in ["source_path", "checksum", "date_range_final", "filters",
-                    "symbol", "validation", "point_in_time_validation",
-                    "transformations", "per_symbol", "panel_shape"]:
-            if key in data_prov:
-                html_parts.append(f"<tr><td>{key}</td><td class='metric'>{fmt_prov(data_prov[key])}</td></tr>")
+
+        prov_fields = [
+            "source_path", "load_timestamp", "file_format", "file_size_bytes",
+            "symbol_filter", "start_date_filter", "end_date_filter",
+            "date_range_original", "date_range_final", "original_shape",
+            "final_shape", "columns_original", "columns_final",
+            "validation_passed", "validation_messages",
+            "transformations_applied", "checksum",
+        ]
+
+        # Per-symbol panel provenance: dict of {symbol: prov_dict}
+        first_val = next(iter(data_prov.values()), None) if data_prov else None
+        is_panel = (
+            isinstance(data_prov, dict)
+            and isinstance(first_val, dict)
+            and "source_path" in first_val
+        )
+        if is_panel:
+            for sym, prov in data_prov.items():
+                for field in prov_fields:
+                    if field in prov:
+                        html_parts.append(
+                            f"<tr><td>{sym} / {field}</td><td class='metric'>{fmt_prov(prov[field])}</td></tr>"
+                        )
+        elif isinstance(data_prov, dict):
+            for field in prov_fields:
+                if field in data_prov:
+                    html_parts.append(
+                        f"<tr><td>{field}</td><td class='metric'>{fmt_prov(data_prov[field])}</td></tr>"
+                    )
+
+        if pit_val is not None:
+            for field in ["passed", "violations", "warnings"]:
+                if field in pit_val:
+                    html_parts.append(
+                        f"<tr><td>point_in_time / {field}</td><td class='metric'>{fmt_prov(pit_val[field])}</td></tr>"
+                    )
+
         html_parts.append("</table>")
 
     cpcv_results = analysis.get("cpcv")
@@ -773,9 +813,14 @@ def generate_tear_sheet(
                 "base_observations": mc.get("base_observations"),
             }
 
-    # Surface data provenance in JSON summary if present
+    # Surface data provenance and point-in-time validation outcome in JSON
+    # summary, if present (backward compatible: omitted when absent).
     if results.get("data_provenance"):
         summary["data_provenance"] = _json_safe(results["data_provenance"])
+    if results.get("point_in_time_validation"):
+        summary["point_in_time_validation"] = _json_safe(
+            results["point_in_time_validation"]
+        )
 
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2, default=str)

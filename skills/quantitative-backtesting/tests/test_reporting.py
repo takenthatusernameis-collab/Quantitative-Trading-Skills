@@ -388,6 +388,123 @@ class TestTearSheet(unittest.TestCase):
                 summary = json.load(f)
             self.assertNotIn("deflated_sharpe", summary)
 
+    def _make_provenance(self, symbol="SPY", checksum="abc123def456"):
+        """Build a DataProvenance-style dict matching DataProvenance.to_dict()."""
+        return {
+            "source_path": "data.csv",
+            "load_timestamp": "2026-01-01T00:00:00Z",
+            "file_format": ".csv",
+            "file_size_bytes": 1234,
+            "symbol_filter": symbol,
+            "start_date_filter": None,
+            "end_date_filter": None,
+            "original_shape": [500, 6],
+            "final_shape": [500, 6],
+            "columns_original": ["date", "open", "high", "low", "close", "volume"],
+            "columns_final": ["date", "open", "high", "low", "close", "volume"],
+            "date_range_original": ["2020-01-01", "2022-01-01"],
+            "date_range_final": ["2020-01-01", "2022-01-01"],
+            "validation_passed": True,
+            "validation_messages": [],
+            "transformations_applied": ["sorted_by_date"],
+            "checksum": checksum,
+        }
+
+    def test_generate_tear_sheet_includes_data_provenance_section(self):
+        """Data Provenance section renders source path, checksum, date range,
+        filters, and validation outcome when results['data_provenance'] is present."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            prov = self._make_provenance(symbol="SPY", checksum="deadbeef")
+            results["data_provenance"] = prov
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Data Provenance", html)
+            self.assertIn("source_path", html)
+            self.assertIn("data.csv", html)
+            self.assertIn("checksum", html)
+            self.assertIn("deadbeef", html)
+            self.assertIn("date_range_final", html)
+            self.assertIn("symbol_filter", html)
+            self.assertIn("validation_passed", html)
+            self.assertIn("validation_messages", html)
+            self.assertIn("transformations_applied", html)
+
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("data_provenance", summary)
+            self.assertEqual(summary["data_provenance"]["source_path"], "data.csv")
+            self.assertEqual(summary["data_provenance"]["checksum"], "deadbeef")
+
+    def test_generate_tear_sheet_omits_data_provenance_when_absent(self):
+        """Without results['data_provenance'], the section and summary key are omitted."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertNotIn("Data Provenance", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertNotIn("data_provenance", summary)
+            self.assertNotIn("point_in_time_validation", summary)
+
+    def test_generate_tear_sheet_data_provenance_per_symbol_panel(self):
+        """Per-symbol panel provenance renders each symbol's fields."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            provs = {
+                "SPY": self._make_provenance(symbol="SPY", checksum="ck1"),
+                "TLT": self._make_provenance(symbol="TLT", checksum="ck2"),
+            }
+            results["data_provenance"] = provs
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Data Provenance", html)
+            self.assertIn("SPY / source_path", html)
+            self.assertIn("TLT / source_path", html)
+            self.assertIn("ck1", html)
+            self.assertIn("ck2", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("data_provenance", summary)
+            self.assertIn("SPY", summary["data_provenance"])
+            self.assertIn("TLT", summary["data_provenance"])
+
+    def test_generate_tear_sheet_surfaces_point_in_time_validation(self):
+        """Point-in-time validation outcome at results level is surfaced
+        in both HTML and JSON summary."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            results["data_provenance"] = self._make_provenance(checksum="deadbeef")
+            results["point_in_time_validation"] = {
+                "passed": True, "violations": [], "warnings": [],
+            }
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("point_in_time", html)
+            self.assertIn("passed", html)
+            self.assertIn("violations", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("point_in_time_validation", summary)
+            self.assertTrue(summary["point_in_time_validation"]["passed"])
+
     def test_generate_tear_sheet_handles_missing_equity(self):
         """Tear sheet does not crash when results lack equity_curve."""
         with tempfile.TemporaryDirectory() as tmpdir:

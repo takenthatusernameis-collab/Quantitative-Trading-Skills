@@ -27,6 +27,7 @@ from walk_forward import (  # noqa: E402
     monte_carlo_simulation,
     deflated_sharpe_ratio,
     run_walk_forward,
+    run_cpcv,
     run_parameter_optimization,
     run_monte_carlo,
     _make_strategy_factory,
@@ -846,6 +847,186 @@ def test_run_monte_carlo_constant_returns_deflated_sharpe():
             assert d["skewness"] == 0.0
             assert d["kurtosis"] == 3.0
             assert d["sharpe_ratio"] == 0.0
+    finally:
+        Path(data_file).unlink()
+
+
+def test_run_walk_forward_cli_persists_pit_results():
+    """--validate-point-in-time persists the PIT outcome in walk-forward summary JSON."""
+    data_file = _make_test_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                train_months=6,
+                test_months=2,
+                step_months=2,
+                initial_capital=100000,
+                deflate=False,
+                validate_point_in_time=True,
+                point_in_time_strict=False,
+            )
+            assert run_walk_forward(args) == 0
+            summary_path = Path(tmpdir) / "walk_forward_summary.json"
+            with open(summary_path) as f:
+                summary = json.load(f)
+            assert "point_in_time_validation" in summary
+            pit = summary["point_in_time_validation"]
+            assert "passed" in pit
+            assert "violations" in pit
+            assert "warnings" in pit
+    finally:
+        Path(data_file).unlink()
+
+
+def test_run_walk_forward_cli_omits_pit_without_flag():
+    """Without --validate-point-in-time, no PIT key is persisted (backward compat)."""
+    data_file = _make_test_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                train_months=6,
+                test_months=2,
+                step_months=2,
+                initial_capital=100000,
+                deflate=False,
+            )
+            assert run_walk_forward(args) == 0
+            summary_path = Path(tmpdir) / "walk_forward_summary.json"
+            with open(summary_path) as f:
+                summary = json.load(f)
+            assert "point_in_time_validation" not in summary
+    finally:
+        Path(data_file).unlink()
+
+
+def test_run_cpcv_cli_persists_pit_results():
+    """--validate-point-in-time persists the PIT outcome in CPCV summary JSON."""
+    data_file = _make_test_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                n_splits=4,
+                test_size=0.25,
+                purge_size=0.0,
+                embargo_size=0.0,
+                initial_capital=100000,
+                deflate=False,
+                validate_point_in_time=True,
+                point_in_time_strict=False,
+            )
+            assert run_cpcv(args) == 0
+            summary_path = Path(tmpdir) / "cpcv_summary.json"
+            with open(summary_path) as f:
+                summary = json.load(f)
+            assert "point_in_time_validation" in summary
+            pit = summary["point_in_time_validation"]
+            assert "passed" in pit
+            assert "violations" in pit
+    finally:
+        Path(data_file).unlink()
+
+
+def test_run_monte_carlo_cli_persists_pit_and_preserves_block_size():
+    """--validate-point-in-time persists PIT in Monte Carlo output and
+    block_size is preserved in the config dict (regression for a prior
+    edit that replaced block_size with point_in_time_validation)."""
+    data_file = _make_test_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                n_simulations=50,
+                confidence_levels=[0.90, 0.95],
+                block_size=10,
+                initial_capital=100000,
+                validate_point_in_time=True,
+                point_in_time_strict=False,
+            )
+            assert run_monte_carlo(args) == 0
+            mc_path = Path(tmpdir) / "monte_carlo_results.json"
+            with open(mc_path) as f:
+                mc = json.load(f)
+            assert "point_in_time_validation" in mc
+            pit = mc["point_in_time_validation"]
+            assert "passed" in pit
+            assert "violations" in pit
+            # Regression: block_size must be preserved in the config dict
+            assert "block_size" in mc["config"]
+            assert mc["config"]["block_size"] == 10
+    finally:
+        Path(data_file).unlink()
+
+
+def test_run_parameter_optimization_cli_persists_pit_results():
+    """--validate-point-in-time persists PIT in a separate artifact for
+    parameter optimization, whose results format is a ranked list (not a
+    dict), so PIT results are saved to point_in_time_validation.json."""
+    data_file = _make_test_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                top_n=5,
+                deflate=False,
+                validate_point_in_time=True,
+                point_in_time_strict=False,
+            )
+            assert run_parameter_optimization(args) == 0
+            pit_path = Path(tmpdir) / "point_in_time_validation.json"
+            assert pit_path.exists(), "point_in_time_validation.json should be written"
+            with open(pit_path) as f:
+                pit = json.load(f)
+            assert "passed" in pit
+            assert "violations" in pit
+            # The optimization results file remains a list (schema preserved)
+            opt_path = Path(tmpdir) / "parameter_optimization.json"
+            with open(opt_path) as f:
+                opt = json.load(f)
+            assert isinstance(opt, list)
+            assert len(opt) > 0
     finally:
         Path(data_file).unlink()
 
@@ -2137,6 +2318,11 @@ def main() -> int:
         ("run_monte_carlo_deflated_sharpe_uses_floored_n_trials", test_run_monte_carlo_deflated_sharpe_uses_floored_n_trials),
         ("run_monte_carlo_constant_returns_deflated_sharpe", test_run_monte_carlo_constant_returns_deflated_sharpe),
         ("run_parameter_optimization_cli_constant_returns_deflation", test_run_parameter_optimization_cli_constant_returns_deflation),
+        ("run_walk_forward_cli_persists_pit_results", test_run_walk_forward_cli_persists_pit_results),
+        ("run_walk_forward_cli_omits_pit_without_flag", test_run_walk_forward_cli_omits_pit_without_flag),
+        ("run_cpcv_cli_persists_pit_results", test_run_cpcv_cli_persists_pit_results),
+        ("run_monte_carlo_cli_persists_pit_and_preserves_block_size", test_run_monte_carlo_cli_persists_pit_and_preserves_block_size),
+        ("run_parameter_optimization_cli_persists_pit_results", test_run_parameter_optimization_cli_persists_pit_results),
         ("parse_param_grid", test_parse_param_grid),
         ("walk_forward_multi_asset_cross_sectional_momentum", test_walk_forward_multi_asset_cross_sectional_momentum),
         ("walk_forward_multi_asset_dual_momentum", test_walk_forward_multi_asset_dual_momentum),

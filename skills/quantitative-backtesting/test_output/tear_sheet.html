@@ -53,6 +53,28 @@
 <tr><td>Trades Closed at End</td><td class='metric'>1.00</td></tr>
 <tr><td>Pct Trades Closed at End</td><td class='metric'>11.11%</td></tr>
 </table>
+<h2>Data Provenance</h2>
+<table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>source_path</td><td class='metric'>skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv</td></tr>
+<tr><td>load_timestamp</td><td class='metric'>2026-10-13T20:44:48.412808Z</td></tr>
+<tr><td>file_format</td><td class='metric'>.csv</td></tr>
+<tr><td>file_size_bytes</td><td class='metric'>46815</td></tr>
+<tr><td>symbol_filter</td><td class='metric'>SPY</td></tr>
+<tr><td>start_date_filter</td><td class='metric'>N/A</td></tr>
+<tr><td>end_date_filter</td><td class='metric'>N/A</td></tr>
+<tr><td>date_range_original</td><td class='metric'>N/A</td></tr>
+<tr><td>date_range_final</td><td class='metric'>('2018-01-01 00:00:00', '2019-12-05 00:00:00')</td></tr>
+<tr><td>original_shape</td><td class='metric'>(504, 6)</td></tr>
+<tr><td>final_shape</td><td class='metric'>(504, 5)</td></tr>
+<tr><td>columns_original</td><td class='metric'>["date", "open", "high", "low", "close", "volume"]</td></tr>
+<tr><td>columns_final</td><td class='metric'>["open", "high", "low", "close", "volume"]</td></tr>
+<tr><td>validation_passed</td><td class='metric'>true</td></tr>
+<tr><td>validation_messages</td><td class='metric'>[]</td></tr>
+<tr><td>transformations_applied</td><td class='metric'>["column_names_lowercase_stripped", "set_index_from_date", "sorted_index", "coerced_numeric_types"]</td></tr>
+<tr><td>checksum</td><td class='metric'>1cb22a22248f2e56</td></tr>
+</table>
+<div class='chart'><img src='equity_curve.png' alt='equity_curve'></div>
+<div class='chart'><img src='returns_distribution.png' alt='returns_distribution'></div>
 
 </div>
 </body>

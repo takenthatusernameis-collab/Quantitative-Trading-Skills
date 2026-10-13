@@ -1433,19 +1433,21 @@ def run_parameter_optimization(args) -> int:
                 f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
             )
 
-    # Attach PIT results to top-level saved results if present
-    if 'pit_results' in locals() or True:
-        pass
-
     # Save results
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # When saving param opt, also attach pit if we have it? But run_parameter_optimization might not have loaded with pit yet
     results_path = output_dir / "parameter_optimization.json"
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2, default=str)
     print(f"\nFull results saved to: {results_path}")
+
+    # Persist PIT validation results alongside the optimization artifact
+    # so the data-integrity baseline is reproducible with the search.
+    if pit_results is not None:
+        pit_path = output_dir / "point_in_time_validation.json"
+        with open(pit_path, "w") as f:
+            json.dump(pit_results, f, indent=2, default=str)
 
     return 0
 
@@ -1591,6 +1593,7 @@ def run_monte_carlo(args) -> int:
             "borrow_cost": args.borrow_cost,
             "funding_cost": args.funding_cost,
             "n_simulations": args.n_simulations,
+            "block_size": args.block_size,
             "point_in_time_validation": pit_results,
         },
     }
@@ -1619,6 +1622,8 @@ def run_monte_carlo(args) -> int:
     mc_base_metrics = calculate_metrics(mc_base_results)
     if dsr is not None:
         mc_base_metrics["deflated_sharpe"] = dsr
+    if pit_results is not None:
+        mc_base_results["point_in_time_validation"] = pit_results
     generate_tear_sheet(
         mc_base_results, mc_base_metrics, args.output,
         symbol=args.symbol,
