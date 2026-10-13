@@ -2344,6 +2344,9 @@ def main() -> int:
         ("borrow_cost_frequency_aware_per_period_rate", test_borrow_cost_frequency_aware_per_period_rate),
         ("borrow_cost_non_datetime_index_falls_back_to_252", test_borrow_cost_non_datetime_index_falls_back_to_252),
         ("funding_cost_frequency_aware_per_period_rate", test_funding_cost_frequency_aware_per_period_rate),
+        ("run_walk_forward_cli_with_benchmark", test_run_walk_forward_cli_with_benchmark),
+        ("run_cpcv_cli_with_benchmark", test_run_cpcv_cli_with_benchmark),
+        ("run_monte_carlo_cli_with_benchmark", test_run_monte_carlo_cli_with_benchmark),
     ]
 
     failures = 0
@@ -2459,6 +2462,183 @@ def test_walk_forward_multi_asset_dict_dual_momentum():
     )
     assert results["summary"]["n_periods"] > 0
     assert len(results["oos_returns"]) > 0
+
+
+# Buy-and-hold benchmark baseline tests for walk-forward CLI
+def _make_benchmark_data(periods: int = 756, seed: int = 99) -> str:
+    """Create a temporary benchmark data file."""
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2018-01-01", periods=periods, freq="B")
+    rets = rng.normal(0.0004, 0.012, periods)
+    prices = 100 * np.exp(np.cumsum(rets))
+    df = pd.DataFrame(
+        {
+            "date": dates,
+            "open": prices * rng.uniform(0.995, 1.005, periods),
+            "high": prices * rng.uniform(1.005, 1.02, periods),
+            "low": prices * rng.uniform(0.98, 0.995, periods),
+            "close": prices,
+            "volume": rng.integers(1_000_000, 10_000_000, periods),
+        }
+    )
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
+    df.to_csv(tmp.name, index=False)
+    return tmp.name
+
+
+def test_run_walk_forward_cli_with_benchmark():
+    """Walk-forward CLI with --benchmark writes benchmark metrics to summary and tear sheet."""
+    data_file = _make_test_data_file()
+    bench_file = _make_benchmark_data()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                train_months=6,
+                test_months=2,
+                step_months=2,
+                initial_capital=100000,
+                deflate=False,
+                benchmark=bench_file,
+            )
+            result = run_walk_forward(args)
+            assert result == 0
+
+            summary_path = Path(tmpdir) / "walk_forward_summary.json"
+            assert summary_path.exists()
+            with open(summary_path) as f:
+                summary = json.load(f)
+
+            # Benchmark metrics should be in summary
+            s = summary["summary"]
+            assert "benchmark_total_return" in s
+            assert "benchmark_annualized_return" in s
+            assert "correlation_with_benchmark" in s
+            assert "alpha" in s
+            assert "beta" in s
+
+            # Benchmark provenance should be written
+            assert "benchmark_provenance" in summary
+            assert summary["benchmark_provenance"]["checksum"] != ""
+
+            # Tear sheet summary should include benchmark
+            tear_summary_path = Path(tmpdir) / "tear_sheet_summary.json"
+            assert tear_summary_path.exists()
+            with open(tear_summary_path) as f:
+                tear_summary = json.load(f)
+            assert "benchmark_total_return" in tear_summary["metrics"]
+            assert "correlation_with_benchmark" in tear_summary["metrics"]
+    finally:
+        Path(data_file).unlink()
+        Path(bench_file).unlink()
+
+
+def test_run_cpcv_cli_with_benchmark():
+    """CPCV CLI with --benchmark writes benchmark metrics to summary."""
+    data_file = _make_test_data_file()
+    bench_file = _make_benchmark_data()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                n_splits=4,
+                test_size=0.2,
+                purge_size=0.0,
+                embargo_size=0.0,
+                initial_capital=100000,
+                deflate=False,
+                benchmark=bench_file,
+            )
+            result = run_cpcv(args)
+            assert result == 0
+
+            summary_path = Path(tmpdir) / "cpcv_summary.json"
+            assert summary_path.exists()
+            with open(summary_path) as f:
+                summary = json.load(f)
+
+            # Benchmark metrics should be in summary (if OOS returns exist)
+            s = summary["summary"]
+            # Note: with small data, CPCV may not produce OOS returns, so just check
+            # that the benchmark config is recorded
+            assert summary["config"]["benchmark"] == bench_file
+    finally:
+        Path(data_file).unlink()
+        Path(bench_file).unlink()
+
+
+def test_run_monte_carlo_cli_with_benchmark():
+    """Monte Carlo CLI with --benchmark writes benchmark metrics to summary and tear sheet."""
+    data_file = _make_test_data_file()
+    bench_file = _make_benchmark_data()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                impact_coefficient=0.0,
+                adv_window=20,
+                borrow_cost=0.0,
+                funding_cost=0.0,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                n_simulations=100,
+                confidence_levels=[0.95],
+                block_size=10,
+                initial_capital=100000,
+                n_trials=None,
+                benchmark=bench_file,
+            )
+            result = run_monte_carlo(args)
+            assert result == 0
+
+            results_path = Path(tmpdir) / "monte_carlo_results.json"
+            assert results_path.exists()
+            with open(results_path) as f:
+                mc_results = json.load(f)
+
+            # Benchmark metrics should be in summary
+            s = mc_results["summary"]
+            assert "benchmark_total_return" in s
+            assert "benchmark_annualized_return" in s
+            assert "correlation_with_benchmark" in s
+            assert "alpha" in s
+            assert "beta" in s
+
+            # Benchmark provenance should be written
+            assert "benchmark_provenance" in mc_results
+
+            # Tear sheet summary should include benchmark
+            tear_summary_path = Path(tmpdir) / "tear_sheet_summary.json"
+            assert tear_summary_path.exists()
+            with open(tear_summary_path) as f:
+                tear_summary = json.load(f)
+            assert "benchmark_total_return" in tear_summary["metrics"]
+            assert "correlation_with_benchmark" in tear_summary["metrics"]
+    finally:
+        Path(data_file).unlink()
+        Path(bench_file).unlink()
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ from itertools import product
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from scripts.strategy_builder import build_strategy
 from scripts.data_loader import load_data, validate_data, validate_point_in_time
-from scripts.performance import calculate_metrics, generate_report
+from scripts.performance import calculate_metrics, generate_report, _annualization_factor
 from scripts.reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
 
@@ -1114,6 +1114,13 @@ def run_cpcv(args) -> int:
         pit_strict=getattr(args, "point_in_time_strict", False),
     )
 
+    # Load benchmark if provided
+    benchmark = None
+    benchmark_provenance = None
+    if getattr(args, "benchmark", None):
+        print(f"Loading benchmark data from {args.benchmark}...")
+        benchmark, benchmark_provenance = _load_benchmark(args.benchmark)
+
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -1136,6 +1143,25 @@ def run_cpcv(args) -> int:
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
+
+    # Compute benchmark comparison metrics if benchmark provided
+    benchmark_returns = None
+    if benchmark is not None and len(results["oos_returns"]) > 0:
+        benchmark_returns = _compute_benchmark_returns(benchmark, results["oos_returns"])
+        if benchmark_returns is not None:
+            # Add benchmark metrics to summary
+            results["summary"] = _add_benchmark_to_summary(
+                results["summary"], results["oos_returns"], benchmark_returns
+            )
+            print(
+                f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
+            )
+            print(
+                f"Alpha (annualized): {results['summary'].get('alpha', 'N/A'):.2%}"
+            )
+            print(
+                f"Beta: {results['summary'].get('beta', 'N/A'):.4f}"
+            )
 
     print(f"Number of CPCV folds: {results['summary']['n_folds']}")
     print(f"Total OOS Return: {results['summary']['total_oos_return']:.2%}")
@@ -1177,11 +1203,14 @@ def run_cpcv(args) -> int:
             "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
             "point_in_time_validation": pit_results,
+            "benchmark": getattr(args, "benchmark", None),
         },
     }
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
         summary_data["point_in_time_validation"] = pit_results
+    if benchmark_provenance is not None:
+        summary_data["benchmark_provenance"] = benchmark_provenance.to_dict()
     with open(summary_path, "w") as f:
         json.dump(summary_data, f, indent=2, default=str)
     print(f"CPCV summary saved to: {summary_path}")
@@ -1200,6 +1229,8 @@ def run_cpcv(args) -> int:
                 "symbol": args.symbol,
             },
         }
+        if benchmark_returns is not None:
+            report_results["benchmark"] = benchmark_returns
         if pit_results is not None:
             report_results["point_in_time_validation"] = pit_results
         metrics = calculate_metrics(report_results)
@@ -1266,6 +1297,73 @@ def _load_and_validate_data(
     return data, pit
 
 
+def _load_benchmark(benchmark_path: str) -> tuple[pd.DataFrame, Optional[Any]]:
+    """Load benchmark data and return (benchmark_df, benchmark_provenance)."""
+    benchmark, provenance = load_data(benchmark_path, return_provenance=True)
+    if not validate_data(benchmark):
+        raise ValueError("Benchmark data validation failed!")
+    print(
+        f"Loaded benchmark: {provenance.final_shape[0]} rows "
+        f"(checksum {provenance.checksum})"
+    )
+    return benchmark, provenance
+
+
+def _compute_benchmark_returns(
+    benchmark: pd.DataFrame,
+    strategy_returns: pd.Series,
+) -> Optional[pd.Series]:
+    """Compute buy-and-hold benchmark returns aligned to strategy returns.
+
+    The benchmark return for period t is the close-to-close return
+    from t-1 to t (no shift). Aligned to the strategy returns index
+    via inner join on common trading dates.
+    """
+    benchmark_returns = benchmark["close"].pct_change()
+    _, aligned_benchmark = strategy_returns.align(benchmark_returns, join="inner")
+    if len(aligned_benchmark) > 0:
+        return aligned_benchmark
+    return None
+
+
+def _add_benchmark_to_summary(
+    summary: Dict[str, Any],
+    strategy_returns: pd.Series,
+    benchmark_returns: pd.Series,
+) -> Dict[str, Any]:
+    """Add benchmark comparison metrics to a summary dict.
+
+    Computes benchmark total/annualized return, correlation, alpha, and beta
+    from the aligned return series.
+    """
+    if len(benchmark_returns) == 0:
+        return summary
+
+    # Annualization factor from strategy returns index
+    ann_factor = _annualization_factor(strategy_returns.index)
+
+    # Benchmark total and annualized return
+    bench_total = (1 + benchmark_returns).prod() - 1
+    summary["benchmark_total_return"] = float(bench_total)
+    summary["benchmark_annualized_return"] = float(
+        (1 + bench_total) ** (ann_factor / len(benchmark_returns)) - 1
+    )
+
+    # Correlation
+    aligned_strat, aligned_bench = strategy_returns.align(benchmark_returns, join="inner")
+    if len(aligned_strat) > 1:
+        summary["correlation_with_benchmark"] = float(aligned_strat.corr(aligned_bench))
+
+    # Alpha/Beta (annualized alpha)
+    if len(aligned_strat) > 1 and aligned_bench.std() > 0:
+        beta = aligned_strat.cov(aligned_bench) / aligned_bench.var()
+        alpha = aligned_strat.mean() - beta * aligned_bench.mean()
+        summary["alpha"] = float(alpha * ann_factor)
+        summary["beta"] = float(beta)
+
+    return summary
+
+
 def _parse_param_grid(param_grid_str: str) -> Dict[str, List[Any]]:
     """Parse parameter grid from JSON string."""
     try:
@@ -1288,6 +1386,13 @@ def run_walk_forward(args) -> int:
         pit_strict=getattr(args, "point_in_time_strict", False),
     )
 
+    # Load benchmark if provided
+    benchmark = None
+    benchmark_provenance = None
+    if getattr(args, "benchmark", None):
+        print(f"Loading benchmark data from {args.benchmark}...")
+        benchmark, benchmark_provenance = _load_benchmark(args.benchmark)
+
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -1309,6 +1414,25 @@ def run_walk_forward(args) -> int:
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
+
+    # Compute benchmark comparison metrics if benchmark provided
+    benchmark_returns = None
+    if benchmark is not None and len(results["oos_returns"]) > 0:
+        benchmark_returns = _compute_benchmark_returns(benchmark, results["oos_returns"])
+        if benchmark_returns is not None:
+            # Add benchmark metrics to summary
+            results["summary"] = _add_benchmark_to_summary(
+                results["summary"], results["oos_returns"], benchmark_returns
+            )
+            print(
+                f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
+            )
+            print(
+                f"Alpha (annualized): {results['summary'].get('alpha', 'N/A'):.2%}"
+            )
+            print(
+                f"Beta: {results['summary'].get('beta', 'N/A'):.4f}"
+            )
 
     print(f"Number of walk-forward periods: {results['summary']['n_periods']}")
     print(f"Total OOS Return: {results['summary']['total_oos_return']:.2%}")
@@ -1351,11 +1475,14 @@ def run_walk_forward(args) -> int:
             "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
             "point_in_time_validation": pit_results,
+            "benchmark": getattr(args, "benchmark", None),
         },
     }
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
         summary_data["point_in_time_validation"] = pit_results
+    if benchmark_provenance is not None:
+        summary_data["benchmark_provenance"] = benchmark_provenance.to_dict()
     with open(summary_path, "w") as f:
         json.dump(summary_data, f, indent=2, default=str)
     print(f"Walk-forward summary saved to: {summary_path}")
@@ -1374,6 +1501,8 @@ def run_walk_forward(args) -> int:
                 "symbol": args.symbol,
             },
         }
+        if benchmark_returns is not None:
+            report_results["benchmark"] = benchmark_returns
         if pit_results is not None:
             report_results["point_in_time_validation"] = pit_results
         metrics = calculate_metrics(report_results)
@@ -1460,6 +1589,13 @@ def run_monte_carlo(args) -> int:
         validate_pit=getattr(args, "validate_point_in_time", False),
         pit_strict=getattr(args, "point_in_time_strict", False),
     )
+
+    # Load benchmark if provided
+    benchmark = None
+    benchmark_provenance = None
+    if getattr(args, "benchmark", None):
+        print(f"Loading benchmark data from {args.benchmark}...")
+        benchmark, benchmark_provenance = _load_benchmark(args.benchmark)
 
     # First run a backtest to get base returns
     param_grid = _parse_param_grid(args.param_grid)
@@ -1548,6 +1684,15 @@ def run_monte_carlo(args) -> int:
             f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
         )
 
+    # Compute benchmark comparison metrics if benchmark provided
+    benchmark_returns = None
+    if benchmark is not None and len(returns) > 0:
+        benchmark_returns = _compute_benchmark_returns(benchmark, returns)
+        if benchmark_returns is not None:
+            print(
+                f"Benchmark Correlation: {benchmark_returns.corr(returns):.4f}"
+            )
+
     print(f"Running Monte Carlo simulation with {args.n_simulations} simulations...")
     mc_results = monte_carlo_simulation(
         base_returns=returns,
@@ -1595,6 +1740,7 @@ def run_monte_carlo(args) -> int:
             "n_simulations": args.n_simulations,
             "block_size": args.block_size,
             "point_in_time_validation": pit_results,
+            "benchmark": getattr(args, "benchmark", None),
         },
     }
     if pit_results is not None:
@@ -1602,6 +1748,12 @@ def run_monte_carlo(args) -> int:
     if dsr is not None:
         mc_save["deflated_sharpe"] = dsr
         mc_save["config"]["n_trials"] = effective_n_trials
+    if benchmark_provenance is not None:
+        mc_save["benchmark_provenance"] = benchmark_provenance.to_dict()
+    if benchmark_returns is not None:
+        mc_save["summary"] = _add_benchmark_to_summary(
+            mc_save["summary"], returns, benchmark_returns
+        )
     with open(mc_path, "w") as f:
         json.dump(mc_save, f, indent=2, default=str)
     print(f"\nMonte Carlo results saved to: {mc_path}")
@@ -1619,6 +1771,8 @@ def run_monte_carlo(args) -> int:
             "symbol": args.symbol,
         },
     }
+    if benchmark_returns is not None:
+        mc_base_results["benchmark"] = benchmark_returns
     mc_base_metrics = calculate_metrics(mc_base_results)
     if dsr is not None:
         mc_base_metrics["deflated_sharpe"] = dsr
@@ -1656,6 +1810,7 @@ def main():
     common_parser.add_argument("--param-grid", type=str, required=True, help="Parameter grid as JSON string")
     common_parser.add_argument("--validate-point-in-time", action="store_true", help="Run point-in-time validation on the loaded data (temporal ordering, duplicate timestamps, stale-data warnings)")
     common_parser.add_argument("--point-in-time-strict", action="store_true", help="Abort when point-in-time validation finds violations (default: warn only)")
+    common_parser.add_argument("--benchmark", type=str, default=None, help="Path to benchmark OHLCV file (e.g. SPY) for buy-and-hold baseline comparison (alpha/beta, correlation)")
 
     # Walk-forward analysis
     wf_parser = subparsers.add_parser("walk-forward", parents=[common_parser], help="Run walk-forward analysis")
