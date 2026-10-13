@@ -517,6 +517,8 @@ def main() -> int:
         ("parse_args_invalid_initial_capital_type", test_parse_args_invalid_initial_capital_type),
         ("run_backtest_multi_asset_cross_sectional_momentum", test_run_backtest_multi_asset_cross_sectional_momentum),
         ("run_backtest_multi_asset_dual_momentum", test_run_backtest_multi_asset_dual_momentum),
+        ("run_backtest_multi_asset_dict_cross_sectional_momentum", test_run_backtest_multi_asset_dict_cross_sectional_momentum),
+        ("run_backtest_multi_asset_dict_dual_momentum", test_run_backtest_multi_asset_dict_dual_momentum),
     ]
 
     failures = 0
@@ -572,25 +574,71 @@ def test_run_backtest_multi_asset_dual_momentum():
     assert "equity_curve" in results
     assert "returns" in results
     assert len(results["returns"]) > 0
+
+
+def _make_multiasset_dict(n=300, n_assets=5, seed=42):
+    """Create dict of symbol -> OHLCV DataFrame for multi-asset testing."""
+    dates = pd.date_range("2020-01-01", periods=n, freq="B")
+    symbols = [f"ASSET_{i}" for i in range(n_assets)]
+    rng = np.random.default_rng(seed)
+    data_dict = {}
+    for i, sym in enumerate(symbols):
+        drift = 0.001 * (i + 1)
+        rets = rng.normal(drift, 0.015, n)
+        prices = 100 * np.exp(np.cumsum(rets))
+        data_dict[sym] = pd.DataFrame({
+            "open": prices * rng.uniform(0.995, 1.005, n),
+            "high": prices * rng.uniform(1.005, 1.02, n),
+            "low": prices * rng.uniform(0.98, 0.995, n),
+            "close": prices,
+            "volume": rng.integers(1_000_000, 10_000_000, n),
+        }, index=dates)
+    return data_dict
+
+
+def test_run_backtest_multi_asset_dict_cross_sectional_momentum():
+    """Run backtest works with dict panel data (cross-sectional momentum).
+
+    Regression coverage: the trade extractor iterated range(len(data)),
+    which is the number of symbols (not bars) for a dict, and read
+    data.index (absent on dicts), so dict panel data crashed or
+    silently recorded zero trades despite active positions.
+    """
+    data = _make_multiasset_dict(n=300, n_assets=5, seed=42)
+    strategy = build_strategy("cross_sectional_momentum",
+                              '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}')
+    results = run_backtest(data, strategy, _Args())
+    assert "equity_curve" in results
+    assert "returns" in results
+    assert len(results["returns"]) > 0
+    # The strategy is active over this window, so the trade ledger
+    # must be non-empty and every trade must be well-formed.
+    assert len(results["trades"]) > 0, (
+        "dict panel data produced an empty trade ledger"
+    )
+    for trade in results["trades"]:
+        assert isinstance(trade["pnl"], float)
+        assert isinstance(trade["return"], float)
+        assert trade["entry_date"] < trade["exit_date"]
+
+
+def test_run_backtest_multi_asset_dict_dual_momentum():
+    """Run backtest works with dict panel data (dual momentum)."""
+    data = _make_multiasset_dict(n=300, n_assets=5, seed=123)
+    strategy = build_strategy("dual_momentum",
+                              '{"lookback": 60, "top_quantile": 0.3, "risk_free_rate": 0.0}')
+    results = run_backtest(data, strategy, _Args())
+    assert "equity_curve" in results
+    assert "returns" in results
+    assert len(results["returns"]) > 0
+    assert len(results["trades"]) > 0, (
+        "dict panel data produced an empty trade ledger"
+    )
+    for trade in results["trades"]:
+        assert isinstance(trade["pnl"], float)
+        assert isinstance(trade["return"], float)
+        assert trade["entry_date"] < trade["exit_date"]
+
+
 if __name__ == "__main__":
     sys.exit(main())
-def test_run_backtest_multi_asset_cross_sectional_momentum():
-    """Run backtest works with multi-asset cross-sectional momentum."""
-    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
-    strategy = build_strategy("cross_sectional_momentum",
-                             '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}')
-    results = run_backtest(data, strategy, _Args())
-    assert "equity_curve" in results
-    assert "returns" in results
-    assert len(results["returns"]) > 0
-
-
-def test_run_backtest_multi_asset_dual_momentum():
-    """Run backtest works with multi-asset dual momentum."""
-    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=123)
-    strategy = build_strategy("dual_momentum",
-                             '{"lookback": 60, "top_quantile": 0.3, "risk_free_rate": 0.0}')
-    results = run_backtest(data, strategy, _Args())
-    assert "equity_curve" in results
-    assert "returns" in results
-    assert len(results["returns"]) > 0

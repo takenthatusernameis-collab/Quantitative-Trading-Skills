@@ -59,6 +59,26 @@ def _make_multiasset_multiindex(n=500, n_assets=4, seed=42):
         df[("close", sym)] = prices
         df[("volume", sym)] = rng.integers(1_000_000, 10_000_000, n)
     return df
+
+
+def _make_multiasset_dict(n=500, n_assets=4, seed=42):
+    """Create dict of symbol -> OHLCV DataFrame for multi-asset testing."""
+    dates = pd.date_range("2020-01-01", periods=n, freq="B")
+    symbols = [f"ASSET_{i}" for i in range(n_assets)]
+    rng = np.random.default_rng(seed)
+    data_dict = {}
+    for i, sym in enumerate(symbols):
+        drift = 0.0005 * (i + 1)
+        rets = rng.normal(drift, 0.01, n)
+        prices = 100 * np.exp(np.cumsum(rets))
+        data_dict[sym] = pd.DataFrame({
+            "open": prices * rng.uniform(0.995, 1.005, n),
+            "high": prices * rng.uniform(1.005, 1.02, n),
+            "low": prices * rng.uniform(0.98, 0.995, n),
+            "close": prices,
+            "volume": rng.integers(1_000_000, 10_000_000, n),
+        }, index=dates)
+    return data_dict
 def _make_strategy_factory(strategy_type: str = "sma_crossover"):
     """Create a simple strategy factory for testing."""
     sys.path.insert(0, str(SKILLS_DIR / "scripts"))
@@ -324,6 +344,8 @@ def main() -> int:
         ("cpcv_cli_help", test_cpcv_cli_help),
         ("cpcv_multi_asset_cross_sectional_momentum", test_cpcv_multi_asset_cross_sectional_momentum),
         ("cpcv_multi_asset_dual_momentum", test_cpcv_multi_asset_dual_momentum),
+        ("cpcv_multi_asset_dict_cross_sectional_momentum", test_cpcv_multi_asset_dict_cross_sectional_momentum),
+        ("cpcv_multi_asset_dict_dual_momentum", test_cpcv_multi_asset_dict_dual_momentum),
     ]
 
     failures = 0
@@ -378,11 +400,17 @@ def test_cpcv_multi_asset_dual_momentum():
     )
     assert len(results["folds"]) > 0
     assert len(results["oos_returns"]) > 0
-if __name__ == "__main__":
-    sys.exit(main())
-def test_cpcv_multi_asset_cross_sectional_momentum():
-    """CPCV works with multi-asset panel data."""
-    data = _make_multiasset_multiindex(n=500, n_assets=5, seed=42)
+
+
+def test_cpcv_multi_asset_dict_cross_sectional_momentum():
+    """CPCV works with dict panel data.
+
+    Regression coverage: dict input previously produced zero
+    folds because fold counts were derived from len(data) (the
+    number of symbols, not bars); dict data is now normalized
+    to a MultiIndex panel before splitting.
+    """
+    data = _make_multiasset_dict(n=500, n_assets=5, seed=42)
     strategy_factory = _make_strategy_factory("cross_sectional_momentum")
     param_grid = {
         "lookback": [20, 30],
@@ -400,9 +428,9 @@ def test_cpcv_multi_asset_cross_sectional_momentum():
     assert len(results["oos_returns"]) > 0
 
 
-def test_cpcv_multi_asset_dual_momentum():
-    """CPCV works with multi-asset panel data for dual momentum."""
-    data = _make_multiasset_multiindex(n=600, n_assets=5, seed=123)
+def test_cpcv_multi_asset_dict_dual_momentum():
+    """CPCV works with dict panel data for dual momentum."""
+    data = _make_multiasset_dict(n=600, n_assets=5, seed=123)
     strategy_factory = _make_strategy_factory("dual_momentum")
     param_grid = {
         "lookback": [40, 60],
@@ -418,3 +446,7 @@ def test_cpcv_multi_asset_dual_momentum():
     )
     assert len(results["folds"]) > 0
     assert len(results["oos_returns"]) > 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

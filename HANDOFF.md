@@ -1,54 +1,58 @@
-# Agent Handoff - Session Summary
+# Handoff — Quantitative Trading Skills Repository
 
-## What changed
-Implemented proper **multi-asset dual momentum** strategy in `DualMomentumStrategy`, replacing the single-asset placeholder that misrepresented its capability.
+**Last updated**: 2026-10-13
 
-- `skills/quantitative-backtesting/scripts/strategy_builder.py` — `DualMomentumStrategy.generate_signals` now handles three data formats:
-  - **Dict of DataFrames** (`symbol -> OHLCV DataFrame`): aligns to common date index, computes lookback returns per symbol, applies absolute momentum filter (return > risk-free rate), ranks remaining assets by relative momentum, selects top quantile, returns portfolio allocation fraction `n_selected / n_assets` as float signal in `[0, 1]`
-  - **MultiIndex DataFrame** (columns like `('close', 'AAPL')`): extracts close prices by symbol, same dual momentum logic
-  - **Single-asset DataFrame** (backward compatible): emits `UserWarning` and falls back to absolute momentum only (asset return vs risk-free rate) returning `{0, 1}`
-- `skills/quantitative-backtesting/scripts/strategy_builder.py` — updated `get_strategy_defaults` for `dual_momentum` to include `top_quantile` (default 0.2) and `risk_free_rate` (default 0.0) parameters
-- `skills/quantitative-backtesting/scripts/strategy_builder.py` — updated `list_strategies()` description from "Dual Momentum (Absolute + Relative)" to "Dual Momentum (Absolute + Relative, Multi-Asset Panel Data)"
-- `skills/quantitative-backtesting/tests/test_strategy_builder.py` — added 5 new tests (15 total, was 10):
-  - `test_dual_momentum_multi_asset_dict` — verifies dict format produces portfolio signals in `[0, 1]`
-  - `test_dual_momentum_multiindex_dataframe` — verifies MultiIndex format produces identical signals
-  - `test_dual_momentum_single_asset_fallback` — verifies warning + binary `{0, 1}` signals
-  - `test_dual_momentum_absolute_momentum_filter` — verifies risk-free rate parameter filters assets correctly
-  - `test_dual_momentum_respects_top_quantile` — verifies top_quantile parameter controls selection count
-- `skills/quantitative-backtesting/references/strategy_templates.md` — updated documentation to accurately describe multi-asset dual momentum implementation, parameters, and single-asset fallback behavior
+## Repository state
 
-## What was actually verified
-- Full quant-backtesting suite passes: `test_data_loader.py` 6/6, `test_performance.py` 13/13, `test_reporting.py` 10/10, `test_run_backtest.py` 15/15, `test_strategy_builder.py` 15/15, `test_walk_forward.py` 13/13, `test_cpcv.py` 10/10, `test_generate_sample_data.py` 1/1. **Total 83 tests** (was 78).
-- Multi-asset dict and MultiIndex formats produce identical float portfolio signals in `[0, 1]` representing allocation fraction
-- Single-asset fallback emits `UserWarning` and produces binary `{0, 1}` signals as before
-- Absolute momentum filter (risk-free rate) correctly includes/excludes assets based on returns
-- Relative momentum ranking (top_quantile) correctly controls number of selected assets
-- Both `CrossSectionalMomentum` and `DualMomentumStrategy` now properly support panel data
-- No claims about profitability; synthetic data only.
+- Git: 1 commit on `main` (`cbbfea7`), working tree dirty with this session's changes (uncommitted; do not commit unless asked).
+- Skill location: `skills/quantitative-backtesting/` (8 strategies, 7 scripts, 8 test files, 3 reference docs).
+- Python deps for the suites: `pandas` and `numpy` (installed into the session user site during this session; not committed).
 
-## What remains unresolved
-- The stationary block bootstrap implementation is correct for the univariate case. For multivariate returns (panel data), a multivariate stationary block bootstrap would be needed — not currently required.
-- The `MeanReversionZScore` strategy is also a single-asset placeholder despite describing "Pairs Trading style"; a full implementation would need panel data for spread/z-score calculation between pairs.
-- No integration tests for multi-asset strategies through the full backtest pipeline (walk-forward, CPCV, Monte Carlo) — these currently only test single-asset strategies.
+## Session summary (2026-10-13)
 
-## Which approaches have already failed and why
-- Previous `DualMomentumStrategy` implementation used only absolute momentum on a single asset — this is a time-series momentum filter, not Gary Antonacci's dual momentum which combines absolute and relative momentum across multiple assets.
-- Previous `CrossSectionalMomentum` implementation used rolling quantile thresholds on a single return series — this is a time-series momentum filter, not cross-sectional momentum. Both have been fixed.
+Executed the assigned task — multi-asset integration tests for the full backtest pipeline — and completed it for **both** panel formats (dict-of-DataFrames and MultiIndex), fixing three real defects found during verification.
 
-## One precise next task, with relevant evidence and constraints
-**Task:** Add multi-asset integration tests for the full backtest pipeline (walk-forward, CPCV, Monte Carlo) using `CrossSectionalMomentum` and `DualMomentumStrategy` with panel data.
+### Changes
 
-Evidence supporting this choice:
-- The strategy builder now supports multi-asset panel data for both momentum strategies
-- The backtest pipeline (`run_backtest.py`, `walk_forward.py`, `cpcv.py`, `monte_carlo.py`) currently only tests single-asset strategies
-- No verification that multi-asset signals integrate correctly with position sizing, trade ledger, performance metrics, and reporting
-- This is the next logical step to ensure the multi-asset strategies work end-to-end
+1. **`scripts/run_backtest.py` — trade extractor dict-panel fix.** The extractor iterated `range(len(data))` and read `data.index[i]`. For dict panel data `len(data)` is the number of *symbols* (not bars) and `data.index` does not exist, so dict input either crashed (`AttributeError` with short lookbacks) or **silently recorded 0 trades** (e.g., 0 trades despite 239 active positions with `lookback=60`). The loop now iterates the position series (`n_bars = len(position_changes_bool)`, dates from `positions.index`), which shares the common index for single-asset, MultiIndex, and dict formats.
+2. **`scripts/walk_forward.py` — dict-panel normalization.** Added `_dict_to_multiindex()`; `walk_forward_analysis`, `parameter_optimization`, and `cpcv_analysis` now normalize dict panel data to a MultiIndex `(field, symbol)` panel before windowing. Previously `walk_forward_analysis` crashed (`data.index.min()` on a dict) and `cpcv_analysis` silently produced 0 folds (`len(data)` = n_symbols). `_calculate_strategy_returns` keeps its native dict path (equal-weight returns).
+3. **`tests/test_strategy_builder.py` — CWD-independent imports.** Replaced the `sys.path.insert(0, "..")` fallback (only worked when CWD was the `tests/` dir) with the `Path(__file__).resolve().parent.parent / "scripts"` pattern used by every other suite. Previously failed with `ModuleNotFoundError: No module named 'scripts'` when run as documented from the repo root.
+4. **Dead code removal** — duplicate test definitions after the `if __name__ == "__main__": sys.exit(main())` guards in `test_walk_forward.py`, `test_cpcv.py`, `test_run_backtest.py` (unreachable copies).
+5. **6 new dict-format integration tests** (registered in the stdlib runners): `test_run_backtest.py` +2 (cross-sectional and dual momentum through `run_backtest`, with trade-ledger validation), `test_walk_forward.py` +2, `test_cpcv.py` +2. MultiIndex-format tests from the prior session were already present and passing.
+6. **`SKILL.md`** — test-coverage section updated to document multi-asset panel (dict + MultiIndex) integration and the extractor invariant.
 
-Constraints / notes for the next agent:
-- Must create synthetic panel data (dict or MultiIndex format) for testing
-- Should test at least one full pipeline: e.g., walk-forward with `CrossSectionalMomentum`
-- Follow existing test patterns in `test_walk_forward.py`, `test_cpcv.py`, `test_monte_carlo.py`
-- Use stdlib runner pattern (`def main()`, `if __name__ == "__main__": sys.exit(main())`)
+### Verified (evidence)
+
+- All 8 suites pass from the repo root, exactly as SKILL.md documents:
+  `test_data_loader` 6/6, `test_performance` 13/13, `test_reporting` 10/10 (stdlib `unittest`, exit 0), `test_run_backtest` 19/19, `test_strategy_builder` 15/15, `test_walk_forward` 18/18, `test_cpcv` 14/14, `test_generate_sample_data` 1/1. **Total: 96.**
+- **Format equivalence**: with a seeded 5-asset panel, dict and MultiIndex inputs produce identical signals (`Series.equals`), equity curves (`np.allclose`), trade counts, walk-forward OOS returns, and CPCV OOS returns.
+- Reproduced the three defects before fixing (dict `run_backtest` crash with `lookback=2`; 0-trade ledger with `lookback=60`; `walk_forward_analysis` `AttributeError`; `cpcv_analysis` 0 folds).
+
+### Unresolved / methodological notes
+
+- **Portfolio signal semantics**: `CrossSectionalMomentum` emits `(n_long - n_short) / n_assets`, which is 0 whenever long and short counts are equal (e.g., symmetric quantiles), so symmetric-quantile configs are effectively flat. Tests deliberately use asymmetric quantiles. This is a design question, not a bug.
+- `MeanReversionZScore` is still a single-asset placeholder (no pairs/z-score implementation).
+- Monte Carlo lives in `walk_forward.py` (`monte_carlo_simulation`); there is no separate `monte_carlo.py` script (the prior handoff's file list was inaccurate). The bootstrap is iid/stationary-block on a single return series — no regime-aware or overlapping-period correction.
+- No out-of-sample evidence of profitability exists; all results are synthetic. Nothing here is production-ready.
+
+## Next task for the next agent
+
+**Evaluate and document the cross-sectional momentum portfolio-signal convention.**
+
+- Context: `skills/quantitative-backtesting/scripts/strategy_builder.py`, `CrossSectionalMomentum._generate_multi_asset_signals_multiindex` (and the dict twin). Signal = `(n_long - n_short) / n_assets`. With symmetric `top_quantile == bottom_quantile` the net signal is identically 0, so the strategy is flat by construction; `run_backtest`'s `signals_active` guard then rejects it ("never takes a position").
+- Decide, with evidence: keep net exposure `(n_long - n_short)/n_assets`, or use gross `(n_long + n_short)/n_assets` (long/short books sized separately), or per-leg signals. Note that `run_backtest`'s equity curve applies the scalar signal to the equal-weight portfolio return, so a net-zero signal correctly means flat — but a long/short book with equal legs is *not* flat in reality.
+- Constraints: smallest reversible change; if semantics change, update `references/strategy_templates.md`, the quantile-semantics tests in `tests/test_strategy_builder.py` (`test_cross_sectional_momentum_respects_quantiles` asserts the current convention), and add regression tests. Keep both panel formats working and verify with the full 96-test suite from the repo root.
 - Do not commit unless explicitly asked.
 
-(End of file)
+## Test suite quick reference
+
+Run all from repo root (requires pandas/numpy):
+
+```bash
+for t in test_data_loader test_performance test_reporting test_run_backtest \
+         test_strategy_builder test_walk_forward test_cpcv test_generate_sample_data; do
+  python3 skills/quantitative-backtesting/tests/$t.py || exit 1
+done
+```
+
+`test_reporting.py` uses stdlib `unittest` (exit code is the pass/fail signal); the rest use the custom `main()` runner printing `N/N tests passed`.

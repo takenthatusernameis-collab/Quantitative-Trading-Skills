@@ -94,19 +94,28 @@ def run_backtest(data, strategy, args):
     # round turn are already accounted for by `position_changes` above.
     position_changes_bool = positions.diff().fillna(0) != 0
 
+    # Trade extraction must iterate over the position series, not
+    # `data`: for dict panel data `len(data)` is the number of
+    # symbols (not bars) and `data.index` does not exist, which
+    # crashed the extractor or silently dropped every trade.
+    # `positions`, `close` and the trade ledger all share the
+    # common date index for single-asset, MultiIndex and dict
+    # panel formats alike.
+    n_bars = len(position_changes_bool)
+
     trades = []
     entry_idx = None
     entry_price = None
     entry_date = None
     entry_direction = None  # +1 for long, -1 for short
-    for i in range(len(data)):
+    for i in range(n_bars):
         if not position_changes_bool.iloc[i]:
             continue
 
         # Close any currently open position at this bar's price.
         if entry_idx is not None:
             exit_price = close.iloc[i]
-            exit_date = data.index[i]
+            exit_date = positions.index[i]
             pnl = (exit_price - entry_price) * entry_direction
             trades.append({
                 "pnl": float(pnl),
@@ -124,7 +133,7 @@ def run_backtest(data, strategy, args):
         if new_pos != 0:
             entry_idx = i
             entry_price = close.iloc[i]
-            entry_date = data.index[i]
+            entry_date = positions.index[i]
             entry_direction = 1 if new_pos > 0 else -1
 
     # Mark the final open position to market at the last bar's close.
@@ -137,9 +146,9 @@ def run_backtest(data, strategy, args):
     # of the sample, not by a signal, so it is flagged via
     # `closed_at_end`. A position opened on the very last bar has no
     # later bar to close at and is left unrecorded.
-    if entry_idx is not None and entry_idx < len(data) - 1:
+    if entry_idx is not None and entry_idx < n_bars - 1:
         exit_price = close.iloc[-1]
-        exit_date = data.index[-1]
+        exit_date = positions.index[-1]
         pnl = (exit_price - entry_price) * entry_direction
         trades.append({
             "pnl": float(pnl),

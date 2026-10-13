@@ -216,13 +216,26 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   parameterized audit runs every registered strategy and asserts each trade
   has finite `pnl`/`return`, `entry_date < exit_date`, and a `pnl` sign
   consistent with the position direction at entry (recomputed independently
-  from the strategy's own shifted signals).
+  from the strategy's own shifted signals). Also covers **multi-asset
+  panel integration**: `run_backtest` accepts dict-of-DataFrames and
+  MultiIndex-column panel data for `CrossSectionalMomentum` and
+  `DualMomentumStrategy`, and the trade ledger is validated (non-empty,
+  well-formed) for both formats. The extractor iterates the position
+  series, not `data`, because `len(data)` is the number of symbols (not
+  bars) for a dict and `data.index` does not exist on dicts.
 - `test_strategy_builder.py` - strategy registry, `build_strategy`, defaults,
-  and binary long/flat signal generation with real crossovers.
-  - `test_walk_forward.py` - walk-forward windowing, parameter grid parsing, and
-  train/test separation.
+  binary long/flat signal generation with real crossovers, and multi-asset
+  panel signal generation for `CrossSectionalMomentum` and
+  `DualMomentumStrategy` (dict and MultiIndex formats, single-asset
+  fallback warnings, quantile/ranking semantics).
+  - `test_walk_forward.py` - walk-forward windowing, parameter grid parsing,
+  train/test separation, Monte Carlo simulation, and multi-asset panel
+  (dict and MultiIndex) walk-forward and Monte Carlo integration with
+  `CrossSectionalMomentum` and `DualMomentumStrategy`.
   - `test_cpcv.py` - CPCV fold structure, purge/embargo behavior, parameter
-  stability calculation, summary metrics, and CLI integration.
+  stability calculation, summary metrics, CLI integration, and multi-asset
+  panel (dict and MultiIndex) CPCV integration with `CrossSectionalMomentum`
+  and `DualMomentumStrategy`.
   - `test_generate_sample_data.py` - Sample data generation creates valid OHLCV
   CSV with expected shape and constraints.
 

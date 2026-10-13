@@ -475,6 +475,8 @@ def main() -> int:
         ("walk_forward_multi_asset_cross_sectional_momentum", test_walk_forward_multi_asset_cross_sectional_momentum),
         ("walk_forward_multi_asset_dual_momentum", test_walk_forward_multi_asset_dual_momentum),
         ("monte_carlo_multi_asset_integration", test_monte_carlo_multi_asset_integration),
+        ("walk_forward_multi_asset_dict_cross_sectional_momentum", test_walk_forward_multi_asset_dict_cross_sectional_momentum),
+        ("walk_forward_multi_asset_dict_dual_momentum", test_walk_forward_multi_asset_dict_dual_momentum),
     ]
 
     failures = 0
@@ -547,11 +549,15 @@ def test_monte_carlo_multi_asset_integration():
     assert "confidence_intervals" in mc_results
     assert mc_results["n_simulations"] == 50
 
-if __name__ == "__main__":
-    sys.exit(main())
-def test_walk_forward_multi_asset_cross_sectional_momentum():
-    """Walk-forward analysis works with multi-asset panel data (MultiIndex)."""
-    data = _make_multiasset_multiindex(n=600, n_assets=5, seed=123)
+
+def test_walk_forward_multi_asset_dict_cross_sectional_momentum():
+    """Walk-forward analysis works with dict panel data.
+
+    Regression coverage: dict input previously crashed because
+    walk-forward windows were sliced with data.index (absent on
+    dicts); dict data is now normalized to a MultiIndex panel.
+    """
+    data = _make_multiasset_dict(n=600, n_assets=5, seed=123)
     results = walk_forward_analysis(
         data=data,
         strategy_factory=lambda p: _factory("cross_sectional_momentum", p),
@@ -569,9 +575,9 @@ def test_walk_forward_multi_asset_cross_sectional_momentum():
     assert results["summary"]["total_oos_return"] is not None
 
 
-def test_walk_forward_multi_asset_dual_momentum():
-    """Walk-forward analysis works with multi-asset panel data for dual momentum."""
-    data = _make_multiasset_multiindex(n=800, n_assets=5, seed=456)
+def test_walk_forward_multi_asset_dict_dual_momentum():
+    """Walk-forward analysis works with dict panel data for dual momentum."""
+    data = _make_multiasset_dict(n=800, n_assets=5, seed=456)
     results = walk_forward_analysis(
         data=data,
         strategy_factory=lambda p: _factory("dual_momentum", p),
@@ -586,3 +592,7 @@ def test_walk_forward_multi_asset_dual_momentum():
     )
     assert results["summary"]["n_periods"] > 0
     assert len(results["oos_returns"]) > 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

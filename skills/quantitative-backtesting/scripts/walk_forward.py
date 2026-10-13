@@ -23,6 +23,41 @@ from scripts.performance import calculate_metrics, generate_report
 from scripts.reporting import generate_tear_sheet
 
 
+def _dict_to_multiindex(data_dict: dict) -> pd.DataFrame:
+    """Convert dict panel data (symbol -> OHLCV DataFrame) to a
+    MultiIndex (field, symbol) DataFrame aligned on the common date index.
+
+    Strategies and return calculators produce identical results for the
+    dict and MultiIndex formats, so walk-forward/CPCV code paths can
+    operate on a single DataFrame representation.
+    """
+    common_index = None
+    columns = None
+    for df in data_dict.values():
+        if common_index is None:
+            common_index = df.index
+            columns = set(df.columns)
+        else:
+            common_index = common_index.intersection(df.index)
+            columns &= set(df.columns)
+    if common_index is None or len(common_index) == 0:
+        raise ValueError("No common index found")
+
+    common_index = common_index.sort_values()
+    fields = sorted(columns)
+    symbols = list(data_dict.keys())
+    panel = pd.DataFrame(
+        index=common_index,
+        columns=pd.MultiIndex.from_product([fields, symbols]),
+        dtype=float,
+    )
+    for symbol, df in data_dict.items():
+        aligned = df.reindex(common_index)
+        for field in fields:
+            panel[(field, symbol)] = aligned[field].to_numpy()
+    return panel
+
+
 def walk_forward_analysis(
     data: Union[pd.DataFrame, dict],
     strategy_factory: Callable,
@@ -56,23 +91,13 @@ def walk_forward_analysis(
             - 'summary': aggregate metrics
     """
     if isinstance(data, dict):
-        # For dict, get common index
-        common_index = None
-        for df in data.values():
-            if common_index is None:
-                common_index = df.index
-            else:
-                common_index = common_index.intersection(df.index)
-        if common_index is None or len(common_index) == 0:
-            raise ValueError("No common index found")
-        common_index = common_index.sort_values()
-        if not isinstance(common_index, pd.DatetimeIndex):
-            # Try to convert if possible
-            try:
-                common_index = pd.DatetimeIndex(common_index)
-            except Exception:
-                pass  # Keep as is
-    elif isinstance(data.columns, pd.MultiIndex):
+        # Normalize dict panel data (symbol -> OHLCV DataFrame) to a
+        # MultiIndex (field, symbol) panel. Strategies and return
+        # calculators produce identical results for both multi-asset
+        # formats, so the DataFrame code paths below handle either.
+        data = _dict_to_multiindex(data)
+
+    if isinstance(data.columns, pd.MultiIndex):
         if not isinstance(data.index, pd.DatetimeIndex):
             try:
                 data.index = pd.DatetimeIndex(data.index)
@@ -220,23 +245,13 @@ def parameter_optimization(
         List of result dictionaries sorted by Sharpe ratio (descending)
     """
     if isinstance(data, dict):
-        # For dict, get common index
-        common_index = None
-        for df in data.values():
-            if common_index is None:
-                common_index = df.index
-            else:
-                common_index = common_index.intersection(df.index)
-        if common_index is None or len(common_index) == 0:
-            raise ValueError("No common index found")
-        common_index = common_index.sort_values()
-        if not isinstance(common_index, pd.DatetimeIndex):
-            # Try to convert if possible
-            try:
-                common_index = pd.DatetimeIndex(common_index)
-            except Exception:
-                pass  # Keep as is
-    elif isinstance(data.columns, pd.MultiIndex):
+        # Normalize dict panel data (symbol -> OHLCV DataFrame) to a
+        # MultiIndex (field, symbol) panel. Strategies and return
+        # calculators produce identical results for both multi-asset
+        # formats, so the DataFrame code paths below handle either.
+        data = _dict_to_multiindex(data)
+
+    if isinstance(data.columns, pd.MultiIndex):
         if not isinstance(data.index, pd.DatetimeIndex):
             try:
                 data.index = pd.DatetimeIndex(data.index)
@@ -658,23 +673,13 @@ def cpcv_analysis(
             - 'param_stability': parameter stability across folds
     """
     if isinstance(data, dict):
-        # For dict, get common index
-        common_index = None
-        for df in data.values():
-            if common_index is None:
-                common_index = df.index
-            else:
-                common_index = common_index.intersection(df.index)
-        if common_index is None or len(common_index) == 0:
-            raise ValueError("No common index found")
-        common_index = common_index.sort_values()
-        if not isinstance(common_index, pd.DatetimeIndex):
-            # Try to convert if possible
-            try:
-                common_index = pd.DatetimeIndex(common_index)
-            except Exception:
-                pass  # Keep as is
-    elif isinstance(data.columns, pd.MultiIndex):
+        # Normalize dict panel data (symbol -> OHLCV DataFrame) to a
+        # MultiIndex (field, symbol) panel. Strategies and return
+        # calculators produce identical results for both multi-asset
+        # formats, so the DataFrame code paths below handle either.
+        data = _dict_to_multiindex(data)
+
+    if isinstance(data.columns, pd.MultiIndex):
         if not isinstance(data.index, pd.DatetimeIndex):
             try:
                 data.index = pd.DatetimeIndex(data.index)

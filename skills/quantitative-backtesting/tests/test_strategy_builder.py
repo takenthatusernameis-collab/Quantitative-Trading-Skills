@@ -1,27 +1,20 @@
 import json
 import sys
 import traceback
+from pathlib import Path
 from typing import Dict
 
 import numpy as np
 import pandas as pd
 
-# StrategyBuilder uses relative imports when run as module
-try:
-    from ..scripts.strategy_builder import (
-        build_strategy,
-        get_strategy_defaults,
+SKILLS_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
-        list_strategies,
-    )
-except ImportError:  # fallback for direct execution
-    sys.path.insert(0, "..")
-    from scripts.strategy_builder import (
-        build_strategy,
-        get_strategy_defaults,
-
-        list_strategies,
-    )
+from strategy_builder import (  # noqa: E402
+    build_strategy,
+    get_strategy_defaults,
+    list_strategies,
+)
 
 
 def _make_data(n=200):
