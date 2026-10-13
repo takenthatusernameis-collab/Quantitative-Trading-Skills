@@ -328,6 +328,23 @@ def _make_test_data_file(periods: int = 504, seed: int = 42) -> str:
     return tmp.name
 
 
+def _make_flat_price_data_file(periods: int = 100) -> str:
+    """Create a temporary CSV file with perfectly flat prices (zero returns)."""
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    prices = np.full(periods, 100.0)
+    df = pd.DataFrame({
+        "date": dates,
+        "open": prices,
+        "high": prices,
+        "low": prices,
+        "close": prices,
+        "volume": [1000000] * periods,
+    })
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
+    df.to_csv(tmp.name, index=False)
+    return tmp.name
+
+
 class _CLIArgs:
     """Mock CLI arguments namespace."""
     def __init__(self, **kwargs):
@@ -730,6 +747,54 @@ def test_run_monte_carlo_deflated_sharpe_uses_floored_n_trials():
                 "n_trials", "n_observations", "skewness", "kurtosis",
             ):
                 assert abs(got[key] - expected[key]) < 1e-12, key
+    finally:
+        Path(data_file).unlink()
+
+
+def test_run_monte_carlo_constant_returns_deflated_sharpe():
+    """The monte-carlo CLI handles constant returns (zero variance) conservatively.
+
+    When the base backtest produces a constant return series (e.g. a strategy
+    that trades on a flat price series with zero costs), the DSR must be
+    DSR = 0, p-value = 1, z_score = None rather than raising or producing NaN.
+    """
+    # Create flat price data file
+    data_file = _make_flat_price_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # donchian_breakout takes positions on flat data (period < len(data))
+            args = _CLIArgs(
+                data=data_file,
+                strategy="donchian_breakout",
+                symbol="TEST",
+                start=None,
+                end=None,
+                commission=0.0,
+                slippage=0.0,
+                output=tmpdir,
+                param_grid='{"period": [10, 20]}',
+                n_simulations=10,
+                confidence_levels=[0.95],
+                block_size=None,
+                initial_capital=100000,
+                n_trials=5,
+            )
+            assert run_monte_carlo(args) == 0
+
+            mc_path = Path(tmpdir) / "monte_carlo_results.json"
+            with open(mc_path) as f:
+                mc = json.load(f)
+
+            assert "deflated_sharpe" in mc, "expected deflated_sharpe in output"
+            d = mc["deflated_sharpe"]
+            assert d["deflated_sharpe_ratio"] == 0.0
+            assert d["p_value"] == 1.0
+            assert d["z_score"] is None
+            assert d["n_trials"] == 5
+            assert d["n_observations"] > 0
+            assert d["skewness"] == 0.0
+            assert d["kurtosis"] == 3.0
+            assert d["sharpe_ratio"] == 0.0
     finally:
         Path(data_file).unlink()
 
@@ -1220,6 +1285,7 @@ def main() -> int:
         ("run_monte_carlo_deflated_sharpe_matches_direct_call", test_run_monte_carlo_deflated_sharpe_matches_direct_call),
         ("run_monte_carlo_n_trials_floored_to_grid_size", test_run_monte_carlo_n_trials_floored_to_grid_size),
         ("run_monte_carlo_deflated_sharpe_uses_floored_n_trials", test_run_monte_carlo_deflated_sharpe_uses_floored_n_trials),
+        ("run_monte_carlo_constant_returns_deflated_sharpe", test_run_monte_carlo_constant_returns_deflated_sharpe),
         ("parse_param_grid", test_parse_param_grid),
         ("walk_forward_multi_asset_cross_sectional_momentum", test_walk_forward_multi_asset_cross_sectional_momentum),
         ("walk_forward_multi_asset_dual_momentum", test_walk_forward_multi_asset_dual_momentum),

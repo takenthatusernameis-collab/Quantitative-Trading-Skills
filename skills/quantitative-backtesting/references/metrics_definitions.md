@@ -88,6 +88,27 @@ internal search is never understated; the dict is printed and
 saved as a top-level `deflated_sharpe` key in
 `monte_carlo_results.json`.
 
+### Degenerate Returns Edge Case
+
+If the base backtest produces a constant return series (zero
+variance), which can occur when a strategy takes active positions
+on a perfectly flat price series with zero transaction costs, the
+Deflated Sharpe Ratio is defined conservatively as:
+
+- `deflated_sharpe_ratio` = 0.0
+- `p_value` = 1.0
+- `z_score` = `None`
+- `sharpe_ratio` = 0.0
+- `skewness` = 0.0, `kurtosis` = 3.0
+
+This behavior applies to both `run_backtest.py --n-trials` and the
+`monte-carlo` subcommand. A constant-return backtest carries no
+statistical evidence of skill, so the multiple-testing correction
+correctly yields the minimum DSR. The `deflated_sharpe` key is
+still emitted (when `n_trials` is provided) with the above values,
+allowing downstream consumers to detect the degenerate case via
+`z_score is None` or `deflated_sharpe_ratio == 0.0`.
+
 ### Sortino Ratio
 
 ```

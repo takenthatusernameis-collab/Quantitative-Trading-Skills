@@ -578,6 +578,53 @@ def test_parse_args_invalid_initial_capital_type():
         assert e.code != 0, "Expected non-zero exit code"
 
 
+def _make_flat_price_data(periods: int = 100) -> pd.DataFrame:
+    """Create a DataFrame with perfectly flat prices (zero returns)."""
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    prices = np.full(periods, 100.0)
+    return pd.DataFrame({
+        "open": prices,
+        "high": prices,
+        "low": prices,
+        "close": prices,
+        "volume": [1000000] * periods,
+    }, index=dates)
+
+
+def test_run_backtest_constant_returns_deflated_sharpe():
+    """A strategy with active signals but constant returns (zero variance)
+    produces DSR = 0 with z_score = None when n_trials is provided.
+
+    This guards the degenerate edge case where a strategy trades (e.g.
+    donchian_breakout on a flat price series) but the return series has
+    zero variance. The Deflated Sharpe Ratio must handle this conservatively
+    (DSR = 0, p-value = 1) rather than raising or producing NaN.
+    """
+    data = _make_flat_price_data()
+    # donchian_breakout takes positions on flat data (period < len(data))
+    strategy = build_strategy("donchian_breakout", '{"period": 20}')
+    # Zero commission/slippage so returns are exactly zero (no cost noise)
+    args = _Args(commission=0.0, slippage=0.0, n_trials=10)
+    results = run_backtest(data, strategy, args)
+
+    assert results["returns"].std() == 0.0, "expected zero-variance returns"
+    assert len(results["returns"]) >= 2, "need at least 2 observations for DSR"
+
+    from performance import calculate_metrics
+    metrics = calculate_metrics(results)
+
+    assert "deflated_sharpe" in metrics, "expected deflated_sharpe in metrics"
+    d = metrics["deflated_sharpe"]
+    assert d["deflated_sharpe_ratio"] == 0.0
+    assert d["p_value"] == 1.0
+    assert d["z_score"] is None
+    assert d["n_trials"] == 10
+    assert d["n_observations"] == len(results["returns"])
+    assert d["skewness"] == 0.0
+    assert d["kurtosis"] == 3.0
+    assert d["sharpe_ratio"] == 0.0
+
+
 def main() -> int:
     tests = [
         ("signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
@@ -599,6 +646,7 @@ def main() -> int:
         ("parse_args_custom_values", test_parse_args_custom_values),
         ("parse_args_invalid_commission_type", test_parse_args_invalid_commission_type),
         ("parse_args_invalid_initial_capital_type", test_parse_args_invalid_initial_capital_type),
+        ("run_backtest_constant_returns_deflated_sharpe", test_run_backtest_constant_returns_deflated_sharpe),
         ("run_backtest_multi_asset_cross_sectional_momentum", test_run_backtest_multi_asset_cross_sectional_momentum),
         ("run_backtest_multi_asset_dual_momentum", test_run_backtest_multi_asset_dual_momentum),
         ("run_backtest_multi_asset_dict_cross_sectional_momentum", test_run_backtest_multi_asset_dict_cross_sectional_momentum),
