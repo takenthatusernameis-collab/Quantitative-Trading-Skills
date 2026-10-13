@@ -104,6 +104,9 @@ def _benchmark_stats(
     returns: pd.Series,
     benchmark_returns: pd.Series,
     ann_factor: float,
+    total_return_benchmark: bool = False,
+    benchmark_commission: float = 0.0,
+    benchmark_slippage: float = 0.0,
 ) -> Dict[str, Any]:
     """Compute buy-and-hold benchmark comparison metrics from aligned returns.
 
@@ -113,15 +116,29 @@ def _benchmark_stats(
     the regression is the standard per-period OLS y = alpha + beta * x on the
     common-date aligned series. t-stat and p-value are invariant to annualization,
     and are only reported when at least 3 aligned observations exist.
+
+    If benchmark_commission or benchmark_slippage > 0, the benchmark total return
+    is reduced by the round-trip cost (buy + sell) applied once to the total
+    benchmark return, simulating a buy-and-hold investor who pays transaction
+    costs at entry and exit.
     """
     stats: Dict[str, Any] = {}
     if benchmark_returns is None or len(benchmark_returns) == 0:
         return stats
     bench_total = (1 + benchmark_returns).prod() - 1
+
+    # Apply benchmark trading costs (round-trip: buy + sell)
+    if benchmark_commission > 0 or benchmark_slippage > 0:
+        round_trip_cost = benchmark_commission + benchmark_slippage
+        bench_total = (1 + bench_total) * (1 - round_trip_cost) - 1
+
     stats["benchmark_total_return"] = float(bench_total)
     stats["benchmark_annualized_return"] = float(
         (1 + bench_total) ** (ann_factor / len(benchmark_returns)) - 1
     )
+    stats["benchmark_total_return_type"] = "total" if total_return_benchmark else "price"
+    stats["benchmark_commission"] = float(benchmark_commission)
+    stats["benchmark_slippage"] = float(benchmark_slippage)
 
     aligned_ret, aligned_bench = returns.align(benchmark_returns, join="inner")
     n = len(aligned_ret)
@@ -331,7 +348,14 @@ def calculate_metrics(
 
     # --- Benchmark Comparison ---
     if benchmark_returns is not None and len(benchmark_returns) > 0:
-        metrics.update(_benchmark_stats(returns, benchmark_returns, ann_factor))
+        metrics.update(_benchmark_stats(
+            returns,
+            benchmark_returns,
+            ann_factor,
+            total_return_benchmark=config.get("total_return_benchmark", False),
+            benchmark_commission=config.get("benchmark_commission", 0.0),
+            benchmark_slippage=config.get("benchmark_slippage", 0.0),
+        ))
 
     # --- Additional Ratios ---
     if returns.std() > 0:
@@ -487,6 +511,9 @@ def generate_report(
             "--- Benchmark Comparison ---",
             f"Benchmark Total Return:      {metrics.get('benchmark_total_return', 0):.2%}",
             f"Benchmark Annualized Return: {metrics.get('benchmark_annualized_return', 0):.2%}",
+            f"Benchmark Return Type:       {metrics.get('benchmark_total_return_type', 'price')}",
+            f"Benchmark Commission:        {metrics.get('benchmark_commission', 0):.4f}",
+            f"Benchmark Slippage:          {metrics.get('benchmark_slippage', 0):.4f}",
             f"Correlation:                 {metrics.get('correlation_with_benchmark', 0):.2f}",
             f"Alpha:                       {metrics.get('alpha', 0):.2%}",
             f"Beta:                        {metrics.get('beta', 0):.2f}",

@@ -232,6 +232,60 @@ def test_benchmark_stats_perfect_fit_has_r_squared_one():
     assert stats["alpha_pvalue"] == 0.0
 
 
+def test_benchmark_stats_total_return_type_recorded():
+    """_benchmark_stats records benchmark_total_return_type in the output."""
+    returns = _make_returns(30)
+    bench = _make_returns(30)
+    stats = _benchmark_stats(returns, bench, 252.0, total_return_benchmark=True)
+    assert stats["benchmark_total_return_type"] == "total"
+
+    stats_price = _benchmark_stats(returns, bench, 252.0, total_return_benchmark=False)
+    assert stats_price["benchmark_total_return_type"] == "price"
+
+
+def test_benchmark_stats_applies_trading_costs():
+    """_benchmark_stats reduces benchmark total return by round-trip commission+slippage."""
+    returns = _make_returns(30)
+    bench = _make_returns(30)
+    # Benchmark has 10% total return
+    bench = pd.Series(0.001, index=returns.index)  # ~0.1% per period = ~25% annualized
+    stats_no_cost = _benchmark_stats(returns, bench, 252.0, benchmark_commission=0.0, benchmark_slippage=0.0)
+    stats_with_cost = _benchmark_stats(returns, bench, 252.0, benchmark_commission=0.001, benchmark_slippage=0.0005)
+    # Round-trip cost = 0.0015, applied to total benchmark return
+    # bench_total_return_after_cost = (1 + bench_total_return) * (1 - round_trip_cost) - 1
+    round_trip_cost = 0.0015
+    expected_with_cost = (1 + stats_no_cost["benchmark_total_return"]) * (1 - round_trip_cost) - 1
+    assert abs(stats_with_cost["benchmark_total_return"] - expected_with_cost) < 1e-10
+    assert stats_with_cost["benchmark_commission"] == 0.001
+    assert stats_with_cost["benchmark_slippage"] == 0.0005
+
+
+def test_calculate_metrics_passes_total_return_benchmark_flag():
+    """calculate_metrics reads total_return_benchmark from config and passes to _benchmark_stats."""
+    returns = _make_returns(30)
+    bench = _make_returns(30)
+    config_total = {"total_return_benchmark": True, "benchmark_commission": 0.0, "benchmark_slippage": 0.0}
+    config_price = {"total_return_benchmark": False, "benchmark_commission": 0.0, "benchmark_slippage": 0.0}
+    metrics_total = calculate_metrics({"returns": returns, "benchmark": bench, "config": config_total})
+    metrics_price = calculate_metrics({"returns": returns, "benchmark": bench, "config": config_price})
+    assert metrics_total["benchmark_total_return_type"] == "total"
+    assert metrics_price["benchmark_total_return_type"] == "price"
+
+
+def test_calculate_metrics_passes_benchmark_costs():
+    """calculate_metrics reads benchmark_commission/slippage from config and passes to _benchmark_stats."""
+    returns = _make_returns(30)
+    bench = _make_returns(30)
+    config = {"total_return_benchmark": False, "benchmark_commission": 0.002, "benchmark_slippage": 0.001}
+    metrics = calculate_metrics({"returns": returns, "benchmark": bench, "config": config})
+    assert metrics["benchmark_commission"] == 0.002
+    assert metrics["benchmark_slippage"] == 0.001
+    # Benchmark total return should be reduced by round-trip cost
+    config_no_cost = {"total_return_benchmark": False, "benchmark_commission": 0.0, "benchmark_slippage": 0.0}
+    metrics_no_cost = calculate_metrics({"returns": returns, "benchmark": bench, "config": config_no_cost})
+    assert metrics["benchmark_total_return"] < metrics_no_cost["benchmark_total_return"]
+
+
 def main() -> int:
     tests = [
         ("calculate_metrics_empty_returns_returns_error", test_calculate_metrics_empty_returns_returns_error),
@@ -251,6 +305,10 @@ def main() -> int:
         ("benchmark_significance_omitted_without_benchmark", test_benchmark_significance_omitted_without_benchmark),
         ("benchmark_t_distribution_pvalue_known_values", test_benchmark_t_distribution_pvalue_known_values),
         ("benchmark_stats_perfect_fit_has_r_squared_one", test_benchmark_stats_perfect_fit_has_r_squared_one),
+        ("benchmark_stats_total_return_type_recorded", test_benchmark_stats_total_return_type_recorded),
+        ("benchmark_stats_applies_trading_costs", test_benchmark_stats_applies_trading_costs),
+        ("calculate_metrics_passes_total_return_benchmark_flag", test_calculate_metrics_passes_total_return_benchmark_flag),
+        ("calculate_metrics_passes_benchmark_costs", test_calculate_metrics_passes_benchmark_costs),
     ]
 
     failures = 0

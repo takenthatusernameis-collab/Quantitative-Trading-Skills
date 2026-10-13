@@ -18,7 +18,7 @@ import pandas as pd
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
-from data_loader import load_data, validate_data, load_multi_symbol, DataProvenance, validate_point_in_time, detect_survivorship_bias  # noqa: E402
+from data_loader import load_data, validate_data, load_multi_symbol, DataProvenance, validate_point_in_time, detect_survivorship_bias, _compute_benchmark_total_return, _detect_benchmark_total_return_type  # noqa: E402
 
 
 def _make_data(periods: int = 100, seed: int = 42) -> pd.DataFrame:
@@ -313,6 +313,124 @@ def test_load_multi_symbol_provenance_complete():
         Path(tmp.name).unlink()
 
 
+def test_compute_benchmark_total_return_with_dividends():
+    """_compute_benchmark_total_return includes dividend yield when dividends column exists."""
+    dates = pd.date_range("2020-01-01", periods=10, freq="B")
+    close = np.array([100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0])
+    dividends = np.array([0.0, 0.0, 0.5, 0.0, 0.0, 0.5, 0.0, 0.0, 0.5, 0.0])
+    df = pd.DataFrame({"close": close, "dividends": dividends}, index=dates)
+    total_rets = _compute_benchmark_total_return(df)
+    price_rets = df["close"].pct_change()
+    div_yield = df["dividends"] / df["close"].shift(1)
+    expected = price_rets + div_yield
+    pd.testing.assert_series_equal(total_rets, expected)
+
+
+def test_compute_benchmark_total_return_with_adj_close():
+    """_compute_benchmark_total_return uses adj_close when dividends absent but adj_close present."""
+    dates = pd.date_range("2020-01-01", periods=10, freq="B")
+    close = np.array([100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0])
+    adj_close = np.array([100.0, 101.5, 102.5, 103.5, 104.5, 105.5, 106.5, 107.5, 108.5, 109.5])
+    df = pd.DataFrame({"close": close, "adj_close": adj_close}, index=dates)
+    total_rets = _compute_benchmark_total_return(df)
+    expected = df["adj_close"].pct_change()
+    pd.testing.assert_series_equal(total_rets, expected)
+
+
+def test_compute_benchmark_total_return_fallback_price_only():
+    """_compute_benchmark_total_return falls back to close.pct_change when no dividends/adj_close."""
+    dates = pd.date_range("2020-01-01", periods=10, freq="B")
+    close = np.array([100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0])
+    df = pd.DataFrame({"close": close}, index=dates)
+    total_rets = _compute_benchmark_total_return(df)
+    expected = df["close"].pct_change()
+    pd.testing.assert_series_equal(total_rets, expected)
+
+
+def test_detect_benchmark_total_return_type():
+    """_detect_benchmark_total_return_type returns 'total' when dividends/adj_close present."""
+    dates = pd.date_range("2020-01-01", periods=10, freq="B")
+    close = np.array([100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0])
+
+    df_div = pd.DataFrame({"close": close, "dividends": np.zeros(10)}, index=dates)
+    assert _detect_benchmark_total_return_type(df_div) == "total"
+
+    df_adj = pd.DataFrame({"close": close, "adj_close": close}, index=dates)
+    assert _detect_benchmark_total_return_type(df_adj) == "total"
+
+    df_price = pd.DataFrame({"close": close}, index=dates)
+    assert _detect_benchmark_total_return_type(df_price) == "price"
+
+
+def test_provenance_includes_total_return_type():
+    """DataProvenance includes total_return_type field when loading data with dividends."""
+    dates = pd.date_range("2020-01-01", periods=20, freq="B")
+    close = 100 * np.exp(np.cumsum(np.random.normal(0.0005, 0.01, 20)))
+    rng = np.random.default_rng(42)
+    df = pd.DataFrame({
+        "open": close * rng.uniform(0.995, 1.005, 20),
+        "high": close * rng.uniform(1.005, 1.02, 20),
+        "low": close * rng.uniform(0.98, 0.995, 20),
+        "close": close,
+        "volume": rng.integers(1_000_000, 10_000_000, 20),
+        "dividends": rng.uniform(0, 0.5, 20)
+    }, index=dates)
+    csv_path = _make_csv(df)
+    try:
+        _, prov = load_data(csv_path, return_provenance=True)
+        assert prov.total_return_type == "total"
+
+        df_no_div = pd.DataFrame({
+            "open": close * rng.uniform(0.995, 1.005, 20),
+            "high": close * rng.uniform(1.005, 1.02, 20),
+            "low": close * rng.uniform(0.98, 0.995, 20),
+            "close": close,
+            "volume": rng.integers(1_000_000, 10_000_000, 20),
+        }, index=dates)
+        csv_path2 = _make_csv(df_no_div)
+        try:
+            _, prov2 = load_data(csv_path2, return_provenance=True)
+            assert prov2.total_return_type == "price"
+        finally:
+            Path(csv_path2).unlink()
+    finally:
+        Path(csv_path).unlink()
+
+
+def test_load_multi_symbol_provenance_includes_total_return_type():
+    """load_multi_symbol provenance includes total_return_type per symbol."""
+    dates = pd.date_range("2020-01-01", periods=100, freq="B")
+    rows = []
+    for i, (sym, has_div) in enumerate([("WITH_DIV", True), ("NO_DIV", False)]):
+        rng = np.random.default_rng(i + 1)
+        rets = rng.normal(0.0005, 0.015, 100)
+        prices = 100 * np.exp(np.cumsum(rets))
+        for j, d in enumerate(dates):
+            row = {
+                "date": d.strftime("%Y-%m-%d"),
+                "symbol": sym,
+                "open": prices[j],
+                "high": prices[j] * 1.01,
+                "low": prices[j] * 0.99,
+                "close": prices[j],
+                "volume": int(rng.integers(1_000_000, 10_000_000)),
+            }
+            if has_div:
+                row["dividends"] = rng.uniform(0, 0.5)
+            rows.append(row)
+    panel = pd.DataFrame(rows)
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
+    panel.to_csv(tmp.name, index=False)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            data, provenance = load_multi_symbol(tmp.name, return_provenance=True)
+        assert provenance["WITH_DIV"].total_return_type == "total"
+        assert provenance["NO_DIV"].total_return_type == "price"
+    finally:
+        Path(tmp.name).unlink()
+
+
 def main() -> int:
     tests = [
         ("load_data_unsupported_format_raises", test_load_data_unsupported_format_raises),
@@ -332,6 +450,12 @@ def main() -> int:
         ("test_detect_survivorship_bias_entries_exits_insufficient", test_detect_survivorship_bias_entries_exits_insufficient),
         ("test_detect_survivorship_bias_empty", test_detect_survivorship_bias_empty),
         ("test_load_multi_symbol_provenance_complete", test_load_multi_symbol_provenance_complete),
+        ("test_compute_benchmark_total_return_with_dividends", test_compute_benchmark_total_return_with_dividends),
+        ("test_compute_benchmark_total_return_with_adj_close", test_compute_benchmark_total_return_with_adj_close),
+        ("test_compute_benchmark_total_return_fallback_price_only", test_compute_benchmark_total_return_fallback_price_only),
+        ("test_detect_benchmark_total_return_type", test_detect_benchmark_total_return_type),
+        ("test_provenance_includes_total_return_type", test_provenance_includes_total_return_type),
+        ("test_load_multi_symbol_provenance_includes_total_return_type", test_load_multi_symbol_provenance_includes_total_return_type),
     ]
 
     failures = 0

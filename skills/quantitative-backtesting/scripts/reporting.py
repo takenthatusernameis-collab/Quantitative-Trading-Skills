@@ -376,6 +376,9 @@ def generate_tear_sheet(
         bench_metrics = [
             ("Benchmark Total Return", "benchmark_total_return", fmt_pct),
             ("Benchmark Annualized Return", "benchmark_annualized_return", fmt_pct),
+            ("Benchmark Return Type", "benchmark_total_return_type", lambda v: str(v)),
+            ("Benchmark Commission", "benchmark_commission", lambda v: f"{v:.4f}"),
+            ("Benchmark Slippage", "benchmark_slippage", lambda v: f"{v:.4f}"),
             ("Correlation", "correlation_with_benchmark", fmt_num),
             ("Alpha", "alpha", fmt_pct),
             ("Beta", "beta", fmt_num),

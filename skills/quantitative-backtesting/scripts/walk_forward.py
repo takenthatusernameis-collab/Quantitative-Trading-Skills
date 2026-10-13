@@ -21,7 +21,7 @@ from itertools import product
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from scripts.strategy_builder import build_strategy
-from scripts.data_loader import load_data, validate_data, validate_point_in_time
+from scripts.data_loader import load_data, validate_data, validate_point_in_time, _compute_benchmark_total_return
 from scripts.performance import calculate_metrics, generate_report, _annualization_factor, _benchmark_stats
 from scripts.reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
@@ -1117,9 +1117,10 @@ def run_cpcv(args) -> int:
     # Load benchmark if provided
     benchmark = None
     benchmark_provenance = None
+    total_return_benchmark = getattr(args, "total_return_benchmark", False)
     if getattr(args, "benchmark", None):
         print(f"Loading benchmark data from {args.benchmark}...")
-        benchmark, benchmark_provenance = _load_benchmark(args.benchmark)
+        benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
 
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
@@ -1147,11 +1148,12 @@ def run_cpcv(args) -> int:
     # Compute benchmark comparison metrics if benchmark provided
     benchmark_returns = None
     if benchmark is not None and len(results["oos_returns"]) > 0:
-        benchmark_returns = _compute_benchmark_returns(benchmark, results["oos_returns"])
+        benchmark_returns = _compute_benchmark_returns(benchmark, results["oos_returns"], total_return_benchmark)
         if benchmark_returns is not None:
             # Add benchmark metrics to summary
             results["summary"] = _add_benchmark_to_summary(
-                results["summary"], results["oos_returns"], benchmark_returns
+                results["summary"], results["oos_returns"], benchmark_returns,
+                commission=args.commission, slippage=args.slippage, total_return_benchmark=total_return_benchmark
             )
             print(
                 f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
@@ -1212,6 +1214,7 @@ def run_cpcv(args) -> int:
             "param_grid": param_grid,
             "point_in_time_validation": pit_results,
             "benchmark": getattr(args, "benchmark", None),
+            "total_return_benchmark": total_return_benchmark,
         },
     }
     if pit_results is not None:
@@ -1235,6 +1238,9 @@ def run_cpcv(args) -> int:
                 "slippage": args.slippage,
                 "strategy": args.strategy,
                 "symbol": args.symbol,
+                "total_return_benchmark": total_return_benchmark,
+                "benchmark_commission": args.commission,
+                "benchmark_slippage": args.slippage,
             },
         }
         if benchmark_returns is not None:
@@ -1305,29 +1311,42 @@ def _load_and_validate_data(
     return data, pit
 
 
-def _load_benchmark(benchmark_path: str) -> tuple[pd.DataFrame, Optional[Any]]:
+def _load_benchmark(benchmark_path: str, total_return_benchmark: bool = False) -> tuple[pd.DataFrame, Optional[Any]]:
     """Load benchmark data and return (benchmark_df, benchmark_provenance)."""
     benchmark, provenance = load_data(benchmark_path, return_provenance=True)
     if not validate_data(benchmark):
         raise ValueError("Benchmark data validation failed!")
     print(
         f"Loaded benchmark: {provenance.final_shape[0]} rows "
-        f"(checksum {provenance.checksum})"
+        f"(checksum {provenance.checksum}, "
+        f"total_return_type: {provenance.total_return_type})"
     )
+    if total_return_benchmark:
+        if provenance.total_return_type == "total":
+            print("Using total-return benchmark (dividends/adj_close included)")
+        else:
+            print("Warning: --total-return-benchmark requested but benchmark data has no dividends/adj_close column; falling back to price-only returns")
     return benchmark, provenance
 
 
 def _compute_benchmark_returns(
     benchmark: pd.DataFrame,
     strategy_returns: pd.Series,
+    total_return_benchmark: bool = False,
 ) -> Optional[pd.Series]:
     """Compute buy-and-hold benchmark returns aligned to strategy returns.
 
     The benchmark return for period t is the close-to-close return
     from t-1 to t (no shift). Aligned to the strategy returns index
     via inner join on common trading dates.
+
+    If total_return_benchmark is True, uses _compute_benchmark_total_return
+    which includes dividends/adj_close when available.
     """
-    benchmark_returns = benchmark["close"].pct_change()
+    if total_return_benchmark:
+        benchmark_returns = _compute_benchmark_total_return(benchmark)
+    else:
+        benchmark_returns = benchmark["close"].pct_change()
     _, aligned_benchmark = strategy_returns.align(benchmark_returns, join="inner")
     if len(aligned_benchmark) > 0:
         return aligned_benchmark
@@ -1338,6 +1357,9 @@ def _add_benchmark_to_summary(
     summary: Dict[str, Any],
     strategy_returns: pd.Series,
     benchmark_returns: pd.Series,
+    commission: float = 0.0,
+    slippage: float = 0.0,
+    total_return_benchmark: bool = False,
 ) -> Dict[str, Any]:
     """Add benchmark comparison metrics to a summary dict.
 
@@ -1349,7 +1371,12 @@ def _add_benchmark_to_summary(
         return summary
 
     ann_factor = _annualization_factor(strategy_returns.index)
-    summary.update(_benchmark_stats(strategy_returns, benchmark_returns, ann_factor))
+    summary.update(_benchmark_stats(
+        strategy_returns, benchmark_returns, ann_factor,
+        total_return_benchmark=total_return_benchmark,
+        benchmark_commission=commission,
+        benchmark_slippage=slippage,
+    ))
     return summary
 
 
@@ -1378,9 +1405,10 @@ def run_walk_forward(args) -> int:
     # Load benchmark if provided
     benchmark = None
     benchmark_provenance = None
+    total_return_benchmark = getattr(args, "total_return_benchmark", False)
     if getattr(args, "benchmark", None):
         print(f"Loading benchmark data from {args.benchmark}...")
-        benchmark, benchmark_provenance = _load_benchmark(args.benchmark)
+        benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
 
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
@@ -1407,11 +1435,12 @@ def run_walk_forward(args) -> int:
     # Compute benchmark comparison metrics if benchmark provided
     benchmark_returns = None
     if benchmark is not None and len(results["oos_returns"]) > 0:
-        benchmark_returns = _compute_benchmark_returns(benchmark, results["oos_returns"])
+        benchmark_returns = _compute_benchmark_returns(benchmark, results["oos_returns"], total_return_benchmark)
         if benchmark_returns is not None:
             # Add benchmark metrics to summary
             results["summary"] = _add_benchmark_to_summary(
-                results["summary"], results["oos_returns"], benchmark_returns
+                results["summary"], results["oos_returns"], benchmark_returns,
+                commission=args.commission, slippage=args.slippage, total_return_benchmark=total_return_benchmark
             )
             print(
                 f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
@@ -1473,6 +1502,7 @@ def run_walk_forward(args) -> int:
             "param_grid": param_grid,
             "point_in_time_validation": pit_results,
             "benchmark": getattr(args, "benchmark", None),
+            "total_return_benchmark": total_return_benchmark,
         },
     }
     if pit_results is not None:
@@ -1496,6 +1526,9 @@ def run_walk_forward(args) -> int:
                 "slippage": args.slippage,
                 "strategy": args.strategy,
                 "symbol": args.symbol,
+                "total_return_benchmark": total_return_benchmark,
+                "benchmark_commission": args.commission,
+                "benchmark_slippage": args.slippage,
             },
         }
         if benchmark_returns is not None:
@@ -1590,9 +1623,10 @@ def run_monte_carlo(args) -> int:
     # Load benchmark if provided
     benchmark = None
     benchmark_provenance = None
+    total_return_benchmark = getattr(args, "total_return_benchmark", False)
     if getattr(args, "benchmark", None):
         print(f"Loading benchmark data from {args.benchmark}...")
-        benchmark, benchmark_provenance = _load_benchmark(args.benchmark)
+        benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
 
     # First run a backtest to get base returns
     param_grid = _parse_param_grid(args.param_grid)
@@ -1684,10 +1718,13 @@ def run_monte_carlo(args) -> int:
     # Compute benchmark comparison metrics if benchmark provided
     benchmark_returns = None
     if benchmark is not None and len(returns) > 0:
-        benchmark_returns = _compute_benchmark_returns(benchmark, returns)
+        benchmark_returns = _compute_benchmark_returns(benchmark, returns, total_return_benchmark)
         if benchmark_returns is not None:
             bstats = _benchmark_stats(
-                returns, benchmark_returns, _annualization_factor(returns.index)
+                returns, benchmark_returns, _annualization_factor(returns.index),
+                total_return_benchmark=total_return_benchmark,
+                benchmark_commission=args.commission,
+                benchmark_slippage=args.slippage,
             )
             print(
                 f"Benchmark Correlation: {bstats.get('correlation_with_benchmark', 0):.4f}"
@@ -1749,6 +1786,7 @@ def run_monte_carlo(args) -> int:
             "block_size": args.block_size,
             "point_in_time_validation": pit_results,
             "benchmark": getattr(args, "benchmark", None),
+            "total_return_benchmark": total_return_benchmark,
         },
     }
     if pit_results is not None:
@@ -1760,7 +1798,8 @@ def run_monte_carlo(args) -> int:
         mc_save["benchmark_provenance"] = benchmark_provenance.to_dict()
     if benchmark_returns is not None:
         mc_save["summary"] = _add_benchmark_to_summary(
-            mc_save["summary"], returns, benchmark_returns
+            mc_save["summary"], returns, benchmark_returns,
+            commission=args.commission, slippage=args.slippage, total_return_benchmark=total_return_benchmark
         )
     with open(mc_path, "w") as f:
         json.dump(mc_save, f, indent=2, default=str)
@@ -1777,6 +1816,9 @@ def run_monte_carlo(args) -> int:
             "slippage": args.slippage,
             "strategy": args.strategy,
             "symbol": args.symbol,
+            "total_return_benchmark": total_return_benchmark,
+            "benchmark_commission": args.commission,
+            "benchmark_slippage": args.slippage,
         },
     }
     if benchmark_returns is not None:
@@ -1812,13 +1854,14 @@ def main():
     common_parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (as decimal)")
     common_parser.add_argument("--impact-coefficient", type=float, default=0.0, help="Market impact coefficient (position_notional/ADV * coefficient). 0 to disable.")
     common_parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
-    common_parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3% per year)")
-    common_parser.add_argument("--funding-cost", type=float, default=0.0, help="Annual funding cost rate for leveraged positions (as decimal, e.g., 0.02 = 2% per year)")
+    common_parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3%% per year)")
+    common_parser.add_argument("--funding-cost", type=float, default=0.0, help="Annual funding cost rate for leveraged positions (as decimal, e.g., 0.02 = 2%% per year)")
     common_parser.add_argument("--output", type=str, default="results", help="Output directory")
     common_parser.add_argument("--param-grid", type=str, required=True, help="Parameter grid as JSON string")
     common_parser.add_argument("--validate-point-in-time", action="store_true", help="Run point-in-time validation on the loaded data (temporal ordering, duplicate timestamps, stale-data warnings)")
     common_parser.add_argument("--point-in-time-strict", action="store_true", help="Abort when point-in-time validation finds violations (default: warn only)")
     common_parser.add_argument("--benchmark", type=str, default=None, help="Path to benchmark OHLCV file (e.g. SPY) for buy-and-hold baseline comparison (alpha/beta, correlation)")
+    common_parser.add_argument("--total-return-benchmark", action="store_true", help="Compute benchmark returns using total return (dividends + price) when dividend/adj_close data is available, instead of price-only returns")
 
     # Walk-forward analysis
     wf_parser = subparsers.add_parser("walk-forward", parents=[common_parser], help="Run walk-forward analysis")

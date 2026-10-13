@@ -20,6 +20,8 @@ import json
 REQUIRED_COLUMNS = ["open", "high", "low", "close", "volume"]
 OPTIONAL_COLUMNS = ["adj_close", "dividends", "splits"]
 
+BENCHMARK_TOTAL_RETURN_TYPES = ("price", "total")
+
 
 @dataclass
 class DataProvenance:
@@ -41,6 +43,7 @@ class DataProvenance:
     validation_messages: List[str] = field(default_factory=list)
     transformations_applied: List[str] = field(default_factory=list)
     checksum: Optional[str] = None
+    total_return_type: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to JSON-serializable dictionary."""
@@ -57,6 +60,55 @@ def _compute_checksum(df: pd.DataFrame) -> str:
     # Use a sample of data for efficiency on large frames
     sample = df.head(1000).to_csv(index=False).encode('utf-8')
     return hashlib.md5(sample).hexdigest()[:16]
+
+
+def _compute_benchmark_total_return(df: pd.DataFrame) -> pd.Series:
+    """
+    Compute total-return benchmark series from OHLCV data.
+
+    If 'dividends' column exists, computes total return as:
+        close.pct_change() + dividends / close.shift(1)
+
+    If 'adj_close' column exists (and no dividends), computes total return as:
+        adj_close.pct_change()
+
+    Otherwise falls back to price-only return:
+        close.pct_change()
+
+    The return type ('price' or 'total') is recorded in the DataProvenance
+    when this function is used for benchmark loading.
+
+    Args:
+        df: DataFrame with OHLCV data (must have 'close', optionally 'dividends' or 'adj_close')
+
+    Returns:
+        Series of period returns (total return when dividends/adj_close available, else price return)
+    """
+    if "dividends" in df.columns:
+        # Total return = price return + dividend yield
+        price_return = df["close"].pct_change()
+        dividend_yield = df["dividends"] / df["close"].shift(1)
+        return price_return + dividend_yield
+    elif "adj_close" in df.columns:
+        # Use adjusted close for total return (includes dividends and splits)
+        return df["adj_close"].pct_change()
+    else:
+        # Price-only return
+        return df["close"].pct_change()
+
+
+def _detect_benchmark_total_return_type(df: pd.DataFrame) -> str:
+    """
+    Detect whether the benchmark data supports total-return computation.
+
+    Returns:
+        'total' if dividends or adj_close column has any non-NaN values, 'price' otherwise
+    """
+    if "dividends" in df.columns and df["dividends"].notna().any():
+        return "total"
+    if "adj_close" in df.columns and df["adj_close"].notna().any():
+        return "total"
+    return "price"
 
 
 def load_data(
@@ -169,6 +221,7 @@ def load_data(
     if isinstance(df.index, pd.DatetimeIndex) and len(df) > 0:
         provenance.date_range_final = (str(df.index.min()), str(df.index.max()))
     provenance.checksum = _compute_checksum(df)
+    provenance.total_return_type = _detect_benchmark_total_return_type(df)
 
     # Validate data and update provenance
     validate_data(df, provenance=provenance)
@@ -552,6 +605,7 @@ def load_multi_symbol(
                     columns_final=list(sym_df.columns),
                     validation_passed=True,
                     checksum=_compute_checksum(sym_df),
+                    total_return_type=_detect_benchmark_total_return_type(sym_df),
                 )
                 if isinstance(sym_df.index, pd.DatetimeIndex) and len(sym_df) > 0:
                     prov.date_range_final = (
