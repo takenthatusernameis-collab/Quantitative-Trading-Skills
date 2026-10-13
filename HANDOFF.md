@@ -4,59 +4,109 @@
 
 ## Repository state
 
-- Git: `main` at `d2d0030` plus this session's changes (uncommitted; do not commit unless asked).
-- Skill location: `skills/quantitative-backtesting/` (8 strategies, 7 scripts, 8 test files, 3 reference docs).
+- Git: `main` at `8dd6758` plus this session's changes (uncommitted; do not commit unless asked).
+- Skill location: `skills/quantitative-backtesting/` (8 strategies, 7 scripts, 8 test files, 4 reference docs).
 - Python deps for the suites: `pandas` and `numpy` (present in the session environment; not committed).
 
-## Session summary (2026-10-13, third session)
+## Session summary (2026-10-13, fourth session)
 
-The pairs trading implementation for `MeanReversionZScore` was already completed in commit `224ceaa` (same day). This session cleaned up the test suite, fixed default parameters, and verified the implementation.
+Implemented **Option C from the previous handoff: multiple-testing correction via the Deflated Sharpe Ratio (Bailey & López de Prado, 2014)** for the parameter search in walk-forward / CPCV / grid optimization.
 
 ### Changes
 
-1. **`scripts/strategy_builder.py`** — Updated `get_strategy_defaults("zscore_mean_reversion")` to include `spread_method` ("log_ratio") and `hedge_ratio` (1.0) defaults, matching the actual implementation.
+1. **`scripts/walk_forward.py`**
+   - New public function `deflated_sharpe_ratio(sharpe_ratio, returns, n_trials, trial_sharpes=None)`:
+     DSR = Phi((SR_hat - SR*) * sqrt(T-1) / sqrt(1 - gamma3*SR_hat + ((gamma4-1)/4)*SR_hat^2)),
+     with all Sharpe quantities in per-period units. `SR*` (expected max Sharpe under the null) is
+     estimated from the cross-sectional dispersion of the trial Sharpes when provided
+     (`std(SR_trials) * sqrt(2 ln N)`), else the i.i.d.-normal null approximation
+     (`sqrt(2 ln N / T)`). Returns DSR, p-value, expected_max_sharpe, z_score, n_trials,
+     n_observations, skewness, kurtosis. Handles degenerate (zero-variance) returns (DSR=0)
+     and raises ValueError for T<2 or n_trials<1.
+   - `parameter_optimization(..., apply_deflation=False)`: when True, every ranked result row
+     gains a `deflated_sharpe` dict (n_trials = number of ranked configurations, SR* from the
+     cross-sectional dispersion of all trial Sharpes).
+   - `walk_forward_analysis(..., apply_deflation=False)`: per-period `deflated_sharpe` on the
+     in-sample selection Sharpe, plus aggregate `summary["deflated_sharpe"]` on the combined
+     OOS returns with n_trials = total configurations evaluated across all periods.
+   - `cpcv_analysis(..., apply_deflation=False)`: same pattern per fold and aggregate.
+   - `overfitting_check`: surfaces the aggregate DSR in diagnostics when present.
+   - CLI: new `--deflate` flag on the `walk-forward`, `optimize` and `cpcv` subcommands;
+     DSR printed alongside OOS Sharpe and recorded in saved JSON under `config.deflate`.
+   - Backward compatible: default `apply_deflation=False` leaves all outputs unchanged.
 
-2. **`tests/test_strategy_builder.py`** — Removed duplicate test definitions (two identical sets of 4 MeanReversionZScore tests). Kept the improved versions with stronger assertions:
-   - `test_mean_reversion_zscore_pairs_two_asset_dict`: now verifies specific entry/exit behavior around known spread spikes (index 40: short entry, index 70: long entry).
-   - `test_mean_reversion_zscore_single_asset_fallback`: now asserts the warning message contains "single-asset".
-   - `test_mean_reversion_zscore_rejects_three_assets`: uses explicit `assert False, "Expected ValueError"` messages.
+2. **`tests/test_walk_forward.py`** — 10 new tests (18 → 28 total): DSR basic/decreasing-with-trials/
+   trial-sharpes/insufficient-data/zero-variance/invalid-n-trials; `parameter_optimization`
+   deflation + backward compat; walk-forward per-period + aggregate deflation + backward compat;
+   `overfitting_check` DSR pass-through; CLI `--deflate` end-to-end. Updated the two
+   `_CLIArgs` mocks to carry `deflate=False` (argparse always sets the flag; the mocks were
+   incomplete and previously passed only by accident of the attribute not being read).
 
-3. **Documentation** — `references/strategy_templates.md` already documented `spread_method` and `hedge_ratio`; no changes needed.
+3. **`tests/test_cpcv.py`** — 1 new test (14 → 15): `cpcv_deflation` verifies per-fold and
+   aggregate DSR plus backward compat. Test config uses 500 bars / n_splits=4 / test_size=0.2
+   with `slow_period` <= 20 so the 25-bar test windows produce active signals (smaller windows
+   correctly skip all combos via the `signals_active` guard, leaving no OOS returns).
+
+4. **Documentation** — `references/validation_methods.md`: new "Deflated Sharpe Ratio
+   (Multiple-Testing Correction)" section (formula, SR* estimators, interpretation, usage, CLI).
+   `references/metrics_definitions.md`: DSR definition. `SKILL.md`: capability, resource,
+   test-coverage and tips updates.
 
 ### Verified (evidence)
 
-- Full suite from repo root: **99/99** tests pass (unchanged count; duplicates removed, stronger assertions added).
-- `test_strategy_builder.py`: 22/22 tests pass (was 22 with duplicates; now 22 unique).
-- Manual verification: two-asset dict and MultiIndex panel data produce correct spread z-score signals (long at z <= -entry_z, short at z >= entry_z, exit at |z| <= exit_z).
-- Single-asset fallback emits `UserWarning` and z-scores close price.
-- Panel data with != 2 assets raises `ValueError`.
+- Full suite from repo root: **114/114 tests pass** (6+13+10+19+22+28+15+1; baseline before
+  this session was 103 with 11 new tests added).
+- End-to-end CLI (`--deflate`) verified on all three subcommands with synthetic data:
+  - `optimize`: top Sharpe -0.24 over 4 trials → DSR 0.186 (p=0.81).
+  - `walk-forward`: OOS Sharpe -1.30 over 13 trials → DSR 0.0001 (p≈1.0).
+  - `cpcv`: OOS Sharpe 1.78 over 15 trials → DSR 0.068 (p=0.93) — a superficially strong
+    OOS Sharpe is correctly revealed as consistent with luck after correcting for search size.
+- Sanity checks: genuine edge (Sharpe 1.14, N=1) → DSR 0.988; N=1e5 → DSR 0.006;
+  constant returns → DSR 0.0; ValueError on T<2 and n_trials<1.
+- Backward compatibility: default runs produce byte-identical rankings and no new keys.
 
 ## Unresolved / methodological notes
 
-- `MeanReversionZScore` uses a **fixed** `hedge_ratio` parameter (default 1.0). The docstring and HANDOFF mention "rolling OLS hedge-ratio residual" as an alternative spread construction — this is not yet implemented.
-- Monte Carlo lives in `walk_forward.py` (`monte_carlo_simulation`); no separate `monte_carlo.py` script.
-- No out-of-sample evidence of profitability exists; all results are synthetic. Nothing here is production-ready.
-- Walk-forward / CPCV parameter search ranks parameter sets without any multiple-comparison correction (deflated Sharpe, Bonferroni, etc.).
+- The aggregate OOS DSR uses the conservative interpretation n_trials = total configurations
+  evaluated across all periods/folds, and the i.i.d. null approximation for SR* (the
+  cross-sectional dispersion of per-period best Sharpes is a different population than the
+  OOS Sharpe). This is a deliberate, documented choice, not a bug.
+- `run_monte_carlo` calls `parameter_optimization` internally without deflation (it only
+  consumes `best_params`), so MC results do not carry a DSR.
+- The per-period DSR deflates the *in-sample selection* Sharpe; it does not by itself
+  validate OOS economics. No out-of-sample evidence of profitability exists anywhere in this
+  repo; all results are synthetic. Nothing here is production-ready.
+- `MeanReversionZScore` still uses a fixed `hedge_ratio` (default 1.0); rolling OLS
+  hedge-ratio estimation (previous handoff Option A) is not yet implemented.
+- Monte Carlo lives in `walk_forward.py` (`monte_carlo_simulation`); no separate
+  `monte_carlo.py` script.
 
 ## Next task for the next agent
 
-**Option A: Add rolling OLS hedge-ratio estimation to `MeanReversionZScore`**
+**Option A (recommended): Add rolling OLS hedge-ratio estimation to `MeanReversionZScore`**
+(deferred from the previous two handoffs)
+- Context: `scripts/strategy_builder.py` (`MeanReversionZScore._construct_spread`),
+  `references/strategy_templates.md`, `tests/test_strategy_builder.py`.
+- Scope: Add `spread_method="ols_hedge"` that estimates the hedge ratio via rolling OLS
+  regression of log(p1) on log(p2) over a `hedge_lookback` window (separate from the
+  z-score `period`), then constructs the spread as the OLS residual. Keep `log_ratio` and
+  `price_difference` as-is. Add regression test with a known cointegrated pair.
+- Constraints: preserve both panel formats, keep full suite passing (114 tests), smallest
+  reversible change.
 
-- Context: `scripts/strategy_builder.py` (`MeanReversionZScore._construct_spread`), `references/strategy_templates.md`, `tests/test_strategy_builder.py`.
-- Scope: Add a new `spread_method="ols_hedge"` option that estimates the hedge ratio via rolling OLS regression of log(p1) on log(p2) over a `hedge_lookback` window (separate from the z-score `period`), then constructs the spread as the OLS residual. Keep `log_ratio` and `price_difference` as-is. Add regression test with known cointegrated pair.
-- Constraints: preserve both panel formats, keep full suite passing (99 tests), smallest reversible change.
+**Option B: Surface DSR in the main backtest path**
+- Context: `scripts/run_backtest.py`, `scripts/performance.py`, `tests/test_run_backtest.py`.
+- Scope: Let `run_backtest` accept the number of development trials (e.g. `--n-trials`)
+  and report the Deflated Sharpe Ratio of the final backtest Sharpe via
+  `walk_forward.deflated_sharpe_ratio`, surfaced in `calculate_metrics` output, reports, and
+  tear sheets.
+- Constraints: backward compatible (no flag → no DSR), keep full suite passing.
 
-**Option B: Extract Monte Carlo into standalone `monte_carlo.py` script**
-
-- Context: `scripts/walk_forward.py` (`monte_carlo_simulation`), `scripts/strategy_builder.py`, `tests/test_walk_forward.py`.
-- Scope: Move `monte_carlo_simulation` and helpers to `scripts/monte_carlo.py` with a clean public API. Update imports in `walk_forward.py` and CLI entry points. Add tests for the new module.
+**Option C: Extract Monte Carlo into standalone `monte_carlo.py`** (previous handoff Option B)
+- Context: `scripts/walk_forward.py` (`monte_carlo_simulation`), `scripts/strategy_builder.py`.
+- Scope: Move `monte_carlo_simulation` and helpers to `scripts/monte_carlo.py` with a clean
+  public API; update imports and CLI entry points; add tests.
 - Constraints: no behavior change, keep full suite passing.
-
-**Option C: Add multiple-testing correction to walk-forward / CPCV parameter search**
-
-- Context: `scripts/walk_forward.py`, `scripts/cpcv.py`, `tests/test_walk_forward.py`, `tests/test_cpcv.py`.
-- Scope: Implement deflated Sharpe ratio (Bailey & López de Prado) or Bonferroni-adjusted selection as an optional post-processing step on the parameter grid results. Expose via new parameter in optimization config.
-- Constraints: backward compatible, keep full suite passing, synthetic tests only.
 
 ## Test suite quick reference
 
@@ -69,4 +119,5 @@ for t in test_data_loader test_performance test_reporting test_run_backtest \
 done
 ```
 
-`test_reporting.py` uses stdlib `unittest` (exit code / `OK` line is the pass/fail signal); the rest use the custom `main()` runner printing `N/N tests passed`.
+`test_reporting.py` uses stdlib `unittest` (exit code / `OK` line is the pass/fail signal);
+the rest use the custom `main()` runner printing `N/N tests passed`.

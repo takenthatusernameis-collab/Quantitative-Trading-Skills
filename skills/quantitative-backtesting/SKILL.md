@@ -50,6 +50,7 @@ This skill provides a comprehensive framework for systematic trading strategy de
 - Monte Carlo simulation for return distribution
 - Parameter sensitivity analysis
 - Overfitting detection (combinatorially purged cross-validation)
+- Multiple-testing correction via the Deflated Sharpe Ratio (Bailey & López de Prado)
 
 ### 6. Reporting
 - Automated tear sheet generation
@@ -121,7 +122,7 @@ Risk Metrics:
 - `data_loader.py` - Utilities for loading and validating market data from various sources
 - `strategy_builder.py` - Factory for creating common strategy templates (trend, mean reversion, momentum)
 - `performance.py` - Comprehensive performance analytics and metric calculation
-- `walk_forward.py` - Walk-forward analysis and parameter optimization
+- `walk_forward.py` - Walk-forward analysis, parameter optimization, Monte Carlo, CPCV, and Deflated Sharpe Ratio multiple-testing correction
 - `reporting.py` - Automated tear sheet and report generation
 - `generate_sample_data.py` - Generates a sample OHLCV dataset for testing
 
@@ -151,6 +152,7 @@ Risk Metrics:
 - Account for transaction costs from the beginning - they significantly impact net returns
 - Test parameter stability across different market regimes
 - Beware of look-ahead bias: ensure signals only use data available at decision time
+- Correct for multiple testing: a grid search over many parameter combinations inflates in-sample Sharpe; compute the Deflated Sharpe Ratio (`--deflate`) before trusting a Sharpe estimate
 - Consider regime-dependent performance (bull/bear/sideways markets)
 - Document all assumptions and data sources for reproducibility
 
@@ -229,13 +231,16 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   `DualMomentumStrategy` (dict and MultiIndex formats, single-asset
   fallback warnings, quantile/ranking semantics).
   - `test_walk_forward.py` - walk-forward windowing, parameter grid parsing,
-  train/test separation, Monte Carlo simulation, and multi-asset panel
-  (dict and MultiIndex) walk-forward and Monte Carlo integration with
-  `CrossSectionalMomentum` and `DualMomentumStrategy`.
+    train/test separation, Monte Carlo simulation, **Deflated Sharpe Ratio
+    multiple-testing correction** (`deflated_sharpe_ratio`, `apply_deflation`
+    on `parameter_optimization` and `walk_forward_analysis`, CLI `--deflate`),
+    and multi-asset panel (dict and MultiIndex) walk-forward and Monte Carlo
+    integration with `CrossSectionalMomentum` and `DualMomentumStrategy`.
   - `test_cpcv.py` - CPCV fold structure, purge/embargo behavior, parameter
-  stability calculation, summary metrics, CLI integration, and multi-asset
-  panel (dict and MultiIndex) CPCV integration with `CrossSectionalMomentum`
-  and `DualMomentumStrategy`.
+    stability calculation, summary metrics, **Deflated Sharpe Ratio
+    correction** (`apply_deflation` on `cpcv_analysis`), CLI integration,
+    and multi-asset panel (dict and MultiIndex) CPCV integration with
+    `CrossSectionalMomentum` and `DualMomentumStrategy`.
   - `test_generate_sample_data.py` - Sample data generation creates valid OHLCV
   CSV with expected shape and constraints.
 

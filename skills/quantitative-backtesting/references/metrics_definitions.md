@@ -40,6 +40,30 @@ excess_returns = r_t - risk_free_rate / periods_per_year
 
 Default risk-free rate is 2% annual.
 
+### Deflated Sharpe Ratio
+
+```
+dsr = Phi( (SR_hat - SR*) * sqrt(T - 1)
+             / sqrt(1 - skew * SR_hat + ((kurtosis - 1) / 4) * SR_hat^2) )
+```
+
+The Deflated Sharpe Ratio (Bailey & Lopez de Prado, 2014)
+corrects an estimated Sharpe for multiple testing (the size
+of the parameter search) and for non-normality of returns.
+All Sharpe quantities are per-period (non-annualized); `T` is
+the number of return observations, `skew`/`kurtosis` are the
+return moments, `Phi` is the standard normal CDF, and `SR*`
+is the expected maximum Sharpe under the null of no skill:
+`std(SR_trials) * sqrt(2 * ln(N))` when the trial Sharpe
+ratios are known, otherwise `sqrt(2 * ln(N) / T)`.
+
+The DSR is the probability that the true Sharpe exceeds the
+best Sharpe expected from luck across `N` trials. Values
+below ~0.95 indicate the result is consistent with luck.
+Computed by `scripts/walk_forward.py::deflated_sharpe_ratio`
+and reported by `parameter_optimization`, `walk_forward_analysis`
+and `cpcv_analysis` when `apply_deflation=True` (CLI: `--deflate`).
+
 ### Sortino Ratio
 
 ```

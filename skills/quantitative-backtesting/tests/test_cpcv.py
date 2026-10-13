@@ -19,6 +19,7 @@ sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 from walk_forward import (  # noqa: E402
     cpcv_analysis,
     signals_active,
+    deflated_sharpe_ratio,
     _calculate_cpcv_summary,
     run_cpcv,
     _make_strategy_factory,
@@ -330,6 +331,53 @@ def test_cpcv_cli_help():
     assert callable(run_cpcv)
 
 
+def test_cpcv_deflation():
+    """CPCV with apply_deflation reports per-fold and aggregate DSR."""
+    # 500 days / 4 splits / test_size=0.2 -> 25-bar test windows,
+    # long enough for the slow_period=20 signals to be active.
+    data = _make_sample_data(500)
+    strategy_factory = _make_strategy_factory("sma_crossover")
+    param_grid = {"fast_period": [5, 10], "slow_period": [15, 20]}
+
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+        apply_deflation=True,
+    )
+
+    # Aggregate DSR on the combined OOS returns
+    assert len(results["oos_returns"]) > 0
+    assert "deflated_sharpe" in results["summary"]
+    agg = results["summary"]["deflated_sharpe"]
+    assert 0.0 <= agg["deflated_sharpe_ratio"] <= 1.0
+    assert agg["n_trials"] >= len(results["folds"])
+
+    # Per-fold DSR for the in-sample selection
+    n_with_params = 0
+    for fold in results["folds"]:
+        if fold.get("best_params") is not None:
+            n_with_params += 1
+            assert "deflated_sharpe" in fold
+            d = fold["deflated_sharpe"]
+            assert 0.0 <= d["deflated_sharpe_ratio"] <= 1.0
+            assert d["n_trials"] >= 1
+    assert n_with_params > 0
+
+    # Backward compatible: default run has no DSR keys
+    default = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+    )
+    assert "deflated_sharpe" not in default["summary"]
+    assert all("deflated_sharpe" not in f for f in default["folds"])
+
+
 def main() -> int:
     tests = [
         ("cpcv_basic_structure", test_cpcv_basic_structure),
@@ -342,6 +390,7 @@ def main() -> int:
         ("signals_active_helper", test_signals_active_helper),
         ("cpcv_different_strategies", test_cpcv_different_strategies),
         ("cpcv_cli_help", test_cpcv_cli_help),
+        ("cpcv_deflation", test_cpcv_deflation),
         ("cpcv_multi_asset_cross_sectional_momentum", test_cpcv_multi_asset_cross_sectional_momentum),
         ("cpcv_multi_asset_dual_momentum", test_cpcv_multi_asset_dual_momentum),
         ("cpcv_multi_asset_dict_cross_sectional_momentum", test_cpcv_multi_asset_dict_cross_sectional_momentum),

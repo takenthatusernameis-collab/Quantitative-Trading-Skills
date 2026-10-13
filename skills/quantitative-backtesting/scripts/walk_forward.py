@@ -8,6 +8,7 @@ strategy robustness across market regimes.
 
 import argparse
 import json
+import math
 import sys
 import numpy as np
 import pandas as pd
@@ -68,6 +69,7 @@ def walk_forward_analysis(
     initial_capital: float = 100000,
     commission: float = 0.0002,
     slippage: float = 0.0001,
+    apply_deflation: bool = False,
 ) -> Dict[str, Any]:
     """
     Perform walk-forward analysis with expanding training windows.
@@ -82,6 +84,11 @@ def walk_forward_analysis(
         initial_capital: Starting portfolio value
         commission: Commission rate per trade
         slippage: Slippage rate per trade
+        apply_deflation: When True, compute the Deflated Sharpe Ratio
+            (multiple-testing correction) for each period's in-sample
+            parameter selection, plus an aggregate correction on the
+            combined out-of-sample returns with n_trials equal to the
+            total number of configurations evaluated across all periods.
 
     Returns:
         Dictionary with walk-forward results including:
@@ -138,6 +145,7 @@ def walk_forward_analysis(
     # Grid search for best params on each training period
     best_params_per_period = []
     oos_returns_list = []
+    total_evaluated_trials = 0
 
     for period in periods:
         train_data = period["train_data"]
@@ -146,6 +154,8 @@ def walk_forward_analysis(
         best_sharpe = -np.inf
         best_params = None
         best_test_returns = None
+        period_trial_sharpes: List[float] = []
+        best_train_returns = None
 
         # Generate all parameter combinations
         param_names = list(param_grid.keys())
@@ -184,20 +194,35 @@ def walk_forward_analysis(
                 else:
                     sharpe = -np.inf
 
+                if apply_deflation and np.isfinite(sharpe):
+                    period_trial_sharpes.append(float(sharpe))
+
                 if sharpe > best_sharpe:
                     best_sharpe = sharpe
                     best_params = params
                     best_test_returns = test_returns
+                    if apply_deflation:
+                        best_train_returns = train_returns
 
             except Exception:
                 continue
 
         best_params_per_period.append(best_params)
+        total_evaluated_trials += len(period_trial_sharpes)
         if best_test_returns is not None and len(best_test_returns) > 0:
             oos_returns_list.append(best_test_returns)
             period["best_params"] = best_params
             period["best_sharpe"] = best_sharpe
             period["test_returns"] = best_test_returns
+            if apply_deflation and best_train_returns is not None and period_trial_sharpes:
+                # Deflate the in-sample selection Sharpe by the number of
+                # configurations compared in this period's grid search.
+                period["deflated_sharpe"] = deflated_sharpe_ratio(
+                    sharpe_ratio=best_sharpe,
+                    returns=best_train_returns,
+                    n_trials=len(period_trial_sharpes),
+                    trial_sharpes=period_trial_sharpes,
+                )
         else:
             period["best_params"] = None
             period["best_sharpe"] = None
@@ -211,6 +236,17 @@ def walk_forward_analysis(
 
     # Summary metrics
     summary = _calculate_walk_forward_summary(oos_returns, periods)
+
+    # Aggregate multiple-testing correction on the combined out-of-sample
+    # returns. The conservative interpretation: the OOS record was produced
+    # by a search that evaluated total_evaluated_trials configurations, so
+    # the OOS Sharpe is deflated by all of them.
+    if apply_deflation and len(oos_returns) > 1 and oos_returns.std() > 0:
+        summary["deflated_sharpe"] = deflated_sharpe_ratio(
+            sharpe_ratio=summary.get("oos_sharpe", 0.0),
+            returns=oos_returns,
+            n_trials=max(total_evaluated_trials, 1),
+        )
 
     return {
         "periods": periods,
@@ -228,6 +264,7 @@ def parameter_optimization(
     commission: float = 0.0002,
     slippage: float = 0.0001,
     n_splits: int = 5,
+    apply_deflation: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Perform parameter optimization using walk-forward-like splits.
@@ -240,6 +277,12 @@ def parameter_optimization(
         commission: Commission rate
         slippage: Slippage rate
         n_splits: Number of train/test splits
+        apply_deflation: When True, compute the Deflated Sharpe Ratio
+            (Bailey & Lopez de Prado, 2014) for every combination,
+            correcting each Sharpe ratio for the number of trials in
+            the grid. Adds a 'deflated_sharpe' dict to each result
+            with keys 'deflated_sharpe_ratio', 'p_value',
+            'expected_max_sharpe', 'n_trials', etc.
 
     Returns:
         List of result dictionaries sorted by Sharpe ratio (descending)
@@ -298,10 +341,30 @@ def parameter_optimization(
                     "total_return": float(total_return),
                     "n_periods": len(returns),
                 })
+                if apply_deflation:
+                    # Transient key: the return series is consumed by
+                    # the deflation step below and never returned.
+                    results[-1]["_returns"] = returns
         except Exception:
             continue
 
     results.sort(key=lambda x: x["sharpe_ratio"], reverse=True)
+
+    # Multiple-testing correction: deflate every combination's Sharpe
+    # by the number of ranked trials, using the cross-sectional
+    # dispersion of the trial Sharpes to estimate the Sharpe
+    # attainable from luck.
+    if apply_deflation and results:
+        n_trials = len(results)
+        trial_sharpes = [r["sharpe_ratio"] for r in results]
+        for result in results:
+            result["deflated_sharpe"] = deflated_sharpe_ratio(
+                sharpe_ratio=result["sharpe_ratio"],
+                returns=result.pop("_returns"),
+                n_trials=n_trials,
+                trial_sharpes=trial_sharpes,
+            )
+
     return results
 
 
@@ -357,6 +420,12 @@ def overfitting_check(
         diagnostics["oos_total_return"] = 0.0
         diagnostics["oos_volatility"] = 0.0
 
+    # Surface the aggregate Deflated Sharpe Ratio when the
+    # walk-forward run computed one (apply_deflation=True).
+    wf_summary = wf_results.get("summary", {})
+    if isinstance(wf_summary, dict) and "deflated_sharpe" in wf_summary:
+        diagnostics["deflated_sharpe"] = wf_summary["deflated_sharpe"]
+
     # Overfitting flags
     diagnostics["overfitting_risk"] = "low"
     if len(valid_params) > 0:
@@ -382,6 +451,122 @@ def signals_active(signals: pd.Series) -> bool:
     """
     # NaN != 0 evaluates to True in pandas, so we must explicitly exclude NaN
     return bool((signals.notna() & (signals != 0)).any())
+
+
+def deflated_sharpe_ratio(
+    sharpe_ratio: float,
+    returns: pd.Series,
+    n_trials: int,
+    trial_sharpes: Optional[List[float]] = None,
+) -> Dict[str, Any]:
+    """
+    Compute the Deflated Sharpe Ratio (Bailey & Lopez de Prado, 2014).
+
+    Searching over a grid of parameter combinations is a multiple-testing
+    problem: with enough configurations, luck alone produces an attractive
+    in-sample Sharpe ratio. The Deflated Sharpe Ratio (DSR) corrects the
+    estimated Sharpe for this selection bias and for the non-normality
+    (skewness, kurtosis) of the return distribution.
+
+    Formula (all Sharpe quantities in per-period, non-annualized units):
+
+        DSR = Phi( (SR_hat - SR*) * sqrt(T - 1)
+                   / sqrt(1 - gamma3 * SR_hat + ((gamma4 - 1) / 4) * SR_hat^2) )
+
+    where SR_hat is the per-period estimated Sharpe, T the number of return
+    observations, gamma3 the return skewness, gamma4 the return kurtosis
+    (not excess), Phi the standard normal CDF, and SR* the expected maximum
+    Sharpe ratio under the null hypothesis of no skill.
+
+    SR* is estimated from the cross-sectional dispersion of the trial Sharpe
+    ratios when `trial_sharpes` is provided (SR* = std(SR_trials) *
+    sqrt(2 * ln(N))), and otherwise from the i.i.d.-normal null approximation
+    (SR* = sqrt(2 * ln(N) / T)). Both estimators are conservative: they
+    slightly overstate the Sharpe attainable from luck.
+
+    Args:
+        sharpe_ratio: Annualized Sharpe ratio of the strategy being evaluated.
+        returns: Per-period return series behind `sharpe_ratio`.
+        n_trials: Number of configurations tested (N).
+        trial_sharpes: Optional list of the annualized Sharpe ratios of all
+            trials. When provided (recommended), the cross-sectional
+            dispersion of the trials estimates SR*; otherwise the i.i.d.-
+            normal null approximation is used.
+
+    Returns:
+        Dictionary with:
+            - 'deflated_sharpe_ratio': DSR in [0, 1]; the probability that
+              the strategy's true Sharpe exceeds the best Sharpe expected
+              from luck alone across the N trials
+            - 'p_value': 1 - DSR
+            - 'sharpe_ratio': input annualized Sharpe ratio
+            - 'expected_max_sharpe': SR* in annualized units (the deflation
+              benchmark)
+            - 'z_score': standardized distance passed to Phi
+            - 'n_trials': number of trials N
+            - 'n_observations': T
+            - 'skewness', 'kurtosis': return moments used in the correction
+    """
+    if n_trials < 1:
+        raise ValueError("n_trials must be at least 1")
+
+    returns = returns.dropna()
+    if len(returns) < 2:
+        raise ValueError("Need at least 2 return observations for Deflated Sharpe Ratio")
+
+    ann_factor = _annualization_factor(returns.index)
+    t_obs = len(returns)
+    sr = float(sharpe_ratio) / np.sqrt(ann_factor)
+
+    ln_trials = np.log(max(int(n_trials), 1))
+
+    # Expected maximum Sharpe under the null (per-period units)
+    sr_star = None
+    if trial_sharpes is not None and len(trial_sharpes) >= 2:
+        trial_sr = np.asarray([float(s) for s in trial_sharpes], dtype=float)
+        trial_sr = trial_sr / np.sqrt(ann_factor)
+        trial_std = float(np.std(trial_sr, ddof=1))
+        if trial_std > 0 and np.isfinite(trial_std):
+            sr_star = trial_std * np.sqrt(2.0 * ln_trials)
+    if sr_star is None:
+        sr_star = float(np.sqrt(2.0 * ln_trials / t_obs))
+
+    # Variance of the Sharpe estimator under non-normality (skew/kurt are
+    # invariant to constant shifts, so raw-return moments are valid for a
+    # Sharpe computed on excess returns)
+    skew = float(returns.skew())
+    kurt = float(returns.kurtosis()) + 3.0  # pandas reports excess kurtosis
+    if not np.isfinite(skew):
+        skew = 0.0
+    if not np.isfinite(kurt):
+        kurt = 3.0
+
+    variance_term = 1.0 - skew * sr + ((kurt - 1.0) / 4.0) * sr * sr
+    if not np.isfinite(variance_term) or variance_term <= 0.0:
+        variance_term = np.finfo(float).tiny
+    denom = np.sqrt(variance_term)
+
+    vol = float(returns.std())
+    if vol > 0:
+        z = (sr - sr_star) * np.sqrt(t_obs - 1) / denom
+    else:
+        # Degenerate (constant) returns carry no information about skill
+        z = -np.inf
+
+    dsr = 0.5 * (1.0 + math.erf(z / np.sqrt(2.0)))
+    dsr = float(min(max(dsr, 0.0), 1.0))
+
+    return {
+        "deflated_sharpe_ratio": dsr,
+        "p_value": 1.0 - dsr,
+        "sharpe_ratio": float(sharpe_ratio),
+        "expected_max_sharpe": float(sr_star * np.sqrt(ann_factor)),
+        "z_score": float(z) if np.isfinite(z) else None,
+        "n_trials": int(n_trials),
+        "n_observations": int(t_obs),
+        "skewness": float(skew),
+        "kurtosis": float(kurt),
+    }
 
 
 def _calculate_strategy_returns(
@@ -641,6 +826,7 @@ def cpcv_analysis(
     initial_capital: float = 100000,
     commission: float = 0.0002,
     slippage: float = 0.0001,
+    apply_deflation: bool = False,
 ) -> Dict[str, Any]:
     """
     Perform Combinatorially Purged Cross-Validation (CPCV).
@@ -663,6 +849,11 @@ def cpcv_analysis(
         initial_capital: Starting portfolio value
         commission: Commission rate per trade
         slippage: Slippage rate per trade
+        apply_deflation: When True, compute the Deflated Sharpe Ratio
+            (multiple-testing correction) for each fold's in-sample
+            parameter selection, plus an aggregate correction on the
+            combined out-of-sample returns with n_trials equal to the
+            total number of configurations evaluated across all folds.
 
     Returns:
         Dictionary with CPCV results including:
@@ -762,6 +953,7 @@ def cpcv_analysis(
     # Grid search for best params on each training fold
     best_params_per_fold = []
     oos_returns_list = []
+    total_evaluated_trials = 0
 
     for fold in folds:
         train_data = fold["train_data"]
@@ -770,6 +962,8 @@ def cpcv_analysis(
         best_sharpe = -np.inf
         best_params = None
         best_test_returns = None
+        fold_trial_sharpes: List[float] = []
+        best_train_returns = None
 
         # Generate all parameter combinations
         param_names = list(param_grid.keys())
@@ -804,20 +998,35 @@ def cpcv_analysis(
                 else:
                     sharpe = -np.inf
 
+                if apply_deflation and np.isfinite(sharpe):
+                    fold_trial_sharpes.append(float(sharpe))
+
                 if sharpe > best_sharpe:
                     best_sharpe = sharpe
                     best_params = params
                     best_test_returns = test_returns
+                    if apply_deflation:
+                        best_train_returns = train_returns
 
             except Exception:
                 continue
 
         best_params_per_fold.append(best_params)
+        total_evaluated_trials += len(fold_trial_sharpes)
         if best_test_returns is not None and len(best_test_returns) > 0:
             oos_returns_list.append(best_test_returns)
             fold["best_params"] = best_params
             fold["best_sharpe"] = best_sharpe
             fold["test_returns"] = best_test_returns
+            if apply_deflation and best_train_returns is not None and fold_trial_sharpes:
+                # Deflate the in-sample selection Sharpe by the number
+                # of configurations compared in this fold's grid search.
+                fold["deflated_sharpe"] = deflated_sharpe_ratio(
+                    sharpe_ratio=best_sharpe,
+                    returns=best_train_returns,
+                    n_trials=len(fold_trial_sharpes),
+                    trial_sharpes=fold_trial_sharpes,
+                )
         else:
             fold["best_params"] = None
             fold["best_sharpe"] = None
@@ -849,6 +1058,17 @@ def cpcv_analysis(
 
     # Summary metrics
     summary = _calculate_cpcv_summary(oos_returns, folds, param_stability)
+
+    # Aggregate multiple-testing correction on the combined out-of-sample
+    # returns. The conservative interpretation: the OOS record was produced
+    # by a search that evaluated total_evaluated_trials configurations, so
+    # the OOS Sharpe is deflated by all of them.
+    if apply_deflation and len(oos_returns) > 1 and oos_returns.std() > 0:
+        summary["deflated_sharpe"] = deflated_sharpe_ratio(
+            sharpe_ratio=summary.get("oos_sharpe", 0.0),
+            returns=oos_returns,
+            n_trials=max(total_evaluated_trials, 1),
+        )
 
     return {
         "folds": folds,
@@ -920,6 +1140,7 @@ def run_cpcv(args) -> int:
         embargo_size=args.embargo_size,
         commission=args.commission,
         slippage=args.slippage,
+        apply_deflation=args.deflate,
     )
 
     print(f"Number of CPCV folds: {results['summary']['n_folds']}")
@@ -927,6 +1148,14 @@ def run_cpcv(args) -> int:
     print(f"OOS Sharpe Ratio: {results['summary'].get('oos_sharpe', 'N/A')}")
     print(f"Avg Parameter Stability: {results['summary'].get('avg_param_stability', 'N/A'):.2f}")
     print(f"Overfitting Risk: {results['summary'].get('overfitting_risk', 'N/A')}")
+
+    dsr = results["summary"].get("deflated_sharpe")
+    if dsr is not None:
+        print(
+            f"Deflated Sharpe Ratio: {dsr['deflated_sharpe_ratio']:.4f} "
+            f"(p-value {dsr['p_value']:.4f}, expected max Sharpe "
+            f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
+        )
 
     # Save results
     output_dir = Path(args.output)
@@ -947,6 +1176,7 @@ def run_cpcv(args) -> int:
             "embargo_size": args.embargo_size,
             "commission": args.commission,
             "slippage": args.slippage,
+            "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
         },
     }
@@ -1022,11 +1252,20 @@ def run_walk_forward(args) -> int:
         step_months=args.step_months,
         commission=args.commission,
         slippage=args.slippage,
+        apply_deflation=args.deflate,
     )
 
     print(f"Number of walk-forward periods: {results['summary']['n_periods']}")
     print(f"Total OOS Return: {results['summary']['total_oos_return']:.2%}")
     print(f"OOS Sharpe Ratio: {results['summary'].get('oos_sharpe', 'N/A')}")
+
+    dsr = results["summary"].get("deflated_sharpe")
+    if dsr is not None:
+        print(
+            f"Deflated Sharpe Ratio: {dsr['deflated_sharpe_ratio']:.4f} "
+            f"(p-value {dsr['p_value']:.4f}, expected max Sharpe "
+            f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
+        )
 
     # Check for overfitting
     diagnostics = overfitting_check(results)
@@ -1050,6 +1289,7 @@ def run_walk_forward(args) -> int:
             "step_months": args.step_months,
             "commission": args.commission,
             "slippage": args.slippage,
+            "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
         },
     }
@@ -1094,6 +1334,7 @@ def run_parameter_optimization(args) -> int:
         param_grid=param_grid,
         commission=args.commission,
         slippage=args.slippage,
+        apply_deflation=args.deflate,
     )
 
     if not results:
@@ -1106,6 +1347,13 @@ def run_parameter_optimization(args) -> int:
     print("-" * 80)
     for i, r in enumerate(results[:args.top_n]):
         print(f"{i+1:<5} {r['sharpe_ratio']:<10.4f} {r['total_return']:<15.2%} {r['params']}")
+        if "deflated_sharpe" in r:
+            dsr = r["deflated_sharpe"]
+            print(
+                f"      Deflated Sharpe Ratio: {dsr['deflated_sharpe_ratio']:.4f} "
+                f"(p-value {dsr['p_value']:.4f}, expected max Sharpe "
+                f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
+            )
 
     # Save results
     output_dir = Path(args.output)
@@ -1229,11 +1477,13 @@ def main():
     wf_parser.add_argument("--test-months", type=int, default=3, help="Testing window size in months")
     wf_parser.add_argument("--step-months", type=int, default=3, help="Step size between iterations in months")
     wf_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
+    wf_parser.add_argument("--deflate", action="store_true", help="Compute Deflated Sharpe Ratio (multiple-testing correction) on the parameter search and OOS results")
     wf_parser.set_defaults(func=run_walk_forward)
 
     # Parameter optimization
     opt_parser = subparsers.add_parser("optimize", parents=[common_parser], help="Run parameter optimization")
     opt_parser.add_argument("--top-n", type=int, default=10, help="Number of top results to display")
+    opt_parser.add_argument("--deflate", action="store_true", help="Compute Deflated Sharpe Ratio (multiple-testing correction) for every parameter combination")
     opt_parser.set_defaults(func=run_parameter_optimization)
 
     # Monte Carlo simulation
@@ -1251,6 +1501,7 @@ def main():
     cpcv_parser.add_argument("--purge-size", type=float, default=0.0, help="Fraction of observations to purge from training around test set")
     cpcv_parser.add_argument("--embargo-size", type=float, default=0.0, help="Fraction of observations to embargo after test set")
     cpcv_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
+    cpcv_parser.add_argument("--deflate", action="store_true", help="Compute Deflated Sharpe Ratio (multiple-testing correction) on the fold searches and OOS results")
     cpcv_parser.set_defaults(func=run_cpcv)
 
     args = parser.parse_args()

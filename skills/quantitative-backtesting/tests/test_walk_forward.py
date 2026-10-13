@@ -24,6 +24,7 @@ from walk_forward import (  # noqa: E402
     signals_active,
     walk_forward_analysis,
     monte_carlo_simulation,
+    deflated_sharpe_ratio,
     run_walk_forward,
     run_parameter_optimization,
     run_monte_carlo,
@@ -350,6 +351,7 @@ def test_run_walk_forward_cli():
                 test_months=2,
                 step_months=2,
                 initial_capital=100000,
+                deflate=False,
             )
             result = run_walk_forward(args)
             assert result == 0
@@ -384,6 +386,7 @@ def test_run_parameter_optimization_cli():
                 output=tmpdir,
                 param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
                 top_n=5,
+                deflate=False,
             )
             result = run_parameter_optimization(args)
             assert result == 0
@@ -457,12 +460,280 @@ def test_parse_param_grid():
         assert "Invalid JSON" in str(e)
 
 
+def test_deflated_sharpe_ratio_basic():
+    """DSR is high for a genuine edge with a single trial."""
+    rng = np.random.default_rng(123)
+    n = 1000
+    dates = pd.date_range("2020-01-01", periods=n, freq="B")
+    returns = pd.Series(rng.normal(0.001, 0.01, n), index=dates)
+    sr_annual = float(returns.mean() / returns.std() * np.sqrt(252))
+
+    out = deflated_sharpe_ratio(
+        sharpe_ratio=sr_annual, returns=returns, n_trials=1
+    )
+
+    assert 0.0 <= out["deflated_sharpe_ratio"] <= 1.0
+    assert out["deflated_sharpe_ratio"] > 0.9
+    assert out["n_trials"] == 1
+    assert out["n_observations"] == n
+    assert out["expected_max_sharpe"] == 0.0
+    assert abs(out["p_value"] - (1.0 - out["deflated_sharpe_ratio"])) < 1e-12
+
+
+def test_deflated_sharpe_ratio_decreases_with_more_trials():
+    """More trials mean stronger deflation and a lower DSR."""
+    rng = np.random.default_rng(123)
+    n = 1000
+    dates = pd.date_range("2020-01-01", periods=n, freq="B")
+    returns = pd.Series(rng.normal(0.001, 0.01, n), index=dates)
+    sr_annual = float(returns.mean() / returns.std() * np.sqrt(252))
+
+    out_few = deflated_sharpe_ratio(
+        sharpe_ratio=sr_annual, returns=returns, n_trials=1
+    )
+    out_many = deflated_sharpe_ratio(
+        sharpe_ratio=sr_annual, returns=returns, n_trials=100000
+    )
+
+    assert out_many["deflated_sharpe_ratio"] < out_few["deflated_sharpe_ratio"]
+    # With enough trials, the expected maximum Sharpe attainable from
+    # luck alone exceeds the observed Sharpe, which forces the DSR
+    # below 0.5 (the edge is more likely luck than skill)
+    assert out_many["expected_max_sharpe"] > sr_annual
+    assert out_many["deflated_sharpe_ratio"] < 0.5
+
+
+def test_deflated_sharpe_ratio_with_trial_sharpes():
+    """Cross-sectional trial dispersion estimates SR* differently."""
+    rng = np.random.default_rng(123)
+    n = 1000
+    dates = pd.date_range("2020-01-01", periods=n, freq="B")
+    returns = pd.Series(rng.normal(0.001, 0.01, n), index=dates)
+    sr_annual = float(returns.mean() / returns.std() * np.sqrt(252))
+
+    fallback = deflated_sharpe_ratio(
+        sharpe_ratio=sr_annual, returns=returns, n_trials=5
+    )
+    trial_sharpes = [sr_annual * f for f in (1.0, 0.9, 0.8, 0.7, 0.6)]
+    cross_sectional = deflated_sharpe_ratio(
+        sharpe_ratio=sr_annual,
+        returns=returns,
+        n_trials=5,
+        trial_sharpes=trial_sharpes,
+    )
+
+    assert 0.0 <= cross_sectional["deflated_sharpe_ratio"] <= 1.0
+    # The dispersion-based benchmark differs from the iid null fallback
+    assert cross_sectional["expected_max_sharpe"] != fallback["expected_max_sharpe"]
+    assert cross_sectional["n_trials"] == 5
+
+
+def test_deflated_sharpe_ratio_insufficient_data():
+    """DSR raises ValueError for fewer than 2 observations."""
+    returns = pd.Series([0.01], index=pd.date_range("2020-01-01", periods=1, freq="B"))
+    try:
+        deflated_sharpe_ratio(0.5, returns, n_trials=10)
+        assert False, "Expected ValueError for < 2 observations"
+    except ValueError as e:
+        assert "at least 2" in str(e)
+
+
+def test_deflated_sharpe_ratio_zero_variance():
+    """Constant returns carry no information: DSR is 0."""
+    dates = pd.date_range("2020-01-01", periods=100, freq="B")
+    returns = pd.Series(0.0, index=dates)
+    out = deflated_sharpe_ratio(0.0, returns, n_trials=5)
+    assert out["deflated_sharpe_ratio"] == 0.0
+    assert out["p_value"] == 1.0
+
+
+def test_deflated_sharpe_ratio_invalid_n_trials():
+    """DSR raises ValueError for n_trials < 1."""
+    dates = pd.date_range("2020-01-01", periods=100, freq="B")
+    returns = pd.Series(np.random.default_rng(1).normal(0.0, 0.01, 100), index=dates)
+    try:
+        deflated_sharpe_ratio(0.5, returns, n_trials=0)
+        assert False, "Expected ValueError for n_trials < 1"
+    except ValueError as e:
+        assert "n_trials" in str(e)
+
+
+def test_parameter_optimization_deflation():
+    """apply_deflation adds DSR keys; the default preserves prior behavior."""
+    data = _make_data()
+    grid = {"fast_period": [10, 20], "slow_period": [30, 50]}
+
+    plain = parameter_optimization(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid=grid,
+    )
+    deflated = parameter_optimization(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid=grid,
+        apply_deflation=True,
+    )
+
+    # Backward compatible: same ranking, no DSR keys by default
+    assert [r["params"] for r in plain] == [r["params"] for r in deflated]
+    assert [r["sharpe_ratio"] for r in plain] == [r["sharpe_ratio"] for r in deflated]
+    assert all("deflated_sharpe" not in r for r in plain)
+
+    # Deflated results carry the correction for every ranked combo
+    assert len(deflated) > 0
+    for r in deflated:
+        assert "deflated_sharpe" in r
+        d = r["deflated_sharpe"]
+        assert 0.0 <= d["deflated_sharpe_ratio"] <= 1.0
+        assert d["n_trials"] == len(deflated)
+        assert d["n_observations"] == r["n_periods"]
+        assert 0.0 <= d["p_value"] <= 1.0
+
+    # The top-ranked combo still has the highest raw Sharpe
+    assert deflated[0]["sharpe_ratio"] >= deflated[-1]["sharpe_ratio"]
+
+    # Each DSR must be computed against that combination's OWN
+    # return series. Independently recompute the top-ranked
+    # combo's DSR and compare (regression guard against a
+    # sort/pairing mismatch between results and return series).
+    from walk_forward import _calculate_strategy_returns
+
+    top_params = deflated[0]["params"]
+    top_signals = _factory("sma_crossover", top_params).generate_signals(data)
+    top_returns = _calculate_strategy_returns(data, top_signals, 0.0002, 0.0001)
+    expected = deflated_sharpe_ratio(
+        sharpe_ratio=deflated[0]["sharpe_ratio"],
+        returns=top_returns,
+        n_trials=len(deflated),
+        trial_sharpes=[r["sharpe_ratio"] for r in deflated],
+    )
+    assert abs(
+        deflated[0]["deflated_sharpe"]["deflated_sharpe_ratio"]
+        - expected["deflated_sharpe_ratio"]
+    ) < 1e-12
+    assert deflated[0]["deflated_sharpe"]["n_observations"] == deflated[0]["n_periods"]
+
+
+def test_walk_forward_deflation():
+    """Walk-forward with apply_deflation reports per-period and aggregate DSR."""
+    data = _make_data()
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid={"fast_period": [10, 20], "slow_period": [30, 50]},
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        apply_deflation=True,
+    )
+
+    # Aggregate DSR on the combined OOS returns
+    assert "deflated_sharpe" in results["summary"]
+    agg = results["summary"]["deflated_sharpe"]
+    assert 0.0 <= agg["deflated_sharpe_ratio"] <= 1.0
+    assert agg["n_trials"] >= len(results["periods"])
+
+    # Per-period DSR for the in-sample selection
+    n_with_params = 0
+    for period in results["periods"]:
+        if period.get("best_params") is not None:
+            n_with_params += 1
+            assert "deflated_sharpe" in period
+            d = period["deflated_sharpe"]
+            assert 0.0 <= d["deflated_sharpe_ratio"] <= 1.0
+            assert d["n_trials"] >= 1
+    assert n_with_params > 0
+
+    # Backward compatible: default run has no DSR keys
+    default = walk_forward_analysis(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid={"fast_period": [10, 20], "slow_period": [30, 50]},
+        train_months=12,
+        test_months=3,
+        step_months=3,
+    )
+    assert "deflated_sharpe" not in default["summary"]
+    assert all("deflated_sharpe" not in p for p in default["periods"])
+
+
+def test_walk_forward_deflation_overfitting_check():
+    """overfitting_check surfaces the aggregate DSR when present."""
+    data = _make_data()
+    wf = walk_forward_analysis(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid={"fast_period": [10, 20], "slow_period": [30, 50]},
+        apply_deflation=True,
+    )
+    diagnostics = overfitting_check(wf)
+    assert "deflated_sharpe" in diagnostics
+    assert 0.0 <= diagnostics["deflated_sharpe"]["deflated_sharpe_ratio"] <= 1.0
+
+    # Without deflation the diagnostics are unchanged
+    wf_plain = walk_forward_analysis(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid={"fast_period": [10, 20], "slow_period": [30, 50]},
+    )
+    diagnostics_plain = overfitting_check(wf_plain)
+    assert "deflated_sharpe" not in diagnostics_plain
+
+
+def test_run_walk_forward_cli_with_deflation():
+    """The walk-forward CLI computes and saves DSR with --deflate."""
+    data_file = _make_test_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                train_months=6,
+                test_months=2,
+                step_months=2,
+                initial_capital=100000,
+                deflate=True,
+            )
+            result = run_walk_forward(args)
+            assert result == 0
+
+            summary_path = Path(tmpdir) / "walk_forward_summary.json"
+            assert summary_path.exists()
+            with open(summary_path) as f:
+                summary = json.load(f)
+            assert "deflated_sharpe" in summary["summary"]
+            dsr = summary["summary"]["deflated_sharpe"]
+            assert 0.0 <= dsr["deflated_sharpe_ratio"] <= 1.0
+            assert summary["config"]["deflate"] is True
+    finally:
+        Path(data_file).unlink()
+
+
+
 def main() -> int:
     tests = [
         ("parameter_optimization_skips_flat_combos", test_parameter_optimization_skips_flat_combos),
         ("walk_forward_skips_flat_combos_in_test_window", test_walk_forward_skips_flat_combos_in_test_window),
         ("overfitting_check_handles_empty_oos", test_overfitting_check_handles_empty_oos),
         ("signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
+        ("deflated_sharpe_ratio_basic", test_deflated_sharpe_ratio_basic),
+        ("deflated_sharpe_ratio_decreases_with_more_trials", test_deflated_sharpe_ratio_decreases_with_more_trials),
+        ("deflated_sharpe_ratio_with_trial_sharpes", test_deflated_sharpe_ratio_with_trial_sharpes),
+        ("deflated_sharpe_ratio_insufficient_data", test_deflated_sharpe_ratio_insufficient_data),
+        ("deflated_sharpe_ratio_zero_variance", test_deflated_sharpe_ratio_zero_variance),
+        ("deflated_sharpe_ratio_invalid_n_trials", test_deflated_sharpe_ratio_invalid_n_trials),
+        ("parameter_optimization_deflation", test_parameter_optimization_deflation),
+        ("walk_forward_deflation", test_walk_forward_deflation),
+        ("walk_forward_deflation_overfitting_check", test_walk_forward_deflation_overfitting_check),
+        ("run_walk_forward_cli_with_deflation", test_run_walk_forward_cli_with_deflation),
         ("monte_carlo_simulation_basic", test_monte_carlo_simulation_basic),
         ("monte_carlo_simulation_block_bootstrap", test_monte_carlo_simulation_block_bootstrap),
         ("monte_carlo_block_bootstrap_preserves_autocorrelation", test_monte_carlo_block_bootstrap_preserves_autocorrelation),

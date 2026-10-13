@@ -69,6 +69,100 @@ The same guard is applied by the `run_backtest` CLI entry point
 never takes a position instead of producing a meaningless zero-return
 backtest with a degenerate Sharpe ratio.
 
+## Deflated Sharpe Ratio (Multiple-Testing Correction)
+
+Grid searches over parameter combinations are a multiple-testing
+problem: with enough configurations, luck alone produces an
+attractive in-sample Sharpe ratio. `deflated_sharpe_ratio`
+implements the Deflated Sharpe Ratio (DSR, Bailey & Lopez de
+Prado, 2014) to correct a reported Sharpe for selection bias and
+for the non-normality of returns.
+
+### Formula
+
+All Sharpe quantities are in per-period (non-annualized) units:
+
+```
+DSR = Phi( (SR_hat - SR*) * sqrt(T - 1)
+           / sqrt(1 - gamma3 * SR_hat + ((gamma4 - 1) / 4) * SR_hat^2) )
+```
+
+- `SR_hat`: estimated per-period Sharpe of the strategy
+- `T`: number of return observations
+- `gamma3`, `gamma4`: return skewness and kurtosis (kurtosis is
+  the raw fourth moment, not excess kurtosis)
+- `Phi`: standard normal CDF
+- `SR*`: expected maximum Sharpe ratio under the null of no skill
+
+`SR*` is estimated from the cross-sectional dispersion of the trial
+Sharpe ratios when those are available (`SR* = std(SR_trials) *
+sqrt(2 * ln(N))`), and otherwise from the i.i.d.-normal null
+approximation (`SR* = sqrt(2 * ln(N) / T)`). Both estimators are
+conservative: they slightly overstate the Sharpe attainable from
+luck, so the correction errs against claiming skill.
+
+### Interpretation
+
+- The DSR is the probability that the strategy's true Sharpe ratio
+  exceeds the best Sharpe expected from luck alone across `N`
+  trials. It is reported together with `p_value = 1 - DSR`.
+- DSR close to 1: the edge is unlikely to be selection bias.
+- DSR below roughly 0.95 (p-value above roughly 0.05): the result
+  is consistent with luck given the size of the search.
+- The DSR corrects the reported Sharpe for the number of trials;
+  it does not validate the out-of-sample economics of a strategy,
+  and it is not evidence of profitability on its own.
+
+### Usage
+
+`parameter_optimization`, `walk_forward_analysis` and `cpcv_analysis`
+accept `apply_deflation=True`:
+
+- `parameter_optimization` adds a `deflated_sharpe` dict to every
+  result row, computed with `n_trials` equal to the number of ranked
+  configurations and `SR*` estimated from the cross-sectional
+  dispersion of all trial Sharpes.
+- `walk_forward_analysis` and `cpcv_analysis` add a per-period
+  (per-fold) `deflated_sharpe` dict deflating that period's
+  in-sample selection Sharpe by the configurations compared in that
+  period, plus an aggregate `summary["deflated_sharpe"]` on the
+  combined out-of-sample returns with `n_trials` equal to the total
+  number of configurations evaluated across all periods/folds. The
+  aggregate uses the conservative interpretation that the final
+  out-of-sample record was produced by a search that tried that many
+  configurations; `SR*` for the aggregate uses the i.i.d. null
+  approximation.
+- `overfitting_check` surfaces the aggregate DSR in its diagnostics
+  when the walk-forward run computed one.
+
+Example:
+
+```python
+results = parameter_optimization(
+    data=data,
+    strategy_factory=strategy_factory,
+    param_grid={"fast_period": [10, 20], "slow_period": [30, 50]},
+    apply_deflation=True,
+)
+top = results[0]
+print(top["sharpe_ratio"], top["deflated_sharpe"]["deflated_sharpe_ratio"])
+```
+
+### CLI
+
+Pass `--deflate` to the `walk-forward`, `optimize` and `cpcv`
+subcommands of `scripts/walk_forward.py`. The flag is recorded in
+the saved summary JSON under `config.deflate` and the DSR is printed
+alongside the OOS Sharpe.
+
+```bash
+python3 scripts/walk_forward.py optimize \
+    --data data.csv \
+    --strategy sma_crossover \
+    --param-grid '{"fast_period": [10, 20], "slow_period": [30, 50]}' \
+    --deflate
+```
+
 ## Overfitting Detection
 
 `overfitting_check` analyzes walk-forward results to flag overfitting risk:
