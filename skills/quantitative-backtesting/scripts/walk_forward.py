@@ -248,7 +248,16 @@ def walk_forward_analysis(
     # the OOS Sharpe is deflated by all of them. Use the pooled cross-period
     # trial Sharpes for the cross-sectional SR* estimator (conservative:
     # between-period variation inflates the null Sharpe).
-    if apply_deflation and len(oos_returns) > 1 and oos_returns.std() > 0:
+    #
+    # The guard is `len(oos_returns) > 1` only: a constant OOS return series
+    # (zero variance) is a degenerate case, not a reason to skip the
+    # correction. `deflated_sharpe_ratio` handles it internally (it sets
+    # `z = -inf` when `returns.std() == 0`), yielding the conservative
+    # DSR = 0, p_value = 1, z_score = None. Skipping the key with an
+    # `oos_returns.std() > 0` guard would be inconsistent with `run_backtest`
+    # and the `monte-carlo` subcommand, which both emit the degenerate dict
+    # when `n_trials` is provided.
+    if apply_deflation and len(oos_returns) > 1:
         summary["deflated_sharpe"] = deflated_sharpe_ratio(
             sharpe_ratio=summary.get("oos_sharpe", 0.0),
             returns=oos_returns,
@@ -909,7 +918,16 @@ def cpcv_analysis(
     # the OOS Sharpe is deflated by all of them. Use the pooled cross-fold
     # trial Sharpes for the cross-sectional SR* estimator (conservative:
     # between-fold variation inflates the null Sharpe).
-    if apply_deflation and len(oos_returns) > 1 and oos_returns.std() > 0:
+    #
+    # The guard is `len(oos_returns) > 1` only: a constant OOS return series
+    # (zero variance) is a degenerate case, not a reason to skip the
+    # correction. `deflated_sharpe_ratio` handles it internally (it sets
+    # `z = -inf` when `returns.std() == 0`), yielding the conservative
+    # DSR = 0, p_value = 1, z_score = None. Skipping the key with an
+    # `oos_returns.std() > 0` guard would be inconsistent with `run_backtest`
+    # and the `monte-carlo` subcommand, which both emit the degenerate dict
+    # when `n_trials` is provided.
+    if apply_deflation and len(oos_returns) > 1:
         summary["deflated_sharpe"] = deflated_sharpe_ratio(
             sharpe_ratio=summary.get("oos_sharpe", 0.0),
             returns=oos_returns,

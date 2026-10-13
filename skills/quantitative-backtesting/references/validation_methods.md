@@ -203,6 +203,52 @@ python3 scripts/run_backtest.py \
     --n-trials 50
 ```
 
+### Degenerate and edge cases
+
+A strategy that takes active positions on a perfectly flat test window
+(e.g. a cross-sectional momentum strategy ranking assets whose prices are
+identical) produces out-of-sample returns with **zero variance**. This is a
+degenerate case, not a reason to skip the multiple-testing correction.
+
+`deflated_sharpe_ratio` handles it explicitly: when `returns.std() == 0` it
+sets `z = -inf`, yielding the conservative dict
+
+```python
+{
+    "deflated_sharpe_ratio": 0.0,
+    "p_value": 1.0,
+    "sharpe_ratio": 0.0,
+    "expected_max_sharpe": <expected max under the null>,
+    "z_score": None,
+    "n_trials": ...,
+    "n_observations": ...,
+    "skewness": 0.0,
+    "kurtosis": 3.0,
+}
+```
+
+This is emitted consistently by every entry point that accepts an
+`n_trials` / `apply_deflation` argument:
+
+- `run_backtest --n-trials N`
+- `monte-carlo --n-trials N`
+- `walk_forward_analysis(apply_deflation=True)` (aggregate DSR)
+- `cpcv_analysis(apply_deflation=True)` (aggregate DSR)
+
+A previous guard (`oos_returns.std() > 0`) on the walk-forward and CPCV
+aggregate paths silently **omitted** the `deflated_sharpe` key on constant
+OOS returns, which was inconsistent with `run_backtest` and `monte-carlo`
+and would have made downstream consumers (tear sheets, reports, CI checks
+for the key) behave differently for degenerate data. The guard is now
+`len(oos_returns) > 1` only; the degenerate dict is always emitted when
+deflation is requested and there are at least two observations.
+
+When no configuration takes an active position in any test window (all
+combinations are filtered out by `signals_active`), the OOS return series is
+empty. In that case no Sharpe or DSR can be computed and the key is omitted
+from the summary — this is a genuine "no signal" outcome, not a degenerate
+one, and is distinct from the zero-variance case above.
+
 The `monte-carlo` subcommand accepts the same `--n-trials` flag. It
 first runs the parameter optimization implied by `--param-grid` to
 select the base parameters, then deflates the base backtest Sharpe

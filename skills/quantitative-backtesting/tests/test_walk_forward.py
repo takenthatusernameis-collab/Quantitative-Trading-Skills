@@ -1254,6 +1254,167 @@ def test_cpcv_aggregate_deflation_uses_pooled_trial_sharpes():
 
 
 
+def _make_flat_test_window_data(periods: int = 300, n_splits: int = 4, test_frac: float = 0.2) -> pd.DataFrame:
+    """Build a multi-asset panel whose test windows are perfectly flat.
+
+    The series is trending up to the first test-window boundary (bar 126,
+    matching the walk-forward test's train_months=6) and constant thereafter,
+    so every walk-forward test window is flat while every expanding training
+    window retains variance (it spans the trending region). A cross-sectional
+    momentum strategy takes active positions on the flat test windows, so the
+    resulting test returns have zero variance. This reproduces the
+    degenerate-returns edge case for the aggregate DSR paths.
+    """
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    symbols = ["A", "B", "C", "D"]
+    cols = pd.MultiIndex.from_product([["open", "high", "low", "close", "volume"], symbols])
+    df = pd.DataFrame(0.0, index=dates, columns=cols)
+
+    flat_start = 126  # first test window starts here (train_months=6)
+    rng = np.random.default_rng(7)
+    prices = np.zeros(periods)
+    # Trending training region
+    if flat_start > 0:
+        rets = rng.normal(0.0005, 0.015, flat_start)
+        prices[:flat_start] = 100.0 * np.exp(np.cumsum(rets))
+    # Constant test region
+    if flat_start < periods:
+        prices[flat_start:] = prices[flat_start - 1]
+
+    for sym in symbols:
+        df[("open", sym)] = prices * rng.uniform(0.995, 1.005, periods)
+        df[("high", sym)] = prices * rng.uniform(1.005, 1.02, periods)
+        df[("low", sym)] = prices * rng.uniform(0.98, 0.995, periods)
+        df[("close", sym)] = prices
+        df[("volume", sym)] = rng.integers(1_000_000, 10_000_000, periods)
+    return df
+
+
+def _make_cpcv_flat_test_window_data(periods: int = 300, n_splits: int = 4, test_frac: float = 0.2) -> pd.DataFrame:
+    """Build a multi-asset panel whose CPCV test windows are perfectly flat.
+
+    Each group's test window (the first `test_frac` fraction of the group) is
+    held at a constant price, while the rest of each group trends. A
+    cross-sectional momentum strategy takes active positions on the flat test
+    windows, so every fold's test returns have zero variance and the combined
+    OOS returns are constant. This reproduces the degenerate-returns edge
+    case for the aggregate CPCV DSR path.
+    """
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    symbols = ["A", "B", "C", "D"]
+    cols = pd.MultiIndex.from_product([["open", "high", "low", "close", "volume"], symbols])
+    df = pd.DataFrame(0.0, index=dates, columns=cols)
+
+    group_size = periods // n_splits
+    test_n = int(group_size * test_frac)
+    rng = np.random.default_rng(7)
+    prices = np.zeros(periods)
+    for g in range(n_splits):
+        gstart = g * group_size
+        gend = gstart + group_size
+        tstart = gstart
+        tend = gstart + test_n
+        flat_price = 100.0 + 10.0 * g
+        prices[tstart:tend] = flat_price
+        n_trend = gend - tend
+        if n_trend > 0:
+            rets = rng.normal(0.0005, 0.015, n_trend)
+            cum = np.cumsum(rets)
+            prices[tend:gend] = flat_price * np.exp(cum)
+
+    for sym in symbols:
+        df[("open", sym)] = prices * rng.uniform(0.995, 1.005, periods)
+        df[("high", sym)] = prices * rng.uniform(1.005, 1.02, periods)
+        df[("low", sym)] = prices * rng.uniform(0.98, 0.995, periods)
+        df[("close", sym)] = prices
+        df[("volume", sym)] = rng.integers(1_000_000, 10_000_000, periods)
+    return df
+
+
+def test_walk_forward_aggregate_deflation_constant_oos_returns():
+    """Aggregate walk-forward DSR emits the conservative degenerate dict.
+
+    When the combined out-of-sample returns have zero variance (a strategy
+    takes active positions on flat test windows), the aggregate DSR must be
+    emitted conservatively as DSR = 0, p_value = 1, z_score = None — mirroring
+    the `run_backtest --n-trials` and `monte-carlo` behavior — rather than
+    being silently omitted by an `oos_returns.std() > 0` guard.
+    """
+    data = _make_flat_test_window_data()
+    strategy_factory = lambda p: _factory("cross_sectional_momentum", p)
+
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid={"lookback": [5, 10], "top_quantile": [0.4], "bottom_quantile": [0.2]},
+        train_months=6,
+        test_months=2,
+        step_months=2,
+        commission=0.0,
+        slippage=0.0,
+        apply_deflation=True,
+    )
+
+    assert results["summary"]["n_periods"] > 0, "expected at least one period"
+    assert len(results["oos_returns"]) > 0, "expected non-empty OOS returns"
+    assert results["oos_returns"].std() == 0.0, "expected zero-variance OOS returns"
+
+    assert "deflated_sharpe" in results["summary"], (
+        "expected aggregate deflated_sharpe key even for constant OOS returns"
+    )
+    d = results["summary"]["deflated_sharpe"]
+    assert d["deflated_sharpe_ratio"] == 0.0
+    assert d["p_value"] == 1.0
+    assert d["z_score"] is None
+    assert d["sharpe_ratio"] == 0.0
+    assert d["skewness"] == 0.0
+    assert d["kurtosis"] == 3.0
+    assert d["n_trials"] >= 1
+    assert d["n_observations"] == len(results["oos_returns"])
+
+
+def test_cpcv_aggregate_deflation_constant_oos_returns():
+    """Aggregate CPCV DSR emits the conservative degenerate dict.
+
+    Mirrors the walk-forward test: when every fold's test window is flat,
+    the combined OOS returns have zero variance and the aggregate DSR must
+    be emitted conservatively (DSR = 0, p_value = 1, z_score = None) rather
+    than being silently omitted.
+    """
+    data = _make_cpcv_flat_test_window_data()
+    strategy_factory = lambda p: _factory("cross_sectional_momentum", p)
+
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid={"lookback": [5, 10], "top_quantile": [0.4], "bottom_quantile": [0.2]},
+        n_splits=4,
+        test_size=0.2,
+        purge_size=0.0,
+        embargo_size=0.0,
+        commission=0.0,
+        slippage=0.0,
+        apply_deflation=True,
+    )
+
+    assert results["summary"]["n_folds"] > 0, "expected at least one fold"
+    assert len(results["oos_returns"]) > 0, "expected non-empty OOS returns"
+    assert results["oos_returns"].std() == 0.0, "expected zero-variance OOS returns"
+
+    assert "deflated_sharpe" in results["summary"], (
+        "expected aggregate deflated_sharpe key even for constant OOS returns"
+    )
+    d = results["summary"]["deflated_sharpe"]
+    assert d["deflated_sharpe_ratio"] == 0.0
+    assert d["p_value"] == 1.0
+    assert d["z_score"] is None
+    assert d["sharpe_ratio"] == 0.0
+    assert d["skewness"] == 0.0
+    assert d["kurtosis"] == 3.0
+    assert d["n_trials"] >= 1
+    assert d["n_observations"] == len(results["oos_returns"])
+
+
 def main() -> int:
     tests = [
         ("parameter_optimization_skips_flat_combos", test_parameter_optimization_skips_flat_combos),
@@ -1272,6 +1433,8 @@ def main() -> int:
         ("run_walk_forward_cli_with_deflation", test_run_walk_forward_cli_with_deflation),
         ("walk_forward_aggregate_deflation_uses_pooled_trial_sharpes", test_walk_forward_aggregate_deflation_uses_pooled_trial_sharpes),
         ("cpcv_aggregate_deflation_uses_pooled_trial_sharpes", test_cpcv_aggregate_deflation_uses_pooled_trial_sharpes),
+        ("walk_forward_aggregate_deflation_constant_oos_returns", test_walk_forward_aggregate_deflation_constant_oos_returns),
+        ("cpcv_aggregate_deflation_constant_oos_returns", test_cpcv_aggregate_deflation_constant_oos_returns),
         ("monte_carlo_simulation_basic", test_monte_carlo_simulation_basic),
         ("monte_carlo_simulation_block_bootstrap", test_monte_carlo_simulation_block_bootstrap),
         ("monte_carlo_block_bootstrap_preserves_autocorrelation", test_monte_carlo_block_bootstrap_preserves_autocorrelation),

@@ -1,6 +1,6 @@
 # Handoff — Quantitative Trading Skills Repository
 
-**Last updated**: 2026-10-13 (tenth session)
+**Last updated**: 2026-10-13 (eleventh session)
 
 ## Repository state
 
@@ -14,132 +14,135 @@
 - Python deps for the suites: `pandas` and `numpy` (present
   in the session environment; not committed).
 
-## Session summary (2026-10-13, tenth session)
+## Repository state
 
-Implemented the ninth handoff's assigned task: **fix the
-`--n-trials` semantics for the `monte-carlo` CLI subcommand
-so the internal parameter search is never understated.**
+- Git: `main` at `1c9bfa4` (constant-returns DSR audit) plus this
+  session's changes (uncommitted at the time of writing; session
+  convention is one commit per session with an empty message).
+- Skill location: `skills/quantitative-backtesting/` (8
+  strategies, 8 scripts, 9 test files, 5 reference docs).
+- Python deps for the suites: `pandas` and `numpy` (present
+  in the session environment; not committed).
+
+## Session summary (2026-10-13, eleventh session)
+
+Implemented the tenth handoff's assigned task: **unify the
+aggregate DSR behavior on constant out-of-sample returns across
+walk-forward, CPCV, run_backtest and monte-carlo.**
 
 ### Changes
 
-1. **`scripts/walk_forward.py`** (`run_monte_carlo`):
-   - Introduced `effective_n_trials`. When a `--param-grid`
-     is searched, the subcommand runs `parameter_optimization`
-     internally, which evaluates `len(opt_results)` ranked
-     configurations. The effective trial count is now
-     `max(--n-trials, len(opt_results))`, so the deflation
-     never understates the search, while still allowing the
-     caller to report additional development trials beyond the
-     grid. Without a grid (or an empty optimization record)
-     the user-supplied `--n-trials` remains the sole source.
-   - `base_results["config"]["n_trials"]` and the saved
-     `monte_carlo_results.json` config now record
-     `effective_n_trials` instead of the raw `args.n_trials`.
-   - Updated the `--n-trials` argparse help text and the
-     block comment to document the revised semantics.
-   - `run_backtest.py --n-trials` is intentionally unchanged:
-     the backtest performs no search, so the flag is the sole
-     source of `n_trials` (correct as-is).
+1. **`scripts/walk_forward.py`** (`walk_forward_analysis` and
+   `cpcv_analysis` aggregate DSR blocks):
+   - Removed the `oos_returns.std() > 0` guard on the aggregate
+     DSR. The guard is now `len(oos_returns) > 1` only, so the
+     degenerate-conservative dict (DSR = 0, p_value = 1,
+     z_score = None) is emitted whenever deflation is requested
+     and there are at least two observations — even when the
+     combined OOS returns have zero variance.
+   - Before this change, `walk_forward_analysis` and
+     `cpcv_analysis` silently omitted the `deflated_sharpe` key
+     on constant OOS returns, which was inconsistent with
+     `run_backtest --n-trials` and `monte-carlo --n-trials`
+     (both of which already emit the degenerate dict) and would
+     have made downstream consumers (tear sheets, reports, CI
+     checks for the key) behave differently for degenerate data.
+   - `run_backtest` and `monte-carlo` were already correct and
+     required no change.
 
-2. **`tests/test_walk_forward.py`** (+2 tests, 33 -> 35):
-   - `test_run_monte_carlo_n_trials_floored_to_grid_size`:
-     runs `run_monte_carlo` with a 6-combo grid and
-     `--n-trials 2`, then independently reconstructs the
-     optimization record and asserts the surfaced
-     `deflated_sharpe.n_trials` and `config.n_trials` both
-     equal `max(2, len(opt_results))` (= 6).
-   - `test_run_monte_carlo_deflated_sharpe_uses_floored_n_trials`:
-     same setup; recomputes the base backtest Sharpe and the
-     optimization trial Sharpes independently and asserts the
-     surfaced DSR matches a direct `deflated_sharpe_ratio`
-     call with `n_trials=max(2, len(opt_results))` to 1e-12 on
-     every key, proving the floored count (not the raw flag)
-     flows into the deflation.
+2. **`tests/test_walk_forward.py`** (+2 tests, 36 -> 38):
+   - `test_walk_forward_aggregate_deflation_constant_oos_returns`:
+     builds a multi-asset panel whose test windows are flat
+     (trending training region, constant test region), runs
+     `walk_forward_analysis(apply_deflation=True)` with a
+     cross-sectional momentum strategy, and asserts the
+     aggregate `deflated_sharpe` dict is present with
+     `deflated_sharpe_ratio == 0`, `p_value == 1`,
+     `z_score is None`, `sharpe_ratio == 0`, `skewness == 0`,
+     `kurtosis == 3`, `n_trials >= 1` and
+     `n_observations == len(oos_returns)`.
+   - `test_cpcv_aggregate_deflation_constant_oos_returns`:
+     same contract for `cpcv_analysis`, with a panel whose
+     per-group test windows are flat.
 
 3. **`references/validation_methods.md`**:
-   - Updated the `monte-carlo` usage bullet, the CLI
-     paragraph, and the "Multiple-Testing Correction (CLI)"
-     note to state the effective trial count is
-     `max(--n-trials, number of grid combinations evaluated)`.
-
-4. **`references/metrics_definitions.md`**:
-   - Updated the Deflated Sharpe Ratio section's `monte-carlo`
-     paragraph to document the `max(--n-trials, grid size)`
-     effective count.
+   - Added a "Degenerate and edge cases" subsection under the
+     DSR CLI section documenting the constant-returns behavior,
+     the four entry points that emit it, the removed
+     `oos_returns.std() > 0` guard, and the distinction between
+     the zero-variance case (emit the degenerate dict) and the
+     empty-OOS case (omit the key, a genuine "no signal" outcome).
 
 ### Verified (evidence)
 
-- Full suite from repo root: **142/142 tests pass**
-  (6 + 13 + 14 + 23 + 27 + **35** + 16 + 7 + 1). Baseline
-  was 140; +2 tests in `test_walk_forward.py`; no existing
-  test changed.
-- CLI end-to-end `monte-carlo` on sample data with a
-  6-combo grid (`fast_period [10,20]`, `slow_period
-  [30,50,70]`):
-  - `--n-trials 2` (smaller than the grid) prints
-    `Deflated Sharpe Ratio: 0.6565 (p-value 0.3435, expected
-    max Sharpe 0.4915, 6 trials)` and writes
-    `config.n_trials = 6` — the floor is applied.
-  - `--n-trials 50` (larger than the grid) prints
-    `... 50 trials` and writes `config.n_trials = 50` — the
-    user's larger count wins (backward compatible).
-  - No `--n-trials` prints no DSR line and writes no
-    `deflated_sharpe`/`n_trials` keys — opt-in preserved.
+- Full suite from repo root: **146/146 tests pass**
+  (6 + 13 + 14 + 24 + 27 + **38** + 16 + 7 + 1 + 14
+  unittest). Baseline was 142; +2 tests in `test_walk_forward.py`;
+  no existing test changed.
+- Reproduction script confirming the fix: on a multi-asset
+  panel with flat test windows, `walk_forward_analysis` and
+  `cpcv_analysis` now emit the aggregate `deflated_sharpe`
+  dict (DSR = 0, p = 1, z_score = None) instead of omitting it.
+- The per-period/per-fold DSR path was already guarded correctly
+  (`len(test_returns) >= 2`) and was not touched.
 
 ### Methodological notes
 
-- The `monte-carlo` subcommand selects base params via the
-  `--param-grid` optimization, so the base backtest Sharpe
-  carries the selection bias of that search. Deflating by
-  fewer trials than the search actually evaluated understates
-  the multiple-testing correction (overstating the DSR);
-  deflating by more than the search evaluated overstates it.
-  `max(--n-trials, len(opt_results))` is the conservative,
-  never-understating choice that still lets the caller report
-  extra development trials.
-- `len(opt_results)` counts the *ranked* (non-flat)
-  configurations; flat combos (e.g. `fast >= slow` for an
-  SMA crossover) are skipped by `parameter_optimization` and
-  correctly excluded from the trial count.
-- All results in this repo are synthetic; the DSR is a
-  multiple-testing correction, not evidence of profitability.
+- A strategy that takes active positions on a perfectly flat test
+  window produces zero-variance OOS returns. That is a degenerate
+  case, not a reason to skip the multiple-testing correction: the
+  conservative interpretation (DSR = 0, p = 1) is the honest answer,
+  and it is now emitted consistently by every entry point that
+  accepts `n_trials` / `apply_deflation`.
+- The empty-OOS case (no configuration takes an active position in
+  any test window) remains distinct: no Sharpe or DSR can be
+  computed and the key is omitted, which is a genuine "no signal"
+  outcome.
 
 ## Unresolved / remaining
 
-- `run_backtest.py --n-trials` remains the sole source of
-  `n_trials` because a single backtest performs no search. If
-  a future `--params`-sweep mode is added to `run_backtest`,
-  the same `max()` flooring would apply there.
-- No out-of-sample evidence of profitability exists anywhere
-  in this repo; all results are synthetic.
+- All four entry points (`run_backtest`, `monte-carlo`,
+  `walk_forward_analysis`, `cpcv_analysis`) now emit the degenerate
+  DSR dict consistently on constant OOS returns. The only remaining
+  inconsistency risk is a future entry point that adds its own
+  `oos_returns.std() > 0` guard instead of reusing
+  `deflated_sharpe_ratio`; keep the guard at `len(returns) > 1`.
+- No out-of-sample evidence of profitability exists anywhere in this
+  repo; all results are synthetic.
 
 ## Next task for the next agent
 
-**Audit the `monte-carlo` and `run_backtest` DSR paths for
-the degenerate-returns edge case.**
+**Verify the per-period/per-fold DSR path is reachable on constant
+test returns, and audit `run_backtest` / `monte-carlo` for the same
+degenerate case.**
 
-Context: `deflated_sharpe_ratio` sets `z = -inf` (DSR = 0)
-when `returns.std() == 0` (constant returns), and raises for
-fewer than 2 observations. The `monte-carlo` and
-`run_backtest` paths guard on `len(returns.dropna()) >= 2`
-and `signals_active`, but neither explicitly guards the
-constant-returns case. A strategy that produces a constant
-(non-zero) return series would yield a zero-variance Sharpe
-and a DSR of exactly 0 with `z_score = None`.
+Context: the aggregate DSR paths (`walk_forward_analysis`,
+`cpcv_analysis`) now emit the conservative degenerate dict (DSR = 0,
+p_value = 1, z_score = None) on constant OOS returns, matching
+`run_backtest --n-trials` and `monte-carlo --n-trials`. The
+per-period/per-fold DSR block in `walk_forward_analysis` /
+`cpcv_analysis` is guarded by `len(test_returns) >= 2` only, so it
+already emits the degenerate dict when a single period's test
+returns are constant — but this was not independently verified in
+this session.
 
 Scope (one bounded change):
-- Determine whether a constant-returns base backtest can
-  reach the DSR path in `run_monte_carlo` / `run_backtest`
-  (e.g. a strategy that is always fully invested in a flat
-  price series). If it can, decide the correct behavior
-  (DSR = 0 is already conservative; consider asserting this
-  explicitly or documenting it).
-- Add a regression test if a real reachable case exists;
-  otherwise document why it is unreachable.
-- Update `references/metrics_definitions.md` if the behavior
-  is documented.
+- Confirm the per-period/per-fold DSR path is reachable on
+  constant test returns (a strategy that takes active positions on
+  a flat test window, e.g. cross-sectional momentum on identical
+  prices). The aggregate test already exercises this; extend it to
+  assert the per-period `deflated_sharpe` dict is present with
+  DSR = 0, p = 1, z_score = None.
+- Audit `run_backtest --n-trials` and `monte-carlo --n-trials` for
+  the same constant-returns case (a strategy that is always fully
+  invested in a flat price series). Both already emit the
+  degenerate dict via `deflated_sharpe_ratio`; confirm with a
+  regression test if a real reachable case exists, otherwise
+  document why it is unreachable.
+- Update `references/metrics_definitions.md` if the behavior needs
+  documenting.
 
-Constraints: keep the full suite passing (142 tests); no new
+Constraints: keep the full suite passing (146 tests); no new
 dependencies; do not weaken the existing
 `len(returns) >= 2` / `signals_active` guards.
 
@@ -158,6 +161,7 @@ done
 `test_reporting.py` uses stdlib `unittest` (exit code / `OK`
 line is the pass/fail signal); the rest use the custom
 `main()` runner printing `N/N tests passed`. Current counts:
-6 + 13 + 14 + 23 + 27 + 35 + 16 + 7 + 1 = 142.
+6 + 13 + 14 + 24 + 27 + 38 + 16 + 7 + 1 = 132, plus 14
+unittest cases in `test_reporting.py` = 146.
 
 (End of file)
