@@ -432,6 +432,28 @@ def generate_tear_sheet(
                 html_parts.append(f"<tr><td>{label}</td><td class='metric'>{display}</td></tr>")
             html_parts.append("</table>")
 
+    # Data provenance
+    data_prov = results.get("data_provenance")
+    if data_prov:
+        html_parts.append("<h2>Data Provenance</h2>")
+        html_parts.append("<table><tr><th>Field</th><th>Value</th></tr>")
+        def fmt_prov(v):
+            if v is None:
+                return "N/A"
+            if isinstance(v, bool):
+                return "true" if v else "false"
+            if isinstance(v, (dict, list)):
+                return json.dumps(v)
+            if isinstance(v, (int, float)):
+                return str(v)
+            return str(v)
+        for key in ["source_path", "checksum", "date_range_final", "filters",
+                    "symbol", "validation", "point_in_time_validation",
+                    "transformations", "per_symbol", "panel_shape"]:
+            if key in data_prov:
+                html_parts.append(f"<tr><td>{key}</td><td class='metric'>{fmt_prov(data_prov[key])}</td></tr>")
+        html_parts.append("</table>")
+
     cpcv_results = analysis.get("cpcv")
     if cpcv_results:
         cpcv_summary = cpcv_results.get("summary", {})
@@ -750,6 +772,10 @@ def generate_tear_sheet(
                 "n_simulations": mc.get("n_simulations"),
                 "base_observations": mc.get("base_observations"),
             }
+
+    # Surface data provenance in JSON summary if present
+    if results.get("data_provenance"):
+        summary["data_provenance"] = _json_safe(results["data_provenance"])
 
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2, default=str)

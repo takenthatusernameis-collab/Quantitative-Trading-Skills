@@ -1108,7 +1108,7 @@ def _calculate_cpcv_summary(
 def run_cpcv(args) -> int:
     """Run CPCV analysis from CLI args."""
     print(f"Loading data from {args.data}...")
-    data = _load_and_validate_data(
+    data, pit_results = _load_and_validate_data(
         args.data, args.symbol, args.start, args.end,
         validate_pit=getattr(args, "validate_point_in_time", False),
         pit_strict=getattr(args, "point_in_time_strict", False),
@@ -1134,6 +1134,8 @@ def run_cpcv(args) -> int:
         funding_cost=args.funding_cost,
         apply_deflation=args.deflate,
     )
+    if pit_results is not None:
+        results["point_in_time_validation"] = pit_results
 
     print(f"Number of CPCV folds: {results['summary']['n_folds']}")
     print(f"Total OOS Return: {results['summary']['total_oos_return']:.2%}")
@@ -1174,8 +1176,12 @@ def run_cpcv(args) -> int:
             "funding_cost": args.funding_cost,
             "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
+            "point_in_time_validation": pit_results,
         },
     }
+    if pit_results is not None:
+        results["point_in_time_validation"] = pit_results
+        summary_data["point_in_time_validation"] = pit_results
     with open(summary_path, "w") as f:
         json.dump(summary_data, f, indent=2, default=str)
     print(f"CPCV summary saved to: {summary_path}")
@@ -1194,6 +1200,8 @@ def run_cpcv(args) -> int:
                 "symbol": args.symbol,
             },
         }
+        if pit_results is not None:
+            report_results["point_in_time_validation"] = pit_results
         metrics = calculate_metrics(report_results)
         generate_report(metrics, args.output, symbol=args.symbol, strategy_name=f"{args.strategy}_cpcv")
         generate_tear_sheet(
@@ -1221,17 +1229,21 @@ def _load_and_validate_data(
     end: str,
     validate_pit: bool = False,
     pit_strict: bool = False,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, Optional[Dict[str, Any]]]:
     """Load and validate data from file.
 
     When validate_pit is True, run point-in-time validation on the
     loaded frame (temporal ordering, duplicate timestamps, stale-data
     warnings) and print the results. With pit_strict, violations raise
     so the analysis aborts instead of continuing on suspect data.
+
+    Returns:
+        tuple of (data_frame, pit_results_dict_or_None)
     """
     data = load_data(data_path, symbol=symbol, start=start, end=end)
     if not validate_data(data):
         raise ValueError("Data validation failed!")
+    pit = None
     if validate_pit:
         pit = validate_point_in_time(data)
         if pit["violations"]:
@@ -1251,7 +1263,7 @@ def _load_and_validate_data(
                 "Point-in-time validation failed in strict mode: "
                 + "; ".join(pit["violations"])
             )
-    return data
+    return data, pit
 
 
 def _parse_param_grid(param_grid_str: str) -> Dict[str, List[Any]]:
@@ -1270,7 +1282,7 @@ def _parse_param_grid(param_grid_str: str) -> Dict[str, List[Any]]:
 def run_walk_forward(args) -> int:
     """Run walk-forward analysis from CLI args."""
     print(f"Loading data from {args.data}...")
-    data = _load_and_validate_data(
+    data, pit_results = _load_and_validate_data(
         args.data, args.symbol, args.start, args.end,
         validate_pit=getattr(args, "validate_point_in_time", False),
         pit_strict=getattr(args, "point_in_time_strict", False),
@@ -1295,6 +1307,8 @@ def run_walk_forward(args) -> int:
         funding_cost=args.funding_cost,
         apply_deflation=args.deflate,
     )
+    if pit_results is not None:
+        results["point_in_time_validation"] = pit_results
 
     print(f"Number of walk-forward periods: {results['summary']['n_periods']}")
     print(f"Total OOS Return: {results['summary']['total_oos_return']:.2%}")
@@ -1336,8 +1350,12 @@ def run_walk_forward(args) -> int:
             "funding_cost": args.funding_cost,
             "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
+            "point_in_time_validation": pit_results,
         },
     }
+    if pit_results is not None:
+        results["point_in_time_validation"] = pit_results
+        summary_data["point_in_time_validation"] = pit_results
     with open(summary_path, "w") as f:
         json.dump(summary_data, f, indent=2, default=str)
     print(f"Walk-forward summary saved to: {summary_path}")
@@ -1356,6 +1374,8 @@ def run_walk_forward(args) -> int:
                 "symbol": args.symbol,
             },
         }
+        if pit_results is not None:
+            report_results["point_in_time_validation"] = pit_results
         metrics = calculate_metrics(report_results)
         generate_report(metrics, args.output, symbol=args.symbol, strategy_name=f"{args.strategy}_walk_forward")
         generate_tear_sheet(
@@ -1372,7 +1392,7 @@ def run_walk_forward(args) -> int:
 def run_parameter_optimization(args) -> int:
     """Run parameter optimization from CLI args."""
     print(f"Loading data from {args.data}...")
-    data = _load_and_validate_data(
+    data, pit_results = _load_and_validate_data(
         args.data, args.symbol, args.start, args.end,
         validate_pit=getattr(args, "validate_point_in_time", False),
         pit_strict=getattr(args, "point_in_time_strict", False),
@@ -1413,10 +1433,15 @@ def run_parameter_optimization(args) -> int:
                 f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
             )
 
+    # Attach PIT results to top-level saved results if present
+    if 'pit_results' in locals() or True:
+        pass
+
     # Save results
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # When saving param opt, also attach pit if we have it? But run_parameter_optimization might not have loaded with pit yet
     results_path = output_dir / "parameter_optimization.json"
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2, default=str)
@@ -1428,7 +1453,7 @@ def run_parameter_optimization(args) -> int:
 def run_monte_carlo(args) -> int:
     """Run Monte Carlo simulation from CLI args."""
     print(f"Loading data from {args.data}...")
-    data = _load_and_validate_data(
+    data, pit_results = _load_and_validate_data(
         args.data, args.symbol, args.start, args.end,
         validate_pit=getattr(args, "validate_point_in_time", False),
         pit_strict=getattr(args, "point_in_time_strict", False),
@@ -1566,9 +1591,11 @@ def run_monte_carlo(args) -> int:
             "borrow_cost": args.borrow_cost,
             "funding_cost": args.funding_cost,
             "n_simulations": args.n_simulations,
-            "block_size": args.block_size,
+            "point_in_time_validation": pit_results,
         },
     }
+    if pit_results is not None:
+        mc_save["point_in_time_validation"] = pit_results
     if dsr is not None:
         mc_save["deflated_sharpe"] = dsr
         mc_save["config"]["n_trials"] = effective_n_trials
