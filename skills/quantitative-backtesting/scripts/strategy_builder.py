@@ -832,7 +832,7 @@ def get_strategy_defaults(strategy_type: str) -> Dict[str, Any]:
         "donchian_breakout": {"period": 20, "exit_period": 10},
         "cross_sectional_momentum": {"lookback": 252, "top_quantile": 0.2, "bottom_quantile": 0.2},
         "dual_momentum": {"lookback": 252, "top_quantile": 0.2, "risk_free_rate": 0.0},
-        "zscore_mean_reversion": {"period": 20, "entry_z": 2.0, "exit_z": 0.5},
+        "zscore_mean_reversion": {"period": 20, "entry_z": 2.0, "exit_z": 0.5, "spread_method": "log_ratio", "hedge_ratio": 1.0},
     }
     return defaults.get(strategy_type, {})
 

@@ -469,129 +469,13 @@ def test_dual_momentum_respects_top_quantile():
 
 
 def test_mean_reversion_zscore_pairs_two_asset_dict():
-    """MeanReversionZScore generates spread-based signals for two-asset dict."""
-    from strategy_builder import build_strategy
-    import pandas as pd
-    import numpy as np
+    """MeanReversionZScore generates spread-based signals for two-asset dict.
 
-    dates = pd.date_range("2021-01-01", periods=100, freq="B")
-    np.random.seed(7)
-    spread = np.zeros(100)
-    spread[40] = 2.5
-    spread[41:45] = [1.5, 0.8, 0.3, 0.1]
-    spread[70] = -2.6
-    spread[71:75] = [-1.4, -0.6, -0.2, 0.05]
-    C = 100
-    p1 = C * np.exp(spread + np.random.normal(0, 0.01, 100))
-    p2 = C + np.random.normal(0, 0.1, 100)
-    data_dict = {
-        "A": pd.DataFrame({"close": p1}, index=dates),
-        "B": pd.DataFrame({"close": p2}, index=dates),
-    }
-    s = build_strategy("zscore_mean_reversion", '{"period": 20, "entry_z": 2.0, "exit_z": 0.5}')
-    sig = s.generate_signals(data_dict)
-    assert (sig.iloc[20:] != 0).any()
-
-
-def test_mean_reversion_zscore_pairs_multiindex_two_assets():
-    """MeanReversionZScore works with MultiIndex DataFrame containing two assets."""
-    from strategy_builder import build_strategy
-    from test_strategy_builder import _make_multiindex_data
-    import pandas as pd
-
-    data = _make_multiindex_data(n=100, n_assets=2, seed=42)
-    s = build_strategy("zscore_mean_reversion", '{"period": 20}')
-    sig = s.generate_signals(data)
-    assert isinstance(sig, pd.Series)
-    assert len(sig) == len(data)
-
-
-def test_mean_reversion_zscore_single_asset_fallback():
-    """MeanReversionZScore with single-asset data warns and falls back."""
-    import warnings
-    from strategy_builder import build_strategy
-    from test_strategy_builder import _make_data
-
-    data = _make_data(n=80)
-    s = build_strategy("zscore_mean_reversion", '{"period": 20}')
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        sig = s.generate_signals(data)
-        assert len(w) == 1
-        assert issubclass(w[0].category, UserWarning)
-
-    assert len(sig) == len(data)
-    assert set(sig.unique()).issubset({-1, 0, 1})
-
-
-def test_mean_reversion_zscore_rejects_three_assets():
-    """MeanReversionZScore rejects panel data with != 2 assets."""
-    from strategy_builder import build_strategy
-    from test_strategy_builder import _make_multi_asset_data, _make_multiindex_data
-
-    try:
-        data = _make_multi_asset_data(n=50, n_assets=3, seed=1)
-        s = build_strategy("zscore_mean_reversion", '{"period": 10}')
-        s.generate_signals(data)
-        assert False
-    except ValueError:
-        pass
-
-    try:
-        data = _make_multiindex_data(n=50, n_assets=3, seed=1)
-        s = build_strategy("zscore_mean_reversion", '{"period": 10}')
-        s.generate_signals(data)
-        assert False
-    except ValueError:
-        pass
-
-
-def main() -> int:
-    tests = [
-        ("build_strategy_unknown_type_raises", test_build_strategy_unknown_type_raises),
-        ("build_strategy_parses_params", test_build_strategy_parses_params),
-        ("registry_listing_and_defaults_agree", test_registry_listing_and_defaults_agree),
-        ("all_registered_strategies_generate_valid_signals", test_all_registered_strategies_generate_valid_signals),
-        ("sma_crossover_signals_are_binary_with_crossovers", test_sma_crossover_signals_are_binary_with_crossovers),
-        ("donchian_breakout_uses_prior_period_high", test_donchian_breakout_uses_prior_period_high),
-        ("cross_sectional_momentum_multi_asset_dict", test_cross_sectional_momentum_multi_asset_dict),
-        ("cross_sectional_momentum_multiindex_dataframe", test_cross_sectional_momentum_multiindex_dataframe),
-        ("cross_sectional_momentum_single_asset_fallback", test_cross_sectional_momentum_single_asset_fallback),
-        ("cross_sectional_momentum_respects_quantiles", test_cross_sectional_momentum_respects_quantiles),
-        ("cross_sectional_momentum_symmetric_quantiles_flat", test_cross_sectional_momentum_symmetric_quantiles_flat),
-        ("cross_sectional_momentum_overlapping_quantiles_warn", test_cross_sectional_momentum_overlapping_quantiles_warn),
-        ("cross_sectional_momentum_asymmetric_no_warning", test_cross_sectional_momentum_asymmetric_no_warning),
-        ("dual_momentum_multi_asset_dict", test_dual_momentum_multi_asset_dict),
-        ("dual_momentum_multiindex_dataframe", test_dual_momentum_multiindex_dataframe),
-        ("dual_momentum_single_asset_fallback", test_dual_momentum_single_asset_fallback),
-        ("dual_momentum_absolute_momentum_filter", test_dual_momentum_absolute_momentum_filter),
-        ("dual_momentum_respects_top_quantile", test_dual_momentum_respects_top_quantile),
-        ("mean_reversion_zscore_pairs_two_asset_dict", test_mean_reversion_zscore_pairs_two_asset_dict),
-        ("mean_reversion_zscore_pairs_multiindex_two_assets", test_mean_reversion_zscore_pairs_multiindex_two_assets),
-        ("mean_reversion_zscore_single_asset_fallback", test_mean_reversion_zscore_single_asset_fallback),
-        ("mean_reversion_zscore_rejects_three_assets", test_mean_reversion_zscore_rejects_three_assets),
-    ]
-
-    failures = 0
-    for name, fn in tests:
-        try:
-            fn()
-            print(f"PASS  {name}")
-        except Exception:
-            failures += 1
-            print(f"FAIL  {name}")
-            traceback.print_exc()
-
-    print(f"\n{len(tests) - failures}/{len(tests)} tests passed")
-    return 1 if failures else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
-
-
-def test_mean_reversion_zscore_pairs_two_asset_dict():
-    """MeanReversionZScore generates spread-based signals for two-asset dict."""
+    Uses a known spread pattern to verify entry/exit logic:
+    - spread=2.5 at index 40 -> z-score > entry_z -> short signal (-1)
+    - spread=-2.6 at index 70 -> z-score < -entry_z -> long signal (1)
+    - exit when |z-score| <= exit_z
+    """
     from strategy_builder import build_strategy
     import pandas as pd
     import numpy as np
@@ -614,6 +498,8 @@ def test_mean_reversion_zscore_pairs_two_asset_dict():
     sig = s.generate_signals(data_dict)
     assert sig.iloc[39] == 0
     assert sig.iloc[40] == 0 or sig.iloc[41] == -1  # enters short around high spread
+    assert sig.iloc[69] == 0
+    assert sig.iloc[70] == 0 or sig.iloc[71] == 1  # enters long around low spread
     # Should produce at least one non-zero signal in post-period
     assert (sig.iloc[20:] != 0).any()
 
@@ -622,6 +508,7 @@ def test_mean_reversion_zscore_pairs_multiindex_two_assets():
     """MeanReversionZScore works with MultiIndex DataFrame containing two assets."""
     from strategy_builder import build_strategy
     from test_strategy_builder import _make_multiindex_data
+    import pandas as pd
 
     data = _make_multiindex_data(n=100, n_assets=2, seed=42)
     s = build_strategy("zscore_mean_reversion", '{"period": 20}')
@@ -671,3 +558,47 @@ def test_mean_reversion_zscore_rejects_three_assets():
         assert False, "Expected ValueError"
     except ValueError:
         pass
+
+
+def main() -> int:
+    tests = [
+        ("build_strategy_unknown_type_raises", test_build_strategy_unknown_type_raises),
+        ("build_strategy_parses_params", test_build_strategy_parses_params),
+        ("registry_listing_and_defaults_agree", test_registry_listing_and_defaults_agree),
+        ("all_registered_strategies_generate_valid_signals", test_all_registered_strategies_generate_valid_signals),
+        ("sma_crossover_signals_are_binary_with_crossovers", test_sma_crossover_signals_are_binary_with_crossovers),
+        ("donchian_breakout_uses_prior_period_high", test_donchian_breakout_uses_prior_period_high),
+        ("cross_sectional_momentum_multi_asset_dict", test_cross_sectional_momentum_multi_asset_dict),
+        ("cross_sectional_momentum_multiindex_dataframe", test_cross_sectional_momentum_multiindex_dataframe),
+        ("cross_sectional_momentum_single_asset_fallback", test_cross_sectional_momentum_single_asset_fallback),
+        ("cross_sectional_momentum_respects_quantiles", test_cross_sectional_momentum_respects_quantiles),
+        ("cross_sectional_momentum_symmetric_quantiles_flat", test_cross_sectional_momentum_symmetric_quantiles_flat),
+        ("cross_sectional_momentum_overlapping_quantiles_warn", test_cross_sectional_momentum_overlapping_quantiles_warn),
+        ("cross_sectional_momentum_asymmetric_no_warning", test_cross_sectional_momentum_asymmetric_no_warning),
+        ("dual_momentum_multi_asset_dict", test_dual_momentum_multi_asset_dict),
+        ("dual_momentum_multiindex_dataframe", test_dual_momentum_multiindex_dataframe),
+        ("dual_momentum_single_asset_fallback", test_dual_momentum_single_asset_fallback),
+        ("dual_momentum_absolute_momentum_filter", test_dual_momentum_absolute_momentum_filter),
+        ("dual_momentum_respects_top_quantile", test_dual_momentum_respects_top_quantile),
+        ("mean_reversion_zscore_pairs_two_asset_dict", test_mean_reversion_zscore_pairs_two_asset_dict),
+        ("mean_reversion_zscore_pairs_multiindex_two_assets", test_mean_reversion_zscore_pairs_multiindex_two_assets),
+        ("mean_reversion_zscore_single_asset_fallback", test_mean_reversion_zscore_single_asset_fallback),
+        ("mean_reversion_zscore_rejects_three_assets", test_mean_reversion_zscore_rejects_three_assets),
+    ]
+
+    failures = 0
+    for name, fn in tests:
+        try:
+            fn()
+            print(f"PASS  {name}")
+        except Exception:
+            failures += 1
+            print(f"FAIL  {name}")
+            traceback.print_exc()
+
+    print(f"\n{len(tests) - failures}/{len(tests)} tests passed")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
