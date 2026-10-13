@@ -530,3 +530,55 @@ python3 scripts/walk_forward.py cpcv \
     --embargo-size 0.02 \
     --output results/
 ```
+
+## Statistical Uncertainty and Robustness
+
+### Confidence Intervals
+
+Monte Carlo simulation computes confidence intervals for performance metrics by
+resampling historical returns. For each simulation path, metrics (total return,
+Sharpe ratio, maximum drawdown, etc.) are computed on the bootstrapped equity
+curve. Percentiles of the resulting distributions form confidence intervals for
+a given confidence level (e.g., 90%, 95%, 99%).
+
+Key considerations:
+- **Narrow confidence intervals** indicate that performance is stable across
+  resampled return sequences and suggests greater robustness.
+- **Wide confidence intervals** indicate sensitivity to the specific sequence of
+  returns observed; performance may not generalize well.
+- The reliability of confidence intervals depends on the number of observations
+  in the base returns (`base_observations`) and the number of simulations
+  (`n_simulations`).
+
+### Probability of Ruin
+
+The Monte Carlo results include `probability_of_ruin`, defined as the fraction
+of simulated paths where the equity curve falls below 50% of initial capital
+(0.5 normalized equity). This quantifies tail risk—the likelihood of a severe
+capital drawdown under resampled market conditions. A higher probability of
+ruin indicates greater downside risk, even if average metrics appear attractive.
+
+### Parameter Stability Interpretation
+
+Parameter stability, as reported by `overfitting_check` and `cpcv_analysis`, measures
+how consistently the optimizer selects the same parameter values across different
+periods or folds:
+
+```
+stability_ratio = 1 - unique_values / total_periods
+```
+
+Interpretation:
+- **High stability (>= 0.5)**: The same parameter values are selected across
+  most periods/folds, suggesting the optimal parameters are driven by a
+  persistent signal rather than noise. This is consistent with a more robust
+  strategy.
+- **Medium stability (0.3 to 0.5)**: Some parameter variation across periods,
+  indicating moderate robustness. Further out-of-sample testing is warranted.
+- **Low stability (< 0.3)**: Parameters change frequently across periods/folds,
+  suggesting the optimizer is overfitting to noise in each training window.
+  This is a strong indicator of poor robustness and potential overfitting.
+
+Parameter stability should be considered alongside out-of-sample performance
+metrics (OOS Sharpe, total return, volatility) and multiple-testing corrections
+(Deflated Sharpe Ratio) to form a complete picture of strategy robustness.
