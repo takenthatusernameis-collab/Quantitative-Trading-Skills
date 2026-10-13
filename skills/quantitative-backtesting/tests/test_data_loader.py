@@ -18,7 +18,7 @@ import pandas as pd
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
-from data_loader import load_data, validate_data, DataProvenance, validate_point_in_time, detect_survivorship_bias  # noqa: E402
+from data_loader import load_data, validate_data, load_multi_symbol, DataProvenance, validate_point_in_time, detect_survivorship_bias  # noqa: E402
 
 
 def _make_data(periods: int = 100, seed: int = 42) -> pd.DataFrame:
@@ -238,6 +238,60 @@ def test_detect_survivorship_bias_empty():
     assert res["surviving_symbols"] == []
 
 
+def test_load_multi_symbol_provenance_complete():
+    """load_multi_symbol returns per-symbol provenance with checksums
+    and date ranges, and does not warn about the cross-symbol
+    duplicate timestamps that multi-symbol files legitimately have.
+
+    Regression coverage for the CLI --multi-symbol integration:
+    the provenance artifact written next to the results must carry
+    the same integrity fields (checksum, date range) as the
+    single-symbol path, or the run is not reproducible.
+    """
+    dates = pd.date_range("2020-01-01", periods=300, freq="B")
+    rows = []
+    for i, (sym, start, end) in enumerate([
+        ("SURV", 0, 300), ("LATE", 60, 300), ("EARLY", 0, 240),
+    ]):
+        rng = np.random.default_rng(i + 1)
+        rets = rng.normal(0.0005, 0.015, end - start)
+        prices = 100 * np.exp(np.cumsum(rets))
+        for j, d in enumerate(dates[start:end]):
+            rows.append({
+                "date": d.strftime("%Y-%m-%d"),
+                "symbol": sym,
+                "open": prices[j],
+                "high": prices[j] * 1.01,
+                "low": prices[j] * 0.99,
+                "close": prices[j],
+                "volume": int(rng.integers(1_000_000, 10_000_000)),
+            })
+    panel = pd.DataFrame(rows)
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
+    panel.to_csv(tmp.name, index=False)
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            data, provenance = load_multi_symbol(tmp.name, return_provenance=True)
+        assert set(data) == {"SURV", "LATE", "EARLY"}
+        assert set(provenance) == {"SURV", "LATE", "EARLY"}
+        for sym, prov in provenance.items():
+            assert isinstance(prov, DataProvenance)
+            assert prov.symbol_filter == sym
+            assert prov.checksum, f"{sym}: provenance missing checksum"
+            assert prov.date_range_final is not None, f"{sym}: missing date range"
+            assert prov.final_shape[0] == len(data[sym])
+        # Cross-symbol duplicate dates are expected in panel files;
+        # per-symbol validation is authoritative (every symbol above
+        # passed), so the aggregate-frame warning must not fire.
+        aggregate_warnings = [
+            w for w in caught if "Data validation failed" in str(w.message)
+        ]
+        assert aggregate_warnings == []
+    finally:
+        Path(tmp.name).unlink()
+
+
 def main() -> int:
     tests = [
         ("load_data_unsupported_format_raises", test_load_data_unsupported_format_raises),
@@ -255,6 +309,7 @@ def main() -> int:
         ("test_detect_survivorship_bias_survivors_only", test_detect_survivorship_bias_survivors_only),
         ("test_detect_survivorship_bias_entries_exits_insufficient", test_detect_survivorship_bias_entries_exits_insufficient),
         ("test_detect_survivorship_bias_empty", test_detect_survivorship_bias_empty),
+        ("test_load_multi_symbol_provenance_complete", test_load_multi_symbol_provenance_complete),
     ]
 
     failures = 0

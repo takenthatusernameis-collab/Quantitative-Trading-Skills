@@ -9,6 +9,9 @@ No third-party test framework is required; uses only the standard library.
 import sys
 import traceback
 import argparse
+import json
+import os
+import tempfile
 from pathlib import Path
 from io import StringIO
 from contextlib import redirect_stderr, redirect_stdout
@@ -20,8 +23,10 @@ SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
 from run_backtest import run_backtest, signals_active, parse_args  # noqa: E402
+from run_backtest import main as run_backtest_main  # noqa: E402  (aliased: the test module defines its own main() runner below)
 from strategy_builder import build_strategy  # noqa: E402
 from walk_forward import deflated_sharpe_ratio  # noqa: E402
+from data_loader import DataProvenance  # noqa: E402
 
 
 def _make_data(periods: int = 252, seed: int = 42) -> pd.DataFrame:
@@ -45,7 +50,9 @@ class _Args:
     def __init__(self, commission=0.0002, slippage=0.0001, initial_capital=100000,
                  strategy="sma_crossover", symbol="TEST", n_trials=None,
                  impact_coefficient=0.0, adv_window=20,
-                 borrow_cost=0.0, funding_cost=0.0):
+                 borrow_cost=0.0, funding_cost=0.0,
+                 validate_point_in_time=False, point_in_time_strict=False,
+                 multi_symbol=False):
         self.commission = commission
         self.slippage = slippage
         self.initial_capital = initial_capital
@@ -56,6 +63,9 @@ class _Args:
         self.adv_window = adv_window
         self.borrow_cost = borrow_cost
         self.funding_cost = funding_cost
+        self.validate_point_in_time = validate_point_in_time
+        self.point_in_time_strict = point_in_time_strict
+        self.multi_symbol = multi_symbol
 
 
 def test_signals_active_detects_flat_and_active_series():
@@ -676,6 +686,285 @@ def test_run_backtest_borrow_cost_frequency_aware():
     )
 
 
+def test_run_backtest_serializes_data_provenance_into_results():
+    """run_backtest serializes the DataProvenance captured at load time.
+
+    The provenance travels from load_data (return_provenance=True)
+    through the CLI into the results dict and the data_provenance.json
+    artifact, so the backtest is reproducible from its inputs.
+    """
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    prov = DataProvenance(
+        source_path="data.csv",
+        load_timestamp="2026-01-01T00:00:00Z",
+        file_format=".csv",
+        file_size_bytes=1234,
+        symbol_filter="SPY",
+        checksum="deadbeef",
+    )
+    results = run_backtest(data, strategy, _Args(), data_provenance=prov)
+
+    assert "data_provenance" in results
+    assert results["data_provenance"] == prov.to_dict()
+    assert results["data_provenance"]["source_path"] == "data.csv"
+    assert results["data_provenance"]["checksum"] == "deadbeef"
+
+
+def test_run_backtest_serializes_panel_provenance_dict():
+    """Multi-symbol panels serialize a dict of per-symbol provenance."""
+    # 3 assets so the net-exposure signal is non-zero with the
+    # 0.4/0.2 quantiles (2 assets would long one and short one,
+    # giving a flat zero signal by construction).
+    data = _make_multiasset_dict(n=120, n_assets=3, seed=5)
+    strategy = build_strategy(
+        "cross_sectional_momentum",
+        '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}',
+    )
+    provs = {
+        sym: DataProvenance(
+            source_path="panel.csv",
+            load_timestamp="2026-01-01T00:00:00Z",
+            file_format=".csv",
+            file_size_bytes=99,
+            symbol_filter=sym,
+            checksum=f"ck{i}",
+        )
+        for i, sym in enumerate(data)
+    }
+    results = run_backtest(data, strategy, _Args(), data_provenance=provs)
+
+    assert set(results["data_provenance"]) == set(data)
+    for sym, prov in provs.items():
+        assert results["data_provenance"][sym] == prov.to_dict()
+
+
+def test_run_backtest_without_provenance_omits_key():
+    """Backward compat: no data_provenance key when none was captured."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    results = run_backtest(data, strategy, _Args())
+    assert "data_provenance" not in results
+
+
+def test_run_backtest_point_in_time_validation_recorded():
+    """--validate-point-in-time records the outcome in the results."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+
+    results = run_backtest(data, strategy, _Args(validate_point_in_time=True))
+    assert "point_in_time_validation" in results
+    pit = results["point_in_time_validation"]
+    assert pit["passed"] is True
+    assert pit["violations"] == []
+
+    # Opt-in: without the flag no key is emitted (backward compatible).
+    off = run_backtest(data, strategy, _Args())
+    assert "point_in_time_validation" not in off
+
+
+def test_run_backtest_point_in_time_detects_duplicate_timestamps():
+    """Duplicate timestamps are a point-in-time violation.
+
+    A non-strict run still completes (violations are warnings), but the
+    outcome is recorded in the results so downstream consumers can see
+    the data-integrity problem.
+    """
+    data = _make_data()
+    dup = pd.concat([data, data.iloc[[5]]])  # duplicate one row's timestamp
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+
+    results = run_backtest(dup, strategy, _Args(validate_point_in_time=True))
+    pit = results["point_in_time_validation"]
+    assert pit["passed"] is False
+    assert any("Duplicate timestamps" in v for v in pit["violations"])
+    assert len(results["trades"]) > 0, "non-strict run must still complete"
+
+
+def test_handle_point_in_time_results_strictness_matrix():
+    """Strict mode aborts only on violations, never on warnings."""
+    from run_backtest import _handle_point_in_time_results
+
+    violations = {
+        "passed": False,
+        "violations": ["Duplicate timestamps found"],
+        "warnings": [],
+    }
+    clean = {"passed": True, "violations": [], "warnings": []}
+    warned = {"passed": True, "violations": [], "warnings": ["stale data"]}
+
+    # The handler prints its findings; keep the test output clean.
+    with redirect_stdout(StringIO()):
+        assert _handle_point_in_time_results(violations, strict=True) is True
+        assert _handle_point_in_time_results(violations, strict=False) is False
+        assert _handle_point_in_time_results(clean, strict=True) is False
+        assert _handle_point_in_time_results(warned, strict=True) is False
+
+def test_run_backtest_point_in_time_panel_validates_each_symbol():
+    """Dict panels are validated per symbol for structural violations.
+
+    A symbol whose frame is out of temporal order is a point-in-time
+    violation even though the panel as a whole is well-formed; the
+    combined result must surface it.
+    """
+    data = _make_multiasset_dict(n=252, n_assets=3, seed=11)
+    sym = sorted(data)[0]
+    data[sym] = data[sym].iloc[::-1]  # unique labels, non-monotonic order
+    strategy = build_strategy(
+        "cross_sectional_momentum",
+        '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}',
+    )
+
+    results = run_backtest(data, strategy, _Args(validate_point_in_time=True))
+    pit = results["point_in_time_validation"]
+    assert pit["passed"] is False
+    assert any("not monotonically increasing" in v for v in pit["violations"])
+
+
+def test_parse_args_accepts_validation_and_multi_symbol_flags():
+    """The PIT-validation and multi-symbol flags parse and default off."""
+    from unittest.mock import patch
+
+    with patch.object(sys, "argv", [
+        "prog", "--data", "d.csv",
+        "--validate-point-in-time", "--point-in-time-strict", "--multi-symbol",
+    ]):
+        args = parse_args()
+    assert args.validate_point_in_time is True
+    assert args.point_in_time_strict is True
+    assert args.multi_symbol is True
+
+    with patch.object(sys, "argv", ["prog", "--data", "d.csv"]):
+        args = parse_args()
+    assert args.validate_point_in_time is False
+    assert args.point_in_time_strict is False
+    assert args.multi_symbol is False
+
+
+def _write_ohlcv_csv(path: str, periods: int = 252, seed: int = 42) -> None:
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    rets = rng.normal(0.0005, 0.015, periods)
+    prices = 100 * np.exp(np.cumsum(rets))
+    pd.DataFrame({
+        "date": dates.strftime("%Y-%m-%d"),
+        "open": prices * rng.uniform(0.995, 1.005, periods),
+        "high": prices * rng.uniform(1.005, 1.02, periods),
+        "low": prices * rng.uniform(0.98, 0.995, periods),
+        "close": prices,
+        "volume": rng.integers(1_000_000, 10_000_000, periods),
+    }).to_csv(path, index=False)
+
+
+def _write_multi_symbol_csv(path: str, periods: int = 300) -> None:
+    """Write a panel with one survivor, one late entry, one early exit."""
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    rows = []
+    for i, (sym, start, end) in enumerate([
+        ("SURV", 0, periods), ("LATE", 60, periods), ("EARLY", 0, periods - 60),
+    ]):
+        rng = np.random.default_rng(i + 1)
+        rets = rng.normal(0.0005, 0.015, end - start)
+        prices = 100 * np.exp(np.cumsum(rets))
+        for j, d in enumerate(dates[start:end]):
+            rows.append({
+                "date": d.strftime("%Y-%m-%d"),
+                "symbol": sym,
+                "open": prices[j],
+                "high": prices[j] * 1.01,
+                "low": prices[j] * 0.99,
+                "close": prices[j],
+                "volume": int(rng.integers(1_000_000, 10_000_000)),
+            })
+    pd.DataFrame(rows).to_csv(path, index=False)
+
+
+def test_cli_writes_data_provenance_artifact():
+    """The CLI persists load-time provenance next to the results.
+
+    End-to-end regression for the provenance integration: the
+    data_provenance.json artifact must record the source file, its
+    checksum, and the validation outcome so the run can be audited
+    and reproduced.
+    """
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest", "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 10, "slow_period": 30}',
+            "--output", out_dir, "--validate-point-in-time",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+
+        assert rc == 0
+        prov_path = os.path.join(out_dir, "data_provenance.json")
+        assert os.path.exists(prov_path), "data_provenance.json not written"
+        with open(prov_path) as f:
+            prov = json.load(f)
+        assert prov["source_path"] == csv_path
+        assert prov["symbol_filter"] == "SPY"  # default --symbol
+        assert prov["checksum"], "provenance artifact missing checksum"
+        assert prov["validation_passed"] is True
+        assert prov["date_range_final"] is not None
+
+
+def test_cli_multi_symbol_writes_survivorship_artifact():
+    """--multi-symbol runs survivorship detection and persists artifacts.
+
+    End-to-end regression for the panel integration: the CLI must
+    load the symbol universe, report and persist the survivorship
+    bias analysis (entered/exited symbols, bias score), and write a
+    per-symbol provenance artifact with checksums.
+    """
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "multi.csv")
+        _write_multi_symbol_csv(csv_path)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest", "--data", csv_path, "--multi-symbol",
+            "--strategy", "cross_sectional_momentum",
+            "--params", '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}',
+            "--output", out_dir, "--validate-point-in-time",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+
+        assert rc == 0
+
+        surv_path = os.path.join(out_dir, "survivorship_bias.json")
+        assert os.path.exists(surv_path), "survivorship_bias.json not written"
+        with open(surv_path) as f:
+            surv = json.load(f)
+        assert surv["surviving_symbols"] == ["SURV"]
+        assert [e["symbol"] for e in surv["entered_symbols"]] == ["LATE"]
+        assert [e["symbol"] for e in surv["exited_symbols"]] == ["EARLY"]
+        assert surv["bias_score"] > 0.0
+
+        prov_path = os.path.join(out_dir, "data_provenance.json")
+        assert os.path.exists(prov_path)
+        with open(prov_path) as f:
+            prov = json.load(f)
+        assert set(prov) == {"SURV", "LATE", "EARLY"}
+        assert all(p["checksum"] for p in prov.values())
+
+        # The backtest itself must have run on the overlapping window.
+        metrics_path = os.path.join(out_dir, "metrics.json")
+        assert os.path.exists(metrics_path)
+        with open(metrics_path) as f:
+            metrics = json.load(f)
+        assert metrics["total_trades"] > 0
+
+
 def main() -> int:
     tests = [
         ("signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
@@ -703,6 +992,16 @@ def main() -> int:
         ("run_backtest_multi_asset_dual_momentum", test_run_backtest_multi_asset_dual_momentum),
         ("run_backtest_multi_asset_dict_cross_sectional_momentum", test_run_backtest_multi_asset_dict_cross_sectional_momentum),
         ("run_backtest_multi_asset_dict_dual_momentum", test_run_backtest_multi_asset_dict_dual_momentum),
+        ("run_backtest_serializes_data_provenance_into_results", test_run_backtest_serializes_data_provenance_into_results),
+        ("run_backtest_serializes_panel_provenance_dict", test_run_backtest_serializes_panel_provenance_dict),
+        ("run_backtest_without_provenance_omits_key", test_run_backtest_without_provenance_omits_key),
+        ("run_backtest_point_in_time_validation_recorded", test_run_backtest_point_in_time_validation_recorded),
+        ("run_backtest_point_in_time_detects_duplicate_timestamps", test_run_backtest_point_in_time_detects_duplicate_timestamps),
+        ("handle_point_in_time_results_strictness_matrix", test_handle_point_in_time_results_strictness_matrix),
+        ("run_backtest_point_in_time_panel_validates_each_symbol", test_run_backtest_point_in_time_panel_validates_each_symbol),
+        ("parse_args_accepts_validation_and_multi_symbol_flags", test_parse_args_accepts_validation_and_multi_symbol_flags),
+        ("cli_writes_data_provenance_artifact", test_cli_writes_data_provenance_artifact),
+        ("cli_multi_symbol_writes_survivorship_artifact", test_cli_multi_symbol_writes_survivorship_artifact),
     ]
 
     failures = 0

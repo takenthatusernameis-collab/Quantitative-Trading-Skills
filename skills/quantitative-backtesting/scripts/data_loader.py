@@ -501,7 +501,12 @@ def load_multi_symbol(
     Returns:
         Dictionary mapping symbol to DataFrame, or tuple with provenance dict
     """
-    df = load_data(path, symbol=None, **kwargs)
+    # The stacked frame legitimately has duplicate timestamps (one
+    # row per symbol per date); per-symbol validation below is the
+    # meaningful check, so suppress the aggregate-frame warning.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Data validation failed.*")
+        df = load_data(path, symbol=None, **kwargs)
 
     if "symbol" not in df.columns and "ticker" not in df.columns:
         raise ValueError("Multi-symbol file must have 'symbol' or 'ticker' column")
@@ -531,7 +536,12 @@ def load_multi_symbol(
                     columns_original=list(sym_df.columns),
                     columns_final=list(sym_df.columns),
                     validation_passed=True,
+                    checksum=_compute_checksum(sym_df),
                 )
+                if isinstance(sym_df.index, pd.DatetimeIndex) and len(sym_df) > 0:
+                    prov.date_range_final = (
+                        str(sym_df.index.min()), str(sym_df.index.max())
+                    )
                 provenance_dict[sym] = prov
 
     if return_provenance:

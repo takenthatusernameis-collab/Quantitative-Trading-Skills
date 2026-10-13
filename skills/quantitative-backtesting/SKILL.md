@@ -119,8 +119,8 @@ Risk Metrics:
 ## Resources
 
 ### scripts/
-- `run_backtest.py` - Main entry point for running backtests with configurable parameters (supports `--n-trials` to report the Deflated Sharpe Ratio of the final backtest Sharpe)
-- `data_loader.py` - Utilities for loading and validating market data from various sources
+- `run_backtest.py` - Main entry point for running backtests with configurable parameters (supports `--n-trials` to report the Deflated Sharpe Ratio of the final backtest Sharpe; `--validate-point-in-time` / `--point-in-time-strict` to screen for look-ahead bias and data-integrity violations, aborting on violations in strict mode; `--multi-symbol` to load a multi-symbol panel, run survivorship-bias detection, and backtest a panel strategy)
+- `data_loader.py` - Utilities for loading and validating market data from various sources (includes `DataProvenance` tracking, `validate_point_in_time`, `detect_survivorship_bias`, and `load_multi_symbol` for panel files with a `symbol`/`ticker` column)
 - `strategy_builder.py` - Factory for creating common strategy templates (trend, mean reversion, momentum)
 - `performance.py` - Comprehensive performance analytics and metric calculation
 - `walk_forward.py` - Walk-forward analysis, parameter optimization, CPCV, Monte Carlo simulation CLI, and Deflated Sharpe Ratio multiple-testing correction
@@ -158,6 +158,9 @@ Risk Metrics:
 - Correct for multiple testing: a grid search over many parameter combinations inflates in-sample Sharpe; compute the Deflated Sharpe Ratio before trusting a Sharpe estimate. Use `--deflate` for walk-forward/optimization/CPCV, or pass `--n-trials` to `run_backtest.py` or the `monte-carlo` subcommand to deflate a single backtest's final Sharpe by the number of development trials (the `monte-carlo` path also uses the optimization record's trial Sharpes for the cross-sectional estimator)
 - Consider regime-dependent performance (bull/bear/sideways markets)
 - Document all assumptions and data sources for reproducibility
+- Run `--validate-point-in-time` on every backtest to screen for temporal-order violations, duplicate timestamps, and signal/next-return correlation (a look-ahead indicator); add `--point-in-time-strict` to make violations fail the run
+- For multi-symbol universes, run `--multi-symbol` to detect survivorship bias (late entries, early exits, insufficient history, data gaps) and review `survivorship_bias.json` before trusting panel results
+- The CLI writes `data_provenance.json` (source path, checksum, filters, transformations, validation outcome) next to the results so every backtest is reproducible and auditable
 
 ## Common Use Cases
 
@@ -194,7 +197,11 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
 
 - `test_data_loader.py` - CSV/Parquet loading, column/date handling, symbol
   filtering, and `validate_data` quality checks (missing columns, non-positive
-  prices, high < low, duplicate dates, short series).
+  prices, high < low, duplicate dates, short series). Also covers
+  `load_multi_symbol` provenance completeness: per-symbol `DataProvenance`
+  carries a checksum and date range, and the expected cross-symbol duplicate
+  timestamps of panel files do not trigger a spurious aggregate validation
+  warning (per-symbol validation is authoritative).
 - `test_performance.py` - `calculate_metrics` and `_annualization_factor`:
   total/annualized return, volatility, Sharpe/Sortino/Calmar, drawdown, VaR/CVaR,
   skew/kurtosis, and **trade-level metrics**. The trade suite is a regression
@@ -249,10 +256,26 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   `--n-trials` threads the number of development trials through the
   results config, `calculate_metrics` deflates the final backtest
   Sharpe by it (importing `deflated_sharpe_ratio` from `walk_forward`
-  lazily) into a `deflated_sharpe` metrics key, and the surfaced DSR
+  lazily) into a `deflated_sharpe` metrics key, and   the surfaced DSR
   equals a direct `deflated_sharpe_ratio` call; without `--n-trials`
   no `deflated_sharpe` key is emitted (backward compatible).
   `parse_args` accepts `--n-trials` (default `None`).
+  Also covers the **provenance / point-in-time / survivorship CLI
+  integration**: `run_backtest` serializes the load-time
+  `DataProvenance` (single and per-symbol panel forms) into
+  `results["data_provenance"]` and omits the key when none was
+  captured; `--validate-point-in-time` records the PIT outcome in
+  `results["point_in_time_validation"]` (clean data passes, duplicate
+  timestamps violate, dict panels are validated per symbol, non-strict
+  runs still complete); `_handle_point_in_time_results` aborts only on
+  violations in strict mode; `parse_args` accepts
+  `--validate-point-in-time`, `--point-in-time-strict`, `--multi-symbol`
+  (all default off). Two end-to-end `main()` tests verify the CLI
+  writes `data_provenance.json` (source path, checksum, validation
+  outcome) and that `--multi-symbol` writes `survivorship_bias.json`
+  (surviving/entered/exited symbols, bias score) plus a per-symbol
+  provenance artifact with checksums, while the panel backtest runs on
+  the overlapping window.
 - `test_strategy_builder.py` - strategy registry, `build_strategy`, defaults,
   binary long/flat signal generation with real crossovers, and multi-asset
   panel signal generation for `CrossSectionalMomentum` and

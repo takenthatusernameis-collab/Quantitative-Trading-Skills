@@ -1,51 +1,48 @@
 # Handoff — Quantitative Trading Skills Repository
 
-**Last updated:** 2026-10-13, after adding borrow/funding cost modeling with 5 new tests and fixing the walk-forward CLI test stub.
+**Last updated:** 2026-10-13, after adding regression tests for the provenance / point-in-time / survivorship CLI integration and fixing two multi-symbol provenance defects.
 
 ## Current repository state
 
 - Default branch: `main`.
 - Main package: `skills/quantitative-backtesting/` (strategies, scripts, tests, and validation references).
-- Dependencies used by the test suite include `pandas` and `numpy`; plotting tests require Matplotlib to be available.
+- Dependencies used by the test suite include `pandas` and `numpy`; plotting tests require Matplotlib to be available. (Environment note: a fresh session must `pip3 install numpy pandas matplotlib` before the suite runs — the baseline failures on 2026-10-13 were only `ModuleNotFoundError`, not code defects.)
 
 ## Recent durable work
 
-1. **Constant-return / deflated-Sharpe correctness:** commit [`a1f4344`](https://github.com/takenthatusernameis-collab/Quantitative-Trading-Skills/commit/a1f434485df3ce4488a3482d03739cb143eaa77d) added a CLI-level regression test ensuring `run_parameter_optimization --deflate` writes degenerate DSR results for constant returns to its JSON artifact. Zero-variance combinations remain ranked at Sharpe 0 rather than being silently dropped.
-2. **Parameter sensitivity visualization:** commit [`460420b`](https://github.com/takenthatusernameis-collab/Quantitative-Trading-Skills/commit/460420baa91b579c44683196e3aefeb9aeb0035f) added `generate_parameter_heatmap` to `scripts/reporting.py`, automatic tear-sheet integration for a two-parameter optimization grid, and heatmap tests covering figures, file saving, degenerate DSR, invalid grids, total return, and custom titles/colormaps.
-3. The skill documentation now describes heatmap coverage. The handoff's former next task ("add a parameter sensitivity heatmap") is obsolete and has been replaced by validation of the feature at the current commit.
-4. **Tear-sheet heatmap integration regression (prior session):** added two explicit integration tests in `test_reporting.py` verifying that `generate_tear_sheet` with `results["parameter_optimization"]` containing exactly two varying parameters and `save_plots=True` writes `parameter_heatmap.png` and embeds it in the generated HTML and JSON summary; also verified the heatmap is omitted when the grid is not a valid 2D parameter space.
-5. **Walk-forward / CPCV / Monte Carlo tear sheet rendering (prior session):** extended `generate_tear_sheet` in `scripts/reporting.py` with an optional `analysis_results` parameter that accepts `walk_forward`, `cpcv`, and/or `monte_carlo` analysis dicts and renders corresponding HTML sections (best params per period/fold, parameter stability, overfitting risk, DSR tables, confidence intervals, metric distributions, probability of ruin) plus a JSON summary entry. A Monte Carlo equity curve fan chart (`monte_carlo_equity_curve.png`) is generated when `simulated_equity_curves` and matplotlib are available. Wired up the three CLI entry points in `walk_forward.py` (`run_walk_forward`, `run_cpcv`, `run_monte_carlo`) to pass their respective analysis results to the tear sheet. Added 9 new tests to `test_reporting.py`.
-6. **Borrow/funding cost modeling (this session):** extended transaction-cost modeling with annual borrow cost (applied daily on short exposure, `borrow_cost/periods_per_year`) and annual funding cost (applied daily on gross exposure beyond 1x). Wired through `_calculate_strategy_returns` in `scripts/walk_forward.py` (used by `walk_forward_analysis`, `parameter_optimization`, `cpcv_analysis`), all four walk-forward CLI entry points (`run_walk_forward`, `run_cpcv`, `run_parameter_optimization`, `run_monte_carlo`) plus the shared argparse section (`--borrow-cost`, `--funding-cost`), and `scripts/run_backtest.py` (CLI flags, cost application, and internal config echo). Documented models, assumptions, typical rates, and cost-level guidance in `references/cost_models.md`.
-7. **Borrow/funding test coverage (this session):** fixed `_CLIArgs` in `tests/test_walk_forward.py` to default the new cost kwargs (the CLI entry points read `args.borrow_cost`/`args.funding_cost` directly, so the missing defaults had broken 11 CLI tests). Added 5 regression tests: borrow cost reduces returns for a short-exposure strategy (Bollinger Bands), no effect on long-only strategies, zero rates match baseline exactly, funding cost applies only beyond 1x gross leverage, and a walk-forward integration run with both costs enabled.
-8. **Data-frequency-aware borrow/funding annualization:** the per-period rate uses `_annualization_factor(index)` (252 business-daily, 365 calendar-daily, 52 weekly, 12 monthly) instead of a hardcoded 252. Covered by tests `borrow_cost_frequency_aware_per_period_rate`, `borrow_cost_non_datetime_index_falls_back_to_252`, `funding_cost_frequency_aware_per_period_rate`, and `run_backtest_borrow_cost_frequency_aware`.
-9. **Walk-forward and CPCV equity curve plots:** `generate_tear_sheet` in `scripts/reporting.py` generates `walk_forward_equity_curve.png` and `cpcv_equity_curve.png` when `analysis_results` contains the respective OOS returns and `save_plots=True`. Covered by tests `test_tear_sheet_wf_equity_curve_generated` and `test_tear_sheet_cpcv_equity_curve_generated`.
-10. **Statistical uncertainty and multiple-testing documentation:** `references/validation_methods.md` covers Deflated Sharpe Ratio, confidence intervals, probability of ruin, and parameter stability interpretation.
+1. **Provenance / point-in-time / survivorship integration (prior sessions, code at HEAD):** `run_backtest.py` captures `DataProvenance` at load time (`return_provenance=True`), serializes it into `results["data_provenance"]` and a `data_provenance.json` artifact, runs `validate_point_in_time` on data + strategy signals when `--validate-point-in-time` is passed (recording the outcome in `results["point_in_time_validation"]`, aborting in strict mode via `--point-in-time-strict`), and supports `--multi-symbol` which loads the full symbol universe via `load_multi_symbol`, runs `detect_survivorship_bias`, prints the report, and persists `survivorship_bias.json`. The walk-forward CLI (`walk_forward.py`) shares `--validate-point-in-time` / `--point-in-time-strict` across all four subcommands via `_load_and_validate_data`.
+2. **Integration regression tests (this session):** the integration code existed but had no CLI-level coverage. Added 10 tests to `test_run_backtest.py` and 1 to `test_data_loader.py` covering: provenance serialization into results (single-asset and per-symbol panel forms), backward-compatible omission when no provenance is captured, PIT outcome recording (clean pass, duplicate-timestamp violation, per-symbol panel validation, non-strict completion), the strict-abort semantics of `_handle_point_in_time_results` (aborts only on violations, never warnings), `parse_args` wiring of the three new flags, and two end-to-end `main()` tests verifying the `data_provenance.json` and `survivorship_bias.json` artifacts are written with checksums, source paths, entered/exited symbols, and a non-empty panel backtest on the overlapping window.
+3. **Multi-symbol provenance defects fixed (this session, `scripts/data_loader.py` `load_multi_symbol`):** (a) per-symbol `DataProvenance` now carries a checksum (`_compute_checksum`) and `date_range_final` — previously both were `None`, so the multi-symbol provenance artifact could not support integrity verification or reproducibility; (b) the aggregate stacked frame no longer emits a spurious "Data validation failed: Duplicate dates in index" warning — cross-symbol duplicate timestamps are expected in panel files and per-symbol validation (which drops failing symbols) is the authoritative check.
+4. **Test-suite count correction:** the previous handoff's stated total (183) did not match the sum of its per-file counts (196). The authoritative totals are recomputed below from the tests actually executed.
 
 ## Verification status — measured this session
 
-- **Full test suite:** 183 tests passing across all 9 test entry points.
-  - `test_data_loader.py`: 15/15
+- **Full test suite:** 207 tests passing across all 9 test entry points.
+  - `test_data_loader.py`: 16/16 (was 15; +1 `load_multi_symbol` provenance test)
   - `test_performance.py`: 13/13
   - `test_reporting.py`: 36/36 (`unittest`, `OK`)
-  - `test_run_backtest.py`: 25/25
+  - `test_run_backtest.py`: 35/35 (was 25; +10 integration tests)
   - `test_strategy_builder.py`: 27/27
-  - `test_walk_forward.py`: 56/56 (was 48 at HEAD; +5 new borrow/funding tests, +3 frequency-aware tests, after fixing 11 broken CLI tests caused by the missing `_CLIArgs` defaults)
+  - `test_walk_forward.py`: 56/56
   - `test_cpcv.py`: 16/16
   - `test_monte_carlo.py`: 7/7
   - `test_generate_sample_data.py`: 1/1
-- **End-to-end CLI verification:** `python -m scripts.run_backtest --strategy bollinger_bands ... --borrow-cost 0.03 --funding-cost 0.02` runs cleanly and reduces sample-data total return from -3.91% to -5.67% vs. the same run without the new costs (short exposure is present in the strategy's signals).
+- **End-to-end CLI verification (manual):**
+  - Single-asset run with `--validate-point-in-time` exits 0, prints "Point-in-time validation passed", and writes `data_provenance.json` with source path, checksum, transformations, and validation outcome.
+  - `--multi-symbol` run on a crafted 3-symbol panel (one survivor, one late entry, one early exit) with `cross_sectional_momentum` exits 0, reports bias_score 1.0 with the correct entered/exited symbols, and writes `survivorship_bias.json` plus per-symbol `data_provenance.json` with checksums.
+- **Pinned snapshot stability:** regenerating `test_output/` via the canonical command in SKILL.md reproduces byte-identical `report.txt`, identical `metrics.json`, and a `tear_sheet_summary.json` that differs only in `plot_files` (absolute output-directory paths — environment-dependent by design, not a regression).
 - **Research limitation:** this package's strategy tests and examples are largely synthetic. No out-of-sample evidence of live-trading profitability is established by these tests.
-- **Modeling limitations:** market impact is a linear participation model; borrow and funding rates are constant annualized with data-frequency-aware per-period conversion; market impact, borrow rates, and funding rates are not time-varying.
+- **Modeling limitations:** market impact is a linear participation model; borrow and funding rates are constant annualized with data-frequency-aware per-period conversion; market impact, borrow rates, and funding rates are not time-varying. The PIT signal/next-return correlation check (threshold 0.3) cannot distinguish genuine alpha from look-ahead — it is a screening heuristic, not proof.
 
 ## Next agent task
 
-Provenance, point-in-time validation, and survivorship bias detection are now implemented and tested. The most impactful next step is to make these checks actionable in downstream workflows.
+The reproducibility chain is complete at the results/artifact level. The most impactful next step is to make provenance first-class in the primary reporting artifact and in the walk-forward workflows:
 
-1. **Integrate provenance into backtest outputs**: Modify `scripts/run_backtest.py` to optionally capture and include data provenance in the backtest results/metadata (when `load_data` is called with provenance or when loading from files). Store a serialized provenance summary in the results dict or write alongside output artifacts so results are reproducible.
-2. **Add CLI flags for validation**: Add optional flags to `scripts/run_backtest.py` and/or walk-forward CLIs to run point-in-time validation (`validate_point_in_time`) on signals/returns and fail or warn based on strictness. Surface violations in logs.
-3. **Panel data survivorship checks**: When loading multi-symbol universes (e.g., in research workflows), add optional survivorship bias detection using `detect_survivorship_bias` and report bias_score and affected symbols.
+1. **Surface provenance in the tear sheet:** extend `generate_tear_sheet` in `scripts/reporting.py` to render a "Data Provenance" section (source path, checksum, date range, filters, validation outcome) in the HTML and a `data_provenance` key in the JSON summary when `results["data_provenance"]` is present, omitting it otherwise (backward compatible). Add tests in `test_reporting.py` for presence, content, and omission.
+2. **Persist PIT validation results in walk-forward outputs:** `_load_and_validate_data` in `scripts/walk_forward.py` currently only prints PIT results; attach them to the analysis dicts so they flow into the walk-forward JSON artifacts and tear-sheet rendering (the reporting layer already renders arbitrary analysis sections).
+3. Optional follow-up: refine the PIT correlation check to compare signal changes against *contemporaneous* returns (true same-bar look-ahead) in addition to next-period returns, since a signal that genuinely predicts next-period returns is alpha, not necessarily look-ahead.
 
-These are bounded, evidence-based improvements that strengthen reproducibility and reduce look-ahead/survivorship risk without expanding scope to unrelated marketplace catalog work. Preserve existing schemas and avoid breaking tests. Include lightweight tests for the new integration points.
+These are bounded, evidence-based extensions of the provenance/validation work. Preserve existing schemas and avoid breaking tests; include lightweight tests for new integration points.
 
 ## Test commands
 
