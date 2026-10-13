@@ -1,106 +1,39 @@
 # Handoff — Quantitative Trading Skills Repository
 
-**Last updated**: 2026-10-13 (fourteenth session)
+**Last updated:** 2026-10-13, after reviewing the latest public commit and heatmap implementation.
 
-## Repository state
+## Current repository state
 
-- Git: `main` at `a1f4344` (CLI regression test for parameter optimization deflation on constant returns committed).
-- Skill location: `skills/quantitative-backtesting/` (8 strategies, 8 scripts, 9 test files, 5 reference docs).
-- Python deps for the suites: `pandas` and `numpy` (present in the session environment; not committed).
+- Default branch: `main`.
+- Latest observed HEAD: [`460420b`](https://github.com/takenthatusernameis-collab/Quantitative-Trading-Skills/commit/460420baa91b579c44683196e3aefeb9aeb0035f), dated 2026-10-13 05:26:19 UTC.
+- Main package: `skills/quantitative-backtesting/` (strategies, scripts, tests, and validation references).
+- Dependencies used by the test suite include `pandas` and `numpy`; plotting tests require Matplotlib to be available.
 
-## Session summary (2026-10-13, fourteenth session)
+## Recent durable work
 
-The thirteenth session's assigned task — **add a CLI-level end-to-end regression test for `run_parameter_optimization --deflate` on constant returns, asserting the saved JSON artifact carries the degenerate dicts** — was already completed and committed as `a1f4344`.
+1. **Constant-return / deflated-Sharpe correctness:** commit [`a1f4344`](https://github.com/takenthatusernameis-collab/Quantitative-Trading-Skills/commit/a1f434485df3ce4488a3482d03739cb143eaa77d) added a CLI-level regression test ensuring `run_parameter_optimization --deflate` writes degenerate DSR results for constant returns to its JSON artifact. Zero-variance combinations remain ranked at Sharpe 0 rather than being silently dropped.
+2. **Parameter sensitivity visualization:** commit [`460420b`](https://github.com/takenthatusernameis-collab/Quantitative-Trading-Skills/commit/460420baa91b579c44683196e3aefeb9aeb0035f) added `generate_parameter_heatmap` to `scripts/reporting.py`, automatic tear-sheet integration for a two-parameter optimization grid, and heatmap tests covering figures, file saving, degenerate DSR, invalid grids, total return, and custom titles/colormaps.
+3. The skill documentation now describes heatmap coverage. The handoff's former next task (“add a parameter sensitivity heatmap”) is obsolete and has been replaced by validation of the feature at the current commit.
 
-### Verified (evidence)
+## Verification status — do not overstate
 
-- Full suite from repo root: **149/149 tests pass**
-  (6 + 13 + 14 + 24 + 27 + 41 + 16 + 7 + 1 = 149).
-- `test_walk_forward.py`: 41/41 tests pass, including the new
-  `test_run_parameter_optimization_cli_constant_returns_deflation`.
-- `references/validation_methods.md` documents the degenerate dict for
-  `parameter_optimization(apply_deflation=True)` and the ranking
-  distinction (zero-variance combos ranked at Sharpe 0, not skipped).
-- `skills/quantitative-backtesting/SKILL.md` coverage bullet includes
-  the CLI degenerate-DSR artifact test.
+- **Historically reported:** the preceding handoff recorded 149/149 tests passing at the earlier `a1f4344` state.
+- **Observed by source inspection:** the current `test_reporting.py` contains 21 test methods, including the new heatmap tests; the latest heatmap implementation and documentation are present on the observed HEAD.
+- **Not verified at current HEAD:** the full suite has not been rerun after commit `460420b`. The previous 149-test result must not be presented as a current green build. This handoff update is documentation, not test evidence.
+- **Research limitation:** this package's strategy tests and examples are largely synthetic. No out-of-sample evidence of live-trading profitability is established by these tests.
+- **Modeling limitations:** transaction-cost support is primarily fixed commission/slippage in basis points; market impact, borrow costs, and funding costs are not comprehensively modeled.
 
-All five deflating entry points now have library-level and CLI-level
-degenerate-window coverage:
-1. `run_backtest --n-trials`
-2. `monte-carlo --n-trials`
-3. `walk_forward_analysis` aggregate (and per-period)
-4. `cpcv_analysis` aggregate (and per-fold)
-5. `parameter_optimization` per-combo (and CLI artifact)
+## Next agent task: verify the current HEAD and close remaining coverage gaps
 
-## Unresolved / remaining
+1. Run all test entry points below from the repository root against the current `main` commit. Record each command's actual exit status and test count; do not reuse the historical 149/149 result.
+2. If any test fails, diagnose and fix the implementation without weakening existing assertions or changing the return format of `parameter_optimization`.
+3. Add an explicit integration regression for `generate_tear_sheet` receiving `results["parameter_optimization"]` with exactly two varying parameters and writing the `parameter_heatmap.png` artifact when `save_plots=True`. Verify the output is represented in the generated tear sheet, not merely that the standalone plotting helper returns a figure.
+4. Run the focused reporting tests, then all test entry points again after the last code change. Update this handoff and the skill coverage/count notes only with measured results.
+5. Preserve the distinction between a plotting/test-infrastructure pass and evidence of a profitable strategy.
 
-- No out-of-sample evidence of profitability exists anywhere in this
-  repo; all results are synthetic.
-- The only remaining consistency risk is a future entry point that
-  adds its own `oos_returns.std() > 0` guard instead of reusing
-  `deflated_sharpe_ratio`; keep the guard at `len(returns) > 1`.
-- Transaction cost modeling is limited to fixed commission + slippage
-  (bps); no market impact, borrow costs, or funding rates.
-- No regime-detection or regime-dependent performance analysis.
-- No parameter sensitivity/robustness visualization (heatmaps, stability
-  profiles) for reporting.
+## Test commands
 
-## Next task for the next agent
-
-**Add a parameter sensitivity heatmap to the reporting module for
-visualizing Sharpe/DSR stability across a 2D parameter grid.**
-
-Context: the reporting module (`scripts/reporting.py`) generates tear
-sheets and text reports but lacks a visual summary of how the key
-metrics vary across the parameter grid. A 2D heatmap (e.g., Sharpe
-ratio, Deflated Sharpe Ratio, or total return as a function of two
-parameters) is standard in quant research for assessing parameter
-stability and identifying overfit regions. This directly supports the
-methodological objective of robustness testing.
-
-Scope (one bounded change):
-
-1. **`scripts/reporting.py`**: Add a `generate_parameter_heatmap`
-   function that takes a `parameter_optimization` results list (or a
-   DataFrame with `params`, `sharpe_ratio`, `deflated_sharpe_ratio`,
-   `total_return`) and two parameter names, and returns a matplotlib
-   figure (or saves to file) with a heatmap of the chosen metric.
-   Handle non-rectangular grids gracefully (missing combos → NaN).
-2. **`scripts/reporting.py`**: Integrate the heatmap into
-   `generate_tear_sheet` when a `parameter_optimization` result is
-   available and the grid has exactly two varying parameters.
-3. **`tests/test_reporting.py`**: Add a regression test that calls
-   `generate_parameter_heatmap` with synthetic grid results (e.g., the
-   4-combo `donchian_breakout` grid from the CLI test) and asserts the
-   figure is created / saved without error. Use the `Agg` backend so
-   the test runs headless.
-4. Update the `test_reporting.py` coverage bullet in
-   `skills/quantitative-backtesting/SKILL.md`.
-5. Run the full suite (must stay green, 149 → 150+ tests).
-
-Constraints:
-- No new third-party dependencies (matplotlib is already an optional
-  import in `reporting.py`; guard with try/except).
-- Do not change the `parameter_optimization` return format.
-- The heatmap must handle the degenerate DSR dict (DSR = 0, p = 1)
-  without crashing — treat `None` z_score as NaN for coloring.
-- Keep the function pure (returns figure) and the CLI integration
-  optional (file output) so it can be unit-tested without filesystem
-  side effects.
-
-Evidence to inspect before starting:
-- `scripts/reporting.py` (current tear sheet structure, `generate_tear_sheet`,
-  matplotlib usage pattern).
-- `tests/test_reporting.py` (existing unittest structure, `Agg` backend usage).
-- `skills/quantitative-backtesting/tests/test_walk_forward.py:428`
-  (`test_run_parameter_optimization_cli_constant_returns_deflation`
-  for the degenerate-grid test fixture).
-- `skills/quantitative-backtesting/SKILL.md:205-210` (reporting test
-  coverage bullet).
-
-## Test suite quick reference
-
-Run all from repo root (requires pandas/numpy):
+Run each command from the repository root and preserve the actual result:
 
 ```bash
 for t in test_data_loader test_performance test_reporting test_run_backtest \
@@ -110,9 +43,4 @@ for t in test_data_loader test_performance test_reporting test_run_backtest \
 done
 ```
 
-`test_reporting.py` uses stdlib `unittest` (exit code / `OK` line is
-the pass/fail signal); the rest use the custom `main()` runner
-printing `N/N tests passed`. Current counts:
-6 + 13 + 14 + 24 + 27 + 41 + 16 + 7 + 1 = 149.
-
-(End of file)
+`test_reporting.py` uses `unittest`; its exit status and `OK` summary are the pass/fail evidence. Other files use a custom runner. Recompute the total from the tests actually executed; do not assume the former total remains valid after the added heatmap coverage.
