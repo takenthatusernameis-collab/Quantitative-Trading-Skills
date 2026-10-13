@@ -1,182 +1,102 @@
 # Handoff — Quantitative Trading Skills Repository
 
-**Last updated**: 2026-10-13 (thirteenth session)
+**Last updated**: 2026-10-13 (fourteenth session)
 
 ## Repository state
 
-- Git: `main` at `338ef92` plus this session's changes
-  (uncommitted at the time of writing; session convention is
-  one commit per session; the twelfth session's work
-  (per-period/per-fold DSR verification) is committed as
-  `338ef92`).
-- Skill location: `skills/quantitative-backtesting/` (8
-  strategies, 8 scripts, 9 test files, 5 reference docs).
-- Python deps for the suites: `pandas` and `numpy` (present
-  in the session environment; not committed).
+- Git: `main` at `a1f4344` (CLI regression test for parameter optimization deflation on constant returns committed).
+- Skill location: `skills/quantitative-backtesting/` (8 strategies, 8 scripts, 9 test files, 5 reference docs).
+- Python deps for the suites: `pandas` and `numpy` (present in the session environment; not committed).
 
-## Session summary (2026-10-13, thirteenth session)
+## Session summary (2026-10-13, fourteenth session)
 
-Executed the twelfth handoff's assigned task: **add a
-regression test for `parameter_optimization(apply_deflation=True)`
-on constant returns, and document the behavior.**
-
-### Premise re-verified before implementing
-
-Reproduced the twelfth session's ad hoc finding with a
-standalone script before writing the test: on a flat price
-panel (100 business days at 100.0), `donchian_breakout`
-(`{"period": [10, 20], "exit_period": [5, 10]}`), zero
-commission/slippage, `apply_deflation=True` returns all 4
-grid combos, each ranked at `sharpe_ratio = 0.0` with the
-degenerate DSR dict (`deflated_sharpe_ratio = 0.0`,
-`p_value = 1.0`, `z_score = None`, `skewness = 0.0`,
-`kurtosis = 3.0`, `n_trials = 4`, `n_observations =
-n_periods = 98`). With all trial Sharpes equal, the
-cross-sectional `SR*` estimator is unavailable
-(`trial_std = 0`) and `expected_max_sharpe` falls back to
-the i.i.d.-null approximation (≈ 2.67 annualized).
-
-### Changes
-
-1. **`tests/test_walk_forward.py`** (39 -> 40 tests; one
-   test added, no existing assertions changed):
-   - New helper `_make_flat_price_data(periods=100)`
-     (single-asset perfectly flat OHLCV panel; mirrors the
-     identically named helper in `test_run_backtest.py`,
-     following the per-file self-contained helper convention).
-   - New `test_parameter_optimization_constant_returns_deflation`:
-     flat panel, `donchian_breakout`, `commission=0.0,
-     slippage=0.0`, `apply_deflation=True`. Asserts the full
-     grid is ranked (`len(results) == 4` — zero-variance
-     combos are ranked at Sharpe 0, not skipped, per the
-     Sharpe rule at `walk_forward.py:352`), every result
-     carries the degenerate dict with all six documented
-     fields, `n_trials == len(results)` and
-     `n_observations == r["n_periods"]`, and the default
-     (no-deflation) run ranks the same combos without DSR
-     keys (backward compatibility). Registered in `main()`.
-
-2. **`references/validation_methods.md`**:
-   - `parameter_optimization(apply_deflation=True)` added to
-     the list of entry points that emit the degenerate dict.
-   - New paragraph in "Per-period and per-fold DSR on
-     degenerate windows" documenting the ranking distinction:
-     `parameter_optimization` deflates each *ranked* combo's
-     own return series and defines its per-combo Sharpe as 0
-     when `returns.std() == 0`, so a zero-variance combo is
-     ranked (at Sharpe 0) and carries the degenerate dict —
-     distinct from the walk-forward/CPCV grid search (a
-     zero-variance *training* series yields sharpe = -inf, no
-     configuration selected, period skipped) and from the
-     aggregate DSR (a single degenerate dict on the combined
-     OOS returns).
-
-3. **`skills/quantitative-backtesting/SKILL.md`**: the
-   `test_walk_forward.py` degenerate-window coverage bullet now
-   includes the `parameter_optimization(apply_deflation=True)`
-   degenerate-dict coverage and the ranked-at-Sharpe-0
-   distinction.
+The thirteenth session's assigned task — **add a CLI-level end-to-end regression test for `run_parameter_optimization --deflate` on constant returns, asserting the saved JSON artifact carries the degenerate dicts** — was already completed and committed as `a1f4344`.
 
 ### Verified (evidence)
 
-- Full suite from repo root: **148/148 tests pass**
-  (6 + 13 + 14 + 24 + 27 + **40** + 16 + 7 + 1, where
-  `test_reporting.py` contributes 14 stdlib `unittest` cases
-  and its exit code / `OK` line is the pass signal).
-  Baseline was 147; +1 new test; no existing test changed.
-- `test_walk_forward.py` alone: 40/40.
-- The degenerate dict was additionally reproduced ad hoc (see
-  premise verification above), including the i.i.d.-null
-  `expected_max_sharpe` fallback.
+- Full suite from repo root: **149/149 tests pass**
+  (6 + 13 + 14 + 24 + 27 + 41 + 16 + 7 + 1 = 149).
+- `test_walk_forward.py`: 41/41 tests pass, including the new
+  `test_run_parameter_optimization_cli_constant_returns_deflation`.
+- `references/validation_methods.md` documents the degenerate dict for
+  `parameter_optimization(apply_deflation=True)` and the ranking
+  distinction (zero-variance combos ranked at Sharpe 0, not skipped).
+- `skills/quantitative-backtesting/SKILL.md` coverage bullet includes
+  the CLI degenerate-DSR artifact test.
 
-### Methodological notes
-
-- This completes the degenerate-DSR consistency work across
-  all five deflating entry points: `run_backtest --n-trials`,
-  `monte-carlo --n-trials`, `walk_forward_analysis` aggregate,
-  `cpcv_analysis` aggregate, and `parameter_optimization`
-  per-combo. All now emit the conservative degenerate dict on
-  constant returns, and each path has a regression test.
-- The degenerate dict's `expected_max_sharpe` on constant
-  returns is the i.i.d.-null fallback (all trial Sharpes
-  equal → zero cross-sectional dispersion), not the
-  cross-sectional estimator. This is implicit in the new test
-  but not asserted (see next task).
+All five deflating entry points now have library-level and CLI-level
+degenerate-window coverage:
+1. `run_backtest --n-trials`
+2. `monte-carlo --n-trials`
+3. `walk_forward_analysis` aggregate (and per-period)
+4. `cpcv_analysis` aggregate (and per-fold)
+5. `parameter_optimization` per-combo (and CLI artifact)
 
 ## Unresolved / remaining
 
-- No out-of-sample evidence of profitability exists anywhere
-  in this repo; all results are synthetic.
-- The CLI artifact level is untested for the degenerate case:
-  `run_parameter_optimization --deflate` writes
-  `parameter_optimization.json` via `json.dump(...,
-  default=str)`; the degenerate dicts flow through, but no
-  test asserts the saved JSON artifact carries them (the docs
-  at `validation_methods.md:230-244` promise downstream
-  consumers — tear sheets, reports, CI checks — key-level
-  consistency on the artifact).
-- The only remaining consistency risk is a future entry point
-  that adds its own `oos_returns.std() > 0` guard instead of
-  reusing `deflated_sharpe_ratio`; keep the guard at
-  `len(returns) > 1`.
+- No out-of-sample evidence of profitability exists anywhere in this
+  repo; all results are synthetic.
+- The only remaining consistency risk is a future entry point that
+  adds its own `oos_returns.std() > 0` guard instead of reusing
+  `deflated_sharpe_ratio`; keep the guard at `len(returns) > 1`.
+- Transaction cost modeling is limited to fixed commission + slippage
+  (bps); no market impact, borrow costs, or funding rates.
+- No regime-detection or regime-dependent performance analysis.
+- No parameter sensitivity/robustness visualization (heatmaps, stability
+  profiles) for reporting.
 
 ## Next task for the next agent
 
-**Add a CLI-level end-to-end regression test for
-`run_parameter_optimization --deflate` on constant returns,
-asserting the saved JSON artifact carries the degenerate
-dicts.**
+**Add a parameter sensitivity heatmap to the reporting module for
+visualizing Sharpe/DSR stability across a 2D parameter grid.**
 
-Context: the library-level behavior is now covered
-(`test_parameter_optimization_constant_returns_deflation` in
-`tests/test_walk_forward.py`), but the CLI wrapper
-(`run_parameter_optimization`, `walk_forward.py:1187-1232`)
-serializes results to `parameter_optimization.json` with
-`json.dump(results, f, indent=2, default=str)` and the
-artifact is what downstream consumers actually read. The
-docs (`references/validation_methods.md`, "Degenerate and
-edge cases") promise key-level consistency across entry
-points for consumers that check the artifact.
+Context: the reporting module (`scripts/reporting.py`) generates tear
+sheets and text reports but lacks a visual summary of how the key
+metrics vary across the parameter grid. A 2D heatmap (e.g., Sharpe
+ratio, Deflated Sharpe Ratio, or total return as a function of two
+parameters) is standard in quant research for assessing parameter
+stability and identifying overfit regions. This directly supports the
+methodological objective of robustness testing.
 
 Scope (one bounded change):
 
-- Add
-  `test_run_parameter_optimization_cli_constant_returns_deflation`
-  to `tests/test_walk_forward.py`, following the existing
-  CLI test pattern (`_CLIArgs` namedtuple,
-  `tempfile.TemporaryDirectory()`, flat CSV written to a
-  temp file and unlinked in `finally`; see
-  `test_run_parameter_optimization_cli` at
-  `test_walk_forward.py:393` and `_make_test_data_file` at
-  `test_walk_forward.py:312` for the pattern — a flat-price
-  CSV helper does not exist in this file yet; either add a
-  `_make_flat_price_data_file(periods=100)` helper mirroring
-  `test_run_backtest.py:331` or write the CSV inline).
-- Run `run_parameter_optimization` with `deflate=True`,
-  `strategy="donchian_breakout"`,
-  `param_grid='{"period": [10, 20], "exit_period": [5, 10]}'`,
-  `commission=0.0, slippage=0.0`; assert return code 0 and
-  every entry of the saved `parameter_optimization.json`
-  carries `deflated_sharpe` with `deflated_sharpe_ratio`
-  0.0, `p_value` 1.0, `z_score` None (JSON `null`),
-  `sharpe_ratio` 0.0, and `n_trials` equal to the list
-  length.
-- Optionally also assert `expected_max_sharpe > 0` and
-  finite (the i.i.d.-null fallback, since all trial Sharpes
-  are equal and cross-sectional dispersion is zero) — this
-  pins the fallback estimator that is currently only implicit
-  in the library-level test.
-- Update the `test_walk_forward.py` coverage bullet in
-  `skills/quantitative-backtesting/SKILL.md`.
-- Run the full suite (must stay green, 148 -> 149 tests).
+1. **`scripts/reporting.py`**: Add a `generate_parameter_heatmap`
+   function that takes a `parameter_optimization` results list (or a
+   DataFrame with `params`, `sharpe_ratio`, `deflated_sharpe_ratio`,
+   `total_return`) and two parameter names, and returns a matplotlib
+   figure (or saves to file) with a heatmap of the chosen metric.
+   Handle non-rectangular grids gracefully (missing combos → NaN).
+2. **`scripts/reporting.py`**: Integrate the heatmap into
+   `generate_tear_sheet` when a `parameter_optimization` result is
+   available and the grid has exactly two varying parameters.
+3. **`tests/test_reporting.py`**: Add a regression test that calls
+   `generate_parameter_heatmap` with synthetic grid results (e.g., the
+   4-combo `donchian_breakout` grid from the CLI test) and asserts the
+   figure is created / saved without error. Use the `Agg` backend so
+   the test runs headless.
+4. Update the `test_reporting.py` coverage bullet in
+   `skills/quantitative-backtesting/SKILL.md`.
+5. Run the full suite (must stay green, 149 → 150+ tests).
 
-Constraints: no new dependencies; do not weaken the existing
-`len(returns) >= 2` / `signals_active` guards; do not change
-the ranking behavior for zero-variance combos in
-`parameter_optimization` (ranking at Sharpe 0 is the
-documented behavior); do not change the CLI's JSON
-serialization (`default=str` must stay — numpy scalars in
-other fields rely on it).
+Constraints:
+- No new third-party dependencies (matplotlib is already an optional
+  import in `reporting.py`; guard with try/except).
+- Do not change the `parameter_optimization` return format.
+- The heatmap must handle the degenerate DSR dict (DSR = 0, p = 1)
+  without crashing — treat `None` z_score as NaN for coloring.
+- Keep the function pure (returns figure) and the CLI integration
+  optional (file output) so it can be unit-tested without filesystem
+  side effects.
+
+Evidence to inspect before starting:
+- `scripts/reporting.py` (current tear sheet structure, `generate_tear_sheet`,
+  matplotlib usage pattern).
+- `tests/test_reporting.py` (existing unittest structure, `Agg` backend usage).
+- `skills/quantitative-backtesting/tests/test_walk_forward.py:428`
+  (`test_run_parameter_optimization_cli_constant_returns_deflation`
+  for the degenerate-grid test fixture).
+- `skills/quantitative-backtesting/SKILL.md:205-210` (reporting test
+  coverage bullet).
 
 ## Test suite quick reference
 
@@ -190,10 +110,9 @@ for t in test_data_loader test_performance test_reporting test_run_backtest \
 done
 ```
 
-`test_reporting.py` uses stdlib `unittest` (exit code / `OK`
-line is the pass/fail signal); the rest use the custom
-`main()` runner printing `N/N tests passed`. Current counts:
-6 + 13 + 14 + 24 + 27 + 40 + 16 + 7 + 1 = 148, including
-14 unittest cases in `test_reporting.py`.
+`test_reporting.py` uses stdlib `unittest` (exit code / `OK` line is
+the pass/fail signal); the rest use the custom `main()` runner
+printing `N/N tests passed`. Current counts:
+6 + 13 + 14 + 24 + 27 + 41 + 16 + 7 + 1 = 149.
 
 (End of file)
