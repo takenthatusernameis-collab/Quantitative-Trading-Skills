@@ -10,6 +10,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Dict, Any
 
 import numpy as np
 import pandas as pd
@@ -17,7 +18,13 @@ import pandas as pd
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from data_loader import load_data, validate_data
+from data_loader import (
+    load_data,
+    validate_data,
+    load_multi_symbol,
+    validate_point_in_time,
+    detect_survivorship_bias,
+)
 from strategy_builder import build_strategy
 from performance import calculate_metrics, generate_report, _annualization_factor
 from reporting import generate_tear_sheet
@@ -41,12 +48,104 @@ def parse_args():
     parser.add_argument("--params", type=str, help="Strategy parameters as JSON string")
     parser.add_argument("--n-trials", type=int, default=None, help="Number of development trials (parameter configurations) tested; when set, report the Deflated Sharpe Ratio (multiple-testing correction) for the final Sharpe")
     parser.add_argument("--risk-free-rate", type=float, default=None, help="Annual risk-free rate (as decimal, e.g., 0.02 for 2%)")
+    parser.add_argument("--validate-point-in-time", action="store_true", help="Run point-in-time validation on the loaded data and strategy signals (temporal ordering, duplicate timestamps, signal/next-return correlation for look-ahead bias screening)")
+    parser.add_argument("--point-in-time-strict", action="store_true", help="Abort with a non-zero exit code when point-in-time validation finds violations (default: warn only)")
+    parser.add_argument("--multi-symbol", action="store_true", help="Load every symbol in a multi-symbol file (with a 'symbol' or 'ticker' column) as a panel, run survivorship-bias detection, and backtest the panel. Requires a panel strategy such as cross_sectional_momentum or dual_momentum.")
     return parser.parse_args()
 
 
-def run_backtest(data, strategy, args):
-    """Run a vectorized backtest and return results with equity curve and trades."""
+def _validate_point_in_time(data, signals) -> Dict[str, Any]:
+    """Run point-in-time validation on the loaded data and signals.
+
+    Single-asset data is validated together with the signal series so
+    the signal/next-return correlation check can screen for look-ahead
+    bias. Panel data (dict or MultiIndex columns) has no single signal
+    column, so each symbol frame is validated for structural violations
+    (temporal ordering, duplicate timestamps) instead.
+    """
+    if isinstance(data, pd.DataFrame) and not isinstance(data.columns, pd.MultiIndex):
+        check_df = data.copy()
+        check_df["_pit_signal"] = signals
+        result = validate_point_in_time(check_df, signal_column="_pit_signal")
+        # The internal signal column is not user data: warnings about
+        # long runs of identical values are an artifact of the check
+        # (signals are sticky by design), not stale data.
+        result["warnings"] = [
+            w for w in result["warnings"] if "_pit_signal" not in w
+        ]
+        return result
+
+    frames = list(data.values()) if isinstance(data, dict) else [data]
+    combined: Dict[str, Any] = {"passed": True, "violations": [], "warnings": []}
+    for df in frames:
+        result = validate_point_in_time(df)
+        combined["passed"] = combined["passed"] and result["passed"]
+        combined["violations"].extend(result["violations"])
+        combined["warnings"].extend(result["warnings"])
+    return combined
+
+
+def _handle_point_in_time_results(pit_result: Dict[str, Any], strict: bool) -> bool:
+    """Print point-in-time validation results to the log.
+
+    Returns True when the run must abort (strict mode with violations).
+    """
+    if pit_result["violations"]:
+        print("Point-in-time validation violations:")
+        for violation in pit_result["violations"]:
+            print(f"  - {violation}")
+    if pit_result["warnings"]:
+        print("Point-in-time validation warnings:")
+        for warning in pit_result["warnings"]:
+            print(f"  - {warning}")
+    if not pit_result["violations"] and not pit_result["warnings"]:
+        print("Point-in-time validation passed (no violations or warnings).")
+    elif not pit_result["violations"]:
+        print("Point-in-time validation passed (no violations).")
+    if strict and not pit_result["passed"]:
+        print("Point-in-time validation failed in strict mode; aborting.")
+        return True
+    return False
+
+
+def _print_survivorship_report(survivorship: Dict[str, Any]) -> None:
+    """Print a survivorship-bias detection report to the log."""
+    print("Survivorship bias detection:")
+    print(f"  bias_score: {survivorship['bias_score']:.3f}")
+    print(f"  surviving symbols: {len(survivorship['surviving_symbols'])}")
+    for entry in survivorship["entered_symbols"]:
+        print(
+            f"  entered after sample start: {entry['symbol']} "
+            f"({entry['days_after_global_start']} days late)"
+        )
+    for entry in survivorship["exited_symbols"]:
+        print(
+            f"  exited before sample end: {entry['symbol']} "
+            f"({entry['days_before_global_end']} days early)"
+        )
+    for symbol in survivorship["insufficient_data"]:
+        print(f"  insufficient observations: {symbol}")
+    for entry in survivorship["large_gaps"]:
+        print(
+            f"  large data gap: {entry['symbol']} "
+            f"(max {entry['max_gap_days']} days)"
+        )
+
+
+def run_backtest(data, strategy, args, data_provenance=None):
+    """Run a vectorized backtest and return results with equity curve and trades.
+
+    data_provenance: optional DataProvenance (or dict of them for
+        multi-symbol panels) captured at load time; serialized into
+        the results so the backtest is reproducible.
+    """
     signals = strategy.generate_signals(data)
+
+    # Optional point-in-time validation (look-ahead bias screening).
+    # Recorded in the results so the check is reproducible downstream.
+    pit_result = None
+    if getattr(args, "validate_point_in_time", False):
+        pit_result = _validate_point_in_time(data, signals)
     if isinstance(data, dict):
         common_index = None
         for df in data.values():
@@ -218,7 +317,7 @@ def run_backtest(data, strategy, args):
             "closed_at_end": True,
         })
 
-    return {
+    results = {
         "equity_curve": equity,
         "returns": strategy_returns,
         "data": data,
@@ -238,6 +337,22 @@ def run_backtest(data, strategy, args):
             "risk_free_rate": getattr(args, "risk_free_rate", None),
         },
     }
+
+    # Optional data provenance (the CLI captures DataProvenance at
+    # load time) so results are reproducible from the artifacts.
+    if data_provenance is not None:
+        if isinstance(data_provenance, dict):
+            results["data_provenance"] = {
+                sym: prov.to_dict() for sym, prov in data_provenance.items()
+            }
+        else:
+            results["data_provenance"] = data_provenance.to_dict()
+
+    # Optional point-in-time validation outcome.
+    if pit_result is not None:
+        results["point_in_time_validation"] = pit_result
+
+    return results
 
 
 def signals_active(signals: pd.Series) -> bool:
@@ -259,9 +374,37 @@ def main():
     args = parse_args()
 
     print(f"Loading data from {args.data}...")
-    data = load_data(args.data, symbol=args.symbol, start=args.start, end=args.end)
+    survivorship = None
+    if getattr(args, "multi_symbol", False):
+        print("Multi-symbol mode: loading the full symbol universe...")
+        data, provenance = load_multi_symbol(args.data, return_provenance=True)
+        if not data:
+            print("No symbols could be loaded from the multi-symbol file!")
+            return 1
+        survivorship = detect_survivorship_bias(data)
+        _print_survivorship_report(survivorship)
+        for sym, prov in provenance.items():
+            print(
+                f"  {sym}: {prov.final_shape[0]} rows, "
+                f"checksum {prov.checksum}"
+            )
+    else:
+        data, provenance = load_data(
+            args.data,
+            symbol=args.symbol,
+            start=args.start,
+            end=args.end,
+            return_provenance=True,
+        )
+        print(
+            f"Loaded {provenance.final_shape[0]} rows x "
+            f"{provenance.final_shape[1]} columns "
+            f"(checksum {provenance.checksum})"
+        )
 
-    if not validate_data(data):
+    # Multi-symbol frames are validated per symbol inside
+    # load_multi_symbol (failing symbols are dropped there).
+    if not isinstance(data, dict) and not validate_data(data):
         print("Data validation failed!")
         return 1
 
@@ -269,7 +412,15 @@ def main():
     strategy = build_strategy(args.strategy, args.params)
 
     print("Running backtest...")
-    results = run_backtest(data, strategy, args)
+    results = run_backtest(data, strategy, args, data_provenance=provenance)
+
+    # Surface point-in-time validation results in the logs and
+    # abort in strict mode before investing more in the run.
+    pit = results.get("point_in_time_validation")
+    if pit is not None and _handle_point_in_time_results(
+        pit, getattr(args, "point_in_time_strict", False)
+    ):
+        return 1
 
     print("Calculating performance metrics...")
     rfr = getattr(args, "risk_free_rate", None)
@@ -289,6 +440,21 @@ def main():
     print("Generating report...")
     generate_report(metrics, args.output, symbol=args.symbol, strategy_name=args.strategy)
     generate_tear_sheet(results, metrics, args.output, symbol=args.symbol, strategy_name=args.strategy)
+
+    # Persist provenance and survivorship artifacts alongside the
+    # other outputs so the backtest can be reproduced and audited.
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    prov_path = output_dir / "data_provenance.json"
+    with open(prov_path, "w") as f:
+        json.dump(results.get("data_provenance"), f, indent=2, default=str)
+    print(f"Data provenance saved to: {prov_path}")
+
+    if survivorship is not None:
+        surv_path = output_dir / "survivorship_bias.json"
+        with open(surv_path, "w") as f:
+            json.dump(survivorship, f, indent=2, default=str)
+        print(f"Survivorship bias report saved to: {surv_path}")
 
     print(f"Backtest complete! Results saved to {args.output}/")
     return 0

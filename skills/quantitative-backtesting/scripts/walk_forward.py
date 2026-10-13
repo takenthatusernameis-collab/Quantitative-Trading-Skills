@@ -21,7 +21,7 @@ from itertools import product
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from scripts.strategy_builder import build_strategy
-from scripts.data_loader import load_data, validate_data
+from scripts.data_loader import load_data, validate_data, validate_point_in_time
 from scripts.performance import calculate_metrics, generate_report
 from scripts.reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
@@ -1108,7 +1108,11 @@ def _calculate_cpcv_summary(
 def run_cpcv(args) -> int:
     """Run CPCV analysis from CLI args."""
     print(f"Loading data from {args.data}...")
-    data = _load_and_validate_data(args.data, args.symbol, args.start, args.end)
+    data = _load_and_validate_data(
+        args.data, args.symbol, args.start, args.end,
+        validate_pit=getattr(args, "validate_point_in_time", False),
+        pit_strict=getattr(args, "point_in_time_strict", False),
+    )
 
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
@@ -1210,11 +1214,43 @@ def _make_strategy_factory(strategy_type: str):
     return factory
 
 
-def _load_and_validate_data(data_path: str, symbol: str, start: str, end: str) -> pd.DataFrame:
-    """Load and validate data from file."""
+def _load_and_validate_data(
+    data_path: str,
+    symbol: str,
+    start: str,
+    end: str,
+    validate_pit: bool = False,
+    pit_strict: bool = False,
+) -> pd.DataFrame:
+    """Load and validate data from file.
+
+    When validate_pit is True, run point-in-time validation on the
+    loaded frame (temporal ordering, duplicate timestamps, stale-data
+    warnings) and print the results. With pit_strict, violations raise
+    so the analysis aborts instead of continuing on suspect data.
+    """
     data = load_data(data_path, symbol=symbol, start=start, end=end)
     if not validate_data(data):
         raise ValueError("Data validation failed!")
+    if validate_pit:
+        pit = validate_point_in_time(data)
+        if pit["violations"]:
+            print("Point-in-time validation violations:")
+            for violation in pit["violations"]:
+                print(f"  - {violation}")
+        if pit["warnings"]:
+            print("Point-in-time validation warnings:")
+            for warning in pit["warnings"]:
+                print(f"  - {warning}")
+        if not pit["violations"] and not pit["warnings"]:
+            print("Point-in-time validation passed (no violations or warnings).")
+        elif not pit["violations"]:
+            print("Point-in-time validation passed (no violations).")
+        if pit_strict and not pit["passed"]:
+            raise ValueError(
+                "Point-in-time validation failed in strict mode: "
+                + "; ".join(pit["violations"])
+            )
     return data
 
 
@@ -1234,7 +1270,11 @@ def _parse_param_grid(param_grid_str: str) -> Dict[str, List[Any]]:
 def run_walk_forward(args) -> int:
     """Run walk-forward analysis from CLI args."""
     print(f"Loading data from {args.data}...")
-    data = _load_and_validate_data(args.data, args.symbol, args.start, args.end)
+    data = _load_and_validate_data(
+        args.data, args.symbol, args.start, args.end,
+        validate_pit=getattr(args, "validate_point_in_time", False),
+        pit_strict=getattr(args, "point_in_time_strict", False),
+    )
 
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
@@ -1332,7 +1372,11 @@ def run_walk_forward(args) -> int:
 def run_parameter_optimization(args) -> int:
     """Run parameter optimization from CLI args."""
     print(f"Loading data from {args.data}...")
-    data = _load_and_validate_data(args.data, args.symbol, args.start, args.end)
+    data = _load_and_validate_data(
+        args.data, args.symbol, args.start, args.end,
+        validate_pit=getattr(args, "validate_point_in_time", False),
+        pit_strict=getattr(args, "point_in_time_strict", False),
+    )
 
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
@@ -1384,7 +1428,11 @@ def run_parameter_optimization(args) -> int:
 def run_monte_carlo(args) -> int:
     """Run Monte Carlo simulation from CLI args."""
     print(f"Loading data from {args.data}...")
-    data = _load_and_validate_data(args.data, args.symbol, args.start, args.end)
+    data = _load_and_validate_data(
+        args.data, args.symbol, args.start, args.end,
+        validate_pit=getattr(args, "validate_point_in_time", False),
+        pit_strict=getattr(args, "point_in_time_strict", False),
+    )
 
     # First run a backtest to get base returns
     param_grid = _parse_param_grid(args.param_grid)
@@ -1574,6 +1622,8 @@ def main():
     common_parser.add_argument("--funding-cost", type=float, default=0.0, help="Annual funding cost rate for leveraged positions (as decimal, e.g., 0.02 = 2% per year)")
     common_parser.add_argument("--output", type=str, default="results", help="Output directory")
     common_parser.add_argument("--param-grid", type=str, required=True, help="Parameter grid as JSON string")
+    common_parser.add_argument("--validate-point-in-time", action="store_true", help="Run point-in-time validation on the loaded data (temporal ordering, duplicate timestamps, stale-data warnings)")
+    common_parser.add_argument("--point-in-time-strict", action="store_true", help="Abort when point-in-time validation finds violations (default: warn only)")
 
     # Walk-forward analysis
     wf_parser = subparsers.add_parser("walk-forward", parents=[common_parser], help="Run walk-forward analysis")
