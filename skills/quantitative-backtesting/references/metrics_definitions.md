@@ -69,7 +69,12 @@ and `cpcv_analysis`, per-period (per-fold) DSRs use the
 dispersion within that period/fold, and the aggregate DSR on
 the combined OOS returns uses the **pooled cross-period/fold**
 trial Sharpes for `SR*` (conservative: between-period variation
-inflates the null benchmark). The main backtest entry point
+inflates the null benchmark). Each per-period (per-fold) DSR is
+an in-sample correction: it deflates the Sharpe of the
+configuration selected on that period's *training* window, so a
+constant *test* window does not degenerate it, while a constant
+*training* window skips the period entirely (no in-sample Sharpe
+to deflate, no `deflated_sharpe` key for that period/fold). The main backtest entry point
 `run_backtest.py` reports it too when the number of development
 trials is supplied (CLI: `--n-trials`): `calculate_metrics` adds
 a `deflated_sharpe` dict to its output (deflating the final

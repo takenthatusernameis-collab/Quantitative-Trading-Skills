@@ -249,6 +249,27 @@ empty. In that case no Sharpe or DSR can be computed and the key is omitted
 from the summary — this is a genuine "no signal" outcome, not a degenerate
 one, and is distinct from the zero-variance case above.
 
+### Per-period and per-fold DSR on degenerate windows
+
+The per-period (walk-forward) and per-fold (CPCV) DSRs are
+**in-sample** deflations: each is computed on the period's
+*training* returns — the in-sample Sharpe of the configuration
+the grid search selected for that period — not on the test-window
+returns. Two consequences:
+
+- Constant *test* windows (a strategy that takes active positions
+  on a flat test window) leave the per-period DSR **non-degenerate**:
+  the training returns retain variance, so the per-period DSR carries
+  a finite `z_score` rather than the degenerate dict above. Only the
+  *aggregate* DSR on the combined OOS returns takes the degenerate
+  dict.
+- A flat *training* window leaves every configuration's in-sample
+  Sharpe undefined (zero variance), so no configuration is selected:
+  the period is skipped entirely (`best_params` is `None`, no
+  `deflated_sharpe` key, no out-of-sample contribution). This is a
+  genuine "no signal" outcome, distinct from the degenerate dict —
+  there is no in-sample Sharpe to deflate.
+
 The `monte-carlo` subcommand accepts the same `--n-trials` flag. It
 first runs the parameter optimization implied by `--param-grid` to
 select the base parameters, then deflates the base backtest Sharpe

@@ -249,17 +249,23 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   three-asset rejection, single-asset fallback warning, and the
   `ols_hedge` spread method (rolling OLS hedge-ratio recovery on a known
   cointegrated pair, spread stationarity, backward-compatible defaults).
-   - `test_walk_forward.py` - walk-forward windowing, parameter grid parsing,
-     train/test separation, Monte Carlo simulation, **Deflated Sharpe Ratio
-     multiple-testing correction** (`deflated_sharpe_ratio`, `apply_deflation`
-     on `parameter_optimization` and `walk_forward_analysis`, CLI `--deflate`),
-     the **`monte-carlo` CLI's `--n-trials` deflation** (the base backtest
-     Sharpe is deflated via `calculate_metrics`, the optimization record's
-     trial Sharpes give the cross-sectional `SR*` estimator, the surfaced DSR
-     equals a direct `deflated_sharpe_ratio` call, and without `--n-trials` no
-     `deflated_sharpe` key is emitted), and multi-asset panel (dict and
-     MultiIndex) walk-forward and Monte Carlo integration with
-     `CrossSectionalMomentum` and `DualMomentumStrategy`.
+    - `test_walk_forward.py` - walk-forward windowing, parameter grid parsing,
+      train/test separation, Monte Carlo simulation, **Deflated Sharpe Ratio
+      multiple-testing correction** (`deflated_sharpe_ratio`, `apply_deflation`
+      on `parameter_optimization` and `walk_forward_analysis`, CLI `--deflate`),
+      the **`monte-carlo` CLI's `--n-trials` deflation** (the base backtest
+      Sharpe is deflated via `calculate_metrics`, the optimization record's
+      trial Sharpes give the cross-sectional `SR*` estimator, the surfaced DSR
+      equals a direct `deflated_sharpe_ratio` call, and without `--n-trials` no
+      `deflated_sharpe` key is emitted), **degenerate-window DSR coverage**
+      (the aggregate DSR emits the conservative degenerate dict on constant
+      OOS returns; the per-period/per-fold DSR — an in-sample deflation on the
+      period's *training* returns — is reachable and non-degenerate on constant
+      *test* windows and equals an independent grid-search recomputation, while
+      a flat *training* window skips the period with no per-period DSR), and
+      multi-asset panel (dict and
+      MultiIndex) walk-forward and Monte Carlo integration with
+      `CrossSectionalMomentum` and `DualMomentumStrategy`.
   - `test_cpcv.py` - CPCV fold structure, purge/embargo behavior, parameter
     stability calculation, summary metrics, **Deflated Sharpe Ratio
     correction** (`apply_deflation` on `cpcv_analysis`), CLI integration,

@@ -1331,6 +1331,108 @@ def _make_cpcv_flat_test_window_data(periods: int = 300, n_splits: int = 4, test
     return df
 
 
+def _make_flat_train_window_data(periods: int = 300) -> pd.DataFrame:
+    """Build a multi-asset panel whose first training window is flat.
+
+    The first walk-forward training window (130 business days for
+    `train_months=6` starting 2020-01-01) is held at a constant
+    price and the series trends afterwards, so the first period's
+    expanding training window has zero return variance while every
+    later training window (and every test window past the flat
+    region) retains variance. No configuration achieves a finite
+    in-sample Sharpe in the first period, so that period is skipped
+    by the grid search.
+    """
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    symbols = ["A", "B", "C", "D"]
+    cols = pd.MultiIndex.from_product([["open", "high", "low", "close", "volume"], symbols])
+    df = pd.DataFrame(0.0, index=dates, columns=cols)
+
+    flat_end = 140  # covers the first train window (130 bars)
+    rng = np.random.default_rng(7)
+    prices = np.zeros(periods)
+    prices[:flat_end] = 100.0
+    if periods > flat_end:
+        rets = rng.normal(0.0005, 0.015, periods - flat_end)
+        prices[flat_end:] = 100.0 * np.exp(np.cumsum(rets))
+
+    for sym in symbols:
+        df[("open", sym)] = prices * rng.uniform(0.995, 1.005, periods)
+        df[("high", sym)] = prices * rng.uniform(1.005, 1.02, periods)
+        df[("low", sym)] = prices * rng.uniform(0.98, 0.995, periods)
+        df[("close", sym)] = prices
+        df[("volume", sym)] = rng.integers(1_000_000, 10_000_000, periods)
+    return df
+
+
+def _recompute_window_deflated_sharpe(
+    window, param_grid, strategy_factory, commission, slippage
+):
+    """Independently recompute a period/fold's per-period DSR.
+
+    Replicates the grid search over `window["train_data"]` /
+    `window["test_data"]` exactly as `walk_forward_analysis` /
+    `cpcv_analysis` do (same combo order, same `signals_active`
+    test-window guard, same in-sample Sharpe rule) and returns the
+    `deflated_sharpe` dict the analysis must have stored for that
+    period/fold. Returns None when no configuration achieved a finite
+    in-sample Sharpe (the period/fold is skipped).
+    """
+    from itertools import product
+
+    param_names = list(param_grid.keys())
+    param_values = list(param_grid.values())
+    best_sharpe = -np.inf
+    best_train_returns = None
+    best_test_returns = None
+    trial_sharpes = []
+
+    for combo in product(*param_values):
+        params = dict(zip(param_names, combo))
+        try:
+            strategy = strategy_factory(params)
+            train_signals = strategy.generate_signals(window["train_data"])
+            test_signals = strategy.generate_signals(window["test_data"])
+
+            if not signals_active(test_signals):
+                continue
+
+            test_returns = _calculate_strategy_returns(
+                window["test_data"], test_signals, commission, slippage
+            )
+            train_returns = _calculate_strategy_returns(
+                window["train_data"], train_signals, commission, slippage
+            )
+
+            if len(train_returns) > 1 and train_returns.std() > 0:
+                ann_factor = _annualization_factor(train_returns.index)
+                excess = train_returns - 0.02 / ann_factor
+                sharpe = excess.mean() / excess.std() * np.sqrt(ann_factor)
+            else:
+                sharpe = -np.inf
+
+            if np.isfinite(sharpe):
+                trial_sharpes.append(float(sharpe))
+
+            if sharpe > best_sharpe:
+                best_sharpe = sharpe
+                best_test_returns = test_returns
+                best_train_returns = train_returns
+        except Exception:
+            continue
+
+    if best_test_returns is None or len(best_test_returns) == 0:
+        return None
+    if best_train_returns is None or not trial_sharpes:
+        return None
+    return deflated_sharpe_ratio(
+        sharpe_ratio=best_sharpe,
+        returns=best_train_returns,
+        n_trials=len(trial_sharpes),
+        trial_sharpes=trial_sharpes,
+    )
+
+
 def test_walk_forward_aggregate_deflation_constant_oos_returns():
     """Aggregate walk-forward DSR emits the conservative degenerate dict.
 
@@ -1342,11 +1444,12 @@ def test_walk_forward_aggregate_deflation_constant_oos_returns():
     """
     data = _make_flat_test_window_data()
     strategy_factory = lambda p: _factory("cross_sectional_momentum", p)
+    param_grid = {"lookback": [5, 10], "top_quantile": [0.4], "bottom_quantile": [0.2]}
 
     results = walk_forward_analysis(
         data=data,
         strategy_factory=strategy_factory,
-        param_grid={"lookback": [5, 10], "top_quantile": [0.4], "bottom_quantile": [0.2]},
+        param_grid=param_grid,
         train_months=6,
         test_months=2,
         step_months=2,
@@ -1372,6 +1475,42 @@ def test_walk_forward_aggregate_deflation_constant_oos_returns():
     assert d["n_trials"] >= 1
     assert d["n_observations"] == len(results["oos_returns"])
 
+    # Per-period DSR: the per-period path IS reachable on constant
+    # test windows, but it is an IN-SAMPLE deflation computed on
+    # each period's TRAINING returns (which retain variance here),
+    # so it is non-degenerate — only the aggregate DSR on the
+    # combined OOS returns takes the degenerate dict above.
+    n_with_params = 0
+    for period in results["periods"]:
+        if period.get("best_params") is None:
+            continue
+        n_with_params += 1
+        assert "deflated_sharpe" in period, (
+            "expected per-period deflated_sharpe on constant test returns"
+        )
+        pd_dsr = period["deflated_sharpe"]
+        assert 0.0 <= pd_dsr["deflated_sharpe_ratio"] <= 1.0
+        assert pd_dsr["z_score"] is not None, (
+            "per-period DSR must be non-degenerate: it is deflated "
+            "on the period's training returns, not the flat test returns"
+        )
+        # The per-period DSR deflates the in-sample selection Sharpe.
+        assert abs(pd_dsr["sharpe_ratio"] - period["best_sharpe"]) < 1e-12
+        # The per-period DSR equals an independent recomputation of
+        # the period's grid search (same guard, same Sharpe rule).
+        expected = _recompute_window_deflated_sharpe(
+            period, param_grid, strategy_factory, 0.0, 0.0
+        )
+        assert expected is not None, (
+            "recomputed per-period DSR missing for an active period"
+        )
+        for key in (
+            "deflated_sharpe_ratio", "p_value", "expected_max_sharpe",
+            "n_trials", "n_observations", "skewness", "kurtosis",
+        ):
+            assert abs(pd_dsr[key] - expected[key]) < 1e-12, key
+    assert n_with_params > 0
+
 
 def test_cpcv_aggregate_deflation_constant_oos_returns():
     """Aggregate CPCV DSR emits the conservative degenerate dict.
@@ -1383,11 +1522,12 @@ def test_cpcv_aggregate_deflation_constant_oos_returns():
     """
     data = _make_cpcv_flat_test_window_data()
     strategy_factory = lambda p: _factory("cross_sectional_momentum", p)
+    param_grid = {"lookback": [5, 10], "top_quantile": [0.4], "bottom_quantile": [0.2]}
 
     results = cpcv_analysis(
         data=data,
         strategy_factory=strategy_factory,
-        param_grid={"lookback": [5, 10], "top_quantile": [0.4], "bottom_quantile": [0.2]},
+        param_grid=param_grid,
         n_splits=4,
         test_size=0.2,
         purge_size=0.0,
@@ -1414,6 +1554,96 @@ def test_cpcv_aggregate_deflation_constant_oos_returns():
     assert d["n_trials"] >= 1
     assert d["n_observations"] == len(results["oos_returns"])
 
+    # Per-fold DSR: like walk-forward, the per-fold path IS
+    # reachable on constant test windows, but each fold's DSR is
+    # an IN-SAMPLE deflation computed on the fold's TRAINING
+    # returns (which retain variance), so it is non-degenerate —
+    # only the aggregate DSR on the combined OOS returns takes
+    # the degenerate dict above.
+    n_with_params = 0
+    for fold in results["folds"]:
+        if fold.get("best_params") is None:
+            continue
+        n_with_params += 1
+        assert "deflated_sharpe" in fold, (
+            "expected per-fold deflated_sharpe on constant test returns"
+        )
+        fold_dsr = fold["deflated_sharpe"]
+        assert 0.0 <= fold_dsr["deflated_sharpe_ratio"] <= 1.0
+        assert fold_dsr["z_score"] is not None, (
+            "per-fold DSR must be non-degenerate: it is deflated "
+            "on the fold's training returns, not the flat test returns"
+        )
+        assert abs(fold_dsr["sharpe_ratio"] - fold["best_sharpe"]) < 1e-12
+        expected = _recompute_window_deflated_sharpe(
+            fold, param_grid, strategy_factory, 0.0, 0.0
+        )
+        assert expected is not None, (
+            "recomputed per-fold DSR missing for an active fold"
+        )
+        for key in (
+            "deflated_sharpe_ratio", "p_value", "expected_max_sharpe",
+            "n_trials", "n_observations", "skewness", "kurtosis",
+        ):
+            assert abs(fold_dsr[key] - expected[key]) < 1e-12, key
+    assert n_with_params > 0
+
+
+def test_walk_forward_flat_train_window_skips_period():
+    """A flat training window skips the period (no per-period DSR).
+
+    When a period's training window is perfectly flat, every
+    configuration's in-sample Sharpe is undefined (zero variance),
+    so none is selected: the period contributes no out-of-sample
+    returns and carries no per-period DSR. This "no signal" outcome
+    is distinct from the degenerate dict the aggregate path emits on
+    constant OOS returns — there is no in-sample Sharpe to deflate.
+    """
+    data = _make_flat_train_window_data()
+    strategy_factory = lambda p: _factory("cross_sectional_momentum", p)
+
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid={"lookback": [5, 10], "top_quantile": [0.4], "bottom_quantile": [0.2]},
+        train_months=6,
+        test_months=2,
+        step_months=2,
+        commission=0.0,
+        slippage=0.0,
+        apply_deflation=True,
+    )
+
+    assert results["summary"]["n_periods"] > 1, "expected multiple periods"
+
+    # The first period's training window is entirely flat: no
+    # configuration is selected and no per-period DSR is emitted.
+    first = results["periods"][0]
+    assert first["best_params"] is None, (
+        "expected the flat-train-window period to be skipped"
+    )
+    assert "deflated_sharpe" not in first
+    assert len(first["test_returns"]) == 0
+
+    # Later periods span the trending region in their training
+    # windows, so they are selected with non-degenerate per-period
+    # DSRs (finite z_score).
+    n_active = 0
+    for period in results["periods"][1:]:
+        if period.get("best_params") is None:
+            continue
+        n_active += 1
+        assert "deflated_sharpe" in period
+        assert period["deflated_sharpe"]["z_score"] is not None
+    assert n_active > 0, "expected later periods to be active"
+
+    # Only the active periods contribute OOS returns; their test
+    # windows are trending, so the aggregate DSR is non-degenerate.
+    assert len(results["oos_returns"]) > 0
+    assert results["oos_returns"].std() > 0
+    agg = results["summary"]["deflated_sharpe"]
+    assert agg["z_score"] is not None
+
 
 def main() -> int:
     tests = [
@@ -1435,6 +1665,7 @@ def main() -> int:
         ("cpcv_aggregate_deflation_uses_pooled_trial_sharpes", test_cpcv_aggregate_deflation_uses_pooled_trial_sharpes),
         ("walk_forward_aggregate_deflation_constant_oos_returns", test_walk_forward_aggregate_deflation_constant_oos_returns),
         ("cpcv_aggregate_deflation_constant_oos_returns", test_cpcv_aggregate_deflation_constant_oos_returns),
+        ("walk_forward_flat_train_window_skips_period", test_walk_forward_flat_train_window_skips_period),
         ("monte_carlo_simulation_basic", test_monte_carlo_simulation_basic),
         ("monte_carlo_simulation_block_bootstrap", test_monte_carlo_simulation_block_bootstrap),
         ("monte_carlo_block_bootstrap_preserves_autocorrelation", test_monte_carlo_block_bootstrap_preserves_autocorrelation),
