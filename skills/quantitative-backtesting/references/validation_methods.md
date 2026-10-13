@@ -234,6 +234,8 @@ This is emitted consistently by every entry point that accepts an
 - `monte-carlo --n-trials N`
 - `walk_forward_analysis(apply_deflation=True)` (aggregate DSR)
 - `cpcv_analysis(apply_deflation=True)` (aggregate DSR)
+- `parameter_optimization(apply_deflation=True)` (per-combo DSR;
+  see the ranking distinction below)
 
 A previous guard (`oos_returns.std() > 0`) on the walk-forward and CPCV
 aggregate paths silently **omitted** the `deflated_sharpe` key on constant
@@ -269,6 +271,19 @@ returns. Two consequences:
   `deflated_sharpe` key, no out-of-sample contribution). This is a
   genuine "no signal" outcome, distinct from the degenerate dict —
   there is no in-sample Sharpe to deflate.
+
+`parameter_optimization(apply_deflation=True)` deflates each
+*ranked* combination's own return series, and its Sharpe rule
+defines the per-combo Sharpe as 0 when `returns.std() == 0`
+(`walk_forward.py:352`). A zero-variance combo is therefore
+**ranked** (at Sharpe 0) rather than skipped: every ranked combo
+carries the degenerate dict above (`z_score = None`, DSR = 0,
+p-value = 1) because its return series has zero variance. This is
+distinct from the walk-forward/CPCV grid search, where a
+zero-variance *training* series yields sharpe = -inf, so no
+configuration is selected and the period is skipped — and from the
+aggregate DSR, which emits a single degenerate dict on the combined
+OOS returns.
 
 The `monte-carlo` subcommand accepts the same `--n-trials` flag. It
 first runs the parameter optimization implied by `--param-grid` to

@@ -972,6 +972,73 @@ def test_parameter_optimization_deflation():
     assert deflated[0]["deflated_sharpe"]["n_observations"] == deflated[0]["n_periods"]
 
 
+def _make_flat_price_data(periods: int = 100) -> pd.DataFrame:
+    """Create a DataFrame with perfectly flat prices (zero returns)."""
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    prices = np.full(periods, 100.0)
+    return pd.DataFrame({
+        "open": prices,
+        "high": prices,
+        "low": prices,
+        "close": prices,
+        "volume": [1000000] * periods,
+    }, index=dates)
+
+
+def test_parameter_optimization_constant_returns_deflation():
+    """apply_deflation on constant (zero-variance) returns emits the
+    degenerate DSR dict for every ranked combo.
+
+    `parameter_optimization` *ranks* zero-variance combos (its
+    Sharpe is defined as 0 when `returns.std() == 0`,
+    `walk_forward.py:352`) instead of skipping them as the
+    walk-forward/CPCV grid search does, where a zero-variance
+    *training* series yields sharpe = -inf, no configuration is
+    selected and the period is skipped. The per-combo DSR is
+    therefore computed — and must take the conservative degenerate
+    dict — rather than being omitted.
+    """
+    data = _make_flat_price_data()
+    grid = {"period": [10, 20], "exit_period": [5, 10]}
+
+    results = parameter_optimization(
+        data=data,
+        strategy_factory=lambda p: _factory("donchian_breakout", p),
+        param_grid=grid,
+        commission=0.0,
+        slippage=0.0,
+        apply_deflation=True,
+    )
+
+    # donchian_breakout takes active positions on flat data, so
+    # every grid combo is ranked (not skipped) at Sharpe 0.
+    assert len(results) == len(grid["period"]) * len(grid["exit_period"])
+    for r in results:
+        assert r["sharpe_ratio"] == 0.0
+        assert "deflated_sharpe" in r
+        d = r["deflated_sharpe"]
+        assert d["deflated_sharpe_ratio"] == 0.0
+        assert d["p_value"] == 1.0
+        assert d["z_score"] is None
+        assert d["sharpe_ratio"] == 0.0
+        assert d["skewness"] == 0.0
+        assert d["kurtosis"] == 3.0
+        assert d["n_trials"] == len(results)
+        assert d["n_observations"] == r["n_periods"]
+
+    # Backward compatible: default run ranks the same combos
+    # without DSR keys.
+    plain = parameter_optimization(
+        data=data,
+        strategy_factory=lambda p: _factory("donchian_breakout", p),
+        param_grid=grid,
+        commission=0.0,
+        slippage=0.0,
+    )
+    assert [r["params"] for r in plain] == [r["params"] for r in results]
+    assert all("deflated_sharpe" not in r for r in plain)
+
+
 def test_walk_forward_deflation():
     """Walk-forward with apply_deflation reports per-period and aggregate DSR."""
     data = _make_data()
@@ -1658,6 +1725,7 @@ def main() -> int:
         ("deflated_sharpe_ratio_zero_variance", test_deflated_sharpe_ratio_zero_variance),
         ("deflated_sharpe_ratio_invalid_n_trials", test_deflated_sharpe_ratio_invalid_n_trials),
         ("parameter_optimization_deflation", test_parameter_optimization_deflation),
+        ("parameter_optimization_constant_returns_deflation", test_parameter_optimization_constant_returns_deflation),
         ("walk_forward_deflation", test_walk_forward_deflation),
         ("walk_forward_deflation_overfitting_check", test_walk_forward_deflation_overfitting_check),
         ("run_walk_forward_cli_with_deflation", test_run_walk_forward_cli_with_deflation),

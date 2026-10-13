@@ -262,7 +262,10 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
       OOS returns; the per-period/per-fold DSR — an in-sample deflation on the
       period's *training* returns — is reachable and non-degenerate on constant
       *test* windows and equals an independent grid-search recomputation, while
-      a flat *training* window skips the period with no per-period DSR), and
+      a flat *training* window skips the period with no per-period DSR;
+      `parameter_optimization(apply_deflation=True)` emits the degenerate dict
+      for every ranked combo on constant returns, where zero-variance combos
+      are ranked at Sharpe 0 rather than skipped), and
       multi-asset panel (dict and
       MultiIndex) walk-forward and Monte Carlo integration with
       `CrossSectionalMomentum` and `DualMomentumStrategy`.
