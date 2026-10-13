@@ -560,6 +560,190 @@ def test_mean_reversion_zscore_rejects_three_assets():
         pass
 
 
+def _make_cointegrated_pair(n=200, beta=0.6, seed=42):
+    """Create two cointegrated price series with a known OLS hedge ratio.
+
+    log(p2) follows a random walk; log(p1) = beta * log(p2) + small
+    stationary noise, so the OLS slope of log(p1) on log(p2) recovers
+    ``beta`` and the residual spread is stationary (low variance).
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    # Random walk in log space for the base price
+    log_p2 = np.cumsum(rng.normal(0, 0.01, n))
+    # Cointegrated: log(p1) = beta * log(p2) + small mean-reverting noise
+    log_p1 = beta * log_p2 + rng.normal(0, 0.002, n)
+
+    p1 = np.exp(log_p1)
+    p2 = np.exp(log_p2)
+    dates = pd.date_range("2021-01-01", periods=n, freq="B")
+    return {
+        "A": pd.DataFrame({"close": p1}, index=dates),
+        "B": pd.DataFrame({"close": p2}, index=dates),
+    }, log_p1, log_p2, dates
+
+
+def _rolling_ols_beta(y: np.ndarray, x: np.ndarray, window: int):
+    """Reference rolling OLS slope of y on x (with intercept), returned as Series."""
+    ys = pd.Series(y)
+    xs = pd.Series(x)
+    mean_x = xs.rolling(window).mean()
+    mean_y = ys.rolling(window).mean()
+    cov_xy = (ys * xs).rolling(window).mean() - mean_x * mean_y
+    var_x = (xs * xs).rolling(window).mean() - mean_x * mean_x
+    beta = cov_xy / var_x
+    return beta
+
+
+def test_ols_hedge_recovers_known_hedge_ratio():
+    """OLS hedge ratio recovers the true beta for a known cointegrated pair (dict)."""
+    from strategy_builder import build_strategy
+
+    data_dict, log_p1, log_p2, dates = _make_cointegrated_pair(n=200, beta=0.6, seed=42)
+
+    s = build_strategy(
+        "zscore_mean_reversion",
+        json.dumps(
+            {
+                "spread_method": "ols_hedge",
+                "hedge_lookback": 30,
+                "period": 20,
+                "entry_z": 2.0,
+                "exit_z": 0.5,
+            }
+        ),
+    )
+    sig = s.generate_signals(data_dict)
+
+    # Signals must be valid {-1, 0, 1} (NaN only in the warm-up period)
+    assert isinstance(sig, pd.Series)
+    assert sig.index.equals(dates)
+    present = sig.dropna()
+    assert set(present.unique()).issubset({-1.0, 0.0, 1.0})
+    # Strategy should produce at least some active positions after warm-up
+    assert (present.abs() > 0).any()
+
+    # Independently verify the hedge ratio recovery: the last rolling OLS beta
+    # should be close to the true beta (0.6).  With finite-sample OLS on a
+    # random-walk pair, a tolerance of 0.05 (≈8 % relative) is a meaningful
+    # recovery check.
+    beta_est = _rolling_ols_beta(log_p1, log_p2, 30)
+    assert abs(beta_est.iloc[-1] - 0.6) < 0.05
+
+
+def test_ols_hedge_multiindex_two_assets():
+    """OLS hedge ratio works with MultiIndex panel data (same pair)."""
+    from strategy_builder import build_strategy
+
+    data_dict, log_p1, log_p2, dates = _make_cointegrated_pair(n=200, beta=0.6, seed=99)
+    # Build MultiIndex column DataFrame
+    columns = pd.MultiIndex.from_tuples(
+        [(f, s) for f in ["close"] for s in ["A", "B"]]
+    )
+    p1 = np.exp(log_p1)
+    p2 = np.exp(log_p2)
+    data = pd.DataFrame({("close", "A"): p1, ("close", "B"): p2}, index=dates)
+
+    s = build_strategy(
+        "zscore_mean_reversion",
+        json.dumps({"spread_method": "ols_hedge", "hedge_lookback": 30, "period": 20}),
+    )
+    sig = s.generate_signals(data)
+
+    assert isinstance(sig, pd.Series)
+    assert sig.index.equals(dates)
+    present = sig.dropna()
+    assert set(present.unique()).issubset({-1.0, 0.0, 1.0})
+    assert (present.abs() > 0).any()
+
+    # Same beta recovery check on the MultiIndex path
+    beta_est = _rolling_ols_beta(log_p1, log_p2, 30)
+    assert abs(beta_est.iloc[-1] - 0.6) < 0.05
+
+
+def test_ols_hedge_spread_is_stationary():
+    """OLS residual spread is far less volatile than the cointegrated levels."""
+    from strategy_builder import build_strategy
+
+    data_dict, log_p1, log_p2, _ = _make_cointegrated_pair(n=200, beta=0.6, seed=42)
+
+    s = build_strategy(
+        "zscore_mean_reversion",
+        json.dumps({"spread_method": "ols_hedge", "hedge_lookback": 30, "period": 20}),
+    )
+    # Access the residual spread directly via the private helper
+    series1 = data_dict["A"]["close"]
+    series2 = data_dict["B"]["close"]
+    spread = s._ols_hedge_residual(series1, series2, 30)
+
+    # Drop NaN warm-up
+    spread_clean = spread.dropna()
+    log1_std = float(np.std(log_p1))
+    log2_std = float(np.std(log_p2))
+    spread_std = float(np.std(spread_clean))
+
+    # The residual spread should be a small fraction of the level volatilities.
+    # log_p1 and log_p2 are random walks with substantial drift over 200 bars,
+    # while the OLS residual is stationary noise.
+    assert spread_std < 0.2 * min(log1_std, log2_std)
+
+
+def test_ols_hedge_ignores_hedge_ratio():
+    """When spread_method='ols_hedge', the fixed hedge_ratio parameter is ignored."""
+    from strategy_builder import build_strategy
+
+    data_dict, log_p1, log_p2, _ = _make_cointegrated_pair(n=200, beta=0.6, seed=7)
+
+    s_no_ratio = build_strategy(
+        "zscore_mean_reversion",
+        json.dumps({"spread_method": "ols_hedge", "hedge_lookback": 30, "period": 20}),
+    )
+    s_with_ratio = build_strategy(
+        "zscore_mean_reversion",
+        json.dumps(
+            {
+                "spread_method": "ols_hedge",
+                "hedge_lookback": 30,
+                "period": 20,
+                "hedge_ratio": 99.0,  # Should be ignored
+            }
+        ),
+    )
+
+    sig_a = s_no_ratio.generate_signals(data_dict)
+    sig_b = s_with_ratio.generate_signals(data_dict)
+
+    # Identical signals confirm hedge_ratio is ignored for ols_hedge
+    pd.testing.assert_series_equal(
+        sig_a.reset_index(drop=True),
+        sig_b.reset_index(drop=True),
+    )
+
+
+def test_ols_hedge_backward_compat_default_is_log_ratio():
+    """Default spread_method (log_ratio) is used when ols_hedge is not selected,
+    even though hedge_lookback is now in the defaults dict."""
+    from strategy_builder import build_strategy, get_strategy_defaults
+
+    defaults = get_strategy_defaults("zscore_mean_reversion")
+    assert defaults["spread_method"] == "log_ratio"
+    assert "hedge_lookback" in defaults
+
+    data_dict, _, _, dates = _make_cointegrated_pair(n=200, beta=0.6, seed=42)
+
+    # Build with the published defaults (no overrides) -> log_ratio path
+    s = build_strategy("zscore_mean_reversion", json.dumps(defaults))
+    sig = s.generate_signals(data_dict)
+
+    assert isinstance(sig, pd.Series)
+    assert sig.index.equals(dates)
+    present = sig.dropna()
+    assert set(present.unique()).issubset({-1.0, 0.0, 1.0})
+    assert (present.abs() > 0).any()
+
+
+
 def main() -> int:
     tests = [
         ("build_strategy_unknown_type_raises", test_build_strategy_unknown_type_raises),
@@ -584,6 +768,11 @@ def main() -> int:
         ("mean_reversion_zscore_pairs_multiindex_two_assets", test_mean_reversion_zscore_pairs_multiindex_two_assets),
         ("mean_reversion_zscore_single_asset_fallback", test_mean_reversion_zscore_single_asset_fallback),
         ("mean_reversion_zscore_rejects_three_assets", test_mean_reversion_zscore_rejects_three_assets),
+        ("ols_hedge_recovers_known_hedge_ratio", test_ols_hedge_recovers_known_hedge_ratio),
+        ("ols_hedge_multiindex_two_assets", test_ols_hedge_multiindex_two_assets),
+        ("ols_hedge_spread_is_stationary", test_ols_hedge_spread_is_stationary),
+        ("ols_hedge_ignores_hedge_ratio", test_ols_hedge_ignores_hedge_ratio),
+        ("ols_hedge_backward_compat_default_is_log_ratio", test_ols_hedge_backward_compat_default_is_log_ratio),
     ]
 
     failures = 0

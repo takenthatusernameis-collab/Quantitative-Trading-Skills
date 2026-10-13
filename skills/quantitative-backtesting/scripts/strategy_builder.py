@@ -584,16 +584,17 @@ class MeanReversionZScore(StrategyBase):
         exit_z = self.parameters.get("exit_z", 0.5)
         spread_method = self.parameters.get("spread_method", "log_ratio")
         hedge_ratio = self.parameters.get("hedge_ratio", 1.0)
+        hedge_lookback = self.parameters.get("hedge_lookback", 30)
 
         # Detect multi-asset panel data for pairs trading
         if isinstance(data, dict):
             return self._generate_pairs_signals_dict(
-                data, period, entry_z, exit_z, spread_method, hedge_ratio
+                data, period, entry_z, exit_z, spread_method, hedge_ratio, hedge_lookback
             )
         elif hasattr(data.columns, "levels") and len(getattr(data.columns, "levels", [])) > 1:
             # MultiIndex columns
             return self._generate_pairs_signals_multiindex(
-                data, period, entry_z, exit_z, spread_method, hedge_ratio
+                data, period, entry_z, exit_z, spread_method, hedge_ratio, hedge_lookback
             )
         else:
             # Single-asset fallback (backward compatible)
@@ -640,22 +641,78 @@ class MeanReversionZScore(StrategyBase):
 
         return signals
 
-    def _construct_spread(self, series1: pd.Series, series2: pd.Series, spread_method: str, hedge_ratio: float) -> pd.Series:
-        """Construct spread between two price series."""
+    def _construct_spread(
+        self,
+        series1: pd.Series,
+        series2: pd.Series,
+        spread_method: str,
+        hedge_ratio: float,
+        hedge_lookback: Optional[int] = None,
+    ) -> pd.Series:
+        """Construct spread between two price series.
+
+        Args:
+            series1: First price series (numerator / dependent variable).
+            series2: Second price series (denominator / regressor).
+            spread_method: ``log_ratio``, ``price_difference``, or ``ols_hedge``.
+            hedge_ratio: Fixed ratio used by ``log_ratio`` / ``price_difference``.
+                Ignored when ``spread_method == "ols_hedge"`` (the ratio is
+                estimated from data).
+            hedge_lookback: Rolling-window length for OLS estimation. Required
+                when ``spread_method == "ols_hedge"``.
+        """
         if spread_method == "log_ratio":
             # Log price ratio: spread = log(p1) - hedge_ratio * log(p2)
             spread = np.log(series1) - hedge_ratio * np.log(series2)
+        elif spread_method == "ols_hedge":
+            spread = self._ols_hedge_residual(series1, series2, hedge_lookback)
         else:
             # Price difference: spread = p1 - hedge_ratio * p2
             spread = series1 - hedge_ratio * series2
         return spread
 
+    def _ols_hedge_residual(
+        self, series1: pd.Series, series2: pd.Series, hedge_lookback: int
+    ) -> pd.Series:
+        """Estimate a rolling OLS hedge ratio from log prices and return the
+        residual spread.
+
+        For each bar the slope ``beta`` of the regression
+        ``log(p1) ~ log(p2)`` (with intercept) is estimated over a rolling
+        ``hedge_lookback`` window.  The spread is the OLS residual
+        ``log(p1) - beta * log(p2) - alpha``.  ``beta`` is the hedge ratio;
+        ``alpha`` is the intercept.  Bars before the window is filled are NaN.
+
+        Degenerate windows (zero or near-zero variance in ``log(p2)``) yield
+        ``beta = NaN`` via the division, which propagates to NaN spreads — the
+        caller's z-score and signal loop already treat NaN as "no signal".
+        """
+        log1 = np.log(series1)
+        log2 = np.log(series2)
+        window = hedge_lookback
+
+        # Rolling OLS slope for y ~ x  (with intercept):
+        #   beta = cov(x, y) / var(x)
+        #   alpha = mean(y) - beta * mean(x)
+        mean_x = log2.rolling(window).mean()
+        mean_y = log1.rolling(window).mean()
+        cov_xy = (log1 * log2).rolling(window).mean() - mean_x * mean_y
+        var_x = (log2 * log2).rolling(window).mean() - mean_x * mean_x
+
+        beta = cov_xy / var_x
+        beta = beta.replace([np.inf, -np.inf], np.nan)
+        alpha = mean_y - beta * mean_x
+
+        # OLS residual (the spread)
+        spread = log1 - beta * log2 - alpha
+        return spread
+
     def _generate_pairs_signals_from_two_series(
         self, series1: pd.Series, series2: pd.Series, period: int, entry_z: float, exit_z: float,
-        spread_method: str, hedge_ratio: float
+        spread_method: str, hedge_ratio: float, hedge_lookback: Optional[int] = None
     ) -> pd.Series:
         """Generate signals from two aligned price series."""
-        spread = self._construct_spread(series1, series2, spread_method, hedge_ratio)
+        spread = self._construct_spread(series1, series2, spread_method, hedge_ratio, hedge_lookback)
         rolling_mean = spread.rolling(period).mean()
         rolling_std = spread.rolling(period).std()
         zscore = (spread - rolling_mean) / rolling_std
@@ -685,7 +742,7 @@ class MeanReversionZScore(StrategyBase):
 
     def _generate_pairs_signals_dict(
         self, data_dict: dict, period: int, entry_z: float, exit_z: float,
-        spread_method: str, hedge_ratio: float
+        spread_method: str, hedge_ratio: float, hedge_lookback: Optional[int] = None
     ) -> pd.Series:
         """Generate signals from dict of symbol -> DataFrame for pairs trading."""
         symbols = list(data_dict.keys())
@@ -707,12 +764,12 @@ class MeanReversionZScore(StrategyBase):
         series2 = df2.loc[common_index, "close"]
 
         return self._generate_pairs_signals_from_two_series(
-            series1, series2, period, entry_z, exit_z, spread_method, hedge_ratio
+            series1, series2, period, entry_z, exit_z, spread_method, hedge_ratio, hedge_lookback
         )
 
     def _generate_pairs_signals_multiindex(
         self, data: pd.DataFrame, period: int, entry_z: float, exit_z: float,
-        spread_method: str, hedge_ratio: float
+        spread_method: str, hedge_ratio: float, hedge_lookback: Optional[int] = None
     ) -> pd.Series:
         """Generate signals from MultiIndex DataFrame for pairs trading."""
         # Get symbols from second level
@@ -734,7 +791,7 @@ class MeanReversionZScore(StrategyBase):
         series2 = data[("close", sym2)]
 
         return self._generate_pairs_signals_from_two_series(
-            series1, series2, period, entry_z, exit_z, spread_method, hedge_ratio
+            series1, series2, period, entry_z, exit_z, spread_method, hedge_ratio, hedge_lookback
         )
 
 class VolatilityTargeting(StrategyBase):
@@ -832,7 +889,7 @@ def get_strategy_defaults(strategy_type: str) -> Dict[str, Any]:
         "donchian_breakout": {"period": 20, "exit_period": 10},
         "cross_sectional_momentum": {"lookback": 252, "top_quantile": 0.2, "bottom_quantile": 0.2},
         "dual_momentum": {"lookback": 252, "top_quantile": 0.2, "risk_free_rate": 0.0},
-        "zscore_mean_reversion": {"period": 20, "entry_z": 2.0, "exit_z": 0.5, "spread_method": "log_ratio", "hedge_ratio": 1.0},
+        "zscore_mean_reversion": {"period": 20, "entry_z": 2.0, "exit_z": 0.5, "spread_method": "log_ratio", "hedge_ratio": 1.0, "hedge_lookback": 30},
     }
     return defaults.get(strategy_type, {})
 

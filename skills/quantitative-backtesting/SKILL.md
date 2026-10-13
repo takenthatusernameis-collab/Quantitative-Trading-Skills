@@ -229,7 +229,11 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   binary long/flat signal generation with real crossovers, and multi-asset
   panel signal generation for `CrossSectionalMomentum` and
   `DualMomentumStrategy` (dict and MultiIndex formats, single-asset
-  fallback warnings, quantile/ranking semantics).
+  fallback warnings, quantile/ranking semantics). Covers `MeanReversionZScore`
+  pairs trading on dict and MultiIndex panel data (two-asset entry/exit),
+  three-asset rejection, single-asset fallback warning, and the
+  `ols_hedge` spread method (rolling OLS hedge-ratio recovery on a known
+  cointegrated pair, spread stationarity, backward-compatible defaults).
   - `test_walk_forward.py` - walk-forward windowing, parameter grid parsing,
     train/test separation, Monte Carlo simulation, **Deflated Sharpe Ratio
     multiple-testing correction** (`deflated_sharpe_ratio`, `apply_deflation`

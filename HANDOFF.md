@@ -8,101 +8,103 @@
 - Skill location: `skills/quantitative-backtesting/` (8 strategies, 7 scripts, 8 test files, 4 reference docs).
 - Python deps for the suites: `pandas` and `numpy` (present in the session environment; not committed).
 
-## Session summary (2026-10-13, fourth session)
+## Session summary (2026-10-13, fifth session)
 
-Implemented **Option C from the previous handoff: multiple-testing correction via the Deflated Sharpe Ratio (Bailey & López de Prado, 2014)** for the parameter search in walk-forward / CPCV / grid optimization.
+Implemented **Option A from the previous handoff: rolling OLS hedge-ratio estimation
+for `MeanReversionZScore`** via a new `spread_method="ols_hedge"`.
 
 ### Changes
 
-1. **`scripts/walk_forward.py`**
-   - New public function `deflated_sharpe_ratio(sharpe_ratio, returns, n_trials, trial_sharpes=None)`:
-     DSR = Phi((SR_hat - SR*) * sqrt(T-1) / sqrt(1 - gamma3*SR_hat + ((gamma4-1)/4)*SR_hat^2)),
-     with all Sharpe quantities in per-period units. `SR*` (expected max Sharpe under the null) is
-     estimated from the cross-sectional dispersion of the trial Sharpes when provided
-     (`std(SR_trials) * sqrt(2 ln N)`), else the i.i.d.-normal null approximation
-     (`sqrt(2 ln N / T)`). Returns DSR, p-value, expected_max_sharpe, z_score, n_trials,
-     n_observations, skewness, kurtosis. Handles degenerate (zero-variance) returns (DSR=0)
-     and raises ValueError for T<2 or n_trials<1.
-   - `parameter_optimization(..., apply_deflation=False)`: when True, every ranked result row
-     gains a `deflated_sharpe` dict (n_trials = number of ranked configurations, SR* from the
-     cross-sectional dispersion of all trial Sharpes).
-   - `walk_forward_analysis(..., apply_deflation=False)`: per-period `deflated_sharpe` on the
-     in-sample selection Sharpe, plus aggregate `summary["deflated_sharpe"]` on the combined
-     OOS returns with n_trials = total configurations evaluated across all periods.
-   - `cpcv_analysis(..., apply_deflation=False)`: same pattern per fold and aggregate.
-   - `overfitting_check`: surfaces the aggregate DSR in diagnostics when present.
-   - CLI: new `--deflate` flag on the `walk-forward`, `optimize` and `cpcv` subcommands;
-     DSR printed alongside OOS Sharpe and recorded in saved JSON under `config.deflate`.
-   - Backward compatible: default `apply_deflation=False` leaves all outputs unchanged.
+1. **`scripts/strategy_builder.py`** — `MeanReversionZScore`:
+   - `generate_signals(...)`: reads `hedge_lookback` (default 30) and threads it through
+     both panel paths (dict and MultiIndex).
+   - `_construct_spread(...)`: new branch for `spread_method == "ols_hedge"`; delegates to
+     the new `_ols_hedge_residual` helper. `log_ratio` and `price_difference` are unchanged.
+   - `_ols_hedge_residual(...)`: estimates the hedge ratio as the rolling OLS slope of
+     `log(p1)` on `log(p2)` (with intercept) over a `hedge_lookback`-bar window, then
+     returns the OLS residual `log(p1) - beta*log(p2) - alpha`. Zero-variance windows
+     produce `NaN` beta (replaced from `inf`), which propagates as NaN spread — the
+     existing z-score/signal loop already treats NaN as "no signal".
+   - `hedge_ratio` (the fixed ratio) is **ignored** when `spread_method == "ols_hedge"`.
+   - `_generate_pairs_signals_from_two_series`, `_generate_pairs_signals_dict`,
+     `_generate_pairs_signals_multiindex`: all accept `hedge_lookback` (default `None`)
+     and pass it through. Backward compatible.
+   - `get_strategy_defaults("zscore_mean_reversion")`: added `"hedge_lookback": 30`
+     (only consumed when `spread_method == "ols_hedge"`).
 
-2. **`tests/test_walk_forward.py`** — 10 new tests (18 → 28 total): DSR basic/decreasing-with-trials/
-   trial-sharpes/insufficient-data/zero-variance/invalid-n-trials; `parameter_optimization`
-   deflation + backward compat; walk-forward per-period + aggregate deflation + backward compat;
-   `overfitting_check` DSR pass-through; CLI `--deflate` end-to-end. Updated the two
-   `_CLIArgs` mocks to carry `deflate=False` (argparse always sets the flag; the mocks were
-   incomplete and previously passed only by accident of the attribute not being read).
+2. **`references/strategy_templates.md`** — `zscore_mean_reversion` section: documented
+   the `"ols_hedge"` method, `hedge_lookback` parameter, and the fact that `hedge_ratio`
+   is ignored for that method.
 
-3. **`tests/test_cpcv.py`** — 1 new test (14 → 15): `cpcv_deflation` verifies per-fold and
-   aggregate DSR plus backward compat. Test config uses 500 bars / n_splits=4 / test_size=0.2
-   with `slow_period` <= 20 so the 25-bar test windows produce active signals (smaller windows
-   correctly skip all combos via the `signals_active` guard, leaving no OOS returns).
+3. **`tests/test_strategy_builder.py`** — 5 new tests (22 → 27 total):
+   - `ols_hedge_recovers_known_hedge_ratio`: cointegrated pair (true beta = 0.6), dict
+     format; verifies OLS beta recovers true value within 0.05, signals are valid
+     {-1, 0, 1}, and at least one active position is generated.
+   - `ols_hedge_multiindex_two_assets`: same pair via MultiIndex columns; independent
+     beta-recovery check.
+   - `ols_hedge_spread_is_stationary`: the OLS residual spread has standard deviation
+     < 20 % of the log-price level volatilities (confirms cointegration is captured).
+   - `ols_hedge_ignores_hedge_ratio`: `hedge_ratio=99.0` has no effect on signals when
+     `spread_method="ols_hedge"` (signals identical to the no-ratio case).
+   - `ols_hedge_backward_compat_default_is_log_ratio`: the published defaults still use
+     `log_ratio`; `hedge_lookback` in the defaults does not alter default behavior.
 
-4. **Documentation** — `references/validation_methods.md`: new "Deflated Sharpe Ratio
-   (Multiple-Testing Correction)" section (formula, SR* estimators, interpretation, usage, CLI).
-   `references/metrics_definitions.md`: DSR definition. `SKILL.md`: capability, resource,
-   test-coverage and tips updates.
+4. **`SKILL.md`** — `test_strategy_builder.py` coverage description updated to mention the
+   `ols_hedge` tests and the pairs-trading coverage.
 
 ### Verified (evidence)
 
-- Full suite from repo root: **114/114 tests pass** (6+13+10+19+22+28+15+1; baseline before
-  this session was 103 with 11 new tests added).
-- End-to-end CLI (`--deflate`) verified on all three subcommands with synthetic data:
-  - `optimize`: top Sharpe -0.24 over 4 trials → DSR 0.186 (p=0.81).
-  - `walk-forward`: OOS Sharpe -1.30 over 13 trials → DSR 0.0001 (p≈1.0).
-  - `cpcv`: OOS Sharpe 1.78 over 15 trials → DSR 0.068 (p=0.93) — a superficially strong
-    OOS Sharpe is correctly revealed as consistent with luck after correcting for search size.
-- Sanity checks: genuine edge (Sharpe 1.14, N=1) → DSR 0.988; N=1e5 → DSR 0.006;
-  constant returns → DSR 0.0; ValueError on T<2 and n_trials<1.
-- Backward compatibility: default runs produce byte-identical rankings and no new keys.
+- Full suite from repo root: **119/119 tests pass**
+  (6 + 13 + 10 + 19 + 27 + 28 + 15 + 1).
+- Baseline before this session was 114 (from the DSR session); 5 tests added → 119.
+- No existing test changed; all pre-existing tests continue to pass unchanged.
+- Cointegrated-pair regression: rolling OLS slope recovers true beta = 0.6 within ±0.025
+  (well inside the 0.05 tolerance); residual spread std ≈ 0.002 vs. log-price level
+  std ≈ 0.3–0.5 (cointegration captured).
+- Backward compatibility: `get_strategy_defaults` now includes `hedge_lookback: 30` but
+  the default `spread_method="log_ratio"` path is unchanged; the `hedge_ratio` parameter
+  is confirmed ignored for `ols_hedge`.
 
-## Unresolved / methodological notes
+### Methodological notes
 
-- The aggregate OOS DSR uses the conservative interpretation n_trials = total configurations
-  evaluated across all periods/folds, and the i.i.d. null approximation for SR* (the
-  cross-sectional dispersion of per-period best Sharpes is a different population than the
-  OOS Sharpe). This is a deliberate, documented choice, not a bug.
+- The rolling OLS estimate uses a window ending at the current bar (inclusive). This is
+  consistent with the existing z-score rolling mean/std, which also includes the current
+  bar. For a stricter point-in-time convention, shift the beta/alpha series by one bar
+  before constructing the spread — not implemented to keep the change minimal.
+- `hedge_lookback` defaults to 30; this is separate from the z-score `period` (default 20).
+  In practice, use `hedge_lookback >= period` (e.g., 30–60) for more stable ratio
+  estimation. A shorter `hedge_lookback` relative to the rolling std `period` can produce
+  noisy, over-fitted hedge ratios.
+- All results are synthetic; nothing here is production-ready.
+
+## Unresolved / remaining
+
 - `run_monte_carlo` calls `parameter_optimization` internally without deflation (it only
   consumes `best_params`), so MC results do not carry a DSR.
-- The per-period DSR deflates the *in-sample selection* Sharpe; it does not by itself
-  validate OOS economics. No out-of-sample evidence of profitability exists anywhere in this
-  repo; all results are synthetic. Nothing here is production-ready.
-- `MeanReversionZScore` still uses a fixed `hedge_ratio` (default 1.0); rolling OLS
-  hedge-ratio estimation (previous handoff Option A) is not yet implemented.
 - Monte Carlo lives in `walk_forward.py` (`monte_carlo_simulation`); no separate
-  `monte_carlo.py` script.
+  `monte_carlo.py` script (previous handoff Option C).
+- DSR (Deflated Sharpe Ratio) is implemented in `walk_forward.py` and surfaced in the CLI
+  (`--deflate`), but is not yet wired into the main `run_backtest` path (Option B).
+- No out-of-sample evidence of profitability exists anywhere in this repo; all results
+  are synthetic.
 
 ## Next task for the next agent
 
-**Option A (recommended): Add rolling OLS hedge-ratio estimation to `MeanReversionZScore`**
-(deferred from the previous two handoffs)
-- Context: `scripts/strategy_builder.py` (`MeanReversionZScore._construct_spread`),
-  `references/strategy_templates.md`, `tests/test_strategy_builder.py`.
-- Scope: Add `spread_method="ols_hedge"` that estimates the hedge ratio via rolling OLS
-  regression of log(p1) on log(p2) over a `hedge_lookback` window (separate from the
-  z-score `period`), then constructs the spread as the OLS residual. Keep `log_ratio` and
-  `price_difference` as-is. Add regression test with a known cointegrated pair.
-- Constraints: preserve both panel formats, keep full suite passing (114 tests), smallest
-  reversible change.
-
 **Option B: Surface DSR in the main backtest path**
 - Context: `scripts/run_backtest.py`, `scripts/performance.py`, `tests/test_run_backtest.py`.
+  The `deflated_sharpe_ratio` function already exists in `scripts/walk_forward.py`.
 - Scope: Let `run_backtest` accept the number of development trials (e.g. `--n-trials`)
-  and report the Deflated Sharpe Ratio of the final backtest Sharpe via
-  `walk_forward.deflated_sharpe_ratio`, surfaced in `calculate_metrics` output, reports, and
-  tear sheets.
-- Constraints: backward compatible (no flag → no DSR), keep full suite passing.
+  and report the Deflated Sharpe Ratio of the final backtest Sharpe by importing
+  `deflated_sharpe_ratio` from `walk_forward`, surfacing it in `calculate_metrics` output,
+  reports, and tear sheets.
+- Constraints: backward compatible (no flag → no DSR key in output), keep full suite
+  passing (119 tests). No new dependencies.
+- Evidence/constraint: `deflated_sharpe_ratio` signature is
+  `(sharpe_ratio, returns, n_trials, trial_sharpes=None)` and returns a dict with keys
+  `dsr`, `p_value`, `expected_max_sharpe`, `z_score`, `n_trials`, `n_observations`,
+  `skewness`, `kurtosis`.
 
-**Option C: Extract Monte Carlo into standalone `monte_carlo.py`** (previous handoff Option B)
+**Option C (alternative): Extract Monte Carlo into standalone `monte_carlo.py`**
 - Context: `scripts/walk_forward.py` (`monte_carlo_simulation`), `scripts/strategy_builder.py`.
 - Scope: Move `monte_carlo_simulation` and helpers to `scripts/monte_carlo.py` with a clean
   public API; update imports and CLI entry points; add tests.

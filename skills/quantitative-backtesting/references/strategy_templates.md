@@ -62,11 +62,18 @@ strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 3
   with a `UserWarning` for backward compatibility.
 - **Parameters**: `period` (default 20), `entry_z` (default 2.0),
   `exit_z` (default 0.5), `spread_method` (default `"log_ratio"`, also accepts
-  `"price_difference"`), `hedge_ratio` (default 1.0).
+  `"price_difference"` and `"ols_hedge"`), `hedge_ratio` (default 1.0),
+  `hedge_lookback` (default 30, used only by `"ols_hedge"`).
 - **Use case**: Pairs trading and statistical arbitrage overlays.
 - **Notes**: Panel data must contain exactly two assets. The default spread is
   the log price ratio `log(p1) - hedge_ratio * log(p2)`. For price difference,
-  use `spread_method="price_difference"`.
+  use `spread_method="price_difference"`. For a data-driven hedge ratio, use
+  `spread_method="ols_hedge"`, which estimates the hedge ratio as the rolling
+  OLS slope of `log(p1)` on `log(p2)` over a `hedge_lookback`-bar window and
+  constructs the spread as the OLS residual (`log(p1) - beta * log(p2) - alpha`).
+  The `hedge_lookback` window is independent of the z-score `period`; use a
+  longer `hedge_lookback` than `period` for more stable ratio estimation.
+  `hedge_ratio` is ignored when `spread_method == "ols_hedge"`.
 
 ## Momentum
 
