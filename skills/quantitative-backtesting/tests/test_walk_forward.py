@@ -23,6 +23,7 @@ from walk_forward import (  # noqa: E402
     parameter_optimization,
     signals_active,
     walk_forward_analysis,
+    cpcv_analysis,
     monte_carlo_simulation,
     deflated_sharpe_ratio,
     run_walk_forward,
@@ -881,6 +882,185 @@ def test_run_walk_forward_cli_with_deflation():
         Path(data_file).unlink()
 
 
+def test_walk_forward_aggregate_deflation_uses_pooled_trial_sharpes():
+    """The aggregate walk-forward DSR must use pooled cross-period trial Sharpes.
+
+    The aggregate `summary["deflated_sharpe"]` is computed on the combined
+    OOS returns with `n_trials` equal to the total evaluated configurations
+    across all periods. This test asserts the surfaced aggregate DSR equals
+    a direct `deflated_sharpe_ratio` call with the pooled `trial_sharpes`
+    list (cross-sectional SR* estimator), not the i.i.d. null approximation.
+    """
+    data = _make_data()
+    param_grid = {"fast_period": [10, 20], "slow_period": [30, 50]}
+    strategy_factory = lambda p: _factory("sma_crossover", p)
+
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        train_months=6,
+        test_months=2,
+        step_months=2,
+        apply_deflation=True,
+    )
+
+    agg_dsr = results["summary"]["deflated_sharpe"]
+
+    # Recompute the pooled trial Sharpes by running parameter optimization
+    # on each training period independently and collecting all trial Sharpes.
+    # This mirrors what the function does internally.
+    from walk_forward import deflated_sharpe_ratio as dsr_func
+
+    # Collect all trial Sharpes from each period
+    pooled_trial_sharpes = []
+    for period in results["periods"]:
+        if period.get("best_params") is None:
+            continue
+        train_data = period["train_data"]
+        test_data = period["test_data"]
+        # We can't easily recover the exact period_trial_sharpes from the
+        # results dict (they're not persisted), so we re-run the grid search
+        # on the training data to get the same trial Sharpes.
+        param_names = list(param_grid.keys())
+        param_values = list(param_grid.values())
+        from itertools import product
+        for combo in product(*param_values):
+            params = dict(zip(param_names, combo))
+            try:
+                strategy = strategy_factory(params)
+                train_signals = strategy.generate_signals(train_data)
+                test_signals = strategy.generate_signals(test_data)
+                if not signals_active(test_signals):
+                    continue
+                train_returns = _calculate_strategy_returns(
+                    train_data, train_signals, 0.0002, 0.0001
+                )
+                if len(train_returns) > 1 and train_returns.std() > 0:
+                    ann_factor = _annualization_factor(train_returns.index)
+                    excess = train_returns - 0.02 / ann_factor
+                    sharpe = excess.mean() / excess.std() * np.sqrt(ann_factor)
+                    if np.isfinite(sharpe):
+                        pooled_trial_sharpes.append(float(sharpe))
+            except Exception:
+                continue
+
+    # Now compute expected aggregate DSR with pooled trial_sharpes
+    oos_returns = results["oos_returns"]
+    oos_sharpe = results["summary"].get("oos_sharpe", 0.0)
+    n_trials = max(len(pooled_trial_sharpes), 1)
+    expected = dsr_func(
+        sharpe_ratio=oos_sharpe,
+        returns=oos_returns,
+        n_trials=n_trials,
+        trial_sharpes=pooled_trial_sharpes if pooled_trial_sharpes else None,
+    )
+
+    # The surfaced aggregate DSR must match the direct call
+    for key in (
+        "deflated_sharpe_ratio", "p_value", "expected_max_sharpe",
+        "n_trials", "n_observations", "skewness", "kurtosis",
+    ):
+        assert abs(agg_dsr[key] - expected[key]) < 1e-12, (
+            f"Mismatch on {key}: got {agg_dsr[key]}, expected {expected[key]}"
+        )
+
+    # Also verify the cross-sectional estimator differs from i.i.d. null
+    iid_null = dsr_func(
+        sharpe_ratio=oos_sharpe, returns=oos_returns, n_trials=n_trials
+    )
+    assert abs(agg_dsr["expected_max_sharpe"] - iid_null["expected_max_sharpe"]) > 1e-9
+
+
+def test_cpcv_aggregate_deflation_uses_pooled_trial_sharpes():
+    """The aggregate CPCV DSR must use pooled cross-fold trial Sharpes.
+
+    Mirrors the walk-forward test: the aggregate DSR on combined OOS returns
+    must use the cross-sectional SR* estimator from pooled fold trial Sharpes.
+    """
+    # Use more data and larger test_size so test windows can accommodate
+    # the slow_period lookback (max 50). 2000 periods with 8 splits,
+    # test_size=0.2 gives ~50 test observations per fold.
+    data = _make_data(periods=2000)
+    param_grid = {"fast_period": [10, 20], "slow_period": [30, 50]}
+    strategy_factory = lambda p: _factory("sma_crossover", p)
+
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=8,
+        test_size=0.2,
+        purge_size=0.0,
+        embargo_size=0.0,
+        apply_deflation=True,
+    )
+
+    # Verify we have valid OOS returns and a deflated_sharpe key
+    assert "deflated_sharpe" in results["summary"], (
+        f"Expected deflated_sharpe in summary, got keys: {results['summary'].keys()}"
+    )
+    assert len(results["oos_returns"]) > 0, "Expected non-empty OOS returns"
+
+    agg_dsr = results["summary"]["deflated_sharpe"]
+
+    # Collect pooled trial Sharpes by re-running grid search on each fold's
+    # training data.
+    from walk_forward import deflated_sharpe_ratio as dsr_func
+    from itertools import product
+
+    pooled_trial_sharpes = []
+    for fold in results["folds"]:
+        if fold.get("best_params") is None:
+            continue
+        train_data = fold["train_data"]
+        test_data = fold["test_data"]
+        param_names = list(param_grid.keys())
+        param_values = list(param_grid.values())
+        for combo in product(*param_values):
+            params = dict(zip(param_names, combo))
+            try:
+                strategy = strategy_factory(params)
+                train_signals = strategy.generate_signals(train_data)
+                test_signals = strategy.generate_signals(test_data)
+                if not signals_active(test_signals):
+                    continue
+                train_returns = _calculate_strategy_returns(
+                    train_data, train_signals, 0.0002, 0.0001
+                )
+                if len(train_returns) > 1 and train_returns.std() > 0:
+                    ann_factor = _annualization_factor(train_returns.index)
+                    excess = train_returns - 0.02 / ann_factor
+                    sharpe = excess.mean() / excess.std() * np.sqrt(ann_factor)
+                    if np.isfinite(sharpe):
+                        pooled_trial_sharpes.append(float(sharpe))
+            except Exception:
+                continue
+
+    oos_returns = results["oos_returns"]
+    oos_sharpe = results["summary"].get("oos_sharpe", 0.0)
+    n_trials = max(len(pooled_trial_sharpes), 1)
+    expected = dsr_func(
+        sharpe_ratio=oos_sharpe,
+        returns=oos_returns,
+        n_trials=n_trials,
+        trial_sharpes=pooled_trial_sharpes if pooled_trial_sharpes else None,
+    )
+
+    for key in (
+        "deflated_sharpe_ratio", "p_value", "expected_max_sharpe",
+        "n_trials", "n_observations", "skewness", "kurtosis",
+    ):
+        assert abs(agg_dsr[key] - expected[key]) < 1e-12, (
+            f"Mismatch on {key}: got {agg_dsr[key]}, expected {expected[key]}"
+        )
+
+    iid_null = dsr_func(
+        sharpe_ratio=oos_sharpe, returns=oos_returns, n_trials=n_trials
+    )
+    assert abs(agg_dsr["expected_max_sharpe"] - iid_null["expected_max_sharpe"]) > 1e-9
+
+
 
 def main() -> int:
     tests = [
@@ -898,6 +1078,8 @@ def main() -> int:
         ("walk_forward_deflation", test_walk_forward_deflation),
         ("walk_forward_deflation_overfitting_check", test_walk_forward_deflation_overfitting_check),
         ("run_walk_forward_cli_with_deflation", test_run_walk_forward_cli_with_deflation),
+        ("walk_forward_aggregate_deflation_uses_pooled_trial_sharpes", test_walk_forward_aggregate_deflation_uses_pooled_trial_sharpes),
+        ("cpcv_aggregate_deflation_uses_pooled_trial_sharpes", test_cpcv_aggregate_deflation_uses_pooled_trial_sharpes),
         ("monte_carlo_simulation_basic", test_monte_carlo_simulation_basic),
         ("monte_carlo_simulation_block_bootstrap", test_monte_carlo_simulation_block_bootstrap),
         ("monte_carlo_block_bootstrap_preserves_autocorrelation", test_monte_carlo_block_bootstrap_preserves_autocorrelation),

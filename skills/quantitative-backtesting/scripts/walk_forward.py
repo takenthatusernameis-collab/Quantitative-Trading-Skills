@@ -149,6 +149,7 @@ def walk_forward_analysis(
     best_params_per_period = []
     oos_returns_list = []
     total_evaluated_trials = 0
+    all_trial_sharpes: List[float] = []
 
     for period in periods:
         train_data = period["train_data"]
@@ -211,6 +212,7 @@ def walk_forward_analysis(
                 continue
 
         best_params_per_period.append(best_params)
+        all_trial_sharpes.extend(period_trial_sharpes)
         total_evaluated_trials += len(period_trial_sharpes)
         if best_test_returns is not None and len(best_test_returns) > 0:
             oos_returns_list.append(best_test_returns)
@@ -243,12 +245,15 @@ def walk_forward_analysis(
     # Aggregate multiple-testing correction on the combined out-of-sample
     # returns. The conservative interpretation: the OOS record was produced
     # by a search that evaluated total_evaluated_trials configurations, so
-    # the OOS Sharpe is deflated by all of them.
+    # the OOS Sharpe is deflated by all of them. Use the pooled cross-period
+    # trial Sharpes for the cross-sectional SR* estimator (conservative:
+    # between-period variation inflates the null Sharpe).
     if apply_deflation and len(oos_returns) > 1 and oos_returns.std() > 0:
         summary["deflated_sharpe"] = deflated_sharpe_ratio(
             sharpe_ratio=summary.get("oos_sharpe", 0.0),
             returns=oos_returns,
             n_trials=max(total_evaluated_trials, 1),
+            trial_sharpes=all_trial_sharpes if all_trial_sharpes else None,
         )
 
     return {
@@ -791,6 +796,7 @@ def cpcv_analysis(
     best_params_per_fold = []
     oos_returns_list = []
     total_evaluated_trials = 0
+    all_trial_sharpes: List[float] = []
 
     for fold in folds:
         train_data = fold["train_data"]
@@ -849,6 +855,7 @@ def cpcv_analysis(
                 continue
 
         best_params_per_fold.append(best_params)
+        all_trial_sharpes.extend(fold_trial_sharpes)
         total_evaluated_trials += len(fold_trial_sharpes)
         if best_test_returns is not None and len(best_test_returns) > 0:
             oos_returns_list.append(best_test_returns)
@@ -899,12 +906,15 @@ def cpcv_analysis(
     # Aggregate multiple-testing correction on the combined out-of-sample
     # returns. The conservative interpretation: the OOS record was produced
     # by a search that evaluated total_evaluated_trials configurations, so
-    # the OOS Sharpe is deflated by all of them.
+    # the OOS Sharpe is deflated by all of them. Use the pooled cross-fold
+    # trial Sharpes for the cross-sectional SR* estimator (conservative:
+    # between-fold variation inflates the null Sharpe).
     if apply_deflation and len(oos_returns) > 1 and oos_returns.std() > 0:
         summary["deflated_sharpe"] = deflated_sharpe_ratio(
             sharpe_ratio=summary.get("oos_sharpe", 0.0),
             returns=oos_returns,
             n_trials=max(total_evaluated_trials, 1),
+            trial_sharpes=all_trial_sharpes if all_trial_sharpes else None,
         )
 
     return {

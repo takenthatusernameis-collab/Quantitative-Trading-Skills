@@ -128,10 +128,11 @@ accept `apply_deflation=True`:
   period, plus an aggregate `summary["deflated_sharpe"]` on the
   combined out-of-sample returns with `n_trials` equal to the total
   number of configurations evaluated across all periods/folds. The
-  aggregate uses the conservative interpretation that the final
-  out-of-sample record was produced by a search that tried that many
-  configurations; `SR*` for the aggregate uses the i.i.d. null
-  approximation.
+  aggregate uses the pooled cross-period (cross-fold) trial Sharpes
+  for the cross-sectional `SR*` estimator (the recommended estimator);
+  the between-period variation inflates `SR*`, which is conservative.
+  The i.i.d. null approximation is used only when no trial Sharpes
+  are available.
 - `overfitting_check` surfaces the aggregate DSR in its diagnostics
   when the walk-forward run computed one.
 - The main backtest entry point `run_backtest.py` also reports the

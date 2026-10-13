@@ -23,6 +23,8 @@ from walk_forward import (  # noqa: E402
     _calculate_cpcv_summary,
     run_cpcv,
     _make_strategy_factory,
+    _calculate_strategy_returns,
+    _annualization_factor,
 )
 
 
@@ -331,6 +333,95 @@ def test_cpcv_cli_help():
     assert callable(run_cpcv)
 
 
+def test_cpcv_aggregate_deflation_uses_pooled_trial_sharpes():
+    """The aggregate CPCV DSR must use pooled cross-fold trial Sharpes.
+
+    Mirrors the walk-forward test: the aggregate DSR on combined OOS returns
+    must use the cross-sectional SR* estimator from pooled fold trial Sharpes.
+    """
+    # Use more data and larger test_size so test windows can accommodate
+    # the slow_period lookback (max 50). 2000 periods with 8 splits,
+    # test_size=0.2 gives ~50 test observations per fold.
+    data = _make_sample_data(2000)
+    param_grid = {"fast_period": [10, 20], "slow_period": [30, 50]}
+    strategy_factory = _make_strategy_factory("sma_crossover")
+
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=8,
+        test_size=0.2,
+        purge_size=0.0,
+        embargo_size=0.0,
+        apply_deflation=True,
+    )
+
+    # Verify we have valid OOS returns and a deflated_sharpe key
+    assert "deflated_sharpe" in results["summary"], (
+        f"Expected deflated_sharpe in summary, got keys: {results['summary'].keys()}"
+    )
+    assert len(results["oos_returns"]) > 0, "Expected non-empty OOS returns"
+
+    agg_dsr = results["summary"]["deflated_sharpe"]
+
+    # Collect pooled trial Sharpes by re-running grid search on each fold's
+    # training data.
+    from itertools import product
+
+    pooled_trial_sharpes = []
+    for fold in results["folds"]:
+        if fold.get("best_params") is None:
+            continue
+        train_data = fold["train_data"]
+        test_data = fold["test_data"]
+        param_names = list(param_grid.keys())
+        param_values = list(param_grid.values())
+        for combo in product(*param_values):
+            params = dict(zip(param_names, combo))
+            try:
+                strategy = strategy_factory(params)
+                train_signals = strategy.generate_signals(train_data)
+                test_signals = strategy.generate_signals(test_data)
+                if not signals_active(test_signals):
+                    continue
+                train_returns = _calculate_strategy_returns(
+                    train_data, train_signals, 0.0002, 0.0001
+                )
+                if len(train_returns) > 1 and train_returns.std() > 0:
+                    ann_factor = _annualization_factor(train_returns.index)
+                    excess = train_returns - 0.02 / ann_factor
+                    sharpe = excess.mean() / excess.std() * np.sqrt(ann_factor)
+                    if np.isfinite(sharpe):
+                        pooled_trial_sharpes.append(float(sharpe))
+            except Exception:
+                continue
+
+    oos_returns = results["oos_returns"]
+    oos_sharpe = results["summary"].get("oos_sharpe", 0.0)
+    n_trials = max(len(pooled_trial_sharpes), 1)
+    expected = deflated_sharpe_ratio(
+        sharpe_ratio=oos_sharpe,
+        returns=oos_returns,
+        n_trials=n_trials,
+        trial_sharpes=pooled_trial_sharpes if pooled_trial_sharpes else None,
+    )
+
+    for key in (
+        "deflated_sharpe_ratio", "p_value", "expected_max_sharpe",
+        "n_trials", "n_observations", "skewness", "kurtosis",
+    ):
+        assert abs(agg_dsr[key] - expected[key]) < 1e-12, (
+            f"Mismatch on {key}: got {agg_dsr[key]}, expected {expected[key]}"
+        )
+
+    # Also verify the cross-sectional estimator differs from i.i.d. null
+    iid_null = deflated_sharpe_ratio(
+        sharpe_ratio=oos_sharpe, returns=oos_returns, n_trials=n_trials
+    )
+    assert abs(agg_dsr["expected_max_sharpe"] - iid_null["expected_max_sharpe"]) > 1e-9
+
+
 def test_cpcv_deflation():
     """CPCV with apply_deflation reports per-fold and aggregate DSR."""
     # 500 days / 4 splits / test_size=0.2 -> 25-bar test windows,
@@ -391,6 +482,7 @@ def main() -> int:
         ("cpcv_different_strategies", test_cpcv_different_strategies),
         ("cpcv_cli_help", test_cpcv_cli_help),
         ("cpcv_deflation", test_cpcv_deflation),
+        ("cpcv_aggregate_deflation_uses_pooled_trial_sharpes", test_cpcv_aggregate_deflation_uses_pooled_trial_sharpes),
         ("cpcv_multi_asset_cross_sectional_momentum", test_cpcv_multi_asset_cross_sectional_momentum),
         ("cpcv_multi_asset_dual_momentum", test_cpcv_multi_asset_dual_momentum),
         ("cpcv_multi_asset_dict_cross_sectional_momentum", test_cpcv_multi_asset_dict_cross_sectional_momentum),

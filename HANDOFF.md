@@ -1,6 +1,6 @@
 # Handoff — Quantitative Trading Skills Repository
 
-**Last updated**: 2026-10-13 (eighth session)
+**Last updated**: 2026-10-13 (ninth session)
 
 ## Repository state
 
@@ -13,159 +13,128 @@
 - Python deps for the suites: `pandas` and `numpy` (present in the
   session environment; not committed).
 
-## Session summary (2026-10-13, eighth session)
+## Session summary (2026-10-13, ninth session)
 
-Implemented the seventh handoff's assigned task: **wire the
-Deflated Sharpe Ratio into the `run_monte_carlo` path** (CLI
-`monte-carlo --n-trials`).
+Implemented the eighth handoff's assigned task: **use the pooled
+per-period trial Sharpes for the aggregate walk-forward (and CPCV)
+DSR.**
 
 ### Changes
 
-1. **`scripts/walk_forward.py`** (`run_monte_carlo`, +~40 lines):
-   - `opt_results` is now initialized to `None` before the
-     `param_grid` branch so the optimization record is available
-     after it.
-   - After the base `returns` are computed, when `args.n_trials`
-     is set (and viable: `>= 1` trial, `>= 2` return observations),
-     the base backtest results (equity curve, returns, config with
-     `n_trials`) are passed through `calculate_metrics`, mirroring
-     the `run_backtest --n-trials` path. When a parameter grid was
-     searched, the optimization record's ranked `sharpe_ratio`
-     values are threaded through the config as `trial_sharpes`, so
-     `SR*` uses the cross-sectional dispersion estimator (recommended)
-     instead of the i.i.d. null approximation.
-   - The DSR is printed alongside the run (same format as
-     `run_backtest`) and saved as a top-level `deflated_sharpe`
-     key in `monte_carlo_results.json`, with `n_trials` recorded
-     in the saved config — both only when the flag is set.
-   - New CLI flag `--n-trials` (type int, default `None`) on the
-     `monte-carlo` subcommand. `getattr(args, "n_trials", None)`
-     keeps the function callable with arg namespaces that lack the
-     attribute (existing tests do exactly that).
+1. **`scripts/walk_forward.py`** (`walk_forward_analysis`, `cpcv_analysis`):
+   - Added `all_trial_sharpes: List[float] = []` accumulator in both
+     functions to pool per-period (per-fold) trial Sharpes across the
+     entire walk-forward/CPCV run.
+   - In the aggregate deflation block (`summary["deflated_sharpe"]`),
+     pass `trial_sharpes=all_trial_sharpes` to
+     `deflated_sharpe_ratio`, so the cross-sectional `SR*` estimator
+     uses the pooled dispersion instead of the i.i.d. null
+     approximation. The between-period variation inflates `SR*`,
+     which is conservative.
+   - Updated docstrings to reflect the new behavior.
 
-2. **`scripts/performance.py`** (`calculate_metrics`, +6 lines):
-   - Reads an optional `trial_sharpes` list from the results config
-     and passes it through to `deflated_sharpe_ratio`. Absent or
-     `None` keeps the previous i.i.d. null behavior, so the
-     `run_backtest` path is unchanged.
+2. **`tests/test_walk_forward.py`** (+2 tests, 31 -> 33):
+   - `test_walk_forward_aggregate_deflation_uses_pooled_trial_sharpes`:
+     re-runs the grid search on each training period to reconstruct the
+     exact pooled trial Sharpes, calls `deflated_sharpe_ratio`
+     directly with them, and asserts the surfaced aggregate DSR matches
+     to 1e-12 on every key. Also verifies the cross-sectional estimator
+     differs from the i.i.d. null.
+   - `test_cpcv_aggregate_deflation_uses_pooled_trial_sharpes`: same
+     logic for CPCV (uses larger test data and test_size=0.2 so test
+     windows accommodate the lookbacks).
 
-3. **`tests/test_walk_forward.py`** (+3 tests, 28 -> 31):
-   - `run_monte_carlo_cli_with_n_trials` — the saved JSON carries a
-     `deflated_sharpe` dict (DSR in [0, 1], `n_trials == 50`,
-     `p_value == 1 - DSR`) and the config records `n_trials`.
-   - `run_monte_carlo_cli_without_n_trials_omits_dsr` — backward
-     compatibility: no `deflated_sharpe` key, no `n_trials` in the
-     saved config when the flag is absent.
-   - `run_monte_carlo_deflated_sharpe_matches_direct_call` —
-     independently recomputes the optimization record, the base
-     backtest Sharpe and the trial Sharpes, and asserts the surfaced
-     DSR equals a direct `deflated_sharpe_ratio(...,
-     trial_sharpes=...)` call to 1e-12 on every key, and that
-     `expected_max_sharpe` differs from the i.i.d. null (proving the
-     cross-sectional estimator was actually used).
+3. **`tests/test_cpcv.py`** (+1 test, 15 -> 16):
+   - `test_cpcv_aggregate_deflation_uses_pooled_trial_sharpes`:
+     mirrors the walk-forward test for CPCV; asserts aggregate DSR
+     matches direct call with pooled fold trial Sharpes.
 
-4. **Docs**: `SKILL.md` (multiple-testing tip, `walk_forward.py`
-   resource line, `test_walk_forward.py` coverage bullet),
-   `references/validation_methods.md` (DSR usage bullet, CLI
-   example, Monte Carlo "Multiple-Testing Correction (CLI)"
-   subsection), `references/metrics_definitions.md` (DSR section
-   now lists the `monte-carlo` path).
+4. **`references/validation_methods.md`**:
+   - Updated the DSR usage bullet for `walk_forward_analysis` and
+     `cpcv_analysis` to state the aggregate now uses the pooled
+     cross-period/fold trial Sharpes for the cross-sectional `SR*`
+     estimator (conservative: between-period variation inflates the
+     null benchmark).
+
+5. **`references/metrics_definitions.md`**:
+   - Updated the Deflated Sharpe Ratio section to document that for
+     `walk_forward_analysis` and `cpcv_analysis`, the aggregate DSR
+     on combined OOS returns uses the pooled cross-period/fold trial
+     Sharpes for `SR*`.
 
 ### Verified (evidence)
 
-- Full suite from repo root: **137/137 tests pass**
-  (6 + 13 + 14 + 23 + 27 + **31** + 15 + 7 + 1). Baseline was
-  134; +3 tests in `test_walk_forward.py`; no existing test
-  changed.
-- Pinned snapshot: `run_backtest.py` output on
-  `assets/example_data/sample_ohlcv.csv` is **byte-identical** to
-  `test_output/` (`metrics.json`, `report.txt`,
-  `tear_sheet_summary.json` all `diff`-clean) — the
-  `calculate_metrics` change is inert without `trial_sharpes` in
-  the config.
-- CLI end-to-end with `--n-trials 50` on the sample data:
-  prints `Deflated Sharpe Ratio: 0.4640 (p-value 0.5360,
-  expected max Sharpe 0.5647, 50 trials)` and writes a
-  top-level `deflated_sharpe` key plus `config.n_trials`.
-  Expected max Sharpe 0.5647 confirms the cross-sectional
-  estimator (the i.i.d. null would give ~1.98 for T=502, N=50).
-- CLI end-to-end without the flag: no DSR print, and the saved
-  JSON keys are exactly the pre-change set
-  (`base_observations`, `confidence_intervals`, `config`,
-  `metric_distributions`, `n_simulations`, `probability_of_ruin`,
-  `ruin_threshold`, `summary`).
+- Full suite from repo root: **140/140 tests pass**
+  (6 + 13 + 14 + 23 + 27 + **33** + **16** + 7 + 1). Baseline was
+  137; +3 tests in `test_walk_forward.py`, +1 in `test_cpcv.py`; no
+  existing test changed.
+- CLI end-to-end walk-forward with `--deflate` on sample data:
+  prints `Deflated Sharpe Ratio: 0.5640 (p-value 0.4360,
+  expected max Sharpe 0.9984, 14 trials)` and writes a
+  `deflated_sharpe` key with `expected_max_sharpe=0.9984` (cross-
+  sectional; the i.i.d. null for T=291, N=14 would give ~0.44).
+- CLI end-to-end CPCV with `--deflate` (n_splits=4, test_size=0.3):
+  prints `Deflated Sharpe Ratio: 0.2489 (p-value 0.7511,
+  expected max Sharpe 0.6778, 4 trials)` with the cross-sectional
+  estimator active.
+- Backward compatibility: without `--deflate`/`apply_deflation=True`,
+  no `deflated_sharpe` keys are emitted anywhere.
 
 ### Methodological notes
 
-- The DSR corrects the **base backtest Sharpe** (the in-sample
-  Sharpe of the grid-selected parameters) for the multiple-testing
-  bias of the parameter search plus return non-normality. It does
-  not deflate the Monte Carlo distributions themselves, and it is
-  not evidence of profitability — all repo results are synthetic.
-- Design choice: `n_trials` is taken verbatim from `--n-trials`
-  (mirroring `run_backtest`), not `max(flag, grid size)`. If a
-  caller passes a count smaller than the grid the subcommand
-  actually evaluated, the deflation understates the search; see
-  "Unresolved".
-- Refactor-grade change: no strategy, signal, metric formula, or
-  simulation algorithm was altered; `deflated_sharpe_ratio` itself
-  is untouched.
+- The DSR corrects the **OOS Sharpe** of the combined walk-forward/
+  CPCV record for the multiple-testing bias of the *entire search*
+  (all periods/folds combined) plus return non-normality.
+- Using pooled trial Sharpes for the cross-sectional `SR*` is
+  conservative because between-period/fold dispersion inflates the
+  estimated null Sharpe. This is the same estimator used by
+  `parameter_optimization` and the `monte-carlo` path; the aggregate
+  is now consistent.
+- All results in this repo are synthetic; the DSR is a multiple-
+  testing correction, not evidence of profitability.
 
 ## Unresolved / remaining
 
-- `--n-trials` semantics: the flag is the sole source of `n_trials`
-  even though the internal optimization knows how many combos it
-  evaluated. A conservative refinement would be
-  `n_trials = max(args.n_trials, len(opt_results))` when a grid was
-  searched (the search constitutes at least that many trials).
-  Not done: it changes the meaning of an explicit user-supplied
-  value and would need its own tests.
+- `--n-trials` semantics in `run_monte_carlo` / `run_backtest`: the
+  flag is the sole source of `n_trials` even though the internal
+  optimization knows how many combos it evaluated. A conservative
+  refinement would be `n_trials = max(args.n_trials, len(opt_results))`
+  when a grid was searched. Not done: it changes the meaning of an
+  explicit user-supplied value and would need its own tests.
 - No out-of-sample evidence of profitability exists anywhere in
   this repo; all results are synthetic.
-- The aggregate walk-forward/CPCV DSR (`summary["deflated_sharpe"]`
-  with `--deflate`) still uses the i.i.d. null for `SR*` even
-  though per-period trial Sharpes are collected and used for the
-  per-period DSRs; the pooled record is discarded.
+- The `overfitting_check` helper surfaces the aggregate DSR correctly
+  (it reads `wf_results["summary"]["deflated_sharpe"]`), no change
+  needed there.
 
 ## Next task for the next agent
 
-**Use the pooled per-period trial Sharpes for the aggregate
-walk-forward (and CPCV) DSR.**
+**Investigate and fix the `--n-trials` semantics for `run_backtest`
+and `run_monte_carlo` CLI.**
 
-Context: `scripts/walk_forward.py` `walk_forward_analysis`
-(lines ~200-252) collects `period_trial_sharpes` per period and
-passes them to the per-period `deflated_sharpe_ratio` (line ~227),
-but the aggregate `summary["deflated_sharpe"]` (lines ~247-252)
-calls `deflated_sharpe_ratio` without `trial_sharpes`, so `SR*`
-falls back to the i.i.d. null. `cpcv_analysis` has the same
-shape. `parameter_optimization` and the new `monte-carlo` path
-both use the cross-sectional estimator, so the aggregate is the
-remaining inconsistent path.
+Context: Both CLI commands accept `--n-trials` as a user-supplied
+integer. However, when a `--param-grid` is provided and the command
+runs an internal parameter optimization, the actual number of
+evaluated configurations (`len(opt_results)`) may differ from the
+user-supplied value. If the user passes a smaller number, the
+deflation understates the search; if they pass a larger number, it
+overstates it.
 
 Scope (one bounded change):
-- Accumulate the per-period trial Sharpes across periods (they are
-  currently local to each period loop and discarded) and pass the
-  pooled list as `trial_sharpes` to the aggregate deflation in
-  `walk_forward_analysis`; mirror in `cpcv_analysis` if its fold
-  record keeps trial Sharpes (inspect first — it may need the same
-  accumulation).
-- Keep `n_trials = total_evaluated_trials` for the aggregate
-  (conservative interpretation is unchanged; only the `SR*`
-  estimator changes).
-- Tests: extend the existing deflation tests
-  (`test_walk_forward_deflation`, `test_run_walk_forward_cli_with_deflation`,
-  the CPCV deflation tests) to assert the aggregate DSR matches a
-  direct `deflated_sharpe_ratio(..., trial_sharpes=pooled)` call;
-  update `references/validation_methods.md` and
-  `references/metrics_definitions.md`, which currently state the
-  aggregate uses the i.i.d. null.
+- For `run_backtest.py --n-trials`: currently the flag is only used
+  when the caller *already knows* the number of development trials.
+  This is correct as-is (the backtest itself does no search).
+- For `walk_forward.py monte-carlo --n-trials`: the subcommand
+  internally runs `parameter_optimization` when `--param-grid` is
+  given. The deflation should use `n_trials = max(args.n_trials,
+  len(opt_results))` so that the internal search is always fully
+  accounted for, while still allowing the user to report additional
+  development trials. Add tests for this behavior.
+- Update `references/validation_methods.md` and `references/
+  metrics_definitions.md` to document the revised semantics.
 
-Constraints: opt-in via `--deflate` only (no behavior change
-without it); keep the full suite passing (137 tests); no new
-dependencies. Note the methodological judgment: pooling
-cross-period dispersion inflates `SR*` with between-period
-variation, which is conservative but debatable — the docs should
-state whichever interpretation is chosen.
+Constraints: opt-in via `--n-trials` only; keep full suite passing
+(140 tests); no new dependencies.
 
 ## Test suite quick reference
 
@@ -181,6 +150,6 @@ done
 
 `test_reporting.py` uses stdlib `unittest` (exit code / `OK` line is the
 pass/fail signal); the rest use the custom `main()` runner printing
-`N/N tests passed`. Current counts: 6 + 13 + 14 + 23 + 27 + 31 + 15 + 7 + 1 = 137.
+`N/N tests passed`. Current counts: 6 + 13 + 14 + 23 + 27 + 33 + 16 + 7 + 1 = 140.
 
 (End of file)
