@@ -183,8 +183,12 @@ def signals_active(signals: pd.Series) -> bool:
     data window leaves every rolling indicator NaN, so the signal stays flat
     at 0) produces no trades and meaningless zero returns. Callers should
     skip such parameter sets rather than ranking them as "optimal".
+
+    NaN values are explicitly excluded: a signal that is entirely NaN
+    (e.g., from an indicator with a lookback longer than the data) is
+    treated as flat, not active.
     """
-    return bool((signals != 0).any())
+    return bool((signals.notna() & (signals != 0)).any())
 
 
 def main():

@@ -64,6 +64,18 @@ def test_signals_active_detects_flat_and_active_series():
     empty = pd.Series(dtype=int)
     assert signals_active(empty) is False
 
+    # NaN signals should be treated as flat (not active)
+    nan_signals = pd.Series([np.nan, np.nan, np.nan], index=dates[:3])
+    assert signals_active(nan_signals) is False
+
+    # Mixed NaN and zero should be flat
+    mixed_nan_zero = pd.Series([np.nan, 0, np.nan, 0], index=dates[:4])
+    assert signals_active(mixed_nan_zero) is False
+
+    # Mixed NaN and active should be active
+    mixed_nan_active = pd.Series([np.nan, 0, 1, np.nan], index=dates[:4])
+    assert signals_active(mixed_nan_active) is True
+
 
 def test_run_backtest_flat_strategy_raises():
     """A strategy that never takes a position must raise ValueError."""
