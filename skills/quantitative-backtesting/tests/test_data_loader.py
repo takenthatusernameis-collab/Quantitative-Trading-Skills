@@ -173,6 +173,27 @@ def test_validate_point_in_time_detects_lookahead():
     assert "passed" in res
 
 
+def test_validate_point_in_time_detects_same_bar_lookahead():
+    """A signal equal to the same-bar return is a strict look-ahead violation.
+
+    Contemporaneous correlation (signal[t] vs return[t]) is a far stricter
+    indicator than next-period correlation, because no information should
+    flow from a same-bar signal to a same-bar return. Setting the signal
+    equal to the same-bar return guarantees corr=+1.0 and must be flagged.
+    """
+    np.random.seed(7)
+    dates = pd.date_range("2020-01-01", periods=50, freq="B")
+    close = 100 * np.exp(np.cumsum(np.random.normal(0.0, 0.01, 50)))
+    df = pd.DataFrame({"close": close}, index=dates)
+    # Signal is set equal to the same-bar return: corr(signal_changes, same_bar_returns) = 1.0
+    df["signal"] = df["close"].pct_change()
+    res = validate_point_in_time(df, signal_column="signal")
+    assert res["passed"] is False
+    assert any("same-bar" in v for v in res["violations"]), (
+        f"expected same-bar look-ahead violation, got {res['violations']}"
+    )
+
+
 def test_validate_point_in_time_non_monotonic():
     """Non-monotonic index is detected."""
     dates = pd.date_range("2020-01-01", periods=10, freq="B")
@@ -304,6 +325,7 @@ def main() -> int:
         ("test_provenance_serialization", test_provenance_serialization),
         ("test_validate_point_in_time_clean", test_validate_point_in_time_clean),
         ("test_validate_point_in_time_detects_lookahead", test_validate_point_in_time_detects_lookahead),
+        ("test_validate_point_in_time_detects_same_bar_lookahead", test_validate_point_in_time_detects_same_bar_lookahead),
         ("test_validate_point_in_time_non_monotonic", test_validate_point_in_time_non_monotonic),
         ("test_validate_point_in_time_lookback_windows", test_validate_point_in_time_lookback_windows),
         ("test_detect_survivorship_bias_survivors_only", test_detect_survivorship_bias_survivors_only),

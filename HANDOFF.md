@@ -1,6 +1,6 @@
 # Handoff — Quantitative Trading Skills Repository
 
- **Last updated:** 2026-10-13, after completing the provenance-in-tear-sheet and PIT-persistence-in-walk-forward tasks (with fixes to defects from the prior commit `dd6fad5`), adding 9 regression tests, and regenerating the pinned snapshot.
+ **Last updated:** 2026-10-13, after completing the provenance-in-tear-sheet and PIT-persistence-in-walk-forward tasks (with fixes to defects from the prior commit `dd6fad5`), adding 9 regression tests, and regenerating the pinned snapshot. A subsequent session added the same-bar (contemporaneous) look-ahead correlation check (1 new test, 217 tests passing).
 
 ## Current repository state
 
@@ -21,8 +21,8 @@
 
 ## Verification status — measured this session
 
- - **Full test suite:** 216 tests passing across all 9 test entry points.
-   - `test_data_loader.py`: 16/16
+ - **Full test suite:** 217 tests passing across all 9 test entry points.
+   - `test_data_loader.py`: 17/17
    - `test_performance.py`: 13/13
    - `test_reporting.py`: 40/40 (`unittest`, `OK`) (was 36; +4 provenance-section tests: presence, omission, per-symbol panel, PIT outcome)
    - `test_run_backtest.py`: 35/35
@@ -47,14 +47,33 @@ The provenance/point-in-time/survivorship reproducibility chain is now complete 
 - `generate_tear_sheet` renders a "Data Provenance" section (source path, checksum, date range, filters, transformations, validation outcome) plus the PIT outcome in the HTML, and surfaces both keys in the JSON summary — for single-asset and per-symbol panel forms.
 - The walk-forward CLI (`walk_forward.py`) persists `point_in_time_validation` in the CPCV, walk-forward, and Monte Carlo summary/result JSON artifacts and in the per-command tear sheets, and in a separate `point_in_time_validation.json` for parameter optimization.
 
-The remaining high-value, bounded task is the **optional follow-up from the prior handoff**:
+**Completed this session — same-bar (contemporaneous) look-ahead check:**
 
-1. **Refine the PIT signal/next-return correlation check** in `data_loader.py` `validate_point_in_time`: currently the check (lines 316-327) correlates signal changes with *next-period* returns (`df["close"].pct_change().shift(-1)`). A signal that genuinely predicts next-period returns is alpha, not look-ahead bias. Refine the check to also test *contemporaneous* (same-bar) correlation — `df["close"].pct_change().shift(0)` (or equivalently the raw `pct_change()`, no shift) — which is a true same-bar look-ahead indicator. A same-bar correlation above the 0.3 threshold is a far stricter violation than next-period correlation, because no information should flow from a same-bar signal to a same-bar return. Add a test in `test_data_loader.py` that constructs a data frame where the signal is set equal to the same-bar return (guaranteeing a +1.0 contemporaneous correlation) and asserts the check flags it as a violation.
+- `validate_point_in_time` in `data_loader.py` now also correlates signal changes with *same-bar* returns (`df["close"].pct_change()`, no shift), in addition to the existing next-period correlation. Same-bar correlation is a stricter look-ahead indicator: no information should flow from a signal to the return of the same bar. The 0.3 threshold and existing next-period check are unchanged; the same-bar check is a supplementary violation, so existing tests stay green.
+- Added `test_validate_point_in_time_detects_same_bar_lookahead` in `test_data_loader.py`: a frame whose signal equals the same-bar return (guaranteeing corr=+1.0) is flagged as a violation with a "same-bar" message.
+- Full suite: **217 tests passing** (17 data_loader + 13 performance + 40 reporting + 35 run_backtest + 27 strategy_builder + 61 walk_forward + 16 cpcv + 7 monte_carlo + 1 generate_sample_data).
+- The `_validate_point_in_time` wrapper in `run_backtest.py` (line 57) calls `validate_point_in_time(check_df, signal_column="_pit_signal")` for single-asset data, so the refinement propagates to `run_backtest` and walk-forward `--validate-point-in-time` automatically.
+
+**Next task — buy-and-hold baseline integration:**
+
+`run_backtest.py` accepts an optional `--benchmark` path (CSV/Parquet of benchmark OHLCV, e.g. SPY) but never wires it through: `run_backtest()` has no `benchmark` parameter, so `results["benchmark"]` is never set, and `calculate_metrics`'s benchmark block (performance.py:204-219) is dead code in the CLI path. Every backtest therefore reports no alpha/beta/correlation vs. the market, which is a methodological gap: a strategy's Sharpe is meaningless without a buy-and-hold baseline.
+
+Implement the buy-and-hold baseline end-to-end:
+
+1. Add a `benchmark` parameter to `run_backtest()` (a DataFrame of benchmark OHLCV indexed by date). Compute the buy-and-hold return series from the benchmark's close (aligned to the strategy's return index on the common trading dates) and attach it as `results["benchmark"]`.
+2. Wire `--benchmark` through `parse_args` and `main()`: load the benchmark file with `load_data` (reusing the same provenance capture is optional; the minimum is that it loads and validates), pass it to `run_backtest`, and persist a `benchmark_provenance.json` artifact next to `data_provenance.json` when provenance is captured.
+3. Surface the benchmark in the tear sheet and JSON summary: `reporting.py` already renders `benchmark_total_return`, `benchmark_annualized_return`, and `correlation_with_benchmark` when present (reporting.py:373-378), so the change is purely to make those keys exist.
+4. Add tests to `test_run_backtest.py`:
+   - `run_backtest` with a benchmark DataFrame attaches `results["benchmark"]` aligned on common dates.
+   - Without a benchmark, the key is absent (backward compatible).
+   - CLI end-to-end with `--benchmark <path>` writes `benchmark_provenance.json` and the metrics JSON contains `benchmark_total_return`, `benchmark_annualized_return`, `correlation_with_benchmark`, `alpha`, `beta`.
+   - A benchmark whose index is a strict superset of the strategy's index aligns correctly (inner join on common dates) rather than crashing or misaligning.
 
 Evidence and constraints for the next agent:
-- The `_validate_point_in_time` wrapper in `run_backtest.py` (line 57) calls `validate_point_in_time(check_df, signal_column="_pit_signal")` for single-asset data, so the refinement in `data_loader.py` propagates to the `run_backtest` and walk-forward `--validate-point-in-time` paths automatically.
-- The 0.3 threshold and the "potential look-ahead bias" message text are referenced by `test_run_backtest.py` tests (`test_run_backtest_point_in_time_detects_duplicate_timestamps` etc.); keep the existing next-period check intact and add the contemporaneous check as a supplementary violation so existing tests remain green.
-- `validate_point_in_time`'s return structure is `{"passed": bool, "violations": [...], "warnings": [...]}`; tests assert on `pit["passed"]` and `pit["violations"]`.
+- `calculate_metrics` reads `results.get("benchmark")` (performance.py:58) and computes `benchmark_total_return`, `benchmark_annualized_return`, `correlation_with_benchmark`, `alpha`, `beta` (performance.py:204-219). It aligns with `returns.align(benchmark_returns, join="inner")`, so the benchmark series must share the strategy return index's datetime type.
+- The benchmark's buy-and-hold return should be `benchmark["close"].pct_change()`, aligned to the strategy returns index. Do not use `shift(-1)` on the benchmark (that would be look-ahead in the benchmark itself); the strategy already trades at next-period open, so the benchmark return for period t is the close-to-close return from t-1 to t.
+- `generate_tear_sheet` in `reporting.py` already handles the keys when present; verify it renders without a benchmark too (backward compat).
+- The existing `--benchmark`-related code in `walk_forward.py` (line 548) is a different path (a benchmark passed to the walk-forward runner); focus on the `run_backtest` CLI path first.
 
 ## Test commands
 
