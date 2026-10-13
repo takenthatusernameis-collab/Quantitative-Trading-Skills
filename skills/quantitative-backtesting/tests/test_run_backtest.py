@@ -44,7 +44,8 @@ def _make_data(periods: int = 252, seed: int = 42) -> pd.DataFrame:
 class _Args:
     def __init__(self, commission=0.0002, slippage=0.0001, initial_capital=100000,
                  strategy="sma_crossover", symbol="TEST", n_trials=None,
-                 impact_coefficient=0.0, adv_window=20):
+                 impact_coefficient=0.0, adv_window=20,
+                 borrow_cost=0.0, funding_cost=0.0):
         self.commission = commission
         self.slippage = slippage
         self.initial_capital = initial_capital
@@ -53,6 +54,8 @@ class _Args:
         self.n_trials = n_trials
         self.impact_coefficient = impact_coefficient
         self.adv_window = adv_window
+        self.borrow_cost = borrow_cost
+        self.funding_cost = funding_cost
 
 
 def test_signals_active_detects_flat_and_active_series():

@@ -352,6 +352,8 @@ class _CLIArgs:
         defaults = {
             "impact_coefficient": 0.0,
             "adv_window": 20,
+            "borrow_cost": 0.0,
+            "funding_cost": 0.0,
         }
         for k, v in defaults.items():
             setattr(self, k, v)
@@ -1917,6 +1919,108 @@ def test_run_backtest_market_impact():
         assert os.path.exists(f"{tmpdir}/results/tear_sheet.html")
 
 
+def test_borrow_cost_reduces_returns_for_short_strategy():
+    """Borrow cost reduces net returns for strategies with short exposure."""
+    data = _make_data(periods=300, seed=42)
+    strategy = build_strategy("bollinger_bands", '{"period": 20, "std_dev": 2.0}')
+    signals = strategy.generate_signals(data)
+    assert (signals < 0).any(), "Expected short exposure from Bollinger strategy"
+
+    returns_no_borrow = _calculate_strategy_returns(
+        data, signals, commission=0.0002, slippage=0.0001
+    )
+    returns_with_borrow = _calculate_strategy_returns(
+        data, signals, commission=0.0002, slippage=0.0001, borrow_cost=0.03
+    )
+
+    aligned_no, aligned_with = returns_no_borrow.align(returns_with_borrow, join="inner")
+    total_no = (1 + aligned_no).prod() - 1
+    total_with = (1 + aligned_with).prod() - 1
+    assert total_with < total_no, (
+        f"Expected borrow cost to reduce returns: {total_with:.4f} >= {total_no:.4f}"
+    )
+
+
+def test_borrow_cost_no_effect_on_long_only_strategy():
+    """Borrow cost leaves long/flat strategies unchanged (no short exposure)."""
+    data = _make_data(periods=300, seed=42)
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    signals = strategy.generate_signals(data)
+    assert (signals < 0).sum() == 0, "sma_crossover should never go short"
+
+    returns_no_borrow = _calculate_strategy_returns(
+        data, signals, commission=0.0002, slippage=0.0001
+    )
+    returns_with_borrow = _calculate_strategy_returns(
+        data, signals, commission=0.0002, slippage=0.0001, borrow_cost=0.05
+    )
+    pd.testing.assert_series_equal(returns_no_borrow, returns_with_borrow)
+
+
+def test_borrow_funding_zero_costs_match_baseline():
+    """Zero borrow and funding costs produce identical returns to baseline."""
+    data = _make_data(periods=300, seed=42)
+    strategy = build_strategy("bollinger_bands", '{"period": 20, "std_dev": 2.0}')
+    signals = strategy.generate_signals(data)
+    baseline = _calculate_strategy_returns(
+        data, signals, commission=0.0002, slippage=0.0001
+    )
+    zero_costs = _calculate_strategy_returns(
+        data, signals, commission=0.0002, slippage=0.0001,
+        borrow_cost=0.0, funding_cost=0.0,
+    )
+    pd.testing.assert_series_equal(baseline, zero_costs)
+
+
+def test_funding_cost_applies_only_beyond_one_x_leverage():
+    """Funding cost applies to gross exposure beyond 1x and nowhere else."""
+    data = _make_data(periods=100, seed=7)
+    idx = data.index
+
+    leveraged = pd.Series(1.5, index=idx)
+    returns_lev_no_funding = _calculate_strategy_returns(
+        data, leveraged, commission=0.0, slippage=0.0
+    )
+    returns_lev_funding = _calculate_strategy_returns(
+        data, leveraged, commission=0.0, slippage=0.0, funding_cost=0.10
+    )
+    aligned_no, aligned_f = returns_lev_no_funding.align(returns_lev_funding, join="inner")
+    total_no = (1 + aligned_no).prod() - 1
+    total_f = (1 + aligned_f).prod() - 1
+    assert total_f < total_no, (
+        f"Expected funding cost to reduce leveraged returns: {total_f:.4f} >= {total_no:.4f}"
+    )
+
+    # 1x gross exposure incurs no funding cost
+    unleveraged = pd.Series(1.0, index=idx)
+    returns_1x_no_funding = _calculate_strategy_returns(
+        data, unleveraged, commission=0.0, slippage=0.0
+    )
+    returns_1x_funding = _calculate_strategy_returns(
+        data, unleveraged, commission=0.0, slippage=0.0, funding_cost=0.10
+    )
+    pd.testing.assert_series_equal(returns_1x_no_funding, returns_1x_funding)
+
+
+def test_borrow_funding_integration_walk_forward():
+    """Walk-forward analysis runs with borrow and funding costs enabled."""
+    data = _make_data(periods=500, seed=42)
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=lambda p: build_strategy("bollinger_bands", json.dumps(p)),
+        param_grid={"period": [20, 25], "std_dev": [2.0]},
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        commission=0.0002,
+        slippage=0.0001,
+        borrow_cost=0.03,
+        funding_cost=0.02,
+    )
+    assert results["summary"]["n_periods"] > 0
+    assert len(results["oos_returns"]) > 0
+
+
 def main() -> int:
     tests = [
         ("parameter_optimization_skips_flat_combos", test_parameter_optimization_skips_flat_combos),
@@ -1967,6 +2071,11 @@ def main() -> int:
         ("market_impact_integration_parameter_optimization", test_market_impact_integration_parameter_optimization),
         ("market_impact_integration_cpcv", test_market_impact_integration_cpcv),
         ("run_backtest_market_impact", test_run_backtest_market_impact),
+        ("borrow_cost_reduces_returns_for_short_strategy", test_borrow_cost_reduces_returns_for_short_strategy),
+        ("borrow_cost_no_effect_on_long_only_strategy", test_borrow_cost_no_effect_on_long_only_strategy),
+        ("borrow_funding_zero_costs_match_baseline", test_borrow_funding_zero_costs_match_baseline),
+        ("funding_cost_applies_only_beyond_one_x_leverage", test_funding_cost_applies_only_beyond_one_x_leverage),
+        ("borrow_funding_integration_walk_forward", test_borrow_funding_integration_walk_forward),
     ]
 
     failures = 0

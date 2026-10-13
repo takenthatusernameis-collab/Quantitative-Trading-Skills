@@ -34,6 +34,8 @@ def parse_args():
     parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (as decimal)")
     parser.add_argument("--impact-coefficient", type=float, default=0.0, help="Market impact coefficient (position_notional/ADV * coefficient). 0 to disable.")
     parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
+    parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3% per year)")
+    parser.add_argument("--funding-cost", type=float, default=0.0, help="Annual funding cost rate for leveraged positions (as decimal, e.g., 0.02 = 2% per year)")
     parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     parser.add_argument("--output", type=str, default="results", help="Output directory")
     parser.add_argument("--params", type=str, help="Strategy parameters as JSON string")
@@ -102,6 +104,30 @@ def run_backtest(data, strategy, args):
         market_impact = (position_notional / adv_notional.replace(0, np.nan)) * args.impact_coefficient
         market_impact = market_impact.fillna(0)
         costs = costs + market_impact
+
+    # Borrow cost for short positions
+    # Applied daily on the absolute value of short positions
+    if args.borrow_cost > 0:
+        # Convert annual rate to per-period rate
+        ann_factor = 252  # trading days per year
+        daily_borrow_rate = args.borrow_cost / ann_factor
+        # Short positions are negative; borrow cost applies to absolute short exposure
+        short_positions = positions.clip(upper=0).abs()
+        borrow_costs = short_positions * daily_borrow_rate
+        costs = costs + borrow_costs
+
+    # Funding cost for leveraged positions (gross exposure > 1)
+    # Applied daily on the amount of leverage used beyond 100% equity
+    if args.funding_cost > 0:
+        # Convert annual rate to per-period rate
+        ann_factor = 252  # trading days per year
+        daily_funding_rate = args.funding_cost / ann_factor
+        # Gross leverage = absolute position size
+        gross_exposure = positions.abs()
+        # Funding cost applies to leverage beyond 1x (i.e., gross_exposure - 1 when > 1)
+        leverage_excess = (gross_exposure - 1).clip(lower=0)
+        funding_costs = leverage_excess * daily_funding_rate
+        costs = costs + funding_costs
 
     strategy_returns = positions * raw_returns - costs
     strategy_returns = strategy_returns.dropna()
@@ -197,6 +223,8 @@ def run_backtest(data, strategy, args):
             "slippage": args.slippage,
             "impact_coefficient": args.impact_coefficient,
             "adv_window": args.adv_window,
+            "borrow_cost": args.borrow_cost,
+            "funding_cost": args.funding_cost,
             "strategy": args.strategy,
             "symbol": args.symbol,
             "n_trials": getattr(args, "n_trials", None),

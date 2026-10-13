@@ -74,6 +74,8 @@ def walk_forward_analysis(
     slippage: float = 0.0001,
     impact_coefficient: float = 0.0,
     adv_window: int = 20,
+    borrow_cost: float = 0.0,
+    funding_cost: float = 0.0,
     apply_deflation: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -93,6 +95,10 @@ def walk_forward_analysis(
             (position_notional / ADV) * impact_coefficient, where ADV is the
             average daily volume over `adv_window` periods. Set to 0 to disable.
         adv_window: Rolling window for Average Daily Volume calculation. Default 20.
+        borrow_cost: Annual borrow cost rate for short positions (as decimal,
+            e.g., 0.03 = 3% per year). Applied daily on short exposure.
+        funding_cost: Annual funding cost rate for leveraged positions (as decimal,
+            e.g., 0.02 = 2% per year). Applied daily on gross exposure exceeding 1x.
         apply_deflation: When True, compute the Deflated Sharpe Ratio
             (multiple-testing correction) for each period's in-sample
             parameter selection, plus an aggregate correction on the
@@ -190,13 +196,13 @@ def walk_forward_analysis(
                 # Calculate returns for this parameter set
                 test_returns = _calculate_strategy_returns(
                     test_data, test_signals, commission, slippage,
-                    impact_coefficient, adv_window
+                    impact_coefficient, adv_window, borrow_cost, funding_cost
                 )
 
                 # Evaluate on training set
                 train_returns = _calculate_strategy_returns(
                     train_data, train_signals, commission, slippage,
-                    impact_coefficient, adv_window
+                    impact_coefficient, adv_window, borrow_cost, funding_cost
                 )
 
                 if len(train_returns) > 1 and train_returns.std() > 0:
@@ -290,6 +296,8 @@ def parameter_optimization(
     slippage: float = 0.0001,
     impact_coefficient: float = 0.0,
     adv_window: int = 20,
+    borrow_cost: float = 0.0,
+    funding_cost: float = 0.0,
     n_splits: int = 5,
     apply_deflation: bool = False,
 ) -> List[Dict[str, Any]]:
@@ -307,6 +315,10 @@ def parameter_optimization(
             (position_notional / ADV) * impact_coefficient, where ADV is the
             average daily volume over `adv_window` periods. Set to 0 to disable.
         adv_window: Rolling window for Average Daily Volume calculation. Default 20.
+        borrow_cost: Annual borrow cost rate for short positions (as decimal,
+            e.g., 0.03 = 3% per year). Applied daily on short exposure.
+        funding_cost: Annual funding cost rate for leveraged positions (as decimal,
+            e.g., 0.02 = 2% per year). Applied daily on gross exposure exceeding 1x.
         n_splits: Number of train/test splits
         apply_deflation: When True, compute the Deflated Sharpe Ratio
             (Bailey & Lopez de Prado, 2014) for every combination,
@@ -358,7 +370,7 @@ def parameter_optimization(
 
             returns = _calculate_strategy_returns(
                 data, signals, commission, slippage,
-                impact_coefficient, adv_window
+                impact_coefficient, adv_window, borrow_cost, funding_cost
             )
 
             if len(returns) > 1:
@@ -608,6 +620,8 @@ def _calculate_strategy_returns(
     slippage: float,
     impact_coefficient: float = 0.0,
     adv_window: int = 20,
+    borrow_cost: float = 0.0,
+    funding_cost: float = 0.0,
 ) -> pd.Series:
     """Calculate strategy returns from signals and market data.
 
@@ -621,6 +635,10 @@ def _calculate_strategy_returns(
             average daily volume over `adv_window` periods. Set to 0 to disable.
             Typical values: 0.1-1.0 for linear impact models.
         adv_window: Rolling window for Average Daily Volume calculation. Default 20.
+        borrow_cost: Annual borrow cost rate for short positions (as decimal,
+            e.g., 0.03 = 3% per year). Applied daily on short exposure.
+        funding_cost: Annual funding cost rate for leveraged positions (as decimal,
+            e.g., 0.02 = 2% per year). Applied daily on gross exposure exceeding 1x.
     """
     if isinstance(data, dict):
         # For dict of dataframes, compute equal-weighted portfolio returns
@@ -672,6 +690,30 @@ def _calculate_strategy_returns(
         market_impact = (position_notional / adv_notional.replace(0, np.nan)) * impact_coefficient
         market_impact = market_impact.fillna(0)
         costs = costs + market_impact
+
+    # Borrow cost for short positions
+    # Applied daily on the absolute value of short positions
+    if borrow_cost > 0:
+        # Convert annual rate to per-period rate
+        ann_factor = 252  # trading days per year
+        daily_borrow_rate = borrow_cost / ann_factor
+        # Short positions are negative; borrow cost applies to absolute short exposure
+        short_positions = positions.clip(upper=0).abs()
+        borrow_costs = short_positions * daily_borrow_rate
+        costs = costs + borrow_costs
+
+    # Funding cost for leveraged positions (gross exposure > 1)
+    # Applied daily on the amount of leverage used beyond 100% equity
+    if funding_cost > 0:
+        # Convert annual rate to per-period rate
+        ann_factor = 252  # trading days per year
+        daily_funding_rate = funding_cost / ann_factor
+        # Gross leverage = absolute position size
+        gross_exposure = positions.abs()
+        # Funding cost applies to leverage beyond 1x (i.e., gross_exposure - 1 when > 1)
+        leverage_excess = (gross_exposure - 1).clip(lower=0)
+        funding_costs = leverage_excess * daily_funding_rate
+        costs = costs + funding_costs
 
     strategy_returns = positions * raw_returns - costs
     return strategy_returns.dropna()
@@ -731,6 +773,8 @@ def cpcv_analysis(
     slippage: float = 0.0001,
     impact_coefficient: float = 0.0,
     adv_window: int = 20,
+    borrow_cost: float = 0.0,
+    funding_cost: float = 0.0,
     apply_deflation: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -758,6 +802,10 @@ def cpcv_analysis(
             (position_notional / ADV) * impact_coefficient, where ADV is the
             average daily volume over `adv_window` periods. Set to 0 to disable.
         adv_window: Rolling window for Average Daily Volume calculation. Default 20.
+        borrow_cost: Annual borrow cost rate for short positions (as decimal,
+            e.g., 0.03 = 3% per year). Applied daily on short exposure.
+        funding_cost: Annual funding cost rate for leveraged positions (as decimal,
+            e.g., 0.02 = 2% per year). Applied daily on gross exposure exceeding 1x.
         apply_deflation: When True, compute the Deflated Sharpe Ratio
             (multiple-testing correction) for each fold's in-sample
             parameter selection, plus an aggregate correction on the
@@ -894,13 +942,13 @@ def cpcv_analysis(
                 # Calculate returns for this parameter set
                 test_returns = _calculate_strategy_returns(
                     test_data, test_signals, commission, slippage,
-                    impact_coefficient, adv_window
+                    impact_coefficient, adv_window, borrow_cost, funding_cost
                 )
 
                 # Evaluate on training set
                 train_returns = _calculate_strategy_returns(
                     train_data, train_signals, commission, slippage,
-                    impact_coefficient, adv_window
+                    impact_coefficient, adv_window, borrow_cost, funding_cost
                 )
 
                 if len(train_returns) > 1 and train_returns.std() > 0:
@@ -1067,6 +1115,8 @@ def run_cpcv(args) -> int:
         slippage=args.slippage,
         impact_coefficient=args.impact_coefficient,
         adv_window=args.adv_window,
+        borrow_cost=args.borrow_cost,
+        funding_cost=args.funding_cost,
         apply_deflation=args.deflate,
     )
 
@@ -1105,6 +1155,8 @@ def run_cpcv(args) -> int:
             "slippage": args.slippage,
             "impact_coefficient": args.impact_coefficient,
             "adv_window": args.adv_window,
+            "borrow_cost": args.borrow_cost,
+            "funding_cost": args.funding_cost,
             "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
         },
@@ -1188,6 +1240,8 @@ def run_walk_forward(args) -> int:
         slippage=args.slippage,
         impact_coefficient=args.impact_coefficient,
         adv_window=args.adv_window,
+        borrow_cost=args.borrow_cost,
+        funding_cost=args.funding_cost,
         apply_deflation=args.deflate,
     )
 
@@ -1227,6 +1281,8 @@ def run_walk_forward(args) -> int:
             "slippage": args.slippage,
             "impact_coefficient": args.impact_coefficient,
             "adv_window": args.adv_window,
+            "borrow_cost": args.borrow_cost,
+            "funding_cost": args.funding_cost,
             "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
         },
@@ -1279,6 +1335,8 @@ def run_parameter_optimization(args) -> int:
         slippage=args.slippage,
         impact_coefficient=args.impact_coefficient,
         adv_window=args.adv_window,
+        borrow_cost=args.borrow_cost,
+        funding_cost=args.funding_cost,
         apply_deflation=args.deflate,
     )
 
@@ -1333,6 +1391,8 @@ def run_monte_carlo(args) -> int:
             slippage=args.slippage,
             impact_coefficient=args.impact_coefficient,
             adv_window=args.adv_window,
+            borrow_cost=args.borrow_cost,
+            funding_cost=args.funding_cost,
         )
         if opt_results:
             best_params = opt_results[0]["params"]
@@ -1351,7 +1411,8 @@ def run_monte_carlo(args) -> int:
     strategy = strategy_factory(best_params)
     signals = strategy.generate_signals(data)
     returns = _calculate_strategy_returns(data, signals, args.commission, args.slippage,
-                                         args.impact_coefficient, args.adv_window)
+                                         args.impact_coefficient, args.adv_window,
+                                         args.borrow_cost, args.funding_cost)
 
     # Multiple-testing correction: the base backtest's Sharpe was
     # produced by the parameter search above (or by development
@@ -1441,6 +1502,10 @@ def run_monte_carlo(args) -> int:
             "params": best_params,
             "commission": args.commission,
             "slippage": args.slippage,
+            "impact_coefficient": args.impact_coefficient,
+            "adv_window": args.adv_window,
+            "borrow_cost": args.borrow_cost,
+            "funding_cost": args.funding_cost,
             "n_simulations": args.n_simulations,
             "block_size": args.block_size,
         },
@@ -1494,6 +1559,8 @@ def main():
     common_parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (as decimal)")
     common_parser.add_argument("--impact-coefficient", type=float, default=0.0, help="Market impact coefficient (position_notional/ADV * coefficient). 0 to disable.")
     common_parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
+    common_parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3% per year)")
+    common_parser.add_argument("--funding-cost", type=float, default=0.0, help="Annual funding cost rate for leveraged positions (as decimal, e.g., 0.02 = 2% per year)")
     common_parser.add_argument("--output", type=str, default="results", help="Output directory")
     common_parser.add_argument("--param-grid", type=str, required=True, help="Parameter grid as JSON string")
 
