@@ -16,7 +16,7 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from performance import generate_report
-from reporting import generate_tear_sheet
+from reporting import generate_tear_sheet, generate_parameter_heatmap
 
 
 class TestReporting(unittest.TestCase):
@@ -294,6 +294,240 @@ class TestTearSheet(unittest.TestCase):
             )
             self.assertTrue(os.path.exists(nested))
             self.assertTrue(os.path.exists(html_path))
+
+
+class TestParameterHeatmap(unittest.TestCase):
+    """Tests for generate_parameter_heatmap function."""
+
+    def _make_optimization_results(self) -> list:
+        """Create synthetic parameter optimization results for a 2x2 grid."""
+        return [
+            {
+                "params": {"period": 10, "exit_period": 5},
+                "sharpe_ratio": 1.2,
+                "total_return": 0.15,
+                "n_periods": 100,
+                "deflated_sharpe": {
+                    "deflated_sharpe_ratio": 0.8,
+                    "p_value": 0.2,
+                    "expected_max_sharpe": 1.5,
+                    "z_score": 0.5,
+                    "n_trials": 4,
+                    "n_observations": 100,
+                    "skewness": 0.1,
+                    "kurtosis": 3.0,
+                },
+            },
+            {
+                "params": {"period": 10, "exit_period": 10},
+                "sharpe_ratio": 0.8,
+                "total_return": 0.10,
+                "n_periods": 100,
+                "deflated_sharpe": {
+                    "deflated_sharpe_ratio": 0.4,
+                    "p_value": 0.6,
+                    "expected_max_sharpe": 1.5,
+                    "z_score": -0.2,
+                    "n_trials": 4,
+                    "n_observations": 100,
+                    "skewness": 0.1,
+                    "kurtosis": 3.0,
+                },
+            },
+            {
+                "params": {"period": 20, "exit_period": 5},
+                "sharpe_ratio": 1.5,
+                "total_return": 0.20,
+                "n_periods": 100,
+                "deflated_sharpe": {
+                    "deflated_sharpe_ratio": 1.0,
+                    "p_value": 0.1,
+                    "expected_max_sharpe": 1.5,
+                    "z_score": 1.0,
+                    "n_trials": 4,
+                    "n_observations": 100,
+                    "skewness": 0.1,
+                    "kurtosis": 3.0,
+                },
+            },
+            {
+                "params": {"period": 20, "exit_period": 10},
+                "sharpe_ratio": 0.5,
+                "total_return": 0.05,
+                "n_periods": 100,
+                "deflated_sharpe": {
+                    "deflated_sharpe_ratio": 0.2,
+                    "p_value": 0.8,
+                    "expected_max_sharpe": 1.5,
+                    "z_score": -0.8,
+                    "n_trials": 4,
+                    "n_observations": 100,
+                    "skewness": 0.1,
+                    "kurtosis": 3.0,
+                },
+            },
+        ]
+
+    def _make_degenerate_optimization_results(self) -> list:
+        """Create synthetic results with constant returns (degenerate DSR)."""
+        return [
+            {
+                "params": {"period": 10, "exit_period": 5},
+                "sharpe_ratio": 0.0,
+                "total_return": 0.0,
+                "n_periods": 100,
+                "deflated_sharpe": {
+                    "deflated_sharpe_ratio": 0.0,
+                    "p_value": 1.0,
+                    "expected_max_sharpe": 1.5,
+                    "z_score": None,
+                    "n_trials": 4,
+                    "n_observations": 100,
+                    "skewness": 0.0,
+                    "kurtosis": 3.0,
+                },
+            },
+            {
+                "params": {"period": 10, "exit_period": 10},
+                "sharpe_ratio": 0.0,
+                "total_return": 0.0,
+                "n_periods": 100,
+                "deflated_sharpe": {
+                    "deflated_sharpe_ratio": 0.0,
+                    "p_value": 1.0,
+                    "expected_max_sharpe": 1.5,
+                    "z_score": None,
+                    "n_trials": 4,
+                    "n_observations": 100,
+                    "skewness": 0.0,
+                    "kurtosis": 3.0,
+                },
+            },
+            {
+                "params": {"period": 20, "exit_period": 5},
+                "sharpe_ratio": 0.0,
+                "total_return": 0.0,
+                "n_periods": 100,
+                "deflated_sharpe": {
+                    "deflated_sharpe_ratio": 0.0,
+                    "p_value": 1.0,
+                    "expected_max_sharpe": 1.5,
+                    "z_score": None,
+                    "n_trials": 4,
+                    "n_observations": 100,
+                    "skewness": 0.0,
+                    "kurtosis": 3.0,
+                },
+            },
+            {
+                "params": {"period": 20, "exit_period": 10},
+                "sharpe_ratio": 0.0,
+                "total_return": 0.0,
+                "n_periods": 100,
+                "deflated_sharpe": {
+                    "deflated_sharpe_ratio": 0.0,
+                    "p_value": 1.0,
+                    "expected_max_sharpe": 1.5,
+                    "z_score": None,
+                    "n_trials": 4,
+                    "n_observations": 100,
+                    "skewness": 0.0,
+                    "kurtosis": 3.0,
+                },
+            },
+        ]
+
+    def test_generate_parameter_heatmap_creates_figure(self):
+        """Test that heatmap figure is created for valid 2D grid."""
+        results = self._make_optimization_results()
+        fig = generate_parameter_heatmap(
+            results, param_x="period", param_y="exit_period", metric="sharpe_ratio"
+        )
+        self.assertIsNotNone(fig)
+        # Clean up
+        import matplotlib.pyplot as plt
+        plt.close(fig)
+
+    def test_generate_parameter_heatmap_saves_to_file(self):
+        """Test that heatmap saves to file when save_path provided."""
+        import tempfile
+        results = self._make_optimization_results()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = os.path.join(tmpdir, "heatmap.png")
+            fig = generate_parameter_heatmap(
+                results,
+                param_x="period",
+                param_y="exit_period",
+                metric="sharpe_ratio",
+                save_path=save_path,
+            )
+            self.assertIsNotNone(fig)
+            self.assertTrue(os.path.exists(save_path))
+            import matplotlib.pyplot as plt
+            plt.close(fig)
+
+    def test_generate_parameter_heatmap_handles_degenerate_dsr(self):
+        """Test heatmap handles degenerate DSR dict (z_score=None) without crash."""
+        results = self._make_degenerate_optimization_results()
+        fig = generate_parameter_heatmap(
+            results,
+            param_x="period",
+            param_y="exit_period",
+            metric="deflated_sharpe_ratio",
+        )
+        # Should not crash; figure created but all values NaN so masked
+        self.assertIsNotNone(fig)
+        import matplotlib.pyplot as plt
+        plt.close(fig)
+
+    def test_generate_parameter_heatmap_returns_none_for_non_rectangular_grid(self):
+        """Test returns None when grid doesn't have exactly two varying params."""
+        # Only one varying parameter
+        results = [
+            {"params": {"period": 10}, "sharpe_ratio": 1.0},
+            {"params": {"period": 20}, "sharpe_ratio": 1.2},
+        ]
+        fig = generate_parameter_heatmap(results, param_x="period", param_y="exit_period")
+        self.assertIsNone(fig)
+
+        # Three varying parameters
+        results = [
+            {"params": {"a": 1, "b": 2, "c": 3}, "sharpe_ratio": 1.0},
+            {"params": {"a": 2, "b": 2, "c": 3}, "sharpe_ratio": 1.2},
+        ]
+        fig = generate_parameter_heatmap(results, param_x="a", param_y="b")
+        self.assertIsNone(fig)
+
+    def test_generate_parameter_heatmap_returns_none_for_empty_results(self):
+        """Test returns None for empty results list."""
+        fig = generate_parameter_heatmap([], param_x="a", param_y="b")
+        self.assertIsNone(fig)
+
+    def test_generate_parameter_heatmap_supports_total_return_metric(self):
+        """Test heatmap works with total_return metric."""
+        results = self._make_optimization_results()
+        fig = generate_parameter_heatmap(
+            results, param_x="period", param_y="exit_period", metric="total_return"
+        )
+        self.assertIsNotNone(fig)
+        import matplotlib.pyplot as plt
+        plt.close(fig)
+
+    def test_generate_parameter_heatmap_custom_cmap_and_title(self):
+        """Test heatmap accepts custom cmap and title."""
+        results = self._make_optimization_results()
+        fig = generate_parameter_heatmap(
+            results,
+            param_x="period",
+            param_y="exit_period",
+            metric="sharpe_ratio",
+            cmap="viridis",
+            title="Custom Title",
+        )
+        self.assertIsNotNone(fig)
+        self.assertEqual(fig.axes[0].get_title(), "Custom Title")
+        import matplotlib.pyplot as plt
+        plt.close(fig)
 
 
 if __name__ == "__main__":

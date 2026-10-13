@@ -208,7 +208,12 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   prints a "Multiple-Testing Correction" section and `generate_tear_sheet`
   renders a table plus a top-level `deflated_sharpe` key in the JSON summary
   when a `deflated_sharpe` dict is present, and both omit it when absent.
-  Uses the stdlib `unittest` framework rather than the custom runner.
+  Covers **parameter sensitivity heatmap**: `generate_parameter_heatmap`
+  produces a 2D heatmap figure for Sharpe/DSR/total-return across a two-parameter
+  grid, handles degenerate DSR dicts (z_score=None) as NaN, and integrates into
+  `generate_tear_sheet` when `parameter_optimization` results with exactly two
+  varying parameters are available. Uses the stdlib `unittest` framework rather
+  than the custom runner.
 - `test_run_backtest.py` - `run_backtest` end-to-end on synthetic data, the
   `signals_active` flat-strategy guard, `parse_args` CLI behavior, and **trade
   extraction across long/short flips**. Regression coverage for a defect where

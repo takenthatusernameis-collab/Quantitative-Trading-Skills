@@ -10,7 +10,164 @@ import json
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Dict, Any, Union, Optional
+from typing import Dict, Any, Union, Optional, List, Tuple
+
+
+def generate_parameter_heatmap(
+    optimization_results: List[Dict[str, Any]],
+    param_x: str,
+    param_y: str,
+    metric: str = "sharpe_ratio",
+    save_path: Optional[Union[str, Path]] = None,
+    cmap: str = "RdYlGn",
+    title: Optional[str] = None,
+) -> Optional[Any]:
+    """
+    Generate a 2D parameter sensitivity heatmap from optimization results.
+
+    Args:
+        optimization_results: List of result dicts from parameter_optimization,
+            each containing 'params', 'sharpe_ratio', 'total_return', and
+            optionally 'deflated_sharpe' with 'deflated_sharpe_ratio'.
+        param_x: Name of the parameter for the x-axis.
+        param_y: Name of the parameter for the y-axis.
+        metric: Metric to visualize. Options: 'sharpe_ratio', 'deflated_sharpe_ratio',
+            'total_return'. Default: 'sharpe_ratio'.
+        save_path: Optional path to save the figure. If None, figure is returned
+            without saving.
+        cmap: Matplotlib colormap name. Default: 'RdYlGn'.
+        title: Optional custom title. If None, generated from metric name.
+
+    Returns:
+        Matplotlib figure object, or None if matplotlib is unavailable or
+        the grid is invalid.
+
+    Notes:
+        - Handles non-rectangular grids (missing combos appear as NaN/white).
+        - Degenerate DSR dicts (z_score=None) are treated as NaN for coloring.
+        - Requires exactly two varying parameters in the grid; returns None otherwise.
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+
+    if not optimization_results:
+        return None
+
+    # Extract the two varying parameter names from results
+    all_params = [r.get("params", {}) for r in optimization_results]
+    param_names = set()
+    for p in all_params:
+        param_names.update(p.keys())
+
+    # Verify exactly two varying parameters
+    varying_params = []
+    for name in param_names:
+        values = set(p.get(name) for p in all_params if name in p)
+        if len(values) > 1:
+            varying_params.append(name)
+
+    if len(varying_params) != 2:
+        return None
+
+    # Verify requested params are in the varying set
+    if param_x not in varying_params or param_y not in varying_params:
+        return None
+
+    # Build coordinate arrays
+    x_vals = sorted(set(p.get(param_x) for p in all_params if param_x in p))
+    y_vals = sorted(set(p.get(param_y) for p in all_params if param_y in p))
+
+    # Create value grid
+    grid = np.full((len(y_vals), len(x_vals)), np.nan)
+    x_to_idx = {v: i for i, v in enumerate(x_vals)}
+    y_to_idx = {v: i for i, v in enumerate(y_vals)}
+
+    for r in optimization_results:
+        params = r.get("params", {})
+        x = params.get(param_x)
+        y = params.get(param_y)
+        if x is None or y is None:
+            continue
+
+        if metric == "deflated_sharpe_ratio":
+            dsr = r.get("deflated_sharpe")
+            if dsr is None:
+                val = np.nan
+            else:
+                val = dsr.get("deflated_sharpe_ratio")
+                # Degenerate DSR (z_score=None) treated as NaN for coloring
+                if dsr.get("z_score") is None:
+                    val = np.nan
+        elif metric == "sharpe_ratio":
+            val = r.get("sharpe_ratio")
+        elif metric == "total_return":
+            val = r.get("total_return")
+        else:
+            val = r.get(metric)
+
+        if val is not None and np.isfinite(val):
+            ix = x_to_idx.get(x)
+            iy = y_to_idx.get(y)
+            if ix is not None and iy is not None:
+                grid[iy, ix] = val
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Mask NaN values for transparent coloring
+    masked_grid = np.ma.masked_invalid(grid)
+
+    im = ax.imshow(
+        masked_grid,
+        aspect="auto",
+        origin="lower",
+        cmap=cmap,
+        interpolation="nearest",
+    )
+
+    # Colorbar
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label(metric.replace("_", " ").title(), rotation=270, labelpad=15)
+
+    # Ticks and labels
+    ax.set_xticks(range(len(x_vals)))
+    ax.set_xticklabels([str(v) for v in x_vals])
+    ax.set_yticks(range(len(y_vals)))
+    ax.set_yticklabels([str(v) for v in y_vals])
+    ax.set_xlabel(param_x)
+    ax.set_ylabel(param_y)
+
+    if title is None:
+        title = f"Parameter Sensitivity: {metric.replace('_', ' ').title()}"
+    ax.set_title(title)
+
+    # Annotate cells with values
+    for iy in range(len(y_vals)):
+        for ix in range(len(x_vals)):
+            val = grid[iy, ix]
+            if not np.isnan(val):
+                ax.text(
+                    ix,
+                    iy,
+                    f"{val:.3f}",
+                    ha="center",
+                    va="center",
+                    color="black" if val > np.nanmean(grid) else "white",
+                    fontsize=9,
+                )
+
+    plt.tight_layout()
+
+    if save_path:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+
+    return fig
 
 
 def generate_tear_sheet(
@@ -189,40 +346,69 @@ def generate_tear_sheet(
 
     # Generate plots if matplotlib is available
     plot_files = []
-    if save_plots and returns is not None:
+    if save_plots:
         try:
             import matplotlib
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
 
-            # Equity curve plot
-            if equity_values is not None:
-                fig, ax = plt.subplots(figsize=(12, 4))
-                ax.plot(equity_values.index, equity_values.values)
-                ax.set_title("Equity Curve")
-                ax.set_ylabel("Portfolio Value")
-                ax.set_xlabel("Date")
+            # Parameter sensitivity heatmap (from parameter_optimization results)
+            param_opt_results = results.get("parameter_optimization")
+            if param_opt_results:
+                # Detect the two varying parameters
+                all_params = [r.get("params", {}) for r in param_opt_results]
+                param_names = set()
+                for p in all_params:
+                    param_names.update(p.keys())
+                varying_params = []
+                for name in param_names:
+                    values = set(p.get(name) for p in all_params if name in p)
+                    if len(values) > 1:
+                        varying_params.append(name)
+
+                if len(varying_params) == 2:
+                    param_x, param_y = varying_params[0], varying_params[1]
+                    heatmap_path = output_dir / "parameter_heatmap.png"
+                    fig = generate_parameter_heatmap(
+                        param_opt_results,
+                        param_x=param_x,
+                        param_y=param_y,
+                        metric="sharpe_ratio",
+                        save_path=heatmap_path,
+                    )
+                    if fig is not None:
+                        plt.close(fig)
+                        plot_files.append(heatmap_path)
+
+            if returns is not None:
+                # Equity curve plot
+                if equity_values is not None:
+                    fig, ax = plt.subplots(figsize=(12, 4))
+                    ax.plot(equity_values.index, equity_values.values)
+                    ax.set_title("Equity Curve")
+                    ax.set_ylabel("Portfolio Value")
+                    ax.set_xlabel("Date")
+                    ax.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    equity_path = output_dir / "equity_curve.png"
+                    plt.savefig(equity_path, dpi=150)
+                    plt.close()
+                    plot_files.append(equity_path)
+
+                # Returns distribution
+                fig, ax = plt.subplots(figsize=(10, 4))
+                ax.hist(returns.values, bins=50, alpha=0.7, edgecolor="black")
+                ax.axvline(returns.mean(), color="red", linestyle="--", label=f"Mean: {returns.mean():.4f}")
+                ax.set_title("Return Distribution")
+                ax.set_xlabel("Returns")
+                ax.set_ylabel("Frequency")
+                ax.legend()
                 ax.grid(True, alpha=0.3)
                 plt.tight_layout()
-                equity_path = output_dir / "equity_curve.png"
-                plt.savefig(equity_path, dpi=150)
+                dist_path = output_dir / "returns_distribution.png"
+                plt.savefig(dist_path, dpi=150)
                 plt.close()
-                plot_files.append(equity_path)
-
-            # Returns distribution
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.hist(returns.values, bins=50, alpha=0.7, edgecolor="black")
-            ax.axvline(returns.mean(), color="red", linestyle="--", label=f"Mean: {returns.mean():.4f}")
-            ax.set_title("Return Distribution")
-            ax.set_xlabel("Returns")
-            ax.set_ylabel("Frequency")
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-            plt.tight_layout()
-            dist_path = output_dir / "returns_distribution.png"
-            plt.savefig(dist_path, dpi=150)
-            plt.close()
-            plot_files.append(dist_path)
+                plot_files.append(dist_path)
 
         except ImportError:
             pass  # matplotlib not available, skip plots
