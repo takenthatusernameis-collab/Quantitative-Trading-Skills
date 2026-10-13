@@ -40,6 +40,7 @@ def parse_args():
     parser.add_argument("--output", type=str, default="results", help="Output directory")
     parser.add_argument("--params", type=str, help="Strategy parameters as JSON string")
     parser.add_argument("--n-trials", type=int, default=None, help="Number of development trials (parameter configurations) tested; when set, report the Deflated Sharpe Ratio (multiple-testing correction) for the final Sharpe")
+    parser.add_argument("--risk-free-rate", type=float, default=None, help="Annual risk-free rate (as decimal, e.g., 0.02 for 2%)")
     return parser.parse_args()
 
 
@@ -234,6 +235,7 @@ def run_backtest(data, strategy, args):
             "strategy": args.strategy,
             "symbol": args.symbol,
             "n_trials": getattr(args, "n_trials", None),
+            "risk_free_rate": getattr(args, "risk_free_rate", None),
         },
     }
 
@@ -270,7 +272,8 @@ def main():
     results = run_backtest(data, strategy, args)
 
     print("Calculating performance metrics...")
-    metrics = calculate_metrics(results)
+    rfr = getattr(args, "risk_free_rate", None)
+    metrics = calculate_metrics(results, risk_free_rate=rfr) if rfr is not None else calculate_metrics(results)
 
     # Multiple-testing correction: when the number of development
     # trials was reported (--n-trials), echo the Deflated Sharpe

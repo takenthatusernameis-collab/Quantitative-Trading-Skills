@@ -49,9 +49,6 @@ def calculate_metrics(
             - 'benchmark': pandas Series of benchmark returns (optional)
             - 'config': original backtest config dict (optional)
         risk_free_rate: Annual risk-free rate for Sharpe/Sortino calculations
-
-    Returns:
-        Dictionary of performance metrics
     """
     metrics = {}
 
