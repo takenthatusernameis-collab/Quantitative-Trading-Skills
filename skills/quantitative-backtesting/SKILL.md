@@ -265,7 +265,8 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
       a flat *training* window skips the period with no per-period DSR;
       `parameter_optimization(apply_deflation=True)` emits the degenerate dict
       for every ranked combo on constant returns, where zero-variance combos
-      are ranked at Sharpe 0 rather than skipped), and
+      are ranked at Sharpe 0 rather than skipped; the `run_parameter_optimization --deflate` CLI
+      writes the degenerate DSR dicts into `parameter_optimization.json` on constant returns), and
       multi-asset panel (dict and
       MultiIndex) walk-forward and Monte Carlo integration with
       `CrossSectionalMomentum` and `DualMomentumStrategy`.

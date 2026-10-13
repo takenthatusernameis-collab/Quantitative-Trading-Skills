@@ -424,6 +424,48 @@ def test_run_parameter_optimization_cli():
         Path(data_file).unlink()
 
 
+
+def test_run_parameter_optimization_cli_constant_returns_deflation():
+    """Parameter optimization CLI writes degenerate DSRs to artifact on constant returns."""
+    data_file = _make_flat_price_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="donchian_breakout",
+                symbol="TEST",
+                start=None,
+                end=None,
+                commission=0.0,
+                slippage=0.0,
+                output=tmpdir,
+                param_grid='{"period": [10, 20], "exit_period": [5, 10]}',
+                top_n=4,
+                deflate=True,
+            )
+            assert run_parameter_optimization(args) == 0
+            results_path = Path(tmpdir) / "parameter_optimization.json"
+            assert results_path.exists()
+            with open(results_path) as f:
+                results = json.load(f)
+            assert len(results) == 4
+            for r in results:
+                assert r["sharpe_ratio"] == 0.0
+                assert "deflated_sharpe" in r
+                d = r["deflated_sharpe"]
+                assert d["deflated_sharpe_ratio"] == 0.0
+                assert d["p_value"] == 1.0
+                assert d["z_score"] is None
+                assert d["sharpe_ratio"] == 0.0
+                assert d["skewness"] == 0.0
+                assert d["kurtosis"] == 3.0
+                assert d["n_trials"] == len(results)
+                assert d["n_observations"] == r["n_periods"]
+                assert d["expected_max_sharpe"] > 0 and np.isfinite(d["expected_max_sharpe"])
+    finally:
+        Path(data_file).unlink()
+
+
 def test_run_monte_carlo_cli():
     """Test Monte Carlo CLI function runs and produces output."""
     data_file = _make_test_data_file()
@@ -1748,6 +1790,7 @@ def main() -> int:
         ("run_monte_carlo_n_trials_floored_to_grid_size", test_run_monte_carlo_n_trials_floored_to_grid_size),
         ("run_monte_carlo_deflated_sharpe_uses_floored_n_trials", test_run_monte_carlo_deflated_sharpe_uses_floored_n_trials),
         ("run_monte_carlo_constant_returns_deflated_sharpe", test_run_monte_carlo_constant_returns_deflated_sharpe),
+        ("run_parameter_optimization_cli_constant_returns_deflation", test_run_parameter_optimization_cli_constant_returns_deflation),
         ("parse_param_grid", test_parse_param_grid),
         ("walk_forward_multi_asset_cross_sectional_momentum", test_walk_forward_multi_asset_cross_sectional_momentum),
         ("walk_forward_multi_asset_dual_momentum", test_walk_forward_multi_asset_dual_momentum),
