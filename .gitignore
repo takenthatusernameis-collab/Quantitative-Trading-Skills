@@ -10,3 +10,12 @@ dist/
 __pycache__/
 *.pyc
 *.pyo
+
+# Kilo agent runtime and generated caches
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
