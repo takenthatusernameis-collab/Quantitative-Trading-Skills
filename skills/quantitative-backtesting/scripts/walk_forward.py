@@ -72,6 +72,8 @@ def walk_forward_analysis(
     initial_capital: float = 100000,
     commission: float = 0.0002,
     slippage: float = 0.0001,
+    impact_coefficient: float = 0.0,
+    adv_window: int = 20,
     apply_deflation: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -87,6 +89,10 @@ def walk_forward_analysis(
         initial_capital: Starting portfolio value
         commission: Commission rate per trade
         slippage: Slippage rate per trade
+        impact_coefficient: Market impact coefficient. Market impact is modeled as
+            (position_notional / ADV) * impact_coefficient, where ADV is the
+            average daily volume over `adv_window` periods. Set to 0 to disable.
+        adv_window: Rolling window for Average Daily Volume calculation. Default 20.
         apply_deflation: When True, compute the Deflated Sharpe Ratio
             (multiple-testing correction) for each period's in-sample
             parameter selection, plus an aggregate correction on the
@@ -183,12 +189,14 @@ def walk_forward_analysis(
 
                 # Calculate returns for this parameter set
                 test_returns = _calculate_strategy_returns(
-                    test_data, test_signals, commission, slippage
+                    test_data, test_signals, commission, slippage,
+                    impact_coefficient, adv_window
                 )
 
                 # Evaluate on training set
                 train_returns = _calculate_strategy_returns(
-                    train_data, train_signals, commission, slippage
+                    train_data, train_signals, commission, slippage,
+                    impact_coefficient, adv_window
                 )
 
                 if len(train_returns) > 1 and train_returns.std() > 0:
@@ -280,6 +288,8 @@ def parameter_optimization(
     initial_capital: float = 100000,
     commission: float = 0.0002,
     slippage: float = 0.0001,
+    impact_coefficient: float = 0.0,
+    adv_window: int = 20,
     n_splits: int = 5,
     apply_deflation: bool = False,
 ) -> List[Dict[str, Any]]:
@@ -293,6 +303,10 @@ def parameter_optimization(
         initial_capital: Starting capital
         commission: Commission rate
         slippage: Slippage rate
+        impact_coefficient: Market impact coefficient. Market impact is modeled as
+            (position_notional / ADV) * impact_coefficient, where ADV is the
+            average daily volume over `adv_window` periods. Set to 0 to disable.
+        adv_window: Rolling window for Average Daily Volume calculation. Default 20.
         n_splits: Number of train/test splits
         apply_deflation: When True, compute the Deflated Sharpe Ratio
             (Bailey & Lopez de Prado, 2014) for every combination,
@@ -343,7 +357,8 @@ def parameter_optimization(
                 continue
 
             returns = _calculate_strategy_returns(
-                data, signals, commission, slippage
+                data, signals, commission, slippage,
+                impact_coefficient, adv_window
             )
 
             if len(returns) > 1:
@@ -591,8 +606,22 @@ def _calculate_strategy_returns(
     signals: pd.Series,
     commission: float,
     slippage: float,
+    impact_coefficient: float = 0.0,
+    adv_window: int = 20,
 ) -> pd.Series:
-    """Calculate strategy returns from signals and market data."""
+    """Calculate strategy returns from signals and market data.
+
+    Args:
+        data: OHLCV data (DataFrame, MultiIndex panel, or dict of DataFrames)
+        signals: Position signals (1=long, -1=short, 0=flat)
+        commission: Commission rate per trade (as decimal, e.g., 0.0002 = 2 bps)
+        slippage: Slippage rate per trade (as decimal)
+        impact_coefficient: Market impact coefficient. Market impact is modeled as
+            (position_notional / ADV) * impact_coefficient, where ADV is the
+            average daily volume over `adv_window` periods. Set to 0 to disable.
+            Typical values: 0.1-1.0 for linear impact models.
+        adv_window: Rolling window for Average Daily Volume calculation. Default 20.
+    """
     if isinstance(data, dict):
         # For dict of dataframes, compute equal-weighted portfolio returns
         # Use first key's index as reference
@@ -604,22 +633,45 @@ def _calculate_strategy_returns(
                 common_index = common_index.intersection(df.index)
         common_index = common_index.sort_values()
         rets = []
+        vols = []
         for df in data.values():
-            rets.append(df.reindex(common_index)["close"].pct_change())
+            aligned = df.reindex(common_index)
+            rets.append(aligned["close"].pct_change())
+            vols.append(aligned["volume"])
         raw_returns = pd.concat(rets, axis=1).mean(axis=1)
+        volume = pd.concat(vols, axis=1).mean(axis=1)
     elif isinstance(data.columns, pd.MultiIndex):
         # For panel data, compute equal-weighted portfolio returns
         close = data["close"]
         raw_returns = close.pct_change().mean(axis=1)
+        volume = data["volume"].mean(axis=1)
     else:
         close = data["close"]
         raw_returns = close.pct_change()
+        volume = data["volume"]
 
     positions = signals.shift(1)  # Trade at next period's open
 
     # Transaction costs: apply on position changes
     position_changes = positions.diff().abs()
     costs = position_changes * (commission + slippage)
+
+    # Market impact model: impact = (position_notional / ADV) * impact_coefficient
+    # Position notional = |position| * price (equity value of the position)
+    # ADV = rolling average of daily volume (in shares) * price
+    if impact_coefficient > 0 and volume is not None:
+        # Average Daily Volume in shares (rolling)
+        adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
+        # Average Daily Volume in notional (shares * price)
+        adv_notional = adv_shares * close
+        # Position notional = |position| * equity (we approximate with close price * initial_capital)
+        # Since we don't have equity at this level, we use position * close as a proxy
+        # The cost is applied as a fraction of notional on position changes
+        position_notional = position_changes * close
+        # Market impact as fraction of notional traded
+        market_impact = (position_notional / adv_notional.replace(0, np.nan)) * impact_coefficient
+        market_impact = market_impact.fillna(0)
+        costs = costs + market_impact
 
     strategy_returns = positions * raw_returns - costs
     return strategy_returns.dropna()
@@ -677,6 +729,8 @@ def cpcv_analysis(
     initial_capital: float = 100000,
     commission: float = 0.0002,
     slippage: float = 0.0001,
+    impact_coefficient: float = 0.0,
+    adv_window: int = 20,
     apply_deflation: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -700,6 +754,10 @@ def cpcv_analysis(
         initial_capital: Starting portfolio value
         commission: Commission rate per trade
         slippage: Slippage rate per trade
+        impact_coefficient: Market impact coefficient. Market impact is modeled as
+            (position_notional / ADV) * impact_coefficient, where ADV is the
+            average daily volume over `adv_window` periods. Set to 0 to disable.
+        adv_window: Rolling window for Average Daily Volume calculation. Default 20.
         apply_deflation: When True, compute the Deflated Sharpe Ratio
             (multiple-testing correction) for each fold's in-sample
             parameter selection, plus an aggregate correction on the
@@ -835,12 +893,14 @@ def cpcv_analysis(
 
                 # Calculate returns for this parameter set
                 test_returns = _calculate_strategy_returns(
-                    test_data, test_signals, commission, slippage
+                    test_data, test_signals, commission, slippage,
+                    impact_coefficient, adv_window
                 )
 
                 # Evaluate on training set
                 train_returns = _calculate_strategy_returns(
-                    train_data, train_signals, commission, slippage
+                    train_data, train_signals, commission, slippage,
+                    impact_coefficient, adv_window
                 )
 
                 if len(train_returns) > 1 and train_returns.std() > 0:
@@ -1005,6 +1065,8 @@ def run_cpcv(args) -> int:
         embargo_size=args.embargo_size,
         commission=args.commission,
         slippage=args.slippage,
+        impact_coefficient=args.impact_coefficient,
+        adv_window=args.adv_window,
         apply_deflation=args.deflate,
     )
 
@@ -1041,6 +1103,8 @@ def run_cpcv(args) -> int:
             "embargo_size": args.embargo_size,
             "commission": args.commission,
             "slippage": args.slippage,
+            "impact_coefficient": args.impact_coefficient,
+            "adv_window": args.adv_window,
             "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
         },
@@ -1122,6 +1186,8 @@ def run_walk_forward(args) -> int:
         step_months=args.step_months,
         commission=args.commission,
         slippage=args.slippage,
+        impact_coefficient=args.impact_coefficient,
+        adv_window=args.adv_window,
         apply_deflation=args.deflate,
     )
 
@@ -1159,6 +1225,8 @@ def run_walk_forward(args) -> int:
             "step_months": args.step_months,
             "commission": args.commission,
             "slippage": args.slippage,
+            "impact_coefficient": args.impact_coefficient,
+            "adv_window": args.adv_window,
             "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
         },
@@ -1209,6 +1277,8 @@ def run_parameter_optimization(args) -> int:
         param_grid=param_grid,
         commission=args.commission,
         slippage=args.slippage,
+        impact_coefficient=args.impact_coefficient,
+        adv_window=args.adv_window,
         apply_deflation=args.deflate,
     )
 
@@ -1261,6 +1331,8 @@ def run_monte_carlo(args) -> int:
             param_grid=param_grid,
             commission=args.commission,
             slippage=args.slippage,
+            impact_coefficient=args.impact_coefficient,
+            adv_window=args.adv_window,
         )
         if opt_results:
             best_params = opt_results[0]["params"]
@@ -1278,7 +1350,8 @@ def run_monte_carlo(args) -> int:
 
     strategy = strategy_factory(best_params)
     signals = strategy.generate_signals(data)
-    returns = _calculate_strategy_returns(data, signals, args.commission, args.slippage)
+    returns = _calculate_strategy_returns(data, signals, args.commission, args.slippage,
+                                         args.impact_coefficient, args.adv_window)
 
     # Multiple-testing correction: the base backtest's Sharpe was
     # produced by the parameter search above (or by development
@@ -1419,6 +1492,8 @@ def main():
     common_parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
     common_parser.add_argument("--commission", type=float, default=0.0002, help="Commission per trade (as decimal)")
     common_parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (as decimal)")
+    common_parser.add_argument("--impact-coefficient", type=float, default=0.0, help="Market impact coefficient (position_notional/ADV * coefficient). 0 to disable.")
+    common_parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
     common_parser.add_argument("--output", type=str, default="results", help="Output directory")
     common_parser.add_argument("--param-grid", type=str, required=True, help="Parameter grid as JSON string")
 

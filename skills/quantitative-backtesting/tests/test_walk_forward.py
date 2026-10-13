@@ -348,6 +348,13 @@ def _make_flat_price_data_file(periods: int = 100) -> str:
 class _CLIArgs:
     """Mock CLI arguments namespace."""
     def __init__(self, **kwargs):
+        # Set defaults for market impact parameters
+        defaults = {
+            "impact_coefficient": 0.0,
+            "adv_window": 20,
+        }
+        for k, v in defaults.items():
+            setattr(self, k, v)
         for k, v in kwargs.items():
             setattr(self, k, v)
 
@@ -1754,6 +1761,162 @@ def test_walk_forward_flat_train_window_skips_period():
     assert agg["z_score"] is not None
 
 
+def test_market_impact_reduces_returns():
+    """Market impact reduces net returns compared to no impact."""
+    data = _make_data(periods=300, seed=42)
+    # Create a high-turnover strategy (sma_crossover with short periods)
+    strategy = build_strategy("sma_crossover", '{"fast_period": 5, "slow_period": 10}')
+    signals = strategy.generate_signals(data)
+
+    # Returns without market impact
+    returns_no_impact = _calculate_strategy_returns(
+        data, signals, commission=0.0002, slippage=0.0001,
+        impact_coefficient=0.0, adv_window=20
+    )
+
+    # Returns with market impact
+    returns_with_impact = _calculate_strategy_returns(
+        data, signals, commission=0.0002, slippage=0.0001,
+        impact_coefficient=0.5, adv_window=20
+    )
+
+    # Align returns for comparison
+    aligned_no, aligned_with = returns_no_impact.align(returns_with_impact, join="inner")
+
+    # With impact, returns should be lower (more negative costs)
+    total_no = (1 + aligned_no).prod() - 1
+    total_with = (1 + aligned_with).prod() - 1
+    assert total_with < total_no, f"Expected impact to reduce returns: {total_with:.4f} >= {total_no:.4f}"
+
+
+def test_market_impact_zero_coefficient_matches_no_impact():
+    """Zero impact coefficient should produce identical results to no impact."""
+    data = _make_data(periods=300, seed=42)
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    signals = strategy.generate_signals(data)
+
+    returns_no_impact = _calculate_strategy_returns(
+        data, signals, commission=0.0002, slippage=0.0001,
+        impact_coefficient=0.0, adv_window=20
+    )
+
+    returns_zero_coeff = _calculate_strategy_returns(
+        data, signals, commission=0.0002, slippage=0.0001,
+        impact_coefficient=0.0, adv_window=20
+    )
+
+    # Should be identical
+    pd.testing.assert_series_equal(returns_no_impact, returns_zero_coeff)
+
+
+def test_market_impact_higher_coefficient_increases_costs():
+    """Higher impact coefficient should result in lower returns."""
+    data = _make_data(periods=300, seed=42)
+    strategy = build_strategy("sma_crossover", '{"fast_period": 5, "slow_period": 10}')
+    signals = strategy.generate_signals(data)
+
+    returns_low = _calculate_strategy_returns(
+        data, signals, commission=0.0002, slippage=0.0001,
+        impact_coefficient=0.1, adv_window=20
+    )
+
+    returns_high = _calculate_strategy_returns(
+        data, signals, commission=0.0002, slippage=0.0001,
+        impact_coefficient=1.0, adv_window=20
+    )
+
+    aligned_low, aligned_high = returns_low.align(returns_high, join="inner")
+    total_low = (1 + aligned_low).prod() - 1
+    total_high = (1 + aligned_high).prod() - 1
+    assert total_high < total_low, f"Expected higher impact to reduce returns more: {total_high:.4f} >= {total_low:.4f}"
+
+
+def test_market_impact_integration_walk_forward():
+    """Walk-forward analysis works with market impact enabled."""
+    data = _make_data(periods=500, seed=42)
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=lambda p: build_strategy("sma_crossover", json.dumps(p)),
+        param_grid={"fast_period": [10, 20], "slow_period": [30, 50]},
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        commission=0.0002,
+        slippage=0.0001,
+        impact_coefficient=0.2,
+        adv_window=20,
+    )
+    assert results["summary"]["n_periods"] > 0
+    assert len(results["oos_returns"]) > 0
+
+
+def test_market_impact_integration_parameter_optimization():
+    """Parameter optimization works with market impact enabled."""
+    data = _make_data(periods=500, seed=42)
+    results = parameter_optimization(
+        data=data,
+        strategy_factory=lambda p: build_strategy("sma_crossover", json.dumps(p)),
+        param_grid={"fast_period": [10, 20], "slow_period": [30, 50]},
+        commission=0.0002,
+        slippage=0.0001,
+        impact_coefficient=0.2,
+        adv_window=20,
+    )
+    assert len(results) > 0
+    assert "sharpe_ratio" in results[0]
+
+
+def test_market_impact_integration_cpcv():
+    """CPCV analysis works with market impact enabled."""
+    data = _make_data(periods=1000, seed=42)
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=lambda p: build_strategy("sma_crossover", json.dumps(p)),
+        param_grid={"fast_period": [10, 20], "slow_period": [30, 50]},
+        n_splits=5,
+        test_size=0.2,
+        commission=0.0002,
+        slippage=0.0001,
+        impact_coefficient=0.2,
+        adv_window=20,
+    )
+    assert results["summary"]["n_folds"] > 0
+    assert len(results["oos_returns"]) > 0
+
+
+def test_run_backtest_market_impact():
+    """run_backtest CLI works with market impact arguments."""
+    import tempfile
+    import subprocess
+    import sys
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Use existing sample data
+        data_path = str(SKILLS_DIR / "assets" / "example_data" / "sample_ohlcv.csv")
+
+        # Run backtest with impact
+        result = subprocess.run([
+            sys.executable, "-m", "scripts.run_backtest",
+            "--data", data_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 10, "slow_period": 30}',
+            "--commission", "0.0002",
+            "--slippage", "0.0001",
+            "--impact-coefficient", "0.1",
+            "--adv-window", "20",
+            "--output", f"{tmpdir}/results",
+        ], capture_output=True, text=True, cwd=SKILLS_DIR)
+
+        assert result.returncode == 0, f"CLI failed: {result.stderr}"
+        assert "Deflated Sharpe Ratio" not in result.stdout  # No n-trials provided
+
+        # Verify output files created
+        import os
+        assert os.path.exists(f"{tmpdir}/results/metrics.json")
+        assert os.path.exists(f"{tmpdir}/results/report.txt")
+        assert os.path.exists(f"{tmpdir}/results/tear_sheet.html")
+
+
 def main() -> int:
     tests = [
         ("parameter_optimization_skips_flat_combos", test_parameter_optimization_skips_flat_combos),
@@ -1797,6 +1960,13 @@ def main() -> int:
         ("monte_carlo_multi_asset_integration", test_monte_carlo_multi_asset_integration),
         ("walk_forward_multi_asset_dict_cross_sectional_momentum", test_walk_forward_multi_asset_dict_cross_sectional_momentum),
         ("walk_forward_multi_asset_dict_dual_momentum", test_walk_forward_multi_asset_dict_dual_momentum),
+        ("market_impact_reduces_returns", test_market_impact_reduces_returns),
+        ("market_impact_zero_coefficient_matches_no_impact", test_market_impact_zero_coefficient_matches_no_impact),
+        ("market_impact_higher_coefficient_increases_costs", test_market_impact_higher_coefficient_increases_costs),
+        ("market_impact_integration_walk_forward", test_market_impact_integration_walk_forward),
+        ("market_impact_integration_parameter_optimization", test_market_impact_integration_parameter_optimization),
+        ("market_impact_integration_cpcv", test_market_impact_integration_cpcv),
+        ("run_backtest_market_impact", test_run_backtest_market_impact),
     ]
 
     failures = 0

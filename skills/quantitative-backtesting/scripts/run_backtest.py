@@ -11,6 +11,7 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 # Add parent directory to path for imports
@@ -31,6 +32,8 @@ def parse_args():
     parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
     parser.add_argument("--commission", type=float, default=0.0002, help="Commission per trade (as decimal)")
     parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (as decimal)")
+    parser.add_argument("--impact-coefficient", type=float, default=0.0, help="Market impact coefficient (position_notional/ADV * coefficient). 0 to disable.")
+    parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
     parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     parser.add_argument("--output", type=str, default="results", help="Output directory")
     parser.add_argument("--params", type=str, help="Strategy parameters as JSON string")
@@ -50,13 +53,19 @@ def run_backtest(data, strategy, args):
                 common_index = common_index.intersection(df.index)
         common_index = common_index.sort_values()
         close_list = []
+        vol_list = []
         for df in data.values():
-            close_list.append(df.reindex(common_index)["close"])
+            aligned = df.reindex(common_index)
+            close_list.append(aligned["close"])
+            vol_list.append(aligned["volume"])
         close = pd.concat(close_list, axis=1).mean(axis=1)
+        volume = pd.concat(vol_list, axis=1).mean(axis=1)
     elif isinstance(data.columns, pd.MultiIndex):
         close = data["close"].mean(axis=1)
+        volume = data["volume"].mean(axis=1)
     else:
         close = data["close"]
+        volume = data["volume"]
 
     # Guard against strategies that never take a position (e.g. a lookback
     # longer than the data window leaves every rolling indicator NaN, so the
@@ -76,6 +85,23 @@ def run_backtest(data, strategy, args):
     # Transaction costs: apply on position changes
     position_changes = positions.diff().abs()
     costs = position_changes * (args.commission + args.slippage)
+
+    # Market impact model: impact = (position_notional / ADV) * impact_coefficient
+    # Position notional = |position| * price (equity value of the position)
+    # ADV = rolling average of daily volume (in shares) * price
+    if args.impact_coefficient > 0 and volume is not None:
+        # Average Daily Volume in shares (rolling)
+        adv_shares = volume.rolling(window=args.adv_window, min_periods=1).mean()
+        # Average Daily Volume in notional (shares * price)
+        adv_notional = adv_shares * close
+        # Position notional = |position| * equity (we approximate with close price * initial_capital)
+        # Since we don't have equity at this level, we use position * close as a proxy
+        # The cost is applied as a fraction of notional on position changes
+        position_notional = position_changes * close
+        # Market impact as fraction of notional traded
+        market_impact = (position_notional / adv_notional.replace(0, np.nan)) * args.impact_coefficient
+        market_impact = market_impact.fillna(0)
+        costs = costs + market_impact
 
     strategy_returns = positions * raw_returns - costs
     strategy_returns = strategy_returns.dropna()
@@ -169,6 +195,8 @@ def run_backtest(data, strategy, args):
             "initial_capital": args.initial_capital,
             "commission": args.commission,
             "slippage": args.slippage,
+            "impact_coefficient": args.impact_coefficient,
+            "adv_window": args.adv_window,
             "strategy": args.strategy,
             "symbol": args.symbol,
             "n_trials": getattr(args, "n_trials", None),
