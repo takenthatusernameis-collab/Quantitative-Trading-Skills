@@ -607,6 +607,133 @@ def test_run_monte_carlo_deflated_sharpe_matches_direct_call():
         Path(data_file).unlink()
 
 
+def test_run_monte_carlo_n_trials_floored_to_grid_size():
+    """--n-trials is floored to the number of grid combos evaluated.
+
+    When the internal parameter search evaluates more
+    configurations than the caller reports via --n-trials, the
+    effective trial count is the larger grid size so the
+    deflation never understates the search.
+    """
+    data_file = _make_test_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            param_grid = {"fast_period": [10, 20], "slow_period": [30, 50, 70]}
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid=json.dumps(param_grid),
+                n_simulations=50,
+                confidence_levels=[0.90, 0.95],
+                block_size=None,
+                initial_capital=100000,
+                n_trials=2,
+            )
+            assert run_monte_carlo(args) == 0
+
+            with open(Path(tmpdir) / "monte_carlo_results.json") as f:
+                mc = json.load(f)
+
+            # Independent optimization record for the expected count.
+            data = load_data(data_file, symbol="SPY", start=None, end=None)
+            strategy_factory = _make_strategy_factory("sma_crossover")
+            opt_results = parameter_optimization(
+                data=data,
+                strategy_factory=strategy_factory,
+                param_grid=param_grid,
+                commission=0.0002,
+                slippage=0.0001,
+            )
+            assert opt_results, "expected at least one valid combo"
+            expected_n_trials = max(2, len(opt_results))
+
+            d = mc["deflated_sharpe"]
+            assert d["n_trials"] == expected_n_trials
+            assert mc["config"]["n_trials"] == expected_n_trials
+    finally:
+        Path(data_file).unlink()
+
+
+def test_run_monte_carlo_deflated_sharpe_uses_floored_n_trials():
+    """The DSR value uses the floored trial count, not --n-trials.
+
+    With a grid search larger than the reported --n-trials, the
+    surfaced DSR must equal a direct deflated_sharpe_ratio call
+    with n_trials = max(--n-trials, grid size) and the
+    optimization record's trial Sharpes.
+    """
+    data_file = _make_test_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            param_grid = {"fast_period": [10, 20], "slow_period": [30, 50, 70]}
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid=json.dumps(param_grid),
+                n_simulations=50,
+                confidence_levels=[0.90, 0.95],
+                block_size=None,
+                initial_capital=100000,
+                n_trials=2,
+            )
+            assert run_monte_carlo(args) == 0
+
+            with open(Path(tmpdir) / "monte_carlo_results.json") as f:
+                mc = json.load(f)
+            got = mc["deflated_sharpe"]
+
+            # Recompute the optimization record and the base
+            # backtest independently of run_monte_carlo.
+            data = load_data(data_file, symbol="SPY", start=None, end=None)
+            strategy_factory = _make_strategy_factory("sma_crossover")
+            opt_results = parameter_optimization(
+                data=data,
+                strategy_factory=strategy_factory,
+                param_grid=param_grid,
+                commission=0.0002,
+                slippage=0.0001,
+            )
+            assert opt_results, "expected at least one valid combo"
+            best_params = opt_results[0]["params"]
+            strategy = strategy_factory(best_params)
+            signals = strategy.generate_signals(data)
+            returns = _calculate_strategy_returns(
+                data, signals, 0.0002, 0.0001
+            )
+
+            ann_factor = _annualization_factor(returns.index)
+            excess = returns - 0.02 / ann_factor
+            sharpe = float(excess.mean() / excess.std() * np.sqrt(ann_factor))
+
+            trial_sharpes = [r["sharpe_ratio"] for r in opt_results]
+            expected = deflated_sharpe_ratio(
+                sharpe_ratio=sharpe,
+                returns=returns,
+                n_trials=max(2, len(opt_results)),
+                trial_sharpes=trial_sharpes,
+            )
+
+            for key in (
+                "deflated_sharpe_ratio", "p_value", "expected_max_sharpe",
+                "n_trials", "n_observations", "skewness", "kurtosis",
+            ):
+                assert abs(got[key] - expected[key]) < 1e-12, key
+    finally:
+        Path(data_file).unlink()
+
+
 def test_parse_param_grid():
     """Test parameter grid parsing from JSON string."""
     # Simple grid
@@ -1091,6 +1218,8 @@ def main() -> int:
         ("run_monte_carlo_cli_with_n_trials", test_run_monte_carlo_cli_with_n_trials),
         ("run_monte_carlo_cli_without_n_trials_omits_dsr", test_run_monte_carlo_cli_without_n_trials_omits_dsr),
         ("run_monte_carlo_deflated_sharpe_matches_direct_call", test_run_monte_carlo_deflated_sharpe_matches_direct_call),
+        ("run_monte_carlo_n_trials_floored_to_grid_size", test_run_monte_carlo_n_trials_floored_to_grid_size),
+        ("run_monte_carlo_deflated_sharpe_uses_floored_n_trials", test_run_monte_carlo_deflated_sharpe_uses_floored_n_trials),
         ("parse_param_grid", test_parse_param_grid),
         ("walk_forward_multi_asset_cross_sectional_momentum", test_walk_forward_multi_asset_cross_sectional_momentum),
         ("walk_forward_multi_asset_dual_momentum", test_walk_forward_multi_asset_dual_momentum),

@@ -82,8 +82,11 @@ reports it as well (CLI: `--n-trials`): the base backtest Sharpe
 is deflated via `calculate_metrics`, and because the subcommand
 runs the `--param-grid` optimization internally, the ranked trial
 Sharpes are passed through the config so `SR*` uses the
-cross-sectional estimator; the dict is printed and saved as a
-top-level `deflated_sharpe` key in `monte_carlo_results.json`.
+cross-sectional estimator; the effective trial count is
+`max(--n-trials, number of grid combinations evaluated)`, so the
+internal search is never understated; the dict is printed and
+saved as a top-level `deflated_sharpe` key in
+`monte_carlo_results.json`.
 
 ### Sortino Ratio
 

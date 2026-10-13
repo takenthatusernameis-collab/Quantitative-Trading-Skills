@@ -1260,9 +1260,21 @@ def run_monte_carlo(args) -> int:
     # the run_backtest --n-trials path. When the optimization
     # record is available, its trial Sharpes give the cross-sectional
     # SR* estimator (recommended over the i.i.d. null approximation).
+    #
+    # Trial count: when a parameter grid was searched, the internal
+    # optimization evaluated len(opt_results) ranked configurations.
+    # The effective trial count is max(--n-trials, len(opt_results))
+    # so the deflation never understates the search, while still
+    # letting the caller report additional development trials beyond
+    # the grid. Without a grid (or an empty optimization record) the
+    # user-supplied --n-trials is the sole source.
     dsr = None
     n_trials = getattr(args, "n_trials", None)
+    effective_n_trials = None
     if n_trials is not None and int(n_trials) >= 1 and len(returns.dropna()) >= 2:
+        effective_n_trials = int(n_trials)
+        if opt_results:
+            effective_n_trials = max(effective_n_trials, len(opt_results))
         base_results = {
             "equity_curve": (1 + returns).cumprod() * args.initial_capital,
             "returns": returns,
@@ -1272,7 +1284,7 @@ def run_monte_carlo(args) -> int:
                 "slippage": args.slippage,
                 "strategy": args.strategy,
                 "symbol": args.symbol,
-                "n_trials": int(n_trials),
+                "n_trials": effective_n_trials,
             },
         }
         if opt_results:
@@ -1334,7 +1346,7 @@ def run_monte_carlo(args) -> int:
     }
     if dsr is not None:
         mc_save["deflated_sharpe"] = dsr
-        mc_save["config"]["n_trials"] = int(n_trials)
+        mc_save["config"]["n_trials"] = effective_n_trials
     with open(mc_path, "w") as f:
         json.dump(mc_save, f, indent=2, default=str)
     print(f"\nMonte Carlo results saved to: {mc_path}")
@@ -1379,7 +1391,7 @@ def main():
     mc_parser.add_argument("--confidence-levels", type=float, nargs="+", default=[0.90, 0.95, 0.99], help="Confidence levels")
     mc_parser.add_argument("--block-size", type=int, help="Block size for block bootstrap")
     mc_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
-    mc_parser.add_argument("--n-trials", type=int, default=None, help="Number of development trials (parameter configurations) tested; when set, report the Deflated Sharpe Ratio (multiple-testing correction) for the base backtest Sharpe")
+    mc_parser.add_argument("--n-trials", type=int, default=None, help="Number of development trials (parameter configurations) tested; when set, report the Deflated Sharpe Ratio (multiple-testing correction) for the base backtest Sharpe. When a --param-grid is searched, the effective count is max(n_trials, number of grid combinations evaluated) so the internal search is never understated")
     mc_parser.set_defaults(func=run_monte_carlo)
 
     # CPCV analysis

@@ -152,10 +152,14 @@ accept `apply_deflation=True`:
   the optimization runs internally and its ranked trial Sharpes are
   recorded in the config, so `SR*` uses the cross-sectional
   dispersion estimator (the recommended estimator) instead of the
-  i.i.d. null approximation. The DSR is printed and written to
-  `monte_carlo_results.json` as a top-level `deflated_sharpe` key
-  (with `n_trials` recorded in the config); without `--n-trials` no
-  key is emitted, so the output is backward compatible.
+  i.i.d. null approximation. The effective trial count is
+  `max(--n-trials, number of grid combinations evaluated)`, so the
+  internal search is never understated while additional development
+  trials beyond the grid can still be reported. The DSR is printed
+  and written to `monte_carlo_results.json` as a top-level
+  `deflated_sharpe` key (with the effective `n_trials` recorded in
+  the config); without `--n-trials` no key is emitted, so the output
+  is backward compatible.
 
 Example:
 
@@ -202,9 +206,12 @@ python3 scripts/run_backtest.py \
 The `monte-carlo` subcommand accepts the same `--n-trials` flag. It
 first runs the parameter optimization implied by `--param-grid` to
 select the base parameters, then deflates the base backtest Sharpe
-by the reported trial count (using the optimization record's trial
-Sharpes for `SR*`) before running the simulations. The DSR is printed
-and saved to `monte_carlo_results.json`.
+before running the simulations. The effective trial count is
+`max(--n-trials, number of grid combinations evaluated)`: the
+internal search is always fully accounted for, and `--n-trials` can
+still report additional development trials beyond the grid. The
+optimization record's trial Sharpes are used for `SR*`. The DSR is
+printed and saved to `monte_carlo_results.json`.
 
 ```bash
 python3 scripts/walk_forward.py monte-carlo \
@@ -330,8 +337,10 @@ Sharpe; the DSR is printed, saved as a top-level
 `deflated_sharpe` key in `monte_carlo_results.json`, and
 computed with `SR*` from the cross-sectional dispersion of the
 optimization record's trial Sharpes (or the i.i.d. null
-approximation when no grid was searched). Without `--n-trials`
-no `deflated_sharpe` key is emitted.
+approximation when no grid was searched). The effective trial
+count is `max(--n-trials, number of grid combinations
+evaluated)`, so the internal search is never understated.
+Without `--n-trials` no `deflated_sharpe` key is emitted.
 
 ## Combinatorially Purged Cross-Validation (CPCV)
 
