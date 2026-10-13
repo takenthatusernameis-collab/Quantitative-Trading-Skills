@@ -73,6 +73,11 @@ strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 3
 - **Use case**: Multi-asset portfolios; requires panel data at the
   portfolio layer. Returns a portfolio-level signal representing
   (n_long - n_short) / n_assets per period.
+- **Notes**: With symmetric quantiles (top == bottom), net signal is 0 (flat)
+  by construction. `run_backtest` applies the scalar portfolio signal to
+  equal-weight portfolio returns; a net-zero signal is flat, which differs
+  from "equal long/short books" in cost/slippage realization depending on
+  execution model. The test suite uses asymmetric quantiles to avoid this.
 
 ### Dual Momentum (`dual_momentum`)
 
