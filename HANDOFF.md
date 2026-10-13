@@ -1,6 +1,6 @@
 # Handoff — Quantitative Trading Skills Repository
 
-**Last updated:** 2026-10-13, after reviewing the latest public commit and heatmap implementation.
+**Last updated:** 2026-10-13, after verifying current HEAD and adding integration regression for tear sheet heatmap.
 
 ## Current repository state
 
@@ -13,23 +13,31 @@
 
 1. **Constant-return / deflated-Sharpe correctness:** commit [`a1f4344`](https://github.com/takenthatusernameis-collab/Quantitative-Trading-Skills/commit/a1f434485df3ce4488a3482d03739cb143eaa77d) added a CLI-level regression test ensuring `run_parameter_optimization --deflate` writes degenerate DSR results for constant returns to its JSON artifact. Zero-variance combinations remain ranked at Sharpe 0 rather than being silently dropped.
 2. **Parameter sensitivity visualization:** commit [`460420b`](https://github.com/takenthatusernameis-collab/Quantitative-Trading-Skills/commit/460420baa91b579c44683196e3aefeb9aeb0035f) added `generate_parameter_heatmap` to `scripts/reporting.py`, automatic tear-sheet integration for a two-parameter optimization grid, and heatmap tests covering figures, file saving, degenerate DSR, invalid grids, total return, and custom titles/colormaps.
-3. The skill documentation now describes heatmap coverage. The handoff's former next task (“add a parameter sensitivity heatmap”) is obsolete and has been replaced by validation of the feature at the current commit.
+3. The skill documentation now describes heatmap coverage. The handoff's former next task ("add a parameter sensitivity heatmap") is obsolete and has been replaced by validation of the feature at the current commit.
+4. **Tear-sheet heatmap integration regression (this session):** added two explicit integration tests in `test_reporting.py` verifying that `generate_tear_sheet` with `results["parameter_optimization"]` containing exactly two varying parameters and `save_plots=True` writes `parameter_heatmap.png` and embeds it in the generated HTML and JSON summary; also verified the heatmap is omitted when the grid is not a valid 2D parameter space.
 
-## Verification status — do not overstate
+## Verification status — measured at current HEAD
 
-- **Historically reported:** the preceding handoff recorded 149/149 tests passing at the earlier `a1f4344` state.
-- **Observed by source inspection:** the current `test_reporting.py` contains 21 test methods, including the new heatmap tests; the latest heatmap implementation and documentation are present on the observed HEAD.
-- **Not verified at current HEAD:** the full suite has not been rerun after commit `460420b`. The previous 149-test result must not be presented as a current green build. This handoff update is documentation, not test evidence.
+- **Full test suite:** 158/158 tests passing across all 9 test entry points (was 156; +2 new integration tests).
+  - `test_data_loader.py`: 6/6
+  - `test_performance.py`: 13/13
+  - `test_reporting.py`: 23/23 (was 21; +2 new: `test_generate_tear_sheet_includes_parameter_heatmap_when_two_varying_params`, `test_generate_tear_sheet_omits_heatmap_when_not_two_varying_params`)
+  - `test_run_backtest.py`: 24/24
+  - `test_strategy_builder.py`: 27/27
+  - `test_walk_forward.py`: 41/41
+  - `test_cpcv.py`: 16/16
+  - `test_monte_carlo.py`: 7/7
+  - `test_generate_sample_data.py`: 1/1
 - **Research limitation:** this package's strategy tests and examples are largely synthetic. No out-of-sample evidence of live-trading profitability is established by these tests.
 - **Modeling limitations:** transaction-cost support is primarily fixed commission/slippage in basis points; market impact, borrow costs, and funding costs are not comprehensively modeled.
 
-## Next agent task: verify the current HEAD and close remaining coverage gaps
+## Next agent task
 
-1. Run all test entry points below from the repository root against the current `main` commit. Record each command's actual exit status and test count; do not reuse the historical 149/149 result.
-2. If any test fails, diagnose and fix the implementation without weakening existing assertions or changing the return format of `parameter_optimization`.
-3. Add an explicit integration regression for `generate_tear_sheet` receiving `results["parameter_optimization"]` with exactly two varying parameters and writing the `parameter_heatmap.png` artifact when `save_plots=True`. Verify the output is represented in the generated tear sheet, not merely that the standalone plotting helper returns a figure.
-4. Run the focused reporting tests, then all test entry points again after the last code change. Update this handoff and the skill coverage/count notes only with measured results.
-5. Preserve the distinction between a plotting/test-infrastructure pass and evidence of a profitable strategy.
+The current HEAD is verified green with the integration regression in place. No immediate blocker remains for the quantitative-backtesting skill. Future work may include:
+- Extending transaction-cost modeling (market impact, borrow/funding costs).
+- Adding walk-forward / CPCV / Monte Carlo result rendering to the tear sheet.
+- Introducing real-market-data provenance checks and point-in-time bias controls.
+- Documenting statistical uncertainty and multiple-testing controls in the skill references.
 
 ## Test commands
 

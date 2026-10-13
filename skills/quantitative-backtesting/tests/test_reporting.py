@@ -295,6 +295,94 @@ class TestTearSheet(unittest.TestCase):
             self.assertTrue(os.path.exists(nested))
             self.assertTrue(os.path.exists(html_path))
 
+    def test_generate_tear_sheet_includes_parameter_heatmap_when_two_varying_params(self):
+        """Integration test: tear sheet generates and embeds parameter_heatmap.png
+        when results['parameter_optimization'] has exactly two varying parameters
+        and save_plots=True.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create synthetic parameter optimization results with 2 varying params (period, exit_period)
+            param_opt_results = [
+                {
+                    "params": {"period": 10, "exit_period": 5},
+                    "sharpe_ratio": 1.2,
+                    "total_return": 0.15,
+                    "n_periods": 100,
+                },
+                {
+                    "params": {"period": 10, "exit_period": 10},
+                    "sharpe_ratio": 0.8,
+                    "total_return": 0.10,
+                    "n_periods": 100,
+                },
+                {
+                    "params": {"period": 20, "exit_period": 5},
+                    "sharpe_ratio": 1.5,
+                    "total_return": 0.20,
+                    "n_periods": 100,
+                },
+                {
+                    "params": {"period": 20, "exit_period": 10},
+                    "sharpe_ratio": 0.5,
+                    "total_return": 0.05,
+                    "n_periods": 100,
+                },
+            ]
+
+            results = self._make_results()
+            results["parameter_optimization"] = param_opt_results
+            metrics = {"total_return": 0.1, "total_trades": 5, "win_rate": 0.6}
+
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir, symbol="SPY", strategy_name="Donchian", save_plots=True
+            )
+
+            # Verify heatmap file was created
+            heatmap_path = os.path.join(tmpdir, "parameter_heatmap.png")
+            self.assertTrue(os.path.exists(heatmap_path), "parameter_heatmap.png should be created")
+
+            # Verify heatmap is referenced in the HTML
+            with open(html_path, "r") as f:
+                html = f.read()
+            self.assertIn("parameter_heatmap.png", html, "HTML should reference the heatmap image")
+
+            # Verify plot_files in JSON summary includes the heatmap
+            summary_path = os.path.join(tmpdir, "tear_sheet_summary.json")
+            with open(summary_path, "r") as f:
+                summary = json.load(f)
+            self.assertIn("plot_files", summary)
+            plot_files = summary["plot_files"]
+            self.assertTrue(any("parameter_heatmap.png" in p for p in plot_files),
+                           "JSON summary should list parameter_heatmap.png")
+
+    def test_generate_tear_sheet_omits_heatmap_when_not_two_varying_params(self):
+        """Tear sheet should not create heatmap when parameter_optimization
+        has fewer or more than two varying parameters.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Only one varying parameter
+            param_opt_results = [
+                {"params": {"period": 10}, "sharpe_ratio": 1.0},
+                {"params": {"period": 20}, "sharpe_ratio": 1.2},
+            ]
+
+            results = self._make_results()
+            results["parameter_optimization"] = param_opt_results
+            metrics = {"total_return": 0.1}
+
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir, symbol="SPY", strategy_name="SMA", save_plots=True
+            )
+
+            heatmap_path = os.path.join(tmpdir, "parameter_heatmap.png")
+            self.assertFalse(os.path.exists(heatmap_path),
+                           "parameter_heatmap.png should NOT be created for non-2D grid")
+
+            with open(html_path, "r") as f:
+                html = f.read()
+            self.assertNotIn("parameter_heatmap.png", html,
+                           "HTML should not reference heatmap when grid is invalid")
+
 
 class TestParameterHeatmap(unittest.TestCase):
     """Tests for generate_parameter_heatmap function."""
