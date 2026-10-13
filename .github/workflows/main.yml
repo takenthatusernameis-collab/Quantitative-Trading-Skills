@@ -1,9 +1,6 @@
 name: Kilo Quantitative Financial Trading Methodology Researcher
 
 on:
-  push:
-    paths:
-      - ".kilo/TWO_AGENT_ONCE"
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
