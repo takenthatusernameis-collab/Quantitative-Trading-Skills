@@ -122,12 +122,14 @@ Risk Metrics:
 - `data_loader.py` - Utilities for loading and validating market data from various sources
 - `strategy_builder.py` - Factory for creating common strategy templates (trend, mean reversion, momentum)
 - `performance.py` - Comprehensive performance analytics and metric calculation
-- `walk_forward.py` - Walk-forward analysis, parameter optimization, Monte Carlo, CPCV, and Deflated Sharpe Ratio multiple-testing correction
+- `walk_forward.py` - Walk-forward analysis, parameter optimization, CPCV, and Deflated Sharpe Ratio multiple-testing correction
+- `monte_carlo.py` - Standalone Monte Carlo simulation (block bootstrap resampling, metric distributions, confidence intervals, probability of ruin). Re-exported from `walk_forward` for backward compatibility.
 - `reporting.py` - Automated tear sheet and report generation
 - `generate_sample_data.py` - Generates a sample OHLCV dataset for testing
 
 ### tests/
 - `test_walk_forward.py` - Unit tests for walk-forward and parameter optimization
+- `test_monte_carlo.py` - Unit tests for the standalone `monte_carlo.py` module (structure, block bootstrap, probability of ruin, short-series guard, and the `walk_forward` re-export identity)
 - `test_run_backtest.py` - Unit tests for the run_backtest CLI entry point and argument parsing
 - `test_strategy_builder.py` - Unit tests for the strategy factory and registry
 - `test_data_loader.py` - Unit tests for data loading and validation
@@ -185,6 +187,7 @@ python3 skills/quantitative-backtesting/tests/test_run_backtest.py
 python3 skills/quantitative-backtesting/tests/test_strategy_builder.py
 python3 skills/quantitative-backtesting/tests/test_walk_forward.py
 python3 skills/quantitative-backtesting/tests/test_cpcv.py
+python3 skills/quantitative-backtesting/tests/test_monte_carlo.py
 python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
 ```
 

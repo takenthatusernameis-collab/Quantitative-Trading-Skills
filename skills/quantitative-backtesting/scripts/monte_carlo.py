@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""
+Monte Carlo simulation for strategy return robustness.
+
+Resamples strategy returns (with optional block bootstrapping to preserve
+autocorrelation) to generate synthetic equity curves and compute the
+distribution of key performance metrics.
+
+This module is standalone: it depends only on pandas/numpy, so it can be
+imported directly (`from monte_carlo import monte_carlo_simulation`) without
+pulling in the walk-forward orchestration code.
+"""
+
+import numpy as np
+import pandas as pd
+from typing import Any, Dict, List, Optional
+
+
+def _annualization_factor(index: pd.Index) -> float:
+    """Estimate periods per year from DatetimeIndex."""
+    if not isinstance(index, pd.DatetimeIndex):
+        return 252
+    try:
+        freq = pd.infer_freq(index)
+        if freq is None:
+            return 252
+        freq_map = {"B": 252, "D": 365, "W": 52, "M": 12, "Q": 4, "Y": 1}
+        return freq_map.get(freq[0], 252)
+    except Exception:
+        return 252
+
+
+def monte_carlo_simulation(
+    base_returns: pd.Series,
+    n_simulations: int = 2000,
+    confidence_levels: List[float] = None,
+    block_size: int = None,
+) -> Dict[str, Any]:
+    """
+    Perform Monte Carlo simulation on strategy returns to assess robustness.
+
+    Resamples the base returns (with optional block bootstrapping to preserve
+    autocorrelation) to generate synthetic equity curves and compute the
+    distribution of key performance metrics.
+
+    Args:
+        base_returns: Series of strategy returns from a backtest
+        n_simulations: Number of Monte Carlo paths to generate
+        confidence_levels: List of confidence levels for percentile bands
+        block_size: If set, use stationary block bootstrap (preserves autocorrelation).
+                   Block size in periods. None = simple i.i.d. resampling.
+
+    Returns:
+        Dictionary with:
+            - 'simulated_equity_curves': List of simulated equity curves (DataFrame)
+            - 'metric_distributions': Dict of metric -> array of simulated values
+            - 'confidence_intervals': Dict of metric -> {level: (lower, upper)}
+            - 'probability_of_ruin': Fraction of sims where equity < initial * threshold
+            - 'summary': Summary statistics of metric distributions
+    """
+    if confidence_levels is None:
+        confidence_levels = [0.90, 0.95, 0.99]
+
+    if len(base_returns) < 2:
+        raise ValueError("Need at least 2 return observations for Monte Carlo")
+
+    base_returns = base_returns.dropna()
+    n_obs = len(base_returns)
+    ann_factor = _annualization_factor(base_returns.index)
+
+    simulated_metrics = {
+        "total_return": [],
+        "annualized_return": [],
+        "annualized_volatility": [],
+        "sharpe_ratio": [],
+        "sortino_ratio": [],
+        "max_drawdown": [],
+        "calmar_ratio": [],
+    }
+
+    simulated_equity_curves = []
+
+    for sim in range(n_simulations):
+        # Resample returns with replacement
+        if block_size is not None and block_size > 1:
+            if block_size >= n_obs:
+                # Block larger than series - fall back to i.i.d. bootstrap
+                sim_returns = base_returns.sample(n=n_obs, replace=True).values
+                sim_returns = pd.Series(sim_returns, index=base_returns.index)
+            else:
+                # Stationary block bootstrap (Politis & Romano, 1994)
+                # Blocks have geometrically distributed lengths with mean = block_size
+                # Circular wrap-around ensures stationarity
+                p_new_block = 1.0 / block_size
+                sim_returns = np.empty(n_obs)
+                returns_array = base_returns.values
+
+                # Random starting position
+                pos = np.random.randint(0, n_obs)
+
+                for i in range(n_obs):
+                    sim_returns[i] = returns_array[pos]
+                    # Decide whether to start a new block
+                    if np.random.random() < p_new_block:
+                        pos = np.random.randint(0, n_obs)
+                    else:
+                        pos = (pos + 1) % n_obs  # Continue sequentially with wrap
+
+                sim_returns = pd.Series(sim_returns, index=base_returns.index)
+        else:
+            # Simple i.i.d. bootstrap
+            sim_returns = base_returns.sample(n=n_obs, replace=True).values
+            sim_returns = pd.Series(sim_returns, index=base_returns.index)
+
+        # Build equity curve
+        equity = (1 + sim_returns).cumprod()
+
+        # Calculate metrics
+        total_ret = equity.iloc[-1] - 1
+        ann_ret = (1 + total_ret) ** (ann_factor / n_obs) - 1
+        ann_vol = sim_returns.std() * np.sqrt(ann_factor)
+
+        excess = sim_returns - 0.02 / ann_factor
+        if excess.std() > 0:
+            sharpe = excess.mean() / excess.std() * np.sqrt(ann_factor)
+            downside = excess[excess < 0]
+            if downside.std() > 0:
+                sortino = excess.mean() / downside.std() * np.sqrt(ann_factor)
+            else:
+                sortino = np.inf
+        else:
+            sharpe = 0.0
+            sortino = 0.0
+
+        # Drawdown
+        cummax = equity.cummax()
+        dd = (equity - cummax) / cummax
+        max_dd = dd.min()
+        calmar = abs(ann_ret / max_dd) if max_dd < 0 else np.inf
+
+        simulated_metrics["total_return"].append(float(total_ret))
+        simulated_metrics["annualized_return"].append(float(ann_ret))
+        simulated_metrics["annualized_volatility"].append(float(ann_vol))
+        simulated_metrics["sharpe_ratio"].append(float(sharpe) if not np.isinf(sharpe) else 0.0)
+        simulated_metrics["sortino_ratio"].append(float(sortino) if not np.isinf(sortino) else 0.0)
+        simulated_metrics["max_drawdown"].append(float(max_dd))
+        simulated_metrics["calmar_ratio"].append(float(calmar) if not np.isinf(calmar) else 0.0)
+
+        simulated_equity_curves.append(equity)
+
+    # Compute confidence intervals
+    confidence_intervals = {}
+    for metric, values in simulated_metrics.items():
+        values_arr = np.array(values)
+        confidence_intervals[metric] = {}
+        for level in confidence_levels:
+            alpha = (1 - level) / 2
+            lower = np.percentile(values_arr, alpha * 100)
+            upper = np.percentile(values_arr, (1 - alpha) * 100)
+            confidence_intervals[metric][level] = (float(lower), float(upper))
+
+    # Probability of ruin (equity falls below 50% of initial)
+    ruin_threshold = 0.5
+    ruin_count = sum(1 for eq in simulated_equity_curves if eq.min() < ruin_threshold)
+    prob_ruin = ruin_count / n_simulations
+
+    # Summary statistics
+    summary = {}
+    for metric, values in simulated_metrics.items():
+        values_arr = np.array(values)
+        summary[metric] = {
+            "mean": float(values_arr.mean()),
+            "std": float(values_arr.std()),
+            "median": float(np.median(values_arr)),
+            "min": float(values_arr.min()),
+            "max": float(values_arr.max()),
+        }
+
+    return {
+        "simulated_equity_curves": simulated_equity_curves,
+        "metric_distributions": {k: np.array(v) for k, v in simulated_metrics.items()},
+        "confidence_intervals": confidence_intervals,
+        "probability_of_ruin": prob_ruin,
+        "ruin_threshold": ruin_threshold,
+        "summary": summary,
+        "n_simulations": n_simulations,
+        "base_observations": n_obs,
+    }

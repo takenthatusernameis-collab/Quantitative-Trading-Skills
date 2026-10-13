@@ -222,6 +222,16 @@ generate synthetic equity curves and compute the distribution of performance
 metrics. This helps assess the statistical significance and robustness of
 backtest results.
 
+The function lives in the standalone `scripts/monte_carlo.py` module and is
+re-exported from `scripts/walk_forward.py` for backward compatibility, so it
+can be imported either way:
+
+```python
+from monte_carlo import monte_carlo_simulation
+# or
+from walk_forward import monte_carlo_simulation
+```
+
 ### Parameters
 
 | Parameter            | Default  | Description                                              |
@@ -255,7 +265,7 @@ The result dictionary contains:
 
 ```python
 # After running a backtest
-from walk_forward import monte_carlo_simulation
+from monte_carlo import monte_carlo_simulation
 
 mc_results = monte_carlo_simulation(
     base_returns=backtest_returns,
