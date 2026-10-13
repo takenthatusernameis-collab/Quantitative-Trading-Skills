@@ -121,6 +121,51 @@ class TestReporting(unittest.TestCase):
 
             self.assertNotIn("End-of-Sample Closes", content)
 
+    def test_generate_report_surfaces_deflated_sharpe(self):
+        """When `deflated_sharpe` is present, the report surfaces it."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            metrics = {
+                "total_return": 0.1,
+                "sharpe_ratio": 0.8,
+                "deflated_sharpe": {
+                    "deflated_sharpe_ratio": 0.42,
+                    "p_value": 0.58,
+                    "expected_max_sharpe": 1.5,
+                    "z_score": -0.3,
+                    "n_trials": 50,
+                    "n_observations": 252,
+                    "skewness": 0.1,
+                    "kurtosis": 3.0,
+                },
+            }
+            generate_report(metrics, tmpdir, symbol="SPY", strategy_name="SMA")
+
+            report_path = os.path.join(tmpdir, "report.txt")
+            with open(report_path, "r") as f:
+                content = f.read()
+
+            self.assertIn("Multiple-Testing Correction", content)
+            self.assertIn("Deflated Sharpe Ratio", content)
+            self.assertIn("P-Value", content)
+            self.assertIn("Expected Max Sharpe", content)
+            self.assertIn("Z-Score", content)
+            self.assertIn("Number of Trials", content)
+            self.assertIn("Observations", content)
+            self.assertIn("50", content)
+            self.assertIn("252", content)
+
+    def test_generate_report_omits_deflated_sharpe_section_when_absent(self):
+        """Without `deflated_sharpe`, the section is omitted entirely."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            metrics = {"total_return": 0.1, "sharpe_ratio": 0.8}
+            generate_report(metrics, tmpdir, symbol="SPY", strategy_name="SMA")
+
+            report_path = os.path.join(tmpdir, "report.txt")
+            with open(report_path, "r") as f:
+                content = f.read()
+
+            self.assertNotIn("Multiple-Testing Correction", content)
+
     def test_generate_report_handles_empty_metrics_dict(self):
         """Test that passing an empty metrics dict does not crash."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -174,6 +219,61 @@ class TestTearSheet(unittest.TestCase):
                 summary = json.load(f)
             self.assertEqual(summary["symbol"], "SPY")
             self.assertEqual(summary["strategy"], "SMA")
+
+    def test_generate_tear_sheet_surfaces_deflated_sharpe(self):
+        """The tear sheet renders the DSR and surfaces it in the JSON summary."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            metrics = {
+                "total_return": 0.1,
+                "deflated_sharpe": {
+                    "deflated_sharpe_ratio": 0.42,
+                    "p_value": 0.58,
+                    "expected_max_sharpe": 1.5,
+                    "z_score": -0.3,
+                    "n_trials": 50,
+                    "n_observations": 252,
+                    "skewness": 0.1,
+                    "kurtosis": 3.0,
+                },
+            }
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir, symbol="SPY", strategy_name="SMA"
+            )
+            with open(html_path, "r") as f:
+                html = f.read()
+
+            self.assertIn("Multiple-Testing Correction", html)
+            self.assertIn("Deflated Sharpe Ratio", html)
+            self.assertIn("Number of Trials", html)
+            self.assertIn("Observations", html)
+
+            # The DSR is a dict, so it is filtered out of the scalar-only
+            # `metrics` field and surfaced as a top-level summary key.
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("deflated_sharpe", summary)
+            self.assertEqual(summary["deflated_sharpe"]["n_trials"], 50)
+            self.assertAlmostEqual(
+                summary["deflated_sharpe"]["deflated_sharpe_ratio"], 0.42
+            )
+
+    def test_generate_tear_sheet_omits_deflated_sharpe_when_absent(self):
+        """Without `deflated_sharpe`, the section and summary key are absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            metrics = {"total_return": 0.1}
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir, symbol="SPY", strategy_name="SMA"
+            )
+            with open(html_path, "r") as f:
+                html = f.read()
+
+            self.assertNotIn("Multiple-Testing Correction", html)
+
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertNotIn("deflated_sharpe", summary)
 
     def test_generate_tear_sheet_handles_missing_equity(self):
         """Tear sheet does not crash when results lack equity_curve."""

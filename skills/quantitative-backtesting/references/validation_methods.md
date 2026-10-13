@@ -134,6 +134,15 @@ accept `apply_deflation=True`:
   approximation.
 - `overfitting_check` surfaces the aggregate DSR in its diagnostics
   when the walk-forward run computed one.
+- The main backtest entry point `run_backtest.py` also reports the
+  DSR when the number of development trials behind the backtest is
+  supplied (`--n-trials`). `run_backtest` records `n_trials` in the
+  results config and `calculate_metrics` deflates the final backtest
+  Sharpe by it, adding a `deflated_sharpe` dict to the metrics (with
+  `SR*` from the i.i.d. null approximation, since the individual trial
+  Sharpes are not available to a single backtest). The report and tear
+  sheet surface the dict; without `--n-trials` no `deflated_sharpe`
+  key is emitted, so the output is backward compatible.
 
 Example:
 
@@ -161,6 +170,20 @@ python3 scripts/walk_forward.py optimize \
     --strategy sma_crossover \
     --param-grid '{"fast_period": [10, 20], "slow_period": [30, 50]}' \
     --deflate
+```
+
+For a single backtest, pass `--n-trials` to `scripts/run_backtest.py`
+with the number of parameter configurations considered during
+development. The final backtest Sharpe is deflated by that many
+trials and the DSR is printed, written to `metrics.json`, and
+rendered in `report.txt` and `tear_sheet.html`.
+
+```bash
+python3 scripts/run_backtest.py \
+    --data data.csv \
+    --strategy sma_crossover \
+    --params '{"fast_period": 10, "slow_period": 30}' \
+    --n-trials 50
 ```
 
 ## Overfitting Detection

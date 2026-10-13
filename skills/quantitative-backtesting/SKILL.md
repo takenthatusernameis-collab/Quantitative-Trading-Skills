@@ -118,7 +118,7 @@ Risk Metrics:
 ## Resources
 
 ### scripts/
-- `run_backtest.py` - Main entry point for running backtests with configurable parameters
+- `run_backtest.py` - Main entry point for running backtests with configurable parameters (supports `--n-trials` to report the Deflated Sharpe Ratio of the final backtest Sharpe)
 - `data_loader.py` - Utilities for loading and validating market data from various sources
 - `strategy_builder.py` - Factory for creating common strategy templates (trend, mean reversion, momentum)
 - `performance.py` - Comprehensive performance analytics and metric calculation
@@ -152,7 +152,7 @@ Risk Metrics:
 - Account for transaction costs from the beginning - they significantly impact net returns
 - Test parameter stability across different market regimes
 - Beware of look-ahead bias: ensure signals only use data available at decision time
-- Correct for multiple testing: a grid search over many parameter combinations inflates in-sample Sharpe; compute the Deflated Sharpe Ratio (`--deflate`) before trusting a Sharpe estimate
+- Correct for multiple testing: a grid search over many parameter combinations inflates in-sample Sharpe; compute the Deflated Sharpe Ratio before trusting a Sharpe estimate. Use `--deflate` for walk-forward/optimization/CPCV, or pass `--n-trials` to `run_backtest.py` to deflate a single backtest's final Sharpe by the number of development trials
 - Consider regime-dependent performance (bull/bear/sideways markets)
 - Document all assumptions and data sources for reproducibility
 
@@ -201,6 +201,10 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   `profit_factor` follows the documented `sum(pnl>0)/abs(sum(pnl<0))` formula.
 - `test_reporting.py` - `generate_report` file/header/trade-section output and
   `generate_tear_sheet` HTML + JSON summary generation (matplotlib optional).
+  Also covers the **multiple-testing correction** reporting: `generate_report`
+  prints a "Multiple-Testing Correction" section and `generate_tear_sheet`
+  renders a table plus a top-level `deflated_sharpe` key in the JSON summary
+  when a `deflated_sharpe` dict is present, and both omit it when absent.
   Uses the stdlib `unittest` framework rather than the custom runner.
 - `test_run_backtest.py` - `run_backtest` end-to-end on synthetic data, the
   `signals_active` flat-strategy guard, `parse_args` CLI behavior, and **trade
@@ -224,7 +228,15 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   `DualMomentumStrategy`, and the trade ledger is validated (non-empty,
   well-formed) for both formats. The extractor iterates the position
   series, not `data`, because `len(data)` is the number of symbols (not
-  bars) for a dict and `data.index` does not exist on dicts.
+  bars) for a dict and `data.index` does not exist on dicts. Also covers
+  **Deflated Sharpe Ratio surfacing in the main backtest path**:
+  `--n-trials` threads the number of development trials through the
+  results config, `calculate_metrics` deflates the final backtest
+  Sharpe by it (importing `deflated_sharpe_ratio` from `walk_forward`
+  lazily) into a `deflated_sharpe` metrics key, and the surfaced DSR
+  equals a direct `deflated_sharpe_ratio` call; without `--n-trials`
+  no `deflated_sharpe` key is emitted (backward compatible).
+  `parse_args` accepts `--n-trials` (default `None`).
 - `test_strategy_builder.py` - strategy registry, `build_strategy`, defaults,
   binary long/flat signal generation with real crossovers, and multi-asset
   panel signal generation for `CrossSectionalMomentum` and

@@ -237,6 +237,30 @@ def calculate_metrics(
         metrics["omega_ratio"] = 0.0
         metrics["tail_ratio"] = 0.0
 
+    # --- Multiple-Testing Correction (Deflated Sharpe Ratio) ---
+    # When the caller reports how many development trials (parameter
+    # configurations) produced this backtest (e.g. the size of the
+    # grid searched), deflate the final Sharpe for selection bias and
+    # for the non-normality of returns. `deflated_sharpe_ratio` lives
+    # in walk_forward, which imports this module, so it is imported
+    # lazily to avoid a circular import at module load time.
+    n_trials = config.get("n_trials") if config else None
+    if n_trials is not None and int(n_trials) >= 1 and len(returns) >= 2:
+        # Try both the top-level and the package-qualified name so the
+        # function resolves regardless of whether `performance` was
+        # imported as a top-level module or as part of the `scripts`
+        # package.
+        try:
+            from walk_forward import deflated_sharpe_ratio  # noqa: E402
+        except ImportError:
+            from scripts.walk_forward import deflated_sharpe_ratio  # noqa: E402
+
+        metrics["deflated_sharpe"] = deflated_sharpe_ratio(
+            sharpe_ratio=metrics["sharpe_ratio"],
+            returns=returns,
+            n_trials=int(n_trials),
+        )
+
     # Store config metadata
     if config:
         metrics["initial_capital"] = config.get("initial_capital", None)
@@ -323,6 +347,22 @@ def generate_report(
                 f"% of Trades Closed at End: {metrics.get('pct_trades_closed_at_end', 0):.2%}",
                 "",
             ])
+
+    # Multiple-testing correction: surfaced only when the backtest
+    # reported the number of development trials behind it.
+    dsr = metrics.get("deflated_sharpe")
+    if dsr is not None:
+        z_score = dsr.get("z_score")
+        lines.extend([
+            "--- Multiple-Testing Correction ---",
+            f"Deflated Sharpe Ratio: {dsr.get('deflated_sharpe_ratio', 0):.4f}",
+            f"P-Value:               {dsr.get('p_value', 0):.4f}",
+            f"Expected Max Sharpe:   {dsr.get('expected_max_sharpe', 0):.4f}",
+            f"Z-Score:               {z_score:.4f}" if z_score is not None else "Z-Score:               N/A",
+            f"Number of Trials:      {dsr.get('n_trials', 0)}",
+            f"Observations:          {dsr.get('n_observations', 0)}",
+            "",
+        ])
 
     if "benchmark_total_return" in metrics:
         lines.extend([

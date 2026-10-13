@@ -34,6 +34,7 @@ def parse_args():
     parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     parser.add_argument("--output", type=str, default="results", help="Output directory")
     parser.add_argument("--params", type=str, help="Strategy parameters as JSON string")
+    parser.add_argument("--n-trials", type=int, default=None, help="Number of development trials (parameter configurations) tested; when set, report the Deflated Sharpe Ratio (multiple-testing correction) for the final Sharpe")
     return parser.parse_args()
 
 
@@ -170,6 +171,7 @@ def run_backtest(data, strategy, args):
             "slippage": args.slippage,
             "strategy": args.strategy,
             "symbol": args.symbol,
+            "n_trials": getattr(args, "n_trials", None),
         },
     }
 
@@ -203,6 +205,17 @@ def main():
 
     print("Calculating performance metrics...")
     metrics = calculate_metrics(results)
+
+    # Multiple-testing correction: when the number of development
+    # trials was reported (--n-trials), echo the Deflated Sharpe
+    # Ratio that calculate_metrics attached to the metrics.
+    dsr = metrics.get("deflated_sharpe")
+    if dsr is not None:
+        print(
+            f"Deflated Sharpe Ratio: {dsr['deflated_sharpe_ratio']:.4f} "
+            f"(p-value {dsr['p_value']:.4f}, expected max Sharpe "
+            f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
+        )
 
     print("Generating report...")
     generate_report(metrics, args.output, symbol=args.symbol, strategy_name=args.strategy)

@@ -21,6 +21,7 @@ sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
 from run_backtest import run_backtest, signals_active, parse_args  # noqa: E402
 from strategy_builder import build_strategy  # noqa: E402
+from walk_forward import deflated_sharpe_ratio  # noqa: E402
 
 
 def _make_data(periods: int = 252, seed: int = 42) -> pd.DataFrame:
@@ -42,12 +43,13 @@ def _make_data(periods: int = 252, seed: int = 42) -> pd.DataFrame:
 
 class _Args:
     def __init__(self, commission=0.0002, slippage=0.0001, initial_capital=100000,
-                 strategy="sma_crossover", symbol="TEST"):
+                 strategy="sma_crossover", symbol="TEST", n_trials=None):
         self.commission = commission
         self.slippage = slippage
         self.initial_capital = initial_capital
         self.strategy = strategy
         self.symbol = symbol
+        self.n_trials = n_trials
 
 
 def test_signals_active_detects_flat_and_active_series():
@@ -116,6 +118,84 @@ def test_run_backtest_trade_analytics_populated():
     assert metrics.get("win_rate") is not None
     assert 0.0 <= metrics["win_rate"] <= 1.0
     assert metrics.get("total_return") is not None
+
+
+def test_run_backtest_n_trials_surfaces_deflated_sharpe():
+    """--n-trials threads n_trials through config into a deflated_sharpe key.
+
+    The Deflated Sharpe Ratio (multiple-testing correction) is computed
+    from the final backtest Sharpe and the number of development trials,
+    and surfaced in the metrics output.
+    """
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    results = run_backtest(data, strategy, _Args(n_trials=50))
+
+    from performance import calculate_metrics
+
+    metrics = calculate_metrics(results)
+
+    assert "deflated_sharpe" in metrics, "expected deflated_sharpe in metrics"
+    d = metrics["deflated_sharpe"]
+    assert 0.0 <= d["deflated_sharpe_ratio"] <= 1.0
+    assert d["n_trials"] == 50
+    assert d["n_observations"] == len(results["returns"])
+    assert abs(d["sharpe_ratio"] - metrics["sharpe_ratio"]) < 1e-9
+    assert abs(d["p_value"] - (1.0 - d["deflated_sharpe_ratio"])) < 1e-12
+
+
+def test_run_backtest_without_n_trials_omits_deflated_sharpe():
+    """Without n_trials, no deflated_sharpe key is added (backward compat)."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    results = run_backtest(data, strategy, _Args())
+
+    from performance import calculate_metrics
+
+    metrics = calculate_metrics(results)
+
+    assert "deflated_sharpe" not in metrics
+    # The behavior is opt-in: the config records n_trials=None.
+    assert results["config"]["n_trials"] is None
+
+
+def test_run_backtest_deflated_sharpe_matches_direct_call():
+    """The surfaced DSR equals a direct deflated_sharpe_ratio call.
+
+    Guards against the metrics path and the standalone function drifting
+    apart: both consume the same Sharpe and return series.
+    """
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    results = run_backtest(data, strategy, _Args(n_trials=25))
+
+    from performance import calculate_metrics
+
+    metrics = calculate_metrics(results)
+
+    expected = deflated_sharpe_ratio(
+        sharpe_ratio=metrics["sharpe_ratio"],
+        returns=results["returns"],
+        n_trials=25,
+    )
+    got = metrics["deflated_sharpe"]
+    for key in ("deflated_sharpe_ratio", "p_value", "expected_max_sharpe",
+                "n_trials", "n_observations", "skewness", "kurtosis"):
+        assert abs(got[key] - expected[key]) < 1e-9, f"{key} mismatch"
+    assert got["n_trials"] == expected["n_trials"] == 25
+
+
+def test_parse_args_accepts_n_trials():
+    """parse_args accepts --n-trials and defaults it to None."""
+    from unittest.mock import patch
+
+    with patch.object(sys, "argv", ["prog", "--data", "d.csv", "--n-trials", "100"]):
+        args = parse_args()
+    assert args.n_trials == 100
+
+    with patch.object(sys, "argv", ["prog", "--data", "d.csv"]):
+        args = parse_args()
+    assert args.n_trials is None
 
 
 class _FlipStrategy:
@@ -505,6 +585,10 @@ def main() -> int:
         ("run_backtest_flat_long_lookback_raises", test_run_backtest_flat_long_lookback_raises),
         ("run_backtest_active_strategy_succeeds", test_run_backtest_active_strategy_succeeds),
         ("run_backtest_trade_analytics_populated", test_run_backtest_trade_analytics_populated),
+        ("run_backtest_n_trials_surfaces_deflated_sharpe", test_run_backtest_n_trials_surfaces_deflated_sharpe),
+        ("run_backtest_without_n_trials_omits_deflated_sharpe", test_run_backtest_without_n_trials_omits_deflated_sharpe),
+        ("run_backtest_deflated_sharpe_matches_direct_call", test_run_backtest_deflated_sharpe_matches_direct_call),
+        ("parse_args_accepts_n_trials", test_parse_args_accepts_n_trials),
         ("run_backtest_records_both_legs_of_direct_long_short_flip", test_run_backtest_records_both_legs_of_direct_long_short_flip),
         ("run_backtest_short_leg_pnl_moves_opposite_to_price", test_run_backtest_short_leg_pnl_moves_opposite_to_price),
         ("run_backtest_long_leg_pnl_moves_with_price", test_run_backtest_long_leg_pnl_moves_with_price),

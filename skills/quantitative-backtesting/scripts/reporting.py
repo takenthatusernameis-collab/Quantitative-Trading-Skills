@@ -152,6 +152,26 @@ def generate_tear_sheet(
                 html_parts.append(f"<tr><td>{label}</td><td class='metric'>{fmt(metrics[key])}</td></tr>")
         html_parts.append("</table>")
 
+    # Multiple-testing correction: surfaced only when the backtest
+    # reported the number of development trials behind it.
+    dsr = metrics.get("deflated_sharpe")
+    if dsr is not None:
+        html_parts.append("<h2>Multiple-Testing Correction</h2>")
+        html_parts.append("<table><tr><th>Metric</th><th>Value</th></tr>")
+        z_score = dsr.get("z_score")
+        dsr_rows = [
+            ("Deflated Sharpe Ratio", dsr.get("deflated_sharpe_ratio"), lambda v: f"{v:.4f}"),
+            ("P-Value", dsr.get("p_value"), lambda v: f"{v:.4f}"),
+            ("Expected Max Sharpe", dsr.get("expected_max_sharpe"), lambda v: f"{v:.4f}"),
+            ("Z-Score", z_score, lambda v: f"{v:.4f}"),
+            ("Number of Trials", dsr.get("n_trials"), lambda v: f"{int(v)}"),
+            ("Observations", dsr.get("n_observations"), lambda v: f"{int(v)}"),
+        ]
+        for label, val, fmt in dsr_rows:
+            display = fmt(val) if val is not None else "N/A"
+            html_parts.append(f"<tr><td>{label}</td><td class='metric'>{display}</td></tr>")
+        html_parts.append("</table>")
+
     # Benchmark comparison
     if "benchmark_total_return" in metrics:
         html_parts.append("<h2>Benchmark Comparison</h2>")
@@ -234,6 +254,10 @@ def generate_tear_sheet(
         "metrics": {k: v for k, v in metrics.items() if isinstance(v, (str, int, float, bool, type(None)))},
         "plot_files": [str(p) for p in plot_files],
     }
+    # The Deflated Sharpe Ratio is a dict, so it is filtered out of
+    # the scalar-only `metrics` field above; surface it explicitly.
+    if "deflated_sharpe" in metrics:
+        summary["deflated_sharpe"] = metrics["deflated_sharpe"]
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2, default=str)
 

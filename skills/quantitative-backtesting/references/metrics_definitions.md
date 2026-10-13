@@ -63,6 +63,13 @@ below ~0.95 indicate the result is consistent with luck.
 Computed by `scripts/walk_forward.py::deflated_sharpe_ratio`
 and reported by `parameter_optimization`, `walk_forward_analysis`
 and `cpcv_analysis` when `apply_deflation=True` (CLI: `--deflate`).
+The main backtest entry point `run_backtest.py` reports it too when
+the number of development trials is supplied (CLI: `--n-trials`):
+`calculate_metrics` adds a `deflated_sharpe` dict to its output
+(deflating the final backtest Sharpe by `n_trials`, with `SR*`
+from the i.i.d. null approximation since the individual trial
+Sharpes are not available), and the report and tear sheet surface
+it. Without `--n-trials`, no `deflated_sharpe` key is emitted.
 
 ### Sortino Ratio
 
