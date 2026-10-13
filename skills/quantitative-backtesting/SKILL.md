@@ -57,6 +57,7 @@ This skill provides a comprehensive framework for systematic trading strategy de
 - Equity curve visualization
 - Monthly/annual return heatmaps
 - Trade distribution analysis
+- Walk-forward / CPCV / Monte Carlo analysis rendering (via `analysis_results` parameter on `generate_tear_sheet`)
 
 ## How to Use
 
@@ -213,7 +214,14 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   grid, handles degenerate DSR dicts (z_score=None) as NaN, and integrates into
   `generate_tear_sheet` when `parameter_optimization` results with exactly two
   varying parameters are available. Uses the stdlib `unittest` framework rather
-  than the custom runner.
+  than the custom runner. Also covers **walk-forward / CPCV / Monte Carlo
+  analysis rendering**: when `analysis_results` dict is passed to
+  `generate_tear_sheet` with `walk_forward`, `cpcv`, and/or `monte_carlo` keys,
+  the corresponding HTML sections (best params per period/fold, parameter
+  stability, overfitting risk, DSR tables, confidence intervals, metric
+  distributions, probability of ruin) and JSON summary entries are generated.
+  A Monte Carlo equity curve fan chart (`monte_carlo_equity_curve.png`) is
+  produced when `simulated_equity_curves` and matplotlib are available.
 - `test_run_backtest.py` - `run_backtest` end-to-end on synthetic data, the
   `signals_active` flat-strategy guard, `parse_args` CLI behavior, and **trade
   extraction across long/short flips**. Regression coverage for a defect where

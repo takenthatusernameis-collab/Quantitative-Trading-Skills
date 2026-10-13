@@ -1065,7 +1065,12 @@ def run_cpcv(args) -> int:
         }
         metrics = calculate_metrics(report_results)
         generate_report(metrics, args.output, symbol=args.symbol, strategy_name=f"{args.strategy}_cpcv")
-        generate_tear_sheet(report_results, metrics, args.output, symbol=args.symbol, strategy_name=f"{args.strategy}_cpcv")
+        generate_tear_sheet(
+            report_results, metrics, args.output,
+            symbol=args.symbol,
+            strategy_name=f"{args.strategy}_cpcv",
+            analysis_results={"cpcv": results},
+        )
         print(f"Detailed report saved to: {args.output}/")
 
     return 0
@@ -1178,7 +1183,12 @@ def run_walk_forward(args) -> int:
         }
         metrics = calculate_metrics(report_results)
         generate_report(metrics, args.output, symbol=args.symbol, strategy_name=f"{args.strategy}_walk_forward")
-        generate_tear_sheet(report_results, metrics, args.output, symbol=args.symbol, strategy_name=f"{args.strategy}_walk_forward")
+        generate_tear_sheet(
+            report_results, metrics, args.output,
+            symbol=args.symbol,
+            strategy_name=f"{args.strategy}_walk_forward",
+            analysis_results={"walk_forward": results},
+        )
         print(f"Detailed report saved to: {args.output}/")
 
     return 0
@@ -1368,6 +1378,30 @@ def run_monte_carlo(args) -> int:
     with open(mc_path, "w") as f:
         json.dump(mc_save, f, indent=2, default=str)
     print(f"\nMonte Carlo results saved to: {mc_path}")
+
+    # Generate tear sheet with Monte Carlo analysis rendered as a section
+    mc_equity = (1 + returns).cumprod() * args.initial_capital
+    mc_base_results = {
+        "equity_curve": mc_equity,
+        "returns": returns,
+        "config": {
+            "initial_capital": args.initial_capital,
+            "commission": args.commission,
+            "slippage": args.slippage,
+            "strategy": args.strategy,
+            "symbol": args.symbol,
+        },
+    }
+    mc_base_metrics = calculate_metrics(mc_base_results)
+    if dsr is not None:
+        mc_base_metrics["deflated_sharpe"] = dsr
+    generate_tear_sheet(
+        mc_base_results, mc_base_metrics, args.output,
+        symbol=args.symbol,
+        strategy_name=f"{args.strategy}_monte_carlo",
+        analysis_results={"monte_carlo": mc_results},
+    )
+    print(f"Tear sheet saved to: {args.output}/tear_sheet.html")
 
     return 0
 

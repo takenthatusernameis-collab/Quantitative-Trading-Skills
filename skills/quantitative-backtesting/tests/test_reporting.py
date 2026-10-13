@@ -204,6 +204,119 @@ class TestTearSheet(unittest.TestCase):
             "config": {"initial_capital": 100000},
         }
 
+    def _make_walk_forward_results(self, include_dsr: bool = False) -> dict:
+        summary = {
+            "n_periods": 2,
+            "total_oos_return": 0.10,
+            "oos_sharpe": 0.85,
+            "oos_volatility": 0.15,
+            "win_rate_periods": 0.60,
+            "avg_period_return": 0.02,
+        }
+        if include_dsr:
+            summary["deflated_sharpe"] = {
+                "deflated_sharpe_ratio": 0.42,
+                "p_value": 0.58,
+                "expected_max_sharpe": 1.5,
+                "z_score": -0.3,
+                "n_trials": 20,
+                "n_observations": 50,
+                "skewness": 0.1,
+                "kurtosis": 3.0,
+            }
+        return {
+            "periods": [
+                {"best_params": {"period": 10, "exit_period": 5}, "best_sharpe": 1.2},
+                {"best_params": {"period": 20, "exit_period": 10}, "best_sharpe": 0.85},
+            ],
+            "best_params_per_period": [
+                {"period": 10, "exit_period": 5},
+                {"period": 20, "exit_period": 10},
+            ],
+            "oos_returns": pd.Series(
+                [0.01, 0.02, -0.01, 0.03, -0.005],
+                index=pd.date_range("2020-01-01", periods=5, freq="B"),
+            ),
+            "summary": summary,
+        }
+
+    def _make_cpcv_results(self, include_dsr: bool = False) -> dict:
+        summary = {
+            "n_folds": 3,
+            "total_oos_return": 0.08,
+            "oos_sharpe": 0.72,
+            "overfitting_risk": "low",
+            "avg_param_stability": 0.67,
+        }
+        if include_dsr:
+            summary["deflated_sharpe"] = {
+                "deflated_sharpe_ratio": 0.38,
+                "p_value": 0.62,
+                "expected_max_sharpe": 1.4,
+                "n_trials": 15,
+                "n_observations": 45,
+                "skewness": 0.05,
+                "kurtosis": 3.1,
+                "z_score": -0.5,
+            }
+        return {
+            "folds": [
+                {"fold": 0, "best_params": {"period": 10}, "best_sharpe": 1.1},
+                {"fold": 1, "best_params": {"period": 10}, "best_sharpe": 0.95},
+                {"fold": 2, "best_params": {"period": 20}, "best_sharpe": 0.88},
+            ],
+            "best_params_per_fold": [
+                {"period": 10}, {"period": 10}, {"period": 20}
+            ],
+            "oos_returns": pd.Series(
+                [0.01, 0.02, -0.01, 0.03, -0.005],
+                index=pd.date_range("2020-01-01", periods=5, freq="B"),
+            ),
+            "summary": summary,
+            "param_stability": {
+                "period": {
+                    "unique_values": 2,
+                    "most_common": 10,
+                    "stability_ratio": 0.67,
+                },
+            },
+        }
+
+    def _make_monte_carlo_results(self) -> dict:
+        dates = pd.date_range("2020-01-01", periods=5, freq="B")
+        return {
+            "simulated_equity_curves": [
+                pd.Series([1.0, 1.02, 0.99, 1.05, 1.03], index=dates),
+                pd.Series([1.0, 0.98, 1.01, 1.02, 0.99], index=dates),
+                pd.Series([1.0, 1.05, 1.03, 1.07, 1.06], index=dates),
+            ],
+            "metric_distributions": {"sharpe_ratio": np.array([0.8, 0.9, 1.0])},
+            "confidence_intervals": {
+                "sharpe_ratio": {
+                    0.90: (0.5, 1.2),
+                    0.95: (0.3, 1.5),
+                    0.99: (0.1, 2.0),
+                },
+                "total_return": {
+                    0.90: (0.05, 0.15),
+                    0.95: (0.02, 0.20),
+                    0.99: (0.01, 0.30),
+                },
+            },
+            "probability_of_ruin": 0.03,
+            "ruin_threshold": 0.5,
+            "summary": {
+                "sharpe_ratio": {
+                    "mean": 0.85, "std": 0.1, "median": 0.84, "min": 0.5, "max": 1.2,
+                },
+                "total_return": {
+                    "mean": 0.10, "std": 0.03, "median": 0.09, "min": 0.02, "max": 0.18,
+                },
+            },
+            "n_simulations": 3,
+            "base_observations": 5,
+        }
+
     def test_generate_tear_sheet_creates_html_and_summary(self):
         """Tear sheet writes HTML and JSON summary files even without matplotlib."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -382,6 +495,182 @@ class TestTearSheet(unittest.TestCase):
                 html = f.read()
             self.assertNotIn("parameter_heatmap.png", html,
                            "HTML should not reference heatmap when grid is invalid")
+
+    def test_tear_sheet_includes_walk_forward_section(self):
+        """Walk-forward analysis results are rendered as an HTML section."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            metrics = {"total_return": 0.1, "total_trades": 5}
+            wf = self._make_walk_forward_results(include_dsr=True)
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir, symbol="SPY", strategy_name="SMA",
+                analysis_results={"walk_forward": wf}, save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Walk-Forward Analysis", html)
+            self.assertIn("Number of Periods", html)
+            self.assertIn("Total OOS Return", html)
+            self.assertIn("OOS Sharpe Ratio", html)
+            self.assertIn("Best Parameters Per Period", html)
+            self.assertIn("Walk-Forward Multiple-Testing Correction", html)
+            self.assertIn("Deflated Sharpe Ratio", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("walk_forward", summary)
+            self.assertEqual(summary["walk_forward"]["summary"]["n_periods"], 2)
+            self.assertIn("best_params_per_period", summary["walk_forward"])
+
+    def test_tear_sheet_omits_walk_forward_when_absent(self):
+        """Without walk_forward analysis, the section is omitted."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir, symbol="SPY",
+                save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertNotIn("Walk-Forward Analysis", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertNotIn("walk_forward", summary)
+
+    def test_tear_sheet_includes_cpcv_section(self):
+        """CPCV analysis results are rendered as an HTML section."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            cpcv = self._make_cpcv_results(include_dsr=True)
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.08}, tmpdir,
+                symbol="SPY", strategy_name="SMA",
+                analysis_results={"cpcv": cpcv}, save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("CPCV Analysis", html)
+            self.assertIn("Number of Folds", html)
+            self.assertIn("Overfitting Risk", html)
+            self.assertIn("low", html)
+            self.assertIn("Parameter Stability", html)
+            self.assertIn("Best Parameters Per Fold", html)
+            self.assertIn("CPCV Multiple-Testing Correction", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("cpcv", summary)
+            self.assertEqual(summary["cpcv"]["summary"]["n_folds"], 3)
+            self.assertIn("param_stability", summary["cpcv"])
+
+    def test_tear_sheet_omits_cpcv_when_absent(self):
+        """Without CPCV analysis, the section is omitted."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir, symbol="SPY",
+                save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertNotIn("CPCV Analysis", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertNotIn("cpcv", summary)
+
+    def test_tear_sheet_includes_monte_carlo_section(self):
+        """Monte Carlo results are rendered as an HTML section."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            mc = self._make_monte_carlo_results()
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA",
+                analysis_results={"monte_carlo": mc}, save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Monte Carlo Simulation", html)
+            self.assertIn("Number of Simulations", html)
+            self.assertIn("Probability of Ruin", html)
+            self.assertIn("Confidence Intervals", html)
+            self.assertIn("Metric Distributions", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("monte_carlo", summary)
+            self.assertEqual(summary["monte_carlo"]["n_simulations"], 3)
+            self.assertAlmostEqual(summary["monte_carlo"]["probability_of_ruin"], 0.03)
+
+    def test_tear_sheet_omits_monte_carlo_when_absent(self):
+        """Without Monte Carlo analysis, the section is omitted."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir, symbol="SPY",
+                save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertNotIn("Monte Carlo Simulation", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertNotIn("monte_carlo", summary)
+
+    def test_tear_sheet_mc_fan_chart_generated(self):
+        """Monte Carlo equity fan chart is generated and embedded when save_plots=True."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            mc = self._make_monte_carlo_results()
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA",
+                analysis_results={"monte_carlo": mc}, save_plots=True,
+            )
+            fan_path = os.path.join(tmpdir, "monte_carlo_equity_curve.png")
+            self.assertTrue(
+                os.path.exists(fan_path),
+                "monte_carlo_equity_curve.png should be created",
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("monte_carlo_equity_curve.png", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertTrue(
+                any("monte_carlo_equity_curve.png" in p for p in summary["plot_files"]),
+                "JSON summary should list monte_carlo_equity_curve.png",
+            )
+
+    def test_tear_sheet_backward_compatible_without_analysis_results(self):
+        """generate_tear_sheet works identically when analysis_results is not passed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            metrics = {"total_return": 0.1, "sharpe_ratio": 1.2, "total_trades": 5}
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir, symbol="SPY", strategy_name="SMA",
+                save_plots=False,
+            )
+            self.assertTrue(os.path.exists(html_path))
+            self.assertTrue(os.path.exists(os.path.join(tmpdir, "tear_sheet_summary.json")))
+            with open(html_path) as f:
+                html = f.read()
+            self.assertNotIn("Walk-Forward Analysis", html)
+            self.assertNotIn("CPCV Analysis", html)
+            self.assertNotIn("Monte Carlo Simulation", html)
+
+    def test_tear_sheet_mc_section_without_equity_curves(self):
+        """Monte Carlo HTML section renders even when simulated_equity_curves is absent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            mc = self._make_monte_carlo_results()
+            del mc["simulated_equity_curves"]
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA",
+                analysis_results={"monte_carlo": mc}, save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Monte Carlo Simulation", html)
+            self.assertIn("Probability of Ruin", html)
 
 
 class TestParameterHeatmap(unittest.TestCase):

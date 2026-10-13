@@ -170,6 +170,42 @@ def generate_parameter_heatmap(
     return fig
 
 
+def _json_safe(obj: Any) -> Any:
+    """Recursively convert numpy/pandas scalar types to JSON-safe Python types."""
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        val = float(obj)
+        return val if np.isfinite(val) else None
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    if isinstance(obj, (int, float, str, bool, type(None))):
+        if isinstance(obj, float) and not np.isfinite(obj):
+            return None
+        return obj
+    return str(obj)
+
+
+def _format_params(params: Optional[Dict[str, Any]]) -> str:
+    """Format a params dict as a readable 'k1=v1, k2=v2' string."""
+    if not params:
+        return "N/A"
+    return ", ".join(f"{k}={v}" for k, v in params.items())
+
+
+def _fmt_sharpe(val: Any) -> str:
+    """Format a Sharpe ratio value, handling None/NaN/np types."""
+    if val is None:
+        return "N/A"
+    if isinstance(val, (int, float, np.floating)) and np.isfinite(float(val)):
+        return f"{float(val):.4f}"
+    return "N/A"
+
+
 def generate_tear_sheet(
     results: Dict[str, Any],
     metrics: Dict[str, Any],
@@ -177,6 +213,7 @@ def generate_tear_sheet(
     symbol: str = "N/A",
     strategy_name: str = "N/A",
     save_plots: bool = True,
+    analysis_results: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Generate a comprehensive tear sheet for a backtest.
@@ -192,6 +229,9 @@ def generate_tear_sheet(
         symbol: Symbol that was backtested
         strategy_name: Name of the strategy
         save_plots: If True, attempt to save matplotlib plots
+        analysis_results: Optional dict with keys 'walk_forward', 'cpcv',
+            and/or 'monte_carlo' containing respective analysis outputs to
+            render as additional tear-sheet sections.
 
     Returns:
         Path to the generated tear sheet HTML file
@@ -344,6 +384,157 @@ def generate_tear_sheet(
                 html_parts.append(f"<tr><td>{label}</td><td class='metric'>{fmt(metrics[key])}</td></tr>")
         html_parts.append("</table>")
 
+    # Analysis results: walk-forward, CPCV, Monte Carlo
+    analysis = analysis_results or {}
+
+    wf_results = analysis.get("walk_forward")
+    if wf_results:
+        wf_summary = wf_results.get("summary", {})
+        html_parts.append("<h2>Walk-Forward Analysis</h2>")
+        html_parts.append("<table><tr><th>Metric</th><th>Value</th></tr>")
+        wf_metrics = [
+            ("Number of Periods", "n_periods", fmt_num),
+            ("Total OOS Return", "total_oos_return", fmt_pct),
+            ("OOS Sharpe Ratio", "oos_sharpe", fmt_num),
+            ("OOS Volatility", "oos_volatility", fmt_pct),
+            ("OOS Win Rate", "win_rate_periods", fmt_pct),
+            ("Avg Period Return", "avg_period_return", fmt_pct),
+        ]
+        for label, key, fmt in wf_metrics:
+            if key in wf_summary:
+                html_parts.append(f"<tr><td>{label}</td><td class='metric'>{fmt(wf_summary[key])}</td></tr>")
+        html_parts.append("</table>")
+
+        periods = wf_results.get("periods", [])
+        if periods:
+            html_parts.append("<h3>Best Parameters Per Period</h3>")
+            html_parts.append("<table><tr><th>Period</th><th>Best Params</th><th>In-Sample Sharpe</th></tr>")
+            for i, p in enumerate(periods):
+                params_str = _format_params(p.get("best_params"))
+                sharpe_str = _fmt_sharpe(p.get("best_sharpe"))
+                html_parts.append(f"<tr><td>{i + 1}</td><td>{params_str}</td><td class='metric'>{sharpe_str}</td></tr>")
+            html_parts.append("</table>")
+
+        wf_dsr = wf_summary.get("deflated_sharpe")
+        if wf_dsr:
+            html_parts.append("<h3>Walk-Forward Multiple-Testing Correction</h3>")
+            html_parts.append("<table><tr><th>Metric</th><th>Value</th></tr>")
+            wf_dsr_rows = [
+                ("Deflated Sharpe Ratio", wf_dsr.get("deflated_sharpe_ratio"), lambda v: f"{v:.4f}"),
+                ("P-Value", wf_dsr.get("p_value"), lambda v: f"{v:.4f}"),
+                ("Expected Max Sharpe", wf_dsr.get("expected_max_sharpe"), lambda v: f"{v:.4f}"),
+                ("Z-Score", wf_dsr.get("z_score"), lambda v: f"{v:.4f}"),
+                ("Number of Trials", wf_dsr.get("n_trials"), lambda v: str(int(v))),
+                ("Observations", wf_dsr.get("n_observations"), lambda v: str(int(v))),
+            ]
+            for label, val, fmt in wf_dsr_rows:
+                display = fmt(val) if val is not None else "N/A"
+                html_parts.append(f"<tr><td>{label}</td><td class='metric'>{display}</td></tr>")
+            html_parts.append("</table>")
+
+    cpcv_results = analysis.get("cpcv")
+    if cpcv_results:
+        cpcv_summary = cpcv_results.get("summary", {})
+        html_parts.append("<h2>CPCV Analysis</h2>")
+        html_parts.append("<table><tr><th>Metric</th><th>Value</th></tr>")
+        cpcv_metrics = [
+            ("Number of Folds", "n_folds", fmt_num),
+            ("Total OOS Return", "total_oos_return", fmt_pct),
+            ("OOS Sharpe Ratio", "oos_sharpe", fmt_num),
+            ("OOS Volatility", "oos_volatility", fmt_pct),
+            ("OOS Win Rate", "win_rate_folds", fmt_pct),
+            ("Avg Fold Return", "avg_fold_return", fmt_pct),
+            ("Avg Parameter Stability", "avg_param_stability", fmt_pct),
+            ("Overfitting Risk", "overfitting_risk", lambda v: str(v)),
+        ]
+        for label, key, fmt in cpcv_metrics:
+            if key in cpcv_summary:
+                html_parts.append(f"<tr><td>{label}</td><td class='metric'>{fmt(cpcv_summary[key])}</td></tr>")
+        html_parts.append("</table>")
+
+        param_stability = cpcv_results.get("param_stability", {})
+        if param_stability:
+            html_parts.append("<h3>Parameter Stability</h3>")
+            html_parts.append("<table><tr><th>Parameter</th><th>Unique Values</th><th>Most Common</th><th>Stability Ratio</th></tr>")
+            for name, stats in param_stability.items():
+                if isinstance(stats, dict):
+                    html_parts.append(
+                        f"<tr><td>{name}</td><td>{stats.get('unique_values', 'N/A')}</td>"
+                        f"<td>{stats.get('most_common', 'N/A')}</td>"
+                        f"<td class='metric'>{fmt_pct(stats.get('stability_ratio', 0))}</td></tr>"
+                    )
+            html_parts.append("</table>")
+
+        folds = cpcv_results.get("folds", [])
+        if folds:
+            html_parts.append("<h3>Best Parameters Per Fold</h3>")
+            html_parts.append("<table><tr><th>Fold</th><th>Best Params</th><th>Best Sharpe</th></tr>")
+            for f in folds:
+                params_str = _format_params(f.get("best_params"))
+                sharpe_str = _fmt_sharpe(f.get("best_sharpe"))
+                html_parts.append(f"<tr><td>{f.get('fold', '?')}</td><td>{params_str}</td><td class='metric'>{sharpe_str}</td></tr>")
+            html_parts.append("</table>")
+
+        cpcv_dsr = cpcv_summary.get("deflated_sharpe")
+        if cpcv_dsr:
+            html_parts.append("<h3>CPCV Multiple-Testing Correction</h3>")
+            html_parts.append("<table><tr><th>Metric</th><th>Value</th></tr>")
+            cpcv_dsr_rows = [
+                ("Deflated Sharpe Ratio", cpcv_dsr.get("deflated_sharpe_ratio"), lambda v: f"{v:.4f}"),
+                ("P-Value", cpcv_dsr.get("p_value"), lambda v: f"{v:.4f}"),
+                ("Expected Max Sharpe", cpcv_dsr.get("expected_max_sharpe"), lambda v: f"{v:.4f}"),
+                ("Number of Trials", cpcv_dsr.get("n_trials"), lambda v: str(int(v))),
+            ]
+            for label, val, fmt in cpcv_dsr_rows:
+                display = fmt(val) if val is not None else "N/A"
+                html_parts.append(f"<tr><td>{label}</td><td class='metric'>{display}</td></tr>")
+            html_parts.append("</table>")
+
+    mc_results = analysis.get("monte_carlo")
+    if mc_results:
+        html_parts.append("<h2>Monte Carlo Simulation</h2>")
+        html_parts.append("<table><tr><th>Metric</th><th>Value</th></tr>")
+        for label, key, fmt in [
+            ("Number of Simulations", "n_simulations", fmt_num),
+            ("Base Observations", "base_observations", fmt_num),
+            ("Probability of Ruin", "probability_of_ruin", fmt_pct),
+            ("Ruin Threshold", "ruin_threshold", fmt_pct),
+        ]:
+            if key in mc_results and mc_results[key] is not None:
+                html_parts.append(f"<tr><td>{label}</td><td class='metric'>{fmt(mc_results[key])}</td></tr>")
+        html_parts.append("</table>")
+
+        cis = mc_results.get("confidence_intervals", {})
+        if cis:
+            html_parts.append("<h3>Confidence Intervals</h3>")
+            html_parts.append("<table><tr><th>Metric</th><th>90%</th><th>95%</th><th>99%</th></tr>")
+            for metric, level_cis in cis.items():
+                cells = []
+                for level in [0.90, 0.95, 0.99]:
+                    ci = level_cis.get(level)
+                    if ci and len(ci) == 2:
+                        cells.append(f"[{ci[0]:.4f}, {ci[1]:.4f}]")
+                    else:
+                        cells.append("N/A")
+                html_parts.append(f"<tr><td>{metric}</td><td>{cells[0]}</td><td>{cells[1]}</td><td>{cells[2]}</td></tr>")
+            html_parts.append("</table>")
+
+        mc_summary = mc_results.get("summary", {})
+        if mc_summary:
+            html_parts.append("<h3>Metric Distributions</h3>")
+            html_parts.append("<table><tr><th>Metric</th><th>Mean</th><th>Std</th><th>Median</th><th>Min</th><th>Max</th></tr>")
+            for metric, stats in mc_summary.items():
+                if isinstance(stats, dict):
+                    cells = []
+                    for field in ["mean", "std", "median", "min", "max"]:
+                        v = stats.get(field)
+                        if isinstance(v, (int, float, np.floating)) and np.isfinite(float(v)):
+                            cells.append(f"{float(v):.4f}")
+                        else:
+                            cells.append("N/A")
+                    html_parts.append(f"<tr><td>{metric}</td>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
+            html_parts.append("</table>")
+
     # Generate plots if matplotlib is available
     plot_files = []
     if save_plots:
@@ -410,6 +601,53 @@ def generate_tear_sheet(
                 plt.close()
                 plot_files.append(dist_path)
 
+                # Monte Carlo equity curve fan chart
+                mc_results = analysis.get("monte_carlo")
+                if mc_results and mc_results.get("simulated_equity_curves"):
+                    mc_curves = mc_results["simulated_equity_curves"]
+                    valid_curves = [
+                        c for c in mc_curves
+                        if isinstance(c, (pd.Series, pd.DataFrame))
+                        and len(c.dropna()) > 0
+                    ]
+                    if valid_curves:
+                        try:
+                            curve_series = []
+                            for c in valid_curves:
+                                if isinstance(c, pd.DataFrame):
+                                    c = c.iloc[:, 0]
+                                curve_series.append(c)
+                            curve_df = pd.concat(curve_series, axis=1)
+                            if not curve_df.empty:
+                                fig, ax = plt.subplots(figsize=(12, 4))
+                                percentiles = [5, 25, 50, 75, 95]
+                                bands = {
+                                    p: curve_df.quantile(p / 100, axis=1)
+                                    for p in percentiles
+                                }
+                                ax.fill_between(
+                                    curve_df.index, bands[5], bands[95],
+                                    alpha=0.2, color="steelblue", label="90% CI",
+                                )
+                                ax.fill_between(
+                                    curve_df.index, bands[25], bands[75],
+                                    alpha=0.3, color="steelblue", label="50% CI",
+                                )
+                                ax.plot(curve_df.index, bands[50], color="steelblue",
+                                        label="Median", linewidth=1.5)
+                                ax.set_title("Monte Carlo Equity Curve Distribution")
+                                ax.set_ylabel("Normalized Equity")
+                                ax.set_xlabel("Date")
+                                ax.legend()
+                                ax.grid(True, alpha=0.3)
+                                plt.tight_layout()
+                                mc_path = output_dir / "monte_carlo_equity_curve.png"
+                                plt.savefig(mc_path, dpi=150, bbox_inches="tight")
+                                plt.close()
+                                plot_files.append(mc_path)
+                        except Exception:
+                            pass
+
         except ImportError:
             pass  # matplotlib not available, skip plots
 
@@ -444,6 +682,33 @@ def generate_tear_sheet(
     # the scalar-only `metrics` field above; surface it explicitly.
     if "deflated_sharpe" in metrics:
         summary["deflated_sharpe"] = metrics["deflated_sharpe"]
+
+    # Surface analysis results in the JSON summary (JSON-safe extraction only).
+    if analysis:
+        wf = analysis.get("walk_forward")
+        if wf:
+            summary["walk_forward"] = {
+                "summary": _json_safe(wf.get("summary", {})),
+                "best_params_per_period": _json_safe(wf.get("best_params_per_period", [])),
+            }
+        cpcv = analysis.get("cpcv")
+        if cpcv:
+            summary["cpcv"] = {
+                "summary": _json_safe(cpcv.get("summary", {})),
+                "param_stability": _json_safe(cpcv.get("param_stability", {})),
+                "best_params_per_fold": _json_safe(cpcv.get("best_params_per_fold", [])),
+            }
+        mc = analysis.get("monte_carlo")
+        if mc:
+            summary["monte_carlo"] = {
+                "summary": _json_safe(mc.get("summary", {})),
+                "confidence_intervals": _json_safe(mc.get("confidence_intervals", {})),
+                "probability_of_ruin": mc.get("probability_of_ruin"),
+                "ruin_threshold": mc.get("ruin_threshold"),
+                "n_simulations": mc.get("n_simulations"),
+                "base_observations": mc.get("base_observations"),
+            }
+
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2, default=str)
 
