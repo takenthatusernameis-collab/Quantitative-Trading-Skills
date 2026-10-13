@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from data_loader import load_data, validate_data
 from strategy_builder import build_strategy
-from performance import calculate_metrics, generate_report
+from performance import calculate_metrics, generate_report, _annualization_factor
 from reporting import generate_tear_sheet
 
 
@@ -105,28 +105,34 @@ def run_backtest(data, strategy, args):
         market_impact = market_impact.fillna(0)
         costs = costs + market_impact
 
+    # Borrow and funding costs are annualized rates applied per period.
+    # The per-period rate divides by the number of periods per year
+    # inferred from the data's index (e.g. 252 for business-daily,
+    # 365 for calendar-daily, 52 for weekly, 12 for monthly), matching
+    # the annualization used for the performance metrics. Falls back to
+    # 252 when the frequency cannot be inferred.
+    ann_factor = _annualization_factor(close.index)
+
     # Borrow cost for short positions
-    # Applied daily on the absolute value of short positions
+    # Applied per period on the absolute value of short positions
     if args.borrow_cost > 0:
         # Convert annual rate to per-period rate
-        ann_factor = 252  # trading days per year
-        daily_borrow_rate = args.borrow_cost / ann_factor
+        period_borrow_rate = args.borrow_cost / ann_factor
         # Short positions are negative; borrow cost applies to absolute short exposure
         short_positions = positions.clip(upper=0).abs()
-        borrow_costs = short_positions * daily_borrow_rate
+        borrow_costs = short_positions * period_borrow_rate
         costs = costs + borrow_costs
 
     # Funding cost for leveraged positions (gross exposure > 1)
-    # Applied daily on the amount of leverage used beyond 100% equity
+    # Applied per period on the amount of leverage used beyond 100% equity
     if args.funding_cost > 0:
         # Convert annual rate to per-period rate
-        ann_factor = 252  # trading days per year
-        daily_funding_rate = args.funding_cost / ann_factor
+        period_funding_rate = args.funding_cost / ann_factor
         # Gross leverage = absolute position size
         gross_exposure = positions.abs()
         # Funding cost applies to leverage beyond 1x (i.e., gross_exposure - 1 when > 1)
         leverage_excess = (gross_exposure - 1).clip(lower=0)
-        funding_costs = leverage_excess * daily_funding_rate
+        funding_costs = leverage_excess * period_funding_rate
         costs = costs + funding_costs
 
     strategy_returns = positions * raw_returns - costs

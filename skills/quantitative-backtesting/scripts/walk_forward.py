@@ -636,9 +636,14 @@ def _calculate_strategy_returns(
             Typical values: 0.1-1.0 for linear impact models.
         adv_window: Rolling window for Average Daily Volume calculation. Default 20.
         borrow_cost: Annual borrow cost rate for short positions (as decimal,
-            e.g., 0.03 = 3% per year). Applied daily on short exposure.
-        funding_cost: Annual funding cost rate for leveraged positions (as decimal,
-            e.g., 0.02 = 2% per year). Applied daily on gross exposure exceeding 1x.
+            e.g., 0.03 = 3% per year). Applied per period on short exposure;
+            the per-period rate is borrow_cost divided by the periods per
+            year inferred from the data's index (252 for business-daily,
+            52 for weekly, etc.).
+        funding_cost: Annual funding cost rate for leveraged positions (as
+            decimal, e.g., 0.02 = 2% per year). Applied per period on gross
+            exposure exceeding 1x; the per-period rate is funding_cost
+            divided by the periods per year inferred from the data's index.
     """
     if isinstance(data, dict):
         # For dict of dataframes, compute equal-weighted portfolio returns
@@ -691,28 +696,34 @@ def _calculate_strategy_returns(
         market_impact = market_impact.fillna(0)
         costs = costs + market_impact
 
+    # Borrow and funding costs are annualized rates applied per period.
+    # The per-period rate divides by the number of periods per year inferred
+    # from the data's index (e.g. 252 for business-daily, 365 for
+    # calendar-daily, 52 for weekly, 12 for monthly), matching the
+    # annualization used for the strategy's own return metrics. Falls back
+    # to 252 when the frequency cannot be inferred.
+    ann_factor = _annualization_factor(raw_returns.index)
+
     # Borrow cost for short positions
-    # Applied daily on the absolute value of short positions
+    # Applied per period on the absolute value of short positions
     if borrow_cost > 0:
         # Convert annual rate to per-period rate
-        ann_factor = 252  # trading days per year
-        daily_borrow_rate = borrow_cost / ann_factor
+        period_borrow_rate = borrow_cost / ann_factor
         # Short positions are negative; borrow cost applies to absolute short exposure
         short_positions = positions.clip(upper=0).abs()
-        borrow_costs = short_positions * daily_borrow_rate
+        borrow_costs = short_positions * period_borrow_rate
         costs = costs + borrow_costs
 
     # Funding cost for leveraged positions (gross exposure > 1)
-    # Applied daily on the amount of leverage used beyond 100% equity
+    # Applied per period on the amount of leverage used beyond 100% equity
     if funding_cost > 0:
         # Convert annual rate to per-period rate
-        ann_factor = 252  # trading days per year
-        daily_funding_rate = funding_cost / ann_factor
+        period_funding_rate = funding_cost / ann_factor
         # Gross leverage = absolute position size
         gross_exposure = positions.abs()
         # Funding cost applies to leverage beyond 1x (i.e., gross_exposure - 1 when > 1)
         leverage_excess = (gross_exposure - 1).clip(lower=0)
-        funding_costs = leverage_excess * daily_funding_rate
+        funding_costs = leverage_excess * period_funding_rate
         costs = costs + funding_costs
 
     strategy_returns = positions * raw_returns - costs

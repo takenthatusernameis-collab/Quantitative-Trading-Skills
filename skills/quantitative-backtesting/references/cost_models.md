@@ -32,19 +32,28 @@ if impact_coefficient > 0:
     market_impact = (position_notional / adv_notional) * impact_coefficient
     costs = costs + market_impact.fillna(0)
 
+# Borrow and funding costs are annualized rates applied per
+# period. The per-period rate divides by the periods per year
+# inferred from the data's index (see _annualization_factor),
+# so the model is data-frequency aware: business-daily data
+# uses 252, calendar-daily 365, weekly 52, monthly 12. When
+# the frequency cannot be inferred (or the index is not a
+# DatetimeIndex), it falls back to 252.
+periods_per_year = _annualization_factor(returns.index)
+
 # Borrow cost for short positions (optional)
 if borrow_cost > 0:
-    daily_borrow_rate = borrow_cost / 252
+    period_borrow_rate = borrow_cost / periods_per_year
     short_positions = positions.clip(upper=0).abs()
-    borrow_costs = short_positions * daily_borrow_rate
+    borrow_costs = short_positions * period_borrow_rate
     costs = costs + borrow_costs
 
 # Funding cost for leveraged positions (optional)
 if funding_cost > 0:
-    daily_funding_rate = funding_cost / 252
+    period_funding_rate = funding_cost / periods_per_year
     gross_exposure = positions.abs()
     leverage_excess = (gross_exposure - 1).clip(lower=0)
-    funding_costs = leverage_excess * daily_funding_rate
+    funding_costs = leverage_excess * period_funding_rate
     costs = costs + funding_costs
 
 strategy_returns = positions * raw_returns - costs
@@ -80,23 +89,32 @@ For more sophisticated models, consider:
 
 ### Borrow Cost Model
 
-Borrow cost models the fee paid to borrow shares for short selling. It is applied
-daily on the absolute value of short positions:
+Borrow cost models the fee paid to borrow shares for short selling. It is
+applied each period on the absolute value of short positions, with the
+annual rate converted to a per-period rate using the data's inferred
+frequency:
 
 ```
-daily_borrow_rate = annual_borrow_cost / 252
-borrow_cost_daily = |short_position| * daily_borrow_rate
+periods_per_year = _annualization_factor(index)   # 252 business-daily, 365 daily, 52 weekly, 12 monthly
+period_borrow_rate = annual_borrow_cost / periods_per_year
+borrow_cost_per_period = |short_position| * period_borrow_rate
 ```
 
 Where:
 - `annual_borrow_cost` = annual borrow rate as a decimal (e.g., 0.03 = 3% per year)
 - `short_position` = negative position values (short exposure)
-- 252 = trading days per year (standard annualization)
+- `periods_per_year` = inferred from the data's DatetimeIndex (252 fallback)
 
 This model assumes:
 1. Borrow cost is proportional to short exposure
 2. The rate is constant (in practice, borrow rates vary by security and over time)
-3. Cost is incurred daily while the short position is held
+3. Cost is incurred each period while the short position is held
+
+Because the per-period rate scales with the data frequency, the same annual
+borrow rate produces the same annualized cost regardless of whether the
+backtest runs on daily, weekly, or monthly bars. Using a fixed 252 divisor
+on lower-frequency data would understate the cost per period (e.g., a weekly
+bar would accrue only 1/252 of a year's borrow cost instead of 1/52).
 
 Typical borrow costs:
 - **General collateral (easy-to-borrow)**: 0.1% - 0.5% per year
@@ -105,24 +123,32 @@ Typical borrow costs:
 
 ### Funding Cost Model
 
-Funding cost models the cost of financing leveraged positions. It is applied daily
-on the amount of gross exposure exceeding 100% of equity (i.e., leverage > 1x):
+Funding cost models the cost of financing leveraged positions. It is applied
+each period on the amount of gross exposure exceeding 100% of equity
+(i.e., leverage > 1x), with the annual rate converted to a per-period rate
+using the data's inferred frequency:
 
 ```
-daily_funding_rate = annual_funding_cost / 252
+periods_per_year = _annualization_factor(index)
+period_funding_rate = annual_funding_cost / periods_per_year
 leverage_excess = max(|position| - 1, 0)
-funding_cost_daily = leverage_excess * daily_funding_rate
+funding_cost_per_period = leverage_excess * period_funding_rate
 ```
 
 Where:
 - `annual_funding_cost` = annual funding rate as a decimal (e.g., 0.02 = 2% per year)
 - `position` = current position size (1.0 = fully invested long, -1.0 = fully short)
 - Leverage excess only applies when gross exposure > 1
+- `periods_per_year` = inferred from the data's DatetimeIndex (252 fallback)
 
 This model assumes:
 1. Funding cost is proportional to leverage used beyond 1x
 2. The rate represents the cost of margin borrowing or financing
 3. Long and short positions both contribute to gross leverage
+4. The rate is constant per period (in practice, financing rates vary over time)
+
+As with borrow costs, frequency awareness keeps the annualized cost
+consistent across data frequencies.
 
 Typical funding costs:
 - **Prime brokerage margin rates**: Fed Funds + 0.5% to 2.5%

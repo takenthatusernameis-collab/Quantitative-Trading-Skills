@@ -2021,6 +2021,85 @@ def test_borrow_funding_integration_walk_forward():
     assert len(results["oos_returns"]) > 0
 
 
+def _make_flat_price_frame(periods: int, freq: str) -> pd.DataFrame:
+    """Create a DataFrame with flat prices (zero returns) at a given frequency."""
+    dates = pd.date_range("2020-01-01", periods=periods, freq=freq)
+    prices = np.full(periods, 100.0)
+    return pd.DataFrame(
+        {
+            "open": prices,
+            "high": prices,
+            "low": prices,
+            "close": prices,
+            "volume": [1000000] * periods,
+        },
+        index=dates,
+    )
+
+
+def test_borrow_cost_frequency_aware_per_period_rate():
+    """Borrow cost per period divides the annual rate by the data's
+    inferred periods per year, not a hardcoded 252.
+
+    Flat prices and a constant short signal isolate the borrow cost:
+    with zero raw returns and no position changes, every period's
+    strategy return must equal exactly -borrow_cost / periods_per_year.
+    """
+    borrow_cost = 0.10
+    cases = {
+        "B": 252,  # business daily
+        "D": 365,  # calendar daily
+        "W": 52,   # weekly
+    }
+    for freq, factor in cases.items():
+        data = _make_flat_price_frame(periods=60, freq=freq)
+        signals = pd.Series(-1.0, index=data.index)
+        returns = _calculate_strategy_returns(
+            data, signals, commission=0.0, slippage=0.0,
+            borrow_cost=borrow_cost,
+        )
+        expected = -borrow_cost / factor
+        assert np.allclose(returns, expected), (
+            f"freq={freq}: expected per-period cost {expected}, "
+            f"got {returns.iloc[0]}"
+        )
+
+
+def test_borrow_cost_non_datetime_index_falls_back_to_252():
+    """A non-DatetimeIndex keeps the 252 fallback for borrow costs."""
+    n = 60
+    data = _make_flat_price_frame(periods=n, freq="B")
+    data.index = pd.RangeIndex(n)
+    signals = pd.Series(-1.0, index=data.index)
+    returns = _calculate_strategy_returns(
+        data, signals, commission=0.0, slippage=0.0,
+        borrow_cost=0.10,
+    )
+    assert np.allclose(returns, -0.10 / 252), (
+        f"expected 252 fallback, got {returns.iloc[0]}"
+    )
+
+
+def test_funding_cost_frequency_aware_per_period_rate():
+    """Funding cost per period divides the annual rate by the data's
+    inferred periods per year.
+
+    Flat prices and constant 1.5x leverage isolate the funding cost:
+    every period's return must equal -(1.5 - 1) * funding_cost / factor.
+    """
+    funding_cost = 0.10
+    data = _make_flat_price_frame(periods=60, freq="W")
+    signals = pd.Series(1.5, index=data.index)
+    returns = _calculate_strategy_returns(
+        data, signals, commission=0.0, slippage=0.0,
+        funding_cost=funding_cost,
+    )
+    expected = -0.5 * funding_cost / 52
+    assert np.allclose(returns, expected), (
+        f"expected weekly funding cost {expected}, got {returns.iloc[0]}"
+    )
+
+
 def main() -> int:
     tests = [
         ("parameter_optimization_skips_flat_combos", test_parameter_optimization_skips_flat_combos),
@@ -2076,6 +2155,9 @@ def main() -> int:
         ("borrow_funding_zero_costs_match_baseline", test_borrow_funding_zero_costs_match_baseline),
         ("funding_cost_applies_only_beyond_one_x_leverage", test_funding_cost_applies_only_beyond_one_x_leverage),
         ("borrow_funding_integration_walk_forward", test_borrow_funding_integration_walk_forward),
+        ("borrow_cost_frequency_aware_per_period_rate", test_borrow_cost_frequency_aware_per_period_rate),
+        ("borrow_cost_non_datetime_index_falls_back_to_252", test_borrow_cost_non_datetime_index_falls_back_to_252),
+        ("funding_cost_frequency_aware_per_period_rate", test_funding_cost_frequency_aware_per_period_rate),
     ]
 
     failures = 0

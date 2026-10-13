@@ -596,9 +596,9 @@ def test_parse_args_invalid_initial_capital_type():
         assert e.code != 0, "Expected non-zero exit code"
 
 
-def _make_flat_price_data(periods: int = 100) -> pd.DataFrame:
+def _make_flat_price_data(periods: int = 100, freq: str = "B") -> pd.DataFrame:
     """Create a DataFrame with perfectly flat prices (zero returns)."""
-    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    dates = pd.date_range("2020-01-01", periods=periods, freq=freq)
     prices = np.full(periods, 100.0)
     return pd.DataFrame({
         "open": prices,
@@ -643,6 +643,39 @@ def test_run_backtest_constant_returns_deflated_sharpe():
     assert d["sharpe_ratio"] == 0.0
 
 
+class _AlwaysShort:
+    """Stub strategy that holds a constant short position."""
+
+    def generate_signals(self, data):
+        return pd.Series(-1.0, index=data.index)
+
+
+def test_run_backtest_borrow_cost_frequency_aware():
+    """run_backtest divides the annual borrow rate by the data's
+    inferred periods per year (weekly -> /52, business-daily -> /252),
+    not a hardcoded 252.
+
+    Flat prices and a constant short signal isolate the borrow cost:
+    with zero raw returns and no position changes, every period's
+    strategy return must equal exactly -borrow_cost / periods_per_year.
+    """
+    args = _Args(commission=0.0, slippage=0.0, borrow_cost=0.10)
+
+    weekly = _make_flat_price_data(periods=60, freq="W")
+    weekly_results = run_backtest(weekly, _AlwaysShort(), args)
+    assert np.allclose(weekly_results["returns"], -0.10 / 52), (
+        f"expected weekly per-period cost {-0.10 / 52}, "
+        f"got {weekly_results['returns'].iloc[0]}"
+    )
+
+    daily = _make_flat_price_data(periods=60, freq="B")
+    daily_results = run_backtest(daily, _AlwaysShort(), args)
+    assert np.allclose(daily_results["returns"], -0.10 / 252), (
+        f"expected daily per-period cost {-0.10 / 252}, "
+        f"got {daily_results['returns'].iloc[0]}"
+    )
+
+
 def main() -> int:
     tests = [
         ("signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
@@ -665,6 +698,7 @@ def main() -> int:
         ("parse_args_invalid_commission_type", test_parse_args_invalid_commission_type),
         ("parse_args_invalid_initial_capital_type", test_parse_args_invalid_initial_capital_type),
         ("run_backtest_constant_returns_deflated_sharpe", test_run_backtest_constant_returns_deflated_sharpe),
+        ("run_backtest_borrow_cost_frequency_aware", test_run_backtest_borrow_cost_frequency_aware),
         ("run_backtest_multi_asset_cross_sectional_momentum", test_run_backtest_multi_asset_cross_sectional_momentum),
         ("run_backtest_multi_asset_dual_momentum", test_run_backtest_multi_asset_dual_momentum),
         ("run_backtest_multi_asset_dict_cross_sectional_momentum", test_run_backtest_multi_asset_dict_cross_sectional_momentum),
