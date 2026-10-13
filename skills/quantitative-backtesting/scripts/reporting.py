@@ -648,6 +648,48 @@ def generate_tear_sheet(
                         except Exception:
                             pass
 
+                # Walk-forward equity curve plot
+                wf_results = analysis.get("walk_forward")
+                if wf_results and wf_results.get("oos_returns") is not None:
+                    wf_oos_returns = wf_results["oos_returns"]
+                    if isinstance(wf_oos_returns, pd.Series) and len(wf_oos_returns) > 0:
+                        try:
+                            wf_equity = (1 + wf_oos_returns).cumprod() * 100000
+                            fig, ax = plt.subplots(figsize=(12, 4))
+                            ax.plot(wf_equity.index, wf_equity.values, color="darkgreen")
+                            ax.set_title("Walk-Forward Out-of-Sample Equity Curve")
+                            ax.set_ylabel("Portfolio Value")
+                            ax.set_xlabel("Date")
+                            ax.grid(True, alpha=0.3)
+                            plt.tight_layout()
+                            wf_path = output_dir / "walk_forward_equity_curve.png"
+                            plt.savefig(wf_path, dpi=150)
+                            plt.close()
+                            plot_files.append(wf_path)
+                        except Exception:
+                            pass
+
+                # CPCV equity curve plot
+                cpcv_results = analysis.get("cpcv")
+                if cpcv_results and cpcv_results.get("oos_returns") is not None:
+                    cpcv_oos_returns = cpcv_results["oos_returns"]
+                    if isinstance(cpcv_oos_returns, pd.Series) and len(cpcv_oos_returns) > 0:
+                        try:
+                            cpcv_equity = (1 + cpcv_oos_returns).cumprod() * 100000
+                            fig, ax = plt.subplots(figsize=(12, 4))
+                            ax.plot(cpcv_equity.index, cpcv_equity.values, color="darkorange")
+                            ax.set_title("CPCV Out-of-Sample Equity Curve")
+                            ax.set_ylabel("Portfolio Value")
+                            ax.set_xlabel("Date")
+                            ax.grid(True, alpha=0.3)
+                            plt.tight_layout()
+                            cpcv_path = output_dir / "cpcv_equity_curve.png"
+                            plt.savefig(cpcv_path, dpi=150)
+                            plt.close()
+                            plot_files.append(cpcv_path)
+                        except Exception:
+                            pass
+
         except ImportError:
             pass  # matplotlib not available, skip plots
 

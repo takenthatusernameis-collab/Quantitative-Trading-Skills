@@ -672,6 +672,90 @@ class TestTearSheet(unittest.TestCase):
             self.assertIn("Monte Carlo Simulation", html)
             self.assertIn("Probability of Ruin", html)
 
+    def test_tear_sheet_wf_equity_curve_generated(self):
+        """Walk-forward equity curve is generated and embedded when save_plots=True."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            wf = self._make_walk_forward_results()
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA",
+                analysis_results={"walk_forward": wf}, save_plots=True,
+            )
+            wf_path = os.path.join(tmpdir, "walk_forward_equity_curve.png")
+            self.assertTrue(
+                os.path.exists(wf_path),
+                "walk_forward_equity_curve.png should be created",
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("walk_forward_equity_curve.png", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertTrue(
+                any("walk_forward_equity_curve.png" in p for p in summary["plot_files"]),
+                "JSON summary should list walk_forward_equity_curve.png",
+            )
+
+    def test_tear_sheet_cpcv_equity_curve_generated(self):
+        """CPCV equity curve is generated and embedded when save_plots=True."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            cpcv = self._make_cpcv_results()
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA",
+                analysis_results={"cpcv": cpcv}, save_plots=True,
+            )
+            cpcv_path = os.path.join(tmpdir, "cpcv_equity_curve.png")
+            self.assertTrue(
+                os.path.exists(cpcv_path),
+                "cpcv_equity_curve.png should be created",
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("cpcv_equity_curve.png", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertTrue(
+                any("cpcv_equity_curve.png" in p for p in summary["plot_files"]),
+                "JSON summary should list cpcv_equity_curve.png",
+            )
+
+    def test_tear_sheet_omits_wf_equity_curve_when_no_oos_returns(self):
+        """Walk-forward equity curve is not created when oos_returns is empty."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            wf = self._make_walk_forward_results()
+            wf["oos_returns"] = pd.Series(dtype=float)  # Empty returns
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA",
+                analysis_results={"walk_forward": wf}, save_plots=True,
+            )
+            wf_path = os.path.join(tmpdir, "walk_forward_equity_curve.png")
+            self.assertFalse(
+                os.path.exists(wf_path),
+                "walk_forward_equity_curve.png should NOT be created for empty oos_returns",
+            )
+
+    def test_tear_sheet_omits_cpcv_equity_curve_when_no_oos_returns(self):
+        """CPCV equity curve is not created when oos_returns is empty."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            cpcv = self._make_cpcv_results()
+            cpcv["oos_returns"] = pd.Series(dtype=float)  # Empty returns
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA",
+                analysis_results={"cpcv": cpcv}, save_plots=True,
+            )
+            cpcv_path = os.path.join(tmpdir, "cpcv_equity_curve.png")
+            self.assertFalse(
+                os.path.exists(cpcv_path),
+                "cpcv_equity_curve.png should NOT be created for empty oos_returns",
+            )
+
 
 class TestParameterHeatmap(unittest.TestCase):
     """Tests for generate_parameter_heatmap function."""
