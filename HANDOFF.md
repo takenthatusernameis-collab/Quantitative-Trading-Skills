@@ -119,4 +119,39 @@ done
 
 `test_reporting.py` uses `unittest`; its exit status and `OK` summary are the pass/fail evidence. Other files use a custom runner. Recompute the total from the tests actually executed; do not assume the former total remains valid after the added coverage.
 
+## Session 2026-10-13 (alpha-significance)
+
+**What changed.** The prior agent's "Next task" — extending the buy-and-hold `--benchmark` baseline to the `walk-forward`/`cpcv`/`monte-carlo` CLI subcommands — was already committed at HEAD (`9d7e433`) and is complete and verified end-to-end. This session completed the natural methodological follow-on: adding statistical significance to the benchmark alpha.
+
+- `performance.py`: added a stdlib-only `_t_two_sided_pvalue` (Student's t two-sided p-value via the regularized incomplete beta function, Lentz continued fraction — validated against t-table critical values: t=2.228,df=10→0.0500; t=1.96,large df→0.0500), and a shared `_benchmark_stats(returns, benchmark_returns, ann_factor)` helper that returns `benchmark_total_return`, `benchmark_annualized_return`, `correlation_with_benchmark`, annualized `alpha`, `beta`, plus `alpha_tstat`, `alpha_pvalue`, and `r_squared`. The regression is the standard per-period OLS y = α + β·x on the inner-join-aligned return series; the t-stat/p-value/R² are annualization-invariant. The old "Alpha/Beta (simplified)" inline block in `calculate_metrics` now delegates to `_benchmark_stats`, so `run_backtest`'s `metrics.json`/`report.txt`/tear sheet surface the new keys automatically.
+- `walk_forward.py`: `_add_benchmark_to_summary` now delegates to `_benchmark_stats` (removing duplicated beta/alpha logic and keeping the CPCV / walk-forward / Monte Carlo summaries consistent with `calculate_metrics`). Console prints now also emit Alpha p-value and R² (None-safe) for all three subcommands.
+- `reporting.py`: the tear-sheet "Benchmark Comparison" table now renders `Alpha t-statistic`, `Alpha p-value`, and `R-squared` rows alongside the existing Total/Annualized Return, Correlation, Alpha, Beta.
+- Tests: +4 in `test_performance.py` (alpha significance via `calculate_metrics`, omission without benchmark, t-distribution known-value table checks, perfect-fit R²=1); extended `test_run_backtest.py` (metrics JSON has `alpha_tstat` finite and p-value/R² in range), `test_reporting.py` (tear-sheet HTML + JSON summary carry the new rows), and `test_walk_forward.py` (walk-forward + Monte Carlo summary and tear-sheet JSON carry `alpha_tstat`/`alpha_pvalue`/`r_squared`).
+
+Backward compatibility: every new key is additive; the canonical non-benchmark command path is unaffected, and `metrics.json`/`report.txt` are byte-identical to the pinned snapshot (only `load_timestamp` differs, by design).
+
+**What was actually verified this session.**
+- Correctness cross-check: `_benchmark_stats` alpha/beta/t-stat/R² match an independent `np.linalg.lstsq` OLS computation to ~15 significant figures; p-values match t-table critical values to <1e-3.
+- End-to-end CLI (`run_backtest.py ... --benchmark`) writes `benchmark_provenance.json`, `metrics.json` (alpha_tstat, alpha_pvalue, r_squared present and finite), `report.txt` Benchmark Comparison now includes Alpha t-stat / p-value / R-squared, and `tear_sheet.html` Benchmark Comparison table includes the new rows.
+- Snapshot stability: canonical command (no `--benchmark`) reproduces byte-identical `report.txt`, `metrics.json`, `tear_sheet_summary.json`; only `load_timestamp` differs (by design). The pinned `test_output/` was restored to its committed state.
+- Full suite: **226 tests passing** (test_data_loader 17 + test_performance 17 + test_reporting 42 + test_run_backtest 39 + test_strategy_builder 27 + test_walk_forward 64 + test_cpcv 16 + test_monte_carlo 7 + test_generate_sample_data 1).
+
+**What remains unresolved / assumptions.**
+- The benchmark is still a pure price-only buy-and-hold (no dividend/split adjustment, no benchmark trading costs). `alpha` significance tests the intercept of a price-return regression; with synthetic random-walk data it is expected to be ~noise (the end-to-end run above gave alpha p-value ≈ 0.49, correctly non-significant). This is honest reporting, not a proven edge.
+- `alpha_tstat`/`alpha_pvalue`/`r_squared` are only emitted when ≥3 aligned observations exist; with 2 they are omitted (undefined degrees of freedom). `alpha_tstat` is `null` for a perfect-fit degenerate case.
+- No out-of-sample evidence of live-trading profitability is established; no production readiness claim is made.
+
+**Approaches that failed and why.** None — all changes were verified incrementally and the suite stayed green; the one defect found during review (a dropped `</td>` in the tear-sheet row template) was caught by re-rendering and fixed before tests were finalized.
+
+## Next task (for the next agent)
+
+Close the remaining methodological gap on the benchmark baseline: the buy-and-hold benchmark is price-only and does not model **benchmark dividends / total return** or **benchmark trading costs** (commission/slippage), so the reported alpha is a price-return alpha, not a true total-return information alpha. Concretely:
+
+1. In `data_loader.py`, add total-return-aware loading: when a benchmark CSV exposes a `dividend` (or `adj_close`) column, compute `benchmark_total_return = (close.pct_change() + dividend/close.shift(1))`; otherwise fall back to the current `close.pct_change()`. Add a `_compute_benchmark_total_return` helper with a provenance field `total_return: price | total` surfaced in `benchmark_provenance.json`.
+2. Subtract benchmark trading costs from the benchmark series (same commission/slippage model used for the strategy) so alpha is measured vs. a realistically-costed baseline.
+3. Add a `total_return_benchmark` flag/wiring in `run_backtest.py`, `walk_forward.py` (all three OOS paths), and `performance._benchmark_stats` (compute on the total-return benchmark series).
+4. Tests: a synthetic benchmark CSV with dividends where the price-only alpha flips sign vs total-return alpha; assert `benchmark_provenance.total_return == "total"` and that the price-only vs total-return alpha differ. Regenerate pinned `test_output` only if the canonical command is changed to use `--benchmark` (it currently is not, so the snapshot should remain stable).
+
+Evidence and constraints: `close.pct_change()` is the established benchmark computation (`_compute_benchmark_returns` in `walk_forward.py` and `performance._benchmark_stats`); `RISK_FREE_RATE`/commission/slippage models live in `performance.py` / `run_backtest.py`; `DataProvenance` already supports arbitrary extra fields via `to_dict()`. Verify with the full suite (226 tests) plus a manual `run_backtest --benchmark` run comparing price-only vs total-return alpha.
+
 (End of file)

@@ -22,7 +22,7 @@ from itertools import product
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from scripts.strategy_builder import build_strategy
 from scripts.data_loader import load_data, validate_data, validate_point_in_time
-from scripts.performance import calculate_metrics, generate_report, _annualization_factor
+from scripts.performance import calculate_metrics, generate_report, _annualization_factor, _benchmark_stats
 from scripts.reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
 
@@ -1162,6 +1162,14 @@ def run_cpcv(args) -> int:
             print(
                 f"Beta: {results['summary'].get('beta', 'N/A'):.4f}"
             )
+            pval = results["summary"].get("alpha_pvalue")
+            print(
+                f"Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
+            )
+            rs = results["summary"].get("r_squared")
+            print(
+                f"R-squared: {rs if rs is None else f'{rs:.4f}'}"
+            )
 
     print(f"Number of CPCV folds: {results['summary']['n_folds']}")
     print(f"Total OOS Return: {results['summary']['total_oos_return']:.2%}")
@@ -1333,34 +1341,15 @@ def _add_benchmark_to_summary(
 ) -> Dict[str, Any]:
     """Add benchmark comparison metrics to a summary dict.
 
-    Computes benchmark total/annualized return, correlation, alpha, and beta
-    from the aligned return series.
+    Computes benchmark total/annualized return, correlation, alpha, beta,
+    the alpha t-statistic, its two-sided p-value, and the regression R^2
+    from the aligned return series (delegates to ``_benchmark_stats``).
     """
     if len(benchmark_returns) == 0:
         return summary
 
-    # Annualization factor from strategy returns index
     ann_factor = _annualization_factor(strategy_returns.index)
-
-    # Benchmark total and annualized return
-    bench_total = (1 + benchmark_returns).prod() - 1
-    summary["benchmark_total_return"] = float(bench_total)
-    summary["benchmark_annualized_return"] = float(
-        (1 + bench_total) ** (ann_factor / len(benchmark_returns)) - 1
-    )
-
-    # Correlation
-    aligned_strat, aligned_bench = strategy_returns.align(benchmark_returns, join="inner")
-    if len(aligned_strat) > 1:
-        summary["correlation_with_benchmark"] = float(aligned_strat.corr(aligned_bench))
-
-    # Alpha/Beta (annualized alpha)
-    if len(aligned_strat) > 1 and aligned_bench.std() > 0:
-        beta = aligned_strat.cov(aligned_bench) / aligned_bench.var()
-        alpha = aligned_strat.mean() - beta * aligned_bench.mean()
-        summary["alpha"] = float(alpha * ann_factor)
-        summary["beta"] = float(beta)
-
+    summary.update(_benchmark_stats(strategy_returns, benchmark_returns, ann_factor))
     return summary
 
 
@@ -1432,6 +1421,14 @@ def run_walk_forward(args) -> int:
             )
             print(
                 f"Beta: {results['summary'].get('beta', 'N/A'):.4f}"
+            )
+            pval = results["summary"].get("alpha_pvalue")
+            print(
+                f"Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
+            )
+            rs = results["summary"].get("r_squared")
+            print(
+                f"R-squared: {rs if rs is None else f'{rs:.4f}'}"
             )
 
     print(f"Number of walk-forward periods: {results['summary']['n_periods']}")
@@ -1689,8 +1686,19 @@ def run_monte_carlo(args) -> int:
     if benchmark is not None and len(returns) > 0:
         benchmark_returns = _compute_benchmark_returns(benchmark, returns)
         if benchmark_returns is not None:
+            bstats = _benchmark_stats(
+                returns, benchmark_returns, _annualization_factor(returns.index)
+            )
             print(
-                f"Benchmark Correlation: {benchmark_returns.corr(returns):.4f}"
+                f"Benchmark Correlation: {bstats.get('correlation_with_benchmark', 0):.4f}"
+            )
+            pval = bstats.get("alpha_pvalue")
+            print(
+                f"Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
+            )
+            rs = bstats.get("r_squared")
+            print(
+                f"R-squared: {rs if rs is None else f'{rs:.4f}'}"
             )
 
     print(f"Running Monte Carlo simulation with {args.n_simulations} simulations...")

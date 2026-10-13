@@ -16,7 +16,7 @@ import pandas as pd
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
-from performance import _annualization_factor, calculate_metrics  # noqa: E402
+from performance import _annualization_factor, calculate_metrics, _benchmark_stats  # noqa: E402
 
 
 def _make_returns(periods: int = 10, seed: int = 42) -> pd.Series:
@@ -182,6 +182,56 @@ def test_closed_at_end_metrics_absent_when_no_forced_closes():
     assert metrics["pct_trades_closed_at_end"] == 0.0
 
 
+def test_benchmark_alpha_significance_reported():
+    """calculate_metrics with a benchmark reports alpha t-stat/p-value and R^2.
+
+    The p-value is the two-sided significance of Jensen's alpha from an OLS
+    regression of strategy returns on benchmark returns. With a non-trivial
+    correlation it should be finite, in [0, 1], and R^2 in [0, 1].
+    """
+    returns = _make_returns(120, seed=11)
+    # Deterministic benchmark with signal so regression has explanatory power.
+    bench = returns.rolling(5).mean().bfill() * 1.2 + _make_returns(120, seed=22) * 0.3
+    bench = bench.iloc[: len(returns)]
+    metrics = calculate_metrics({"returns": returns, "benchmark": bench})
+    assert "benchmark_total_return" in metrics
+    assert metrics["alpha"] is not None
+    assert metrics["beta"] is not None
+    assert "alpha_tstat" in metrics
+    assert np.isfinite(metrics["alpha_tstat"])
+    assert 0.0 <= metrics["alpha_pvalue"] <= 1.0
+    assert 0.0 <= metrics["r_squared"] <= 1.0
+
+
+def test_benchmark_significance_omitted_without_benchmark():
+    """No benchmark -> no benchmark metrics whatsoever."""
+    returns = _make_returns(20)
+    metrics = calculate_metrics({"returns": returns})
+    for key in (
+        "benchmark_total_return", "alpha_tstat", "alpha_pvalue", "r_squared",
+    ):
+        assert key not in metrics
+
+
+def test_benchmark_t_distribution_pvalue_known_values():
+    """The Student's t two-sided p-value matches table values."""
+    from performance import _t_two_sided_pvalue
+    # df=10, two-sided alpha=0.05 critical t = 2.228
+    assert abs(_t_two_sided_pvalue(2.228, 10) - 0.05) < 1e-3
+    assert abs(_t_two_sided_pvalue(2.0, 10) - 0.0734) < 1e-3
+    # t=0 -> p=1.0
+    assert _t_two_sided_pvalue(0.0, 20) == 1.0
+
+
+def test_benchmark_stats_perfect_fit_has_r_squared_one():
+    """When strategy == benchmark, R^2 = 1, alpha = 0, p-value = 0."""
+    bench = _make_returns(60, seed=5)
+    stats = _benchmark_stats(bench, bench, 252.0)
+    assert abs(stats["r_squared"] - 1.0) < 1e-9
+    assert abs(stats["alpha"]) < 1e-9
+    assert stats["alpha_pvalue"] == 0.0
+
+
 def main() -> int:
     tests = [
         ("calculate_metrics_empty_returns_returns_error", test_calculate_metrics_empty_returns_returns_error),
@@ -197,6 +247,10 @@ def main() -> int:
         ("trade_metrics_absent_when_no_trades", test_trade_metrics_absent_when_no_trades),
         ("closed_at_end_metrics_are_surfaced", test_closed_at_end_metrics_are_surfaced),
         ("closed_at_end_metrics_absent_when_no_forced_closes", test_closed_at_end_metrics_absent_when_no_forced_closes),
+        ("benchmark_alpha_significance_reported", test_benchmark_alpha_significance_reported),
+        ("benchmark_significance_omitted_without_benchmark", test_benchmark_significance_omitted_without_benchmark),
+        ("benchmark_t_distribution_pvalue_known_values", test_benchmark_t_distribution_pvalue_known_values),
+        ("benchmark_stats_perfect_fit_has_r_squared_one", test_benchmark_stats_perfect_fit_has_r_squared_one),
     ]
 
     failures = 0

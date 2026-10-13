@@ -383,6 +383,14 @@ def generate_tear_sheet(
         for label, key, fmt in bench_metrics:
             if key in metrics:
                 html_parts.append(f"<tr><td>{label}</td><td class='metric'>{fmt(metrics[key])}</td></tr>")
+        sig_metrics = [
+            ("Alpha t-statistic", "alpha_tstat", fmt_num),
+            ("Alpha p-value", "alpha_pvalue", fmt_num),
+            ("R-squared", "r_squared", fmt_num),
+        ]
+        for label, key, fmt in sig_metrics:
+            if key in metrics:
+                html_parts.append(f"<tr><td>{label}</td><td class='metric'>{fmt(metrics[key])}</td></tr>")
         html_parts.append("</table>")
 
     # Analysis results: walk-forward, CPCV, Monte Carlo

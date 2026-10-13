@@ -1262,6 +1262,11 @@ def test_cli_benchmark_writes_artifact_and_metrics():
         for key in ("benchmark_total_return", "benchmark_annualized_return",
                      "correlation_with_benchmark", "alpha", "beta"):
             assert key in metrics, f"metrics missing {key}"
+        # Alpha significance: t-stat finite and p-value in [0, 1].
+        assert "alpha_tstat" in metrics
+        assert np.isfinite(metrics["alpha_tstat"])
+        assert 0.0 <= metrics["alpha_pvalue"] <= 1.0
+        assert 0.0 <= metrics["r_squared"] <= 1.0
 
 
 if __name__ == "__main__":

@@ -401,6 +401,9 @@ class TestTearSheet(unittest.TestCase):
                 "correlation_with_benchmark": 0.85,
                 "alpha": 0.02,
                 "beta": 1.1,
+                "alpha_tstat": 1.9,
+                "alpha_pvalue": 0.06,
+                "r_squared": 0.72,
             }
             html_path = generate_tear_sheet(
                 results, metrics, tmpdir,
@@ -414,11 +417,16 @@ class TestTearSheet(unittest.TestCase):
             self.assertIn("Correlation", html)
             self.assertIn("Alpha", html)
             self.assertIn("Beta", html)
+            self.assertIn("Alpha t-statistic", html)
+            self.assertIn("Alpha p-value", html)
+            self.assertIn("R-squared", html)
 
             with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
                 summary = json.load(f)
             for key in ("benchmark_total_return", "benchmark_annualized_return",
                         "correlation_with_benchmark", "alpha", "beta"):
+                self.assertIn(key, summary["metrics"])
+            for key in ("alpha_tstat", "alpha_pvalue", "r_squared"):
                 self.assertIn(key, summary["metrics"])
 
     def test_generate_tear_sheet_omits_benchmark_when_absent(self):

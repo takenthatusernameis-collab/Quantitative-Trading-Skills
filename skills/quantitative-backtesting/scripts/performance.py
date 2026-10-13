@@ -7,6 +7,7 @@ analytics, and benchmark comparisons from backtest results.
 """
 
 import json
+import math
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -32,6 +33,134 @@ def _annualization_factor(index: pd.Index, target_years: float = 1.0) -> float:
         return freq_map.get(freq[0], 252)
     except Exception:
         return 252
+
+
+def _betacf(a: float, b: float, x: float) -> float:
+    """Continued-fraction expansion for the incomplete beta function (Lentz)."""
+    maxit = 300
+    eps = 3.0e-16
+    fpmin = 1e-300
+    qab = a + b
+    qap = a + 1.0
+    qam = a - 1.0
+    c = 1.0
+    d = 1.0 - qab * x / qap
+    if abs(d) < fpmin:
+        d = fpmin
+    d = 1.0 / d
+    h = d
+    for m in range(1, maxit + 1):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        if abs(d) < fpmin:
+            d = fpmin
+        c = 1.0 + aa / c
+        if abs(c) < fpmin:
+            c = fpmin
+        d = 1.0 / d
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        if abs(d) < fpmin:
+            d = fpmin
+        c = 1.0 + aa / c
+        if abs(c) < fpmin:
+            c = fpmin
+        d = 1.0 / d
+        dele = d * c
+        h *= dele
+        if abs(dele - 1.0) < eps:
+            break
+    return h
+
+
+def _betai(a: float, b: float, x: float) -> float:
+    """Regularized incomplete beta function I_x(a, b)."""
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    lbeta = math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
+    bt = math.exp(lbeta + a * math.log(x) + b * math.log(1.0 - x))
+    if x < (a + 1.0) / (a + b + 2.0):
+        return bt * _betacf(a, b, x) / a
+    return 1.0 - bt * _betacf(b, a, 1.0 - x) / b
+
+
+def _t_two_sided_pvalue(t: float, df: int) -> Optional[float]:
+    """Two-sided p-value for a Student's t statistic with `df` degrees of freedom.
+
+    Returns None when the test cannot be evaluated (df <= 0, non-finite t).
+    p = I_{df/(df+t^2)}(df/2, 1/2).
+    """
+    if df <= 0 or not np.isfinite(t) or t == 0.0:
+        return None if df <= 0 else (1.0 if t == 0.0 else None)
+    x = df / (df + t * t)
+    return float(_betai(0.5 * df, 0.5, x))
+
+
+def _benchmark_stats(
+    returns: pd.Series,
+    benchmark_returns: pd.Series,
+    ann_factor: float,
+) -> Dict[str, Any]:
+    """Compute buy-and-hold benchmark comparison metrics from aligned returns.
+
+    Returns total/annualized benchmark return, correlation, OLS alpha (annualized),
+    beta, the alpha t-statistic, its two-sided p-value, and the regression R^2.
+    The alpha/beta/correlation match the existing (pre-significance) definition;
+    the regression is the standard per-period OLS y = alpha + beta * x on the
+    common-date aligned series. t-stat and p-value are invariant to annualization,
+    and are only reported when at least 3 aligned observations exist.
+    """
+    stats: Dict[str, Any] = {}
+    if benchmark_returns is None or len(benchmark_returns) == 0:
+        return stats
+    bench_total = (1 + benchmark_returns).prod() - 1
+    stats["benchmark_total_return"] = float(bench_total)
+    stats["benchmark_annualized_return"] = float(
+        (1 + bench_total) ** (ann_factor / len(benchmark_returns)) - 1
+    )
+
+    aligned_ret, aligned_bench = returns.align(benchmark_returns, join="inner")
+    n = len(aligned_ret)
+    if n <= 1:
+        return stats
+
+    stats["correlation_with_benchmark"] = float(aligned_ret.corr(aligned_bench))
+
+    y = aligned_ret.to_numpy(dtype=float)
+    x = aligned_bench.to_numpy(dtype=float)
+    x_mean = float(np.mean(x))
+    y_mean = float(np.mean(y))
+    sxx = float(np.sum((x - x_mean) ** 2))
+    if sxx <= 0:
+        return stats
+    sxy = float(np.sum((x - x_mean) * (y - y_mean)))
+    beta = sxy / sxx
+    alpha = y_mean - beta * x_mean  # per-period OLS intercept
+    stats["alpha"] = float(alpha * ann_factor)
+    stats["beta"] = float(beta)
+
+    # Significance of the alpha intercept (Jensen's alpha t-test).
+    if n >= 3:
+        residuals = y - (alpha + beta * x)
+        rss = float(np.sum(residuals ** 2))
+        tss = float(np.sum((y - y_mean) ** 2))
+        df = n - 2
+        if rss > 0 and tss > 0:
+            sigma2 = rss / df
+            se_alpha = math.sqrt(sigma2 * (1.0 / n + x_mean ** 2 / sxx))
+            t_stat = alpha / se_alpha if se_alpha > 0 else float("inf")
+            stats["alpha_tstat"] = float(t_stat)
+            stats["alpha_pvalue"] = _t_two_sided_pvalue(t_stat, df)
+        elif rss <= 0:
+            # Perfect linear fit: alpha estimate is exact, p-value is 0.
+            stats["alpha_tstat"] = None
+            stats["alpha_pvalue"] = 0.0
+        stats["r_squared"] = float(1.0 - rss / tss) if tss > 0 else 0.0
+    return stats
 
 
 def calculate_metrics(
@@ -202,21 +331,7 @@ def calculate_metrics(
 
     # --- Benchmark Comparison ---
     if benchmark_returns is not None and len(benchmark_returns) > 0:
-        bench_total = (1 + benchmark_returns).prod() - 1
-        metrics["benchmark_total_return"] = float(bench_total)
-        metrics["benchmark_annualized_return"] = float(
-            (1 + bench_total) ** (ann_factor / len(benchmark_returns)) - 1
-        )
-        # Correlation
-        aligned_ret, aligned_bench = returns.align(benchmark_returns, join="inner")
-        if len(aligned_ret) > 1:
-            metrics["correlation_with_benchmark"] = float(aligned_ret.corr(aligned_bench))
-        # Alpha/Beta (simplified)
-        if len(aligned_ret) > 1 and aligned_bench.std() > 0:
-            beta = aligned_ret.cov(aligned_bench) / aligned_bench.var()
-            alpha = aligned_ret.mean() - beta * aligned_bench.mean()
-            metrics["alpha"] = float(alpha * ann_factor)
-            metrics["beta"] = float(beta)
+        metrics.update(_benchmark_stats(returns, benchmark_returns, ann_factor))
 
     # --- Additional Ratios ---
     if returns.std() > 0:
@@ -375,6 +490,9 @@ def generate_report(
             f"Correlation:                 {metrics.get('correlation_with_benchmark', 0):.2f}",
             f"Alpha:                       {metrics.get('alpha', 0):.2%}",
             f"Beta:                        {metrics.get('beta', 0):.2f}",
+            f"Alpha t-stat:                {metrics.get('alpha_tstat', 'N/A')}",
+            f"Alpha p-value:               {metrics.get('alpha_pvalue', 'N/A')}",
+            f"R-squared:                   {metrics.get('r_squared', 'N/A')}",
             "",
         ])
 

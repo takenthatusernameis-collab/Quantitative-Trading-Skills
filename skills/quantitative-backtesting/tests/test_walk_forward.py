@@ -2524,6 +2524,9 @@ def test_run_walk_forward_cli_with_benchmark():
             assert "correlation_with_benchmark" in s
             assert "alpha" in s
             assert "beta" in s
+            assert "alpha_tstat" in s
+            assert 0.0 <= s["alpha_pvalue"] <= 1.0
+            assert 0.0 <= s["r_squared"] <= 1.0
 
             # Benchmark provenance should be written
             assert "benchmark_provenance" in summary
@@ -2536,6 +2539,7 @@ def test_run_walk_forward_cli_with_benchmark():
                 tear_summary = json.load(f)
             assert "benchmark_total_return" in tear_summary["metrics"]
             assert "correlation_with_benchmark" in tear_summary["metrics"]
+            assert "alpha_pvalue" in tear_summary["metrics"]
     finally:
         Path(data_file).unlink()
         Path(bench_file).unlink()
@@ -2625,6 +2629,9 @@ def test_run_monte_carlo_cli_with_benchmark():
             assert "correlation_with_benchmark" in s
             assert "alpha" in s
             assert "beta" in s
+            assert "alpha_tstat" in s
+            assert 0.0 <= s["alpha_pvalue"] <= 1.0
+            assert 0.0 <= s["r_squared"] <= 1.0
 
             # Benchmark provenance should be written
             assert "benchmark_provenance" in mc_results
