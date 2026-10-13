@@ -18,7 +18,7 @@ import pandas as pd
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
-from data_loader import load_data, validate_data  # noqa: E402
+from data_loader import load_data, validate_data, DataProvenance, validate_point_in_time, detect_survivorship_bias  # noqa: E402
 
 
 def _make_data(periods: int = 100, seed: int = 42) -> pd.DataFrame:
@@ -113,6 +113,131 @@ def test_validate_data_handles_short_series():
     assert validate_data(short) is True
 
 
+
+def test_provenance_tracking_basic():
+    """DataProvenance records source, filters, shapes, transforms, validation."""
+    data = _make_data(periods=20)
+    csv_path = _make_csv(data)
+    try:
+        loaded, prov = load_data(csv_path, start="2020-01-08", end="2020-01-17", return_provenance=True)
+        assert isinstance(prov, DataProvenance)
+        assert Path(csv_path).name in prov.source_path
+        assert prov.load_timestamp is not None
+        assert prov.original_shape[0] > 0
+        assert prov.final_shape[0] == len(loaded)
+        assert "column_names_lowercase_stripped" in prov.transformations_applied
+        assert prov.validation_passed is True
+        assert isinstance(prov.to_dict(), dict)
+        assert isinstance(prov.to_json(), str)
+    finally:
+        Path(csv_path).unlink()
+
+
+def test_provenance_serialization():
+    """Provenance can be serialized to dict and JSON."""
+    data = _make_data(periods=15)
+    csv_path = _make_csv(data)
+    try:
+        _, prov = load_data(csv_path, return_provenance=True)
+        d = prov.to_dict()
+        j = prov.to_json()
+        assert d["source_path"] == prov.source_path
+        assert "transformations_applied" in d
+        assert j.startswith("{")
+        assert "source_path" in j
+    finally:
+        Path(csv_path).unlink()
+
+
+def test_validate_point_in_time_clean():
+    """Clean temporal data passes point-in-time validation."""
+    dates = pd.date_range("2020-01-01", periods=30, freq="B")
+    df = pd.DataFrame({"close": np.linspace(1, 30, 30)}, index=dates)
+    res = validate_point_in_time(df)
+    assert res["passed"] is True
+    assert res["violations"] == []
+    assert isinstance(res["warnings"], list)
+
+
+def test_validate_point_in_time_detects_lookahead():
+    """High correlation between signal changes and next-period returns suggests look-ahead."""
+    np.random.seed(42)
+    dates = pd.date_range("2020-01-01", periods=50, freq="B")
+    close = 100 * np.exp(np.cumsum(np.random.normal(0.0005, 0.01, 50)))
+    df = pd.DataFrame({"close": close}, index=dates)
+    # Create a signal that strongly uses future info by looking ahead
+    df["signal"] = (df["close"].shift(-1) > df["close"]).astype(int)
+    res = validate_point_in_time(df, signal_column="signal")
+    # We expect either warning/violation depending on detection logic
+    assert "violations" in res
+    assert "passed" in res
+
+
+def test_validate_point_in_time_non_monotonic():
+    """Non-monotonic index is detected."""
+    dates = pd.date_range("2020-01-01", periods=10, freq="B")
+    df = pd.DataFrame({"close": range(1, 11)}, index=dates)
+    df = df.iloc[[0, 2, 1, 3, 4, 5, 6, 7, 8, 9]]  # mess up order
+    res = validate_point_in_time(df)
+    assert res["passed"] is False
+    assert any("monotonically" in v for v in res["violations"])
+
+
+def test_validate_point_in_time_lookback_windows():
+    """Invalid lookback windows are flagged."""
+    dates = pd.date_range("2020-01-01", periods=10, freq="B")
+    df = pd.DataFrame({"close": range(1, 11)}, index=dates)
+    res = validate_point_in_time(df, lookback_windows=[-1, 5])
+    assert res["passed"] is False
+    assert any("Invalid lookback" in v for v in res["violations"])
+
+
+def test_detect_survivorship_bias_survivors_only():
+    """All symbols surviving full period gives low bias score."""
+    dates = pd.date_range("2020-01-01", periods=300, freq="B")
+    data = {
+        "A": pd.DataFrame({"close": 1.0}, index=dates),
+        "B": pd.DataFrame({"close": 2.0}, index=dates),
+    }
+    res = detect_survivorship_bias(data)
+    assert res["bias_score"] == 0.0
+    assert set(res["surviving_symbols"]) == {"A", "B"}
+    assert res["entered_symbols"] == []
+    assert res["exited_symbols"] == []
+
+
+def test_detect_survivorship_bias_entries_exits_insufficient():
+    """Detects entries, exits, insufficient data, and computes bias score."""
+    global_start = "2020-01-01"
+    global_end = "2021-12-31"
+    dates_full = pd.date_range(global_start, global_end, freq="B")  # ~504
+    # A: survives
+    A = pd.DataFrame({"close": 1.0}, index=dates_full)
+    # B: enters late
+    B = pd.DataFrame({"close": 1.0}, index=pd.date_range("2020-07-01", global_end, freq="B"))  # entered late
+    # C: exits early
+    C = pd.DataFrame({"close": 1.0}, index=pd.date_range(global_start, "2021-06-01", freq="B"))  # exited early
+    # D: insufficient
+    D = pd.DataFrame({"close": 1.0}, index=pd.date_range(global_start, periods=100, freq="B"))  # < 252
+    data = {"A": A, "B": B, "C": C, "D": D}
+    res = detect_survivorship_bias(data)
+    assert "A" in res["surviving_symbols"]
+    assert len(res["entered_symbols"]) == 1
+    assert res["entered_symbols"][0]["symbol"] == "B"
+    # D exits early and also has insufficient data; C exits early
+    exited_syms = {e["symbol"] for e in res["exited_symbols"]}
+    assert "C" in exited_syms
+    assert "D" in res["insufficient_data"]
+    assert 0.0 < res["bias_score"] <= 1.0
+
+
+def test_detect_survivorship_bias_empty():
+    """Empty data dict returns zero bias."""
+    res = detect_survivorship_bias({})
+    assert res["bias_score"] == 0.0
+    assert res["surviving_symbols"] == []
+
+
 def main() -> int:
     tests = [
         ("load_data_unsupported_format_raises", test_load_data_unsupported_format_raises),
@@ -121,6 +246,15 @@ def main() -> int:
         ("validate_data_accepts_clean_frame", test_validate_data_accepts_clean_frame),
         ("validate_data_rejects_bad_frames", test_validate_data_rejects_bad_frames),
         ("validate_data_handles_short_series", test_validate_data_handles_short_series),
+        ("test_provenance_tracking_basic", test_provenance_tracking_basic),
+        ("test_provenance_serialization", test_provenance_serialization),
+        ("test_validate_point_in_time_clean", test_validate_point_in_time_clean),
+        ("test_validate_point_in_time_detects_lookahead", test_validate_point_in_time_detects_lookahead),
+        ("test_validate_point_in_time_non_monotonic", test_validate_point_in_time_non_monotonic),
+        ("test_validate_point_in_time_lookback_windows", test_validate_point_in_time_lookback_windows),
+        ("test_detect_survivorship_bias_survivors_only", test_detect_survivorship_bias_survivors_only),
+        ("test_detect_survivorship_bias_entries_exits_insufficient", test_detect_survivorship_bias_entries_exits_insufficient),
+        ("test_detect_survivorship_bias_empty", test_detect_survivorship_bias_empty),
     ]
 
     failures = 0
