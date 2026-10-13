@@ -70,6 +70,13 @@ the number of development trials is supplied (CLI: `--n-trials`):
 from the i.i.d. null approximation since the individual trial
 Sharpes are not available), and the report and tear sheet surface
 it. Without `--n-trials`, no `deflated_sharpe` key is emitted.
+The `monte-carlo` subcommand of `scripts/walk_forward.py`
+reports it as well (CLI: `--n-trials`): the base backtest Sharpe
+is deflated via `calculate_metrics`, and because the subcommand
+runs the `--param-grid` optimization internally, the ranked trial
+Sharpes are passed through the config so `SR*` uses the
+cross-sectional estimator; the dict is printed and saved as a
+top-level `deflated_sharpe` key in `monte_carlo_results.json`.
 
 ### Sortino Ratio
 

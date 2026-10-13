@@ -143,6 +143,18 @@ accept `apply_deflation=True`:
   Sharpes are not available to a single backtest). The report and tear
   sheet surface the dict; without `--n-trials` no `deflated_sharpe`
   key is emitted, so the output is backward compatible.
+- The `monte-carlo` subcommand of `scripts/walk_forward.py` reports
+  the DSR for the base backtest Sharpe when the number of development
+  trials is supplied (`--n-trials`). The base backtest results are
+  passed through `calculate_metrics` (mirroring `run_backtest`), so
+  the deflation logic is shared. When a parameter grid was searched,
+  the optimization runs internally and its ranked trial Sharpes are
+  recorded in the config, so `SR*` uses the cross-sectional
+  dispersion estimator (the recommended estimator) instead of the
+  i.i.d. null approximation. The DSR is printed and written to
+  `monte_carlo_results.json` as a top-level `deflated_sharpe` key
+  (with `n_trials` recorded in the config); without `--n-trials` no
+  key is emitted, so the output is backward compatible.
 
 Example:
 
@@ -183,6 +195,22 @@ python3 scripts/run_backtest.py \
     --data data.csv \
     --strategy sma_crossover \
     --params '{"fast_period": 10, "slow_period": 30}' \
+    --n-trials 50
+```
+
+The `monte-carlo` subcommand accepts the same `--n-trials` flag. It
+first runs the parameter optimization implied by `--param-grid` to
+select the base parameters, then deflates the base backtest Sharpe
+by the reported trial count (using the optimization record's trial
+Sharpes for `SR*`) before running the simulations. The DSR is printed
+and saved to `monte_carlo_results.json`.
+
+```bash
+python3 scripts/walk_forward.py monte-carlo \
+    --data data.csv \
+    --strategy sma_crossover \
+    --param-grid '{"fast_period": [10, 20], "slow_period": [30, 50]}' \
+    --n-simulations 2000 \
     --n-trials 50
 ```
 
@@ -288,6 +316,21 @@ print(f"95% CI for Sharpe: [{sharpe_ci[0]:.2f}, {sharpe_ci[1]:.2f}]")
 - **Wide intervals** suggest the strategy's performance is highly sensitive to the specific sequence of returns.
 - **Probability of ruin** quantifies tail risk: the chance of a catastrophic drawdown under resampled conditions.
 - If the observed Sharpe ratio falls outside the 95% confidence interval of the Monte Carlo distribution, the result may be statistically unusual (either positively or negatively).
+
+### Multiple-Testing Correction (CLI)
+
+The `monte_carlo_simulation` function itself knows nothing about
+how the base backtest was produced. The `monte-carlo` CLI
+subcommand does: it selects the base parameters via the
+`--param-grid` optimization, so the base Sharpe carries the
+selection bias of that search. Pass `--n-trials` with the
+number of development trials to deflate the base backtest
+Sharpe; the DSR is printed, saved as a top-level
+`deflated_sharpe` key in `monte_carlo_results.json`, and
+computed with `SR*` from the cross-sectional dispersion of the
+optimization record's trial Sharpes (or the i.i.d. null
+approximation when no grid was searched). Without `--n-trials`
+no `deflated_sharpe` key is emitted.
 
 ## Combinatorially Purged Cross-Validation (CPCV)
 

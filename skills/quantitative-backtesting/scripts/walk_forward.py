@@ -1214,6 +1214,7 @@ def run_monte_carlo(args) -> int:
     strategy_factory = _make_strategy_factory(args.strategy)
 
     # Use best params from optimization or first combo
+    opt_results = None
     if param_grid:
         # Try to get best params from optimization
         opt_results = parameter_optimization(
@@ -1240,6 +1241,42 @@ def run_monte_carlo(args) -> int:
     strategy = strategy_factory(best_params)
     signals = strategy.generate_signals(data)
     returns = _calculate_strategy_returns(data, signals, args.commission, args.slippage)
+
+    # Multiple-testing correction: the base backtest's Sharpe was
+    # produced by the parameter search above (or by development
+    # trials the caller reports via --n-trials). When the number of
+    # development trials is reported, deflate the base Sharpe for
+    # selection bias and for the non-normality of returns, mirroring
+    # the run_backtest --n-trials path. When the optimization
+    # record is available, its trial Sharpes give the cross-sectional
+    # SR* estimator (recommended over the i.i.d. null approximation).
+    dsr = None
+    n_trials = getattr(args, "n_trials", None)
+    if n_trials is not None and int(n_trials) >= 1 and len(returns.dropna()) >= 2:
+        base_results = {
+            "equity_curve": (1 + returns).cumprod() * args.initial_capital,
+            "returns": returns,
+            "config": {
+                "initial_capital": args.initial_capital,
+                "commission": args.commission,
+                "slippage": args.slippage,
+                "strategy": args.strategy,
+                "symbol": args.symbol,
+                "n_trials": int(n_trials),
+            },
+        }
+        if opt_results:
+            base_results["config"]["trial_sharpes"] = [
+                r["sharpe_ratio"] for r in opt_results
+            ]
+        dsr = calculate_metrics(base_results).get("deflated_sharpe")
+
+    if dsr is not None:
+        print(
+            f"Deflated Sharpe Ratio: {dsr['deflated_sharpe_ratio']:.4f} "
+            f"(p-value {dsr['p_value']:.4f}, expected max Sharpe "
+            f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
+        )
 
     print(f"Running Monte Carlo simulation with {args.n_simulations} simulations...")
     mc_results = monte_carlo_simulation(
@@ -1285,6 +1322,9 @@ def run_monte_carlo(args) -> int:
             "block_size": args.block_size,
         },
     }
+    if dsr is not None:
+        mc_save["deflated_sharpe"] = dsr
+        mc_save["config"]["n_trials"] = int(n_trials)
     with open(mc_path, "w") as f:
         json.dump(mc_save, f, indent=2, default=str)
     print(f"\nMonte Carlo results saved to: {mc_path}")
@@ -1329,6 +1369,7 @@ def main():
     mc_parser.add_argument("--confidence-levels", type=float, nargs="+", default=[0.90, 0.95, 0.99], help="Confidence levels")
     mc_parser.add_argument("--block-size", type=int, help="Block size for block bootstrap")
     mc_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
+    mc_parser.add_argument("--n-trials", type=int, default=None, help="Number of development trials (parameter configurations) tested; when set, report the Deflated Sharpe Ratio (multiple-testing correction) for the base backtest Sharpe")
     mc_parser.set_defaults(func=run_monte_carlo)
 
     # CPCV analysis

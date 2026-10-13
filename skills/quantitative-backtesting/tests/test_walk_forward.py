@@ -30,6 +30,8 @@ from walk_forward import (  # noqa: E402
     run_monte_carlo,
     _make_strategy_factory,
     _parse_param_grid,
+    _annualization_factor,
+    _calculate_strategy_returns,
 )
 from strategy_builder import build_strategy  # noqa: E402
 from data_loader import load_data  # noqa: E402
@@ -442,6 +444,168 @@ def test_run_monte_carlo_cli():
         Path(data_file).unlink()
 
 
+def test_run_monte_carlo_cli_with_n_trials():
+    """The monte-carlo CLI deflates the base Sharpe with --n-trials."""
+    data_file = _make_test_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                n_simulations=50,
+                confidence_levels=[0.90, 0.95],
+                block_size=None,
+                initial_capital=100000,
+                n_trials=50,
+            )
+            result = run_monte_carlo(args)
+            assert result == 0
+
+            mc_path = Path(tmpdir) / "monte_carlo_results.json"
+            assert mc_path.exists(), "Monte Carlo results JSON not created"
+
+            with open(mc_path) as f:
+                mc = json.load(f)
+
+            assert "deflated_sharpe" in mc, (
+                "expected deflated_sharpe in monte-carlo output"
+            )
+            d = mc["deflated_sharpe"]
+            assert 0.0 <= d["deflated_sharpe_ratio"] <= 1.0
+            assert d["n_trials"] == 50
+            assert d["n_observations"] > 0
+            assert "expected_max_sharpe" in d
+            assert "p_value" in d
+            assert abs(d["p_value"] - (1.0 - d["deflated_sharpe_ratio"])) < 1e-12
+            # The saved config records the trial count.
+            assert mc["config"]["n_trials"] == 50
+    finally:
+        Path(data_file).unlink()
+
+
+def test_run_monte_carlo_cli_without_n_trials_omits_dsr():
+    """Without --n-trials no deflated_sharpe key is saved (backward compat)."""
+    data_file = _make_test_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                n_simulations=50,
+                confidence_levels=[0.90, 0.95],
+                block_size=None,
+                initial_capital=100000,
+            )
+            result = run_monte_carlo(args)
+            assert result == 0
+
+            mc_path = Path(tmpdir) / "monte_carlo_results.json"
+            with open(mc_path) as f:
+                mc = json.load(f)
+
+            assert "deflated_sharpe" not in mc
+            assert "n_trials" not in mc["config"]
+    finally:
+        Path(data_file).unlink()
+
+
+def test_run_monte_carlo_deflated_sharpe_matches_direct_call():
+    """The surfaced DSR equals a direct deflated_sharpe_ratio call.
+
+    The monte-carlo run must deflate the base backtest Sharpe (the
+    Sharpe of the selected params over the full sample), and when a
+    parameter grid was searched it must pass the optimization
+    record's trial Sharpes so SR* uses the cross-sectional
+    estimator rather than the i.i.d. null approximation.
+    """
+    data_file = _make_test_data_file()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            param_grid = {"fast_period": [10, 20], "slow_period": [30, 50]}
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid=json.dumps(param_grid),
+                n_simulations=50,
+                confidence_levels=[0.90, 0.95],
+                block_size=None,
+                initial_capital=100000,
+                n_trials=50,
+            )
+            assert run_monte_carlo(args) == 0
+
+            with open(Path(tmpdir) / "monte_carlo_results.json") as f:
+                mc = json.load(f)
+            got = mc["deflated_sharpe"]
+
+            # Recompute the optimization record and the base
+            # backtest independently of run_monte_carlo.
+            data = load_data(data_file, symbol="SPY", start=None, end=None)
+            strategy_factory = _make_strategy_factory("sma_crossover")
+            opt_results = parameter_optimization(
+                data=data,
+                strategy_factory=strategy_factory,
+                param_grid=param_grid,
+                commission=0.0002,
+                slippage=0.0001,
+            )
+            assert opt_results, "expected at least one valid combo"
+            best_params = opt_results[0]["params"]
+            strategy = strategy_factory(best_params)
+            signals = strategy.generate_signals(data)
+            returns = _calculate_strategy_returns(
+                data, signals, 0.0002, 0.0001
+            )
+
+            ann_factor = _annualization_factor(returns.index)
+            excess = returns - 0.02 / ann_factor
+            sharpe = float(excess.mean() / excess.std() * np.sqrt(ann_factor))
+
+            trial_sharpes = [r["sharpe_ratio"] for r in opt_results]
+            expected = deflated_sharpe_ratio(
+                sharpe_ratio=sharpe,
+                returns=returns,
+                n_trials=50,
+                trial_sharpes=trial_sharpes,
+            )
+
+            for key in (
+                "deflated_sharpe_ratio", "p_value", "expected_max_sharpe",
+                "n_trials", "n_observations", "skewness", "kurtosis",
+            ):
+                assert abs(got[key] - expected[key]) < 1e-12, key
+
+            # The cross-sectional estimator (from the optimization
+            # record) must differ from the i.i.d. null approximation,
+            # proving the trial Sharpes were actually used.
+            iid_null = deflated_sharpe_ratio(
+                sharpe_ratio=sharpe, returns=returns, n_trials=50
+            )
+            assert abs(got["expected_max_sharpe"] - iid_null["expected_max_sharpe"]) > 1e-9
+    finally:
+        Path(data_file).unlink()
+
+
 def test_parse_param_grid():
     """Test parameter grid parsing from JSON string."""
     # Simple grid
@@ -742,6 +906,9 @@ def main() -> int:
         ("run_walk_forward_cli", test_run_walk_forward_cli),
         ("run_parameter_optimization_cli", test_run_parameter_optimization_cli),
         ("run_monte_carlo_cli", test_run_monte_carlo_cli),
+        ("run_monte_carlo_cli_with_n_trials", test_run_monte_carlo_cli_with_n_trials),
+        ("run_monte_carlo_cli_without_n_trials_omits_dsr", test_run_monte_carlo_cli_without_n_trials_omits_dsr),
+        ("run_monte_carlo_deflated_sharpe_matches_direct_call", test_run_monte_carlo_deflated_sharpe_matches_direct_call),
         ("parse_param_grid", test_parse_param_grid),
         ("walk_forward_multi_asset_cross_sectional_momentum", test_walk_forward_multi_asset_cross_sectional_momentum),
         ("walk_forward_multi_asset_dual_momentum", test_walk_forward_multi_asset_dual_momentum),

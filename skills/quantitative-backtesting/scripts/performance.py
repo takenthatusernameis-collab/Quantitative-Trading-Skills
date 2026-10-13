@@ -245,6 +245,11 @@ def calculate_metrics(
     # in walk_forward, which imports this module, so it is imported
     # lazily to avoid a circular import at module load time.
     n_trials = config.get("n_trials") if config else None
+    # Optional cross-sectional record: when the caller also reports the
+    # Sharpe ratios of every trial (e.g. the ranked rows of a parameter
+    # optimization), SR* is estimated from their dispersion instead of
+    # the i.i.d.-normal null approximation.
+    trial_sharpes = config.get("trial_sharpes") if config else None
     if n_trials is not None and int(n_trials) >= 1 and len(returns) >= 2:
         # Try both the top-level and the package-qualified name so the
         # function resolves regardless of whether `performance` was
@@ -259,6 +264,7 @@ def calculate_metrics(
             sharpe_ratio=metrics["sharpe_ratio"],
             returns=returns,
             n_trials=int(n_trials),
+            trial_sharpes=trial_sharpes,
         )
 
     # Store config metadata

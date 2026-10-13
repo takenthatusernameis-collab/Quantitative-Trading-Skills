@@ -122,7 +122,7 @@ Risk Metrics:
 - `data_loader.py` - Utilities for loading and validating market data from various sources
 - `strategy_builder.py` - Factory for creating common strategy templates (trend, mean reversion, momentum)
 - `performance.py` - Comprehensive performance analytics and metric calculation
-- `walk_forward.py` - Walk-forward analysis, parameter optimization, CPCV, and Deflated Sharpe Ratio multiple-testing correction
+- `walk_forward.py` - Walk-forward analysis, parameter optimization, CPCV, Monte Carlo simulation CLI, and Deflated Sharpe Ratio multiple-testing correction
 - `monte_carlo.py` - Standalone Monte Carlo simulation (block bootstrap resampling, metric distributions, confidence intervals, probability of ruin). Re-exported from `walk_forward` for backward compatibility.
 - `reporting.py` - Automated tear sheet and report generation
 - `generate_sample_data.py` - Generates a sample OHLCV dataset for testing
@@ -154,7 +154,7 @@ Risk Metrics:
 - Account for transaction costs from the beginning - they significantly impact net returns
 - Test parameter stability across different market regimes
 - Beware of look-ahead bias: ensure signals only use data available at decision time
-- Correct for multiple testing: a grid search over many parameter combinations inflates in-sample Sharpe; compute the Deflated Sharpe Ratio before trusting a Sharpe estimate. Use `--deflate` for walk-forward/optimization/CPCV, or pass `--n-trials` to `run_backtest.py` to deflate a single backtest's final Sharpe by the number of development trials
+- Correct for multiple testing: a grid search over many parameter combinations inflates in-sample Sharpe; compute the Deflated Sharpe Ratio before trusting a Sharpe estimate. Use `--deflate` for walk-forward/optimization/CPCV, or pass `--n-trials` to `run_backtest.py` or the `monte-carlo` subcommand to deflate a single backtest's final Sharpe by the number of development trials (the `monte-carlo` path also uses the optimization record's trial Sharpes for the cross-sectional estimator)
 - Consider regime-dependent performance (bull/bear/sideways markets)
 - Document all assumptions and data sources for reproducibility
 
@@ -249,12 +249,17 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   three-asset rejection, single-asset fallback warning, and the
   `ols_hedge` spread method (rolling OLS hedge-ratio recovery on a known
   cointegrated pair, spread stationarity, backward-compatible defaults).
-  - `test_walk_forward.py` - walk-forward windowing, parameter grid parsing,
-    train/test separation, Monte Carlo simulation, **Deflated Sharpe Ratio
-    multiple-testing correction** (`deflated_sharpe_ratio`, `apply_deflation`
-    on `parameter_optimization` and `walk_forward_analysis`, CLI `--deflate`),
-    and multi-asset panel (dict and MultiIndex) walk-forward and Monte Carlo
-    integration with `CrossSectionalMomentum` and `DualMomentumStrategy`.
+   - `test_walk_forward.py` - walk-forward windowing, parameter grid parsing,
+     train/test separation, Monte Carlo simulation, **Deflated Sharpe Ratio
+     multiple-testing correction** (`deflated_sharpe_ratio`, `apply_deflation`
+     on `parameter_optimization` and `walk_forward_analysis`, CLI `--deflate`),
+     the **`monte-carlo` CLI's `--n-trials` deflation** (the base backtest
+     Sharpe is deflated via `calculate_metrics`, the optimization record's
+     trial Sharpes give the cross-sectional `SR*` estimator, the surfaced DSR
+     equals a direct `deflated_sharpe_ratio` call, and without `--n-trials` no
+     `deflated_sharpe` key is emitted), and multi-asset panel (dict and
+     MultiIndex) walk-forward and Monte Carlo integration with
+     `CrossSectionalMomentum` and `DualMomentumStrategy`.
   - `test_cpcv.py` - CPCV fold structure, purge/embargo behavior, parameter
     stability calculation, summary metrics, **Deflated Sharpe Ratio
     correction** (`apply_deflation` on `cpcv_analysis`), CLI integration,
