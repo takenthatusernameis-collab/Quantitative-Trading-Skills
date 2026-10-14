@@ -191,26 +191,16 @@ def test_out_of_sample_validation_benchmark_cost_is_periodic():
 
 def test_out_of_sample_validation_benchmark_cost_is_periodic_cpcv():
     """Test that out_of_sample_validation with CPCV correctly handles benchmark_cost_is_periodic flag."""
-    # Create test data with sufficient periods
-    data = _make_ohlcv_data(periods=300, seed=42)
-    benchmark = _make_benchmark_data(periods=300, seed=99)
-
-    # Use a simple built-in strategy
+    data = _make_ohlcv_data(periods=500, seed=42)
+    benchmark = _make_benchmark_data(periods=500, seed=99)
     strategy_type = "sma_crossover"
-    # Parameter grid - small grid for testing
-    param_grid = {
-        "fast_period": [3, 5],
-        "slow_period": [8, 10]
-    }
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
 
-    # Run out_of_sample_validation with benchmark_cost_is_periodic=False
     results_false = out_of_sample_validation(
         data=data,
         strategy_factory=lambda params: build_strategy(strategy_type, json.dumps(params)),
         param_grid=param_grid,
-        train_frac=0.6,
-        val_frac=0.2,
-        test_frac=0.2,
+        train_frac=0.6, val_frac=0.2, test_frac=0.2,
         validation_method="cpcv",
         cpcv_n_splits=5,
         cpcv_test_size=0.2,
@@ -222,17 +212,14 @@ def test_out_of_sample_validation_benchmark_cost_is_periodic_cpcv():
         benchmark_commission=0.001,
         benchmark_slippage=0.001,
         benchmark_expense_ratio=0.0,
-        benchmark_cost_is_periodic=False,  # Round-trip costs
+        benchmark_cost_is_periodic=False,
     )
 
-    # Run out_of_sample_validation with benchmark_cost_is_periodic=True
     results_true = out_of_sample_validation(
         data=data,
         strategy_factory=lambda params: build_strategy(strategy_type, json.dumps(params)),
         param_grid=param_grid,
-        train_frac=0.6,
-        val_frac=0.2,
-        test_frac=0.2,
+        train_frac=0.6, val_frac=0.2, test_frac=0.2,
         validation_method="cpcv",
         cpcv_n_splits=5,
         cpcv_test_size=0.2,
@@ -244,42 +231,26 @@ def test_out_of_sample_validation_benchmark_cost_is_periodic_cpcv():
         benchmark_commission=0.001,
         benchmark_slippage=0.001,
         benchmark_expense_ratio=0.0,
-        benchmark_cost_is_periodic=True,  # Periodic costs
+        benchmark_cost_is_periodic=True,
     )
 
-    # Verify that both runs succeeded
-    assert results_false is not None, "results_false should not be None"
-    assert results_true is not None, "results_true should not be None"
-    assert "test_performance" in results_false, "'test_performance' should be in results_false"
-    assert "test_performance" in results_true, "'test_performance' should be in results_true"
-
-    # Extract benchmark stats from test performance
+    assert results_false is not None
+    assert results_true is not None
+    assert "test_performance" in results_false
+    assert "test_performance" in results_true
     bench_false = results_false["test_performance"]
     bench_true = results_true["test_performance"]
-
-    # Both should have benchmark metrics since we provided a benchmark
-    assert "benchmark_total_return" in bench_false, f"'benchmark_total_return' should be in bench_false. Keys: {list(bench_false.keys())}"
-    assert "benchmark_total_return" in bench_true, f"'benchmark_total_return' should be in bench_true. Keys: {list(bench_true.keys())}"
-    assert "benchmark_cost_is_periodic" in bench_false, f"'benchmark_cost_is_periodic' should be in bench_false. Keys: {list(bench_false.keys())}"
-    assert "benchmark_cost_is_periodic" in bench_true, f"'benchmark_cost_is_periodic' should be in bench_true. Keys: {list(bench_true.keys())}"
-
-    # Verify the flag is correctly recorded
-    assert bench_false["benchmark_cost_is_periodic"] is False, f"Expected False, got {bench_false['benchmark_cost_is_periodic']}"
-    assert bench_true["benchmark_cost_is_periodic"] is True, f"Expected True, got {bench_true['benchmark_cost_is_periodic']}"
-
-    # The key test is that the flag is correctly propagated and recorded
-    # Also verify that the flag appears in the summary
-    assert "summary" in results_false, "'summary' should be in results_false"
-    assert "summary" in results_true, "'summary' should be in results_true"
+    assert bench_false is not None
+    assert bench_true is not None
+    assert "benchmark_total_return" in bench_false
+    assert "benchmark_cost_is_periodic" in bench_false
+    assert bench_false["benchmark_cost_is_periodic"] is False
+    assert bench_true["benchmark_cost_is_periodic"] is True
+    assert "summary" in results_false
     summary_false = results_false["summary"]
     summary_true = results_true["summary"]
-
-    # For CPCV with single benchmark, the flag should be in the summary
-    assert "benchmark_cost_is_periodic" in summary_false, f"'benchmark_cost_is_periodic' should be in summary_false. Keys: {list(summary_false.keys())}"
-    assert "benchmark_cost_is_periodic" in summary_true, f"'benchmark_cost_is_periodic' should be in summary_true. Keys: {list(summary_true.keys())}"
-
-    assert summary_false["benchmark_cost_is_periodic"] is False, f"Expected False in summary, got {summary_false['benchmark_cost_is_periodic']}"
-    assert summary_true["benchmark_cost_is_periodic"] is True, f"Expected True in summary, got {summary_true['benchmark_cost_is_periodic']}"
+    assert "benchmark_cost_is_periodic" in summary_false
+    assert summary_true["benchmark_cost_is_periodic"] is True
 
 
 def main() -> int:

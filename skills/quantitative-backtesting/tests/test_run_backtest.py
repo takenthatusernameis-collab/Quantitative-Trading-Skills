@@ -433,6 +433,7 @@ _AUDIT_PARAMS = {
     "cross_sectional_momentum": '{"lookback": 21}',
     "dual_momentum": '{"lookback": 21}',
     "zscore_mean_reversion": None,
+    "macd": None,
 }
 
 
