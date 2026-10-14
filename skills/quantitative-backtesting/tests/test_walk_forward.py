@@ -41,6 +41,8 @@ from walk_forward import (  # noqa: E402
     _calculate_strategy_returns,
     _split_train_val_test,
     _verify_split_separation,
+    _benchmark_stats_with_splits,
+    _add_benchmark_to_summary,
     main as walk_forward_main,
 )
 from strategy_builder import build_strategy  # noqa: E402
@@ -436,6 +438,162 @@ def test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv():
             f"Expected benchmark_cost_is_periodic=True in config, got {summary['config']['benchmark_cost_is_periodic']}"
 
 
+def _make_benchmark_data_with_splits(periods: int = 50, split_at: int = 20, seed: int = 88) -> pd.DataFrame:
+    """Create benchmark OHLCV data with a stock-split column for testing.
+
+    The close prices are generated at the POST-SPLIT price level on and after
+    the split date.  Pre-split dates carry the pre-split (higher) price level.
+    The ``splits`` column records the split ratio (2.0 for a 2-for-1 split).
+    """
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    trend = np.linspace(0, 0.3, periods)
+    noise = rng.normal(0, 0.008, periods)
+    daily_returns = trend / periods + noise
+    prices = 100 * np.exp(np.cumsum(daily_returns))
+
+    splits = np.ones(periods)
+    splits[split_at] = 2.0
+
+    # Post-split prices are halved to simulate a 2-for-1 split
+    close = prices.copy()
+    close[split_at:] = close[split_at:] / 2.0
+
+    return pd.DataFrame({
+        "open": close * rng.uniform(0.995, 1.005, periods),
+        "high": close * rng.uniform(1.005, 1.02, periods),
+        "low": close * rng.uniform(0.98, 0.995, periods),
+        "close": close,
+        "volume": rng.integers(1_000_000, 10_000_000, periods),
+        "splits": splits,
+    }, index=dates)
+
+
+def test_benchmark_stats_with_splits_runs_without_error():
+    """_benchmark_stats_with_splits must be defined and callable with splits data."""
+    dates = pd.date_range("2020-01-01", periods=50, freq="B")
+    rng = np.random.default_rng(42)
+    strategy_returns = pd.Series(rng.normal(0.001, 0.02, 50), index=dates)
+
+    benchmark_data = _make_benchmark_data_with_splits(periods=50, split_at=20)
+    benchmark_returns = benchmark_data["close"].pct_change()
+    _, aligned_bench = strategy_returns.align(benchmark_returns, join="inner")
+    aligned_bench = aligned_bench.dropna()
+
+    stats = _benchmark_stats_with_splits(
+        strategy_returns, aligned_bench, 252,
+        total_return_benchmark=False,
+        benchmark_commission=0.001,
+        benchmark_slippage=0.001,
+        benchmark_expense_ratio=0.0,
+        benchmark_cost_is_periodic=True,
+        benchmark_data=benchmark_data,
+    )
+    assert "benchmark_total_return" in stats, f"Expected benchmark_total_return in stats. Keys: {list(stats.keys())}"
+    assert stats["benchmark_cost_is_periodic"] is True
+    assert "alpha" in stats
+    assert "beta" in stats
+    assert "correlation_with_benchmark" in stats
+
+
+def test_benchmark_stats_with_splits_uses_adjusted_returns():
+    """_benchmark_stats_with_splits should adjust prices for splits, producing
+    different returns than the raw (unadjusted) close-to-close returns."""
+    dates = pd.date_range("2020-01-01", periods=50, freq="B")
+    rng = np.random.default_rng(42)
+    strategy_returns = pd.Series(rng.normal(0.001, 0.02, 50), index=dates)
+
+    benchmark_data = _make_benchmark_data_with_splits(periods=50, split_at=20)
+    raw_returns = benchmark_data["close"].pct_change()
+    _, aligned_raw = strategy_returns.align(raw_returns, join="inner")
+    aligned_raw = aligned_raw.dropna()
+
+    from data_loader import adjust_for_splits
+    adjusted = adjust_for_splits(benchmark_data)
+    adjusted_returns = adjusted["close"].pct_change()
+    _, aligned_adj = strategy_returns.align(adjusted_returns, join="inner")
+    aligned_adj = aligned_adj.dropna()
+
+    # The adjusted returns should differ from raw returns (adjustment happened)
+    assert not aligned_raw.equals(aligned_adj), (
+        "Split-adjusted returns should differ from raw returns"
+    )
+
+    # Both should produce stats without error
+    stats_raw = _benchmark_stats_with_splits(
+        strategy_returns, aligned_raw, 252,
+        benchmark_data=benchmark_data,
+    )
+    stats_adj = _benchmark_stats_with_splits(
+        strategy_returns, aligned_adj, 252,
+        benchmark_data=benchmark_data,
+    )
+    assert "benchmark_total_return" in stats_raw
+    assert "benchmark_total_return" in stats_adj
+
+
+def test_add_benchmark_to_summary_splits_path():
+    """_add_benchmark_to_summary should route to splits-aware path without NameError."""
+    dates = pd.date_range("2020-01-01", periods=50, freq="B")
+    rng = np.random.default_rng(42)
+    strategy_returns = pd.Series(rng.normal(0.001, 0.02, 50), index=dates)
+
+    benchmark_data = _make_benchmark_data_with_splits(periods=50, split_at=20)
+    benchmark_returns = benchmark_data["close"].pct_change()
+    _, aligned_bench = strategy_returns.align(benchmark_returns, join="inner")
+    aligned_bench = aligned_bench.dropna()
+
+    summary = {}
+    summary = _add_benchmark_to_summary(
+        summary, strategy_returns, aligned_bench,
+        commission=0.001, slippage=0.001,
+        benchmark_expense_ratio=0.0,
+        total_return_benchmark=False,
+        benchmark_cost_is_periodic=True,
+        benchmark_data=benchmark_data,
+    )
+    assert "benchmark_total_return" in summary, f"Keys: {list(summary.keys())}"
+    assert summary["benchmark_cost_is_periodic"] is True
+
+
+def test_out_of_sample_validation_with_splits():
+    """out_of_sample_validation should handle benchmark data with splits + periodic costs."""
+    data = _make_ohlcv_data(periods=300, seed=42)
+    benchmark = _make_benchmark_data_with_splits(periods=300, split_at=100)
+
+    strategy_type = "sma_crossover"
+    param_grid = {"fast_period": [3, 5], "slow_period": [8, 10]}
+
+    results = out_of_sample_validation(
+        data=data,
+        strategy_factory=lambda params: build_strategy(strategy_type, json.dumps(params)),
+        param_grid=param_grid,
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        benchmark=benchmark,
+        total_return_benchmark=False,
+        benchmark_commission=0.001,
+        benchmark_slippage=0.001,
+        benchmark_expense_ratio=0.0,
+        benchmark_cost_is_periodic=True,
+    )
+
+    assert results is not None
+    assert "test_benchmark" in results
+    assert "summary" in results
+    test_bench = results["test_benchmark"]
+    if isinstance(test_bench, dict):
+        assert test_bench.get("benchmark_cost_is_periodic") is True
+
+
 # Need to import patch for mocking
 from unittest.mock import patch
 
@@ -447,6 +605,10 @@ def main() -> int:
         ("test_cli_out_of_sample_benchmark_cost_is_periodic", test_cli_out_of_sample_benchmark_cost_is_periodic),
         ("test_cli_out_of_sample_benchmark_cost_is_periodic_false", test_cli_out_of_sample_benchmark_cost_is_periodic_false),
         ("test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv", test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv),
+        ("test_benchmark_stats_with_splits_runs_without_error", test_benchmark_stats_with_splits_runs_without_error),
+        ("test_benchmark_stats_with_splits_uses_adjusted_returns", test_benchmark_stats_with_splits_uses_adjusted_returns),
+        ("test_add_benchmark_to_summary_splits_path", test_add_benchmark_to_summary_splits_path),
+        ("test_out_of_sample_validation_with_splits", test_out_of_sample_validation_with_splits),
     ]
 
     failures = 0

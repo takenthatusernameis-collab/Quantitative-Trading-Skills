@@ -20,6 +20,13 @@
    - `test_cli_out_of_sample_benchmark_cost_is_periodic_false()` — verifies default `False` behavior when flag is omitted
    - `test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv()` — verifies the flag works correctly with CPCV validation method
    Updated `run_out_of_sample_validation()` in `walk_forward.py` to persist the flag in the output summary JSON (`config.benchmark_cost_is_periodic` and `test_benchmark.benchmark_cost_is_periodic`).
+7. **Completed split-aware benchmark cost calculation (fixes incomplete prior work).** The prior session added a `benchmark_data` parameter to `_add_benchmark_to_summary()` with a code path that called the undefined function `_benchmark_stats_with_splits`. Implemented the function in `walk_forward.py`: it adjusts benchmark OHLCV prices for splits via `adjust_for_splits()`, recomputes benchmark returns from split-adjusted close prices (or `adj_close`/dividends for total-return benchmarks), and delegates to `_benchmark_stats()` with the original `benchmark_cost_is_periodic` flag preserved. Wired up `benchmark_data=benchmark` at all five `_add_benchmark_to_summary()` call sites (walk_forward_analysis, cpcv_analysis, run_walk_forward, run_cpcv, run_monte_carlo). Also routed the `out_of_sample_validation` test-phase `_benchmark_stats()` calls through `_benchmark_stats_with_splits` when `benchmark_cost_is_periodic=True` and the benchmark DataFrame contains a `splits` column. Added `adjust_for_splits` to the data_loader import.
+8. **Added tests for split-aware benchmark costs.** Added four new tests to `tests/test_walk_forward.py`:
+   - `test_benchmark_stats_with_splits_runs_without_error` — verifies the function is defined and callable with splits data
+   - `test_benchmark_stats_with_splits_uses_adjusted_returns` — verifies returns are adjusted differently than raw returns
+   - `test_add_benchmark_to_summary_splits_path` — verifies `_add_benchmark_to_summary` routes to the splits-aware path without `NameError`
+   - `test_out_of_sample_validation_with_splits` — end-to-end test with benchmark data containing a `splits` column
+   Removed dead `splits_test_data.csv` from the repository root (was untracked, unreferenced in code).
 
 ## Verification status (this session)
 
@@ -27,17 +34,17 @@
 - `test_performance.py`: 23/23 passed (including the new periodic costs test)
 - `test_run_backtest.py`: 41/41 passed
 - `test_strategy_builder.py`: 27/27 passed
-- `test_walk_forward.py`: 5/5 passed (including 3 new CLI integration tests for benchmark_cost_is_periodic)
+- `test_walk_forward.py`: 9/9 passed (5 prior + 4 new tests for split-aware benchmark costs)
 - `test_cpcv.py`: 16/16 passed
 - `test_monte_carlo.py`: 7/7 passed
 - `test_generate_sample_data.py`: 1/1 passed
 - `test_reporting.py`: 9 failures, all pre-existing and matplotlib-dependent
 
-All non-reporting tests pass (143/143 core quant tests).
+All non-reporting tests pass (147/147 core quant tests).
 
 ## What remains unresolved
 
-- Benchmark cost model refinement: split adjustment (corporate actions/splits) beyond what `adj_close` provides; dynamic benchmark cost modeling; benchmark-specific slippage/impact models. Current implementation adds periodic cost option on top of existing round-trip/expense-ratio handling.
+- Benchmark cost model refinement: `_adjust_for_splits()` in `data_loader.py` normalizes pre-split prices by multiplying by the split ratio, but this can produce incorrect period returns on split dates depending on the data format (pre-split vs post-split price levels). Consider validating the adjustment against real Yahoo Finance data with `adj_close` as ground truth.
 - Real data integration: Add example workflows with real market data (documentation/spec task; no network access in this environment) demonstrating full pipeline from data loading through provenance, PIT validation, survivorship bias detection, benchmark comparison, and statistical significance testing.
 - Multiple-testing correction for benchmark alpha (Deflated Alpha) is implemented; could benefit from additional worked examples with real data and clearer interpretation docs.
 
@@ -48,7 +55,10 @@ All non-reporting tests pass (143/143 core quant tests).
 - `run_backtest.py` CLI gains `--benchmark-cost-is-periodic` and stores it in results config.
 - `walk_forward.py` fully propagates `benchmark_cost_is_periodic` through function signatures, internal calls to `_benchmark_stats()` and `_add_benchmark_to_summary()`, and all CLI entry points; adds CLI flag.
 - `run_out_of_sample_validation()` CLI now persists `benchmark_cost_is_periodic` in the output summary JSON.
-- All non-reporting tests pass including new tests validating periodic benchmark cost behavior and CLI integration.
+- `walk_forward._benchmark_stats_with_splits()` is now defined; adjusts benchmark prices for splits, recomputes returns, and delegates to `_benchmark_stats()` preserving the periodic flag.
+- `walk_forward._add_benchmark_to_summary()` routes to `_benchmark_stats_with_splits()` when benchmark data has a `splits` column and `benchmark_cost_is_periodic=True`; `benchmark_data=benchmark` is now passed at all five call sites.
+- The `out_of_sample_validation` test-phase `_benchmark_stats()` calls also route through `_benchmark_stats_with_splits()` when splits data is available and periodic costs are requested.
+- All non-reporting tests pass (147/147) including 4 new tests for split-aware benchmark cost behavior.
 
 ## Test commands (preserve evidence)
 

@@ -1,0 +1,98 @@
+{
+  "symbol": "SPY",
+  "strategy": "sma_crossover",
+  "metrics": {
+    "total_return": -0.4953509450990099,
+    "annualized_return": -1.0,
+    "annualized_volatility": 4.806662031058953,
+    "sharpe_ratio": -9.319624380496812,
+    "sortino_ratio": -8.124870276916303,
+    "max_drawdown": -0.50015,
+    "avg_drawdown": -0.500075,
+    "calmar_ratio": 1.9994001799460162,
+    "max_drawdown_recovery_days": null,
+    "var_95": -0.425045,
+    "cvar_95": -0.5,
+    "skewness": -1.9979874030622615,
+    "kurtosis": 3.993407197846178,
+    "total_trades": 1,
+    "winning_trades": 0,
+    "losing_trades": 1,
+    "win_rate": 0.0,
+    "trades_closed_at_end": 0,
+    "pct_trades_closed_at_end": 0.0,
+    "avg_win": 0.0,
+    "avg_loss": 0.49019607843137253,
+    "profit_factor": 0.0,
+    "expectancy": -50.0,
+    "avg_trade_duration": 2.0,
+    "benchmark_total_return": -0.48000212034219114,
+    "benchmark_annualized_return": -1.0,
+    "benchmark_total_return_type": "price",
+    "benchmark_commission": 0.0002,
+    "benchmark_slippage": 0.0001,
+    "benchmark_expense_ratio": 0.0,
+    "benchmark_cost_is_periodic": true,
+    "correlation_with_benchmark": 0.9995036249628332,
+    "alpha": -3.6007243670937736,
+    "beta": 0.9799010878222716,
+    "tracking_error": 0.18066873612922832,
+    "information_ratio": -19.929980384200263,
+    "alpha_tstat": -1.8046876815429729,
+    "alpha_pvalue": 0.21288662158888763,
+    "r_squared": 0.9990074963138439,
+    "omega_ratio": 2.017991185486728,
+    "tail_ratio": 0.019197043815324454,
+    "initial_capital": 100000
+  },
+  "plot_files": [],
+  "data_provenance": {
+    "source_path": "splits_test_data.csv",
+    "load_timestamp": "2026-10-14T21:58:57.175392Z",
+    "file_format": ".csv",
+    "file_size_bytes": 209,
+    "symbol_filter": "SPY",
+    "start_date_filter": null,
+    "end_date_filter": null,
+    "original_shape": [
+      5,
+      7
+    ],
+    "final_shape": [
+      5,
+      6
+    ],
+    "columns_original": [
+      "date",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume",
+      "splits"
+    ],
+    "columns_final": [
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume",
+      "splits"
+    ],
+    "date_range_original": null,
+    "date_range_final": [
+      "2020-01-01 00:00:00",
+      "2020-01-05 00:00:00"
+    ],
+    "validation_passed": true,
+    "validation_messages": [],
+    "transformations_applied": [
+      "column_names_lowercase_stripped",
+      "set_index_from_date",
+      "sorted_index",
+      "coerced_numeric_types"
+    ],
+    "checksum": "d524d9e8e7a7d1e7",
+    "total_return_type": "price"
+  }
+}

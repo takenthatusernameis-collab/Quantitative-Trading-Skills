@@ -21,7 +21,7 @@ from itertools import product
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from scripts.strategy_builder import build_strategy
-from scripts.data_loader import load_data, validate_data, validate_point_in_time, _compute_benchmark_total_return
+from scripts.data_loader import load_data, validate_data, validate_point_in_time, _compute_benchmark_total_return, adjust_for_splits
 from scripts.performance import calculate_metrics, generate_report, _annualization_factor, _benchmark_stats
 from scripts.reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
@@ -506,6 +506,7 @@ def walk_forward_analysis(
                     commission=benchmark_commission, slippage=benchmark_slippage,
                     benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark,
                     benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+                    benchmark_data=benchmark,
                 )
 
     # Add per-period benchmark metrics to summary
@@ -1541,6 +1542,7 @@ def cpcv_analysis(
                     commission=benchmark_commission, slippage=benchmark_slippage,
                     benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark,
                     benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+                    benchmark_data=benchmark,
                 )
 
     # Add per-fold benchmark metrics to summary
@@ -1846,14 +1848,25 @@ def out_of_sample_validation(
             for i, bench in enumerate(benchmark):
                 benchmark_returns = _compute_benchmark_returns(bench, test_returns, total_return_benchmark)
                 if benchmark_returns is not None:
-                    bench_stats = _benchmark_stats(
-                        test_returns, benchmark_returns, ann_factor_test,
-                        total_return_benchmark=total_return_benchmark,
-                        benchmark_commission=benchmark_commission,
-                        benchmark_slippage=benchmark_slippage,
-                        benchmark_expense_ratio=benchmark_expense_ratio,
-                        benchmark_cost_is_periodic=benchmark_cost_is_periodic,
-                    )
+                    if benchmark_cost_is_periodic and "splits" in bench.columns:
+                        bench_stats = _benchmark_stats_with_splits(
+                            test_returns, benchmark_returns, ann_factor_test,
+                            total_return_benchmark=total_return_benchmark,
+                            benchmark_commission=benchmark_commission,
+                            benchmark_slippage=benchmark_slippage,
+                            benchmark_expense_ratio=benchmark_expense_ratio,
+                            benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+                            benchmark_data=bench,
+                        )
+                    else:
+                        bench_stats = _benchmark_stats(
+                            test_returns, benchmark_returns, ann_factor_test,
+                            total_return_benchmark=total_return_benchmark,
+                            benchmark_commission=benchmark_commission,
+                            benchmark_slippage=benchmark_slippage,
+                            benchmark_expense_ratio=benchmark_expense_ratio,
+                            benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+                        )
                     benchmark_results.append(bench_stats)
                     if 'alpha_pvalue' in bench_stats and bench_stats['alpha_pvalue'] is not None:
                         p_values.append(bench_stats['alpha_pvalue'])
@@ -1915,14 +1928,25 @@ def out_of_sample_validation(
             # Single benchmark (backward compatibility)
             benchmark_returns = _compute_benchmark_returns(benchmark, test_returns, total_return_benchmark)
             if benchmark_returns is not None:
-                test_benchmark = _benchmark_stats(
-                    test_returns, benchmark_returns, ann_factor_test,
-                    total_return_benchmark=total_return_benchmark,
-                    benchmark_commission=benchmark_commission,
-                    benchmark_slippage=benchmark_slippage,
-                    benchmark_expense_ratio=benchmark_expense_ratio,
-                    benchmark_cost_is_periodic=benchmark_cost_is_periodic,
-                )
+                if benchmark_cost_is_periodic and "splits" in benchmark.columns:
+                    test_benchmark = _benchmark_stats_with_splits(
+                        test_returns, benchmark_returns, ann_factor_test,
+                        total_return_benchmark=total_return_benchmark,
+                        benchmark_commission=benchmark_commission,
+                        benchmark_slippage=benchmark_slippage,
+                        benchmark_expense_ratio=benchmark_expense_ratio,
+                        benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+                        benchmark_data=benchmark,
+                    )
+                else:
+                    test_benchmark = _benchmark_stats(
+                        test_returns, benchmark_returns, ann_factor_test,
+                        total_return_benchmark=total_return_benchmark,
+                        benchmark_commission=benchmark_commission,
+                        benchmark_slippage=benchmark_slippage,
+                        benchmark_expense_ratio=benchmark_expense_ratio,
+                        benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+                    )
                 test_performance.update(test_benchmark)
 
     # Aggregate summary
@@ -2143,6 +2167,7 @@ def run_cpcv(args) -> int:
                 commission=bench_commission, slippage=bench_slippage,
                 benchmark_expense_ratio=bench_expense_ratio, total_return_benchmark=total_return_benchmark,
                 benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+                benchmark_data=benchmark,
             )
             print(
                 f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
@@ -2354,6 +2379,7 @@ def _add_benchmark_to_summary(
     benchmark_expense_ratio: float = 0.0,
     total_return_benchmark: bool = False,
     benchmark_cost_is_periodic: bool = False,
+    benchmark_data: Optional[pd.DataFrame] = None,
 ) -> Dict[str, Any]:
     """Add benchmark comparison metrics to a summary dict.
 
@@ -2369,20 +2395,96 @@ def _add_benchmark_to_summary(
         slippage: Slippage rate per trade.
         benchmark_expense_ratio: Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%).
         total_return_benchmark: If True, compute benchmark returns using total return (dividends + price).
+        benchmark_data: Original benchmark OHLCV data with splits column (optional).
     """
     if len(benchmark_returns) == 0:
         return summary
 
     ann_factor = _annualization_factor(strategy_returns.index)
-    summary.update(_benchmark_stats(
-        strategy_returns, benchmark_returns, ann_factor,
+
+    # If we have benchmark data and periodic costs are requested, use split-aware cost calculation
+    if benchmark_cost_is_periodic and benchmark_data is not None and "splits" in benchmark_data.columns:
+        # Align benchmark data with returns
+        _, aligned_benchmark_data = strategy_returns.align(benchmark_data, join="inner")
+        if len(aligned_benchmark_data) > 0:
+            stats = _benchmark_stats_with_splits(
+                strategy_returns, benchmark_returns, ann_factor,
+                total_return_benchmark=total_return_benchmark,
+                benchmark_commission=commission,
+                benchmark_slippage=slippage,
+                benchmark_expense_ratio=benchmark_expense_ratio,
+                benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+                benchmark_data=aligned_benchmark_data,
+            )
+        else:
+            stats = _benchmark_stats(
+                strategy_returns, benchmark_returns, ann_factor,
+                total_return_benchmark=total_return_benchmark,
+                benchmark_commission=commission,
+                benchmark_slippage=slippage,
+                benchmark_expense_ratio=benchmark_expense_ratio,
+                benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+            )
+    else:
+        stats = _benchmark_stats(
+            strategy_returns, benchmark_returns, ann_factor,
+            total_return_benchmark=total_return_benchmark,
+            benchmark_commission=commission,
+            benchmark_slippage=slippage,
+            benchmark_expense_ratio=benchmark_expense_ratio,
+            benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+        )
+    summary.update(stats)
+    return summary
+
+
+def _benchmark_stats_with_splits(
+    strategy_returns: pd.Series,
+    benchmark_returns: pd.Series,
+    ann_factor: float,
+    total_return_benchmark: bool = False,
+    benchmark_commission: float = 0.0,
+    benchmark_slippage: float = 0.0,
+    benchmark_expense_ratio: float = 0.0,
+    benchmark_cost_is_periodic: bool = False,
+    benchmark_data: Optional[pd.DataFrame] = None,
+) -> Dict[str, Any]:
+    """Compute benchmark stats with split-adjusted returns.
+
+    When benchmark OHLCV data includes a ``splits`` column, prices are
+    adjusted for splits before computing returns.  This prevents the
+    artificial return drop that a stock split would otherwise introduce on
+    the split date (e.g. a 2-for-1 split halves the close price), which
+    would distort benchmark comparison metrics and cost calculations.
+
+    After recomputing returns from split-adjusted prices, the function
+    delegates to ``_benchmark_stats`` and forwards ``benchmark_cost_is_periodic``
+    unchanged so that periodic or round-trip cost handling is preserved.
+    """
+    if benchmark_data is not None and "splits" in benchmark_data.columns:
+        benchmark_data = adjust_for_splits(benchmark_data)
+
+    if benchmark_data is not None and "close" in benchmark_data.columns:
+        if total_return_benchmark:
+            adjusted_benchmark_returns = _compute_benchmark_total_return(benchmark_data)
+        else:
+            adjusted_benchmark_returns = benchmark_data["close"].pct_change()
+        _, aligned_bench = strategy_returns.align(
+            adjusted_benchmark_returns, join="inner"
+        )
+        if len(aligned_bench) > 0:
+            benchmark_returns = aligned_bench
+
+    return _benchmark_stats(
+        strategy_returns,
+        benchmark_returns,
+        ann_factor,
         total_return_benchmark=total_return_benchmark,
-        benchmark_commission=commission,
-        benchmark_slippage=slippage,
+        benchmark_commission=benchmark_commission,
+        benchmark_slippage=benchmark_slippage,
         benchmark_expense_ratio=benchmark_expense_ratio,
         benchmark_cost_is_periodic=benchmark_cost_is_periodic,
-    ))
-    return summary
+    )
 
 
 def _parse_param_grid(param_grid_str: str) -> Dict[str, List[Any]]:
@@ -2457,6 +2559,7 @@ def run_walk_forward(args) -> int:
                 commission=bench_commission, slippage=bench_slippage,
                 benchmark_expense_ratio=bench_expense_ratio, total_return_benchmark=total_return_benchmark,
                 benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+                benchmark_data=benchmark,
             )
             print(
                 f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
@@ -2885,7 +2988,9 @@ def run_monte_carlo(args) -> int:
         mc_save["summary"] = _add_benchmark_to_summary(
             mc_save["summary"], returns, benchmark_returns,
             commission=bench_commission, slippage=bench_slippage,
-            benchmark_expense_ratio=bench_expense_ratio, total_return_benchmark=total_return_benchmark
+            benchmark_expense_ratio=bench_expense_ratio, total_return_benchmark=total_return_benchmark,
+            benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+            benchmark_data=benchmark,
         )
     with open(mc_path, "w") as f:
         json.dump(mc_save, f, indent=2, default=str)

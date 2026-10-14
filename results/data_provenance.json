@@ -1,0 +1,49 @@
+{
+  "source_path": "splits_test_data.csv",
+  "load_timestamp": "2026-10-14T21:58:57.175392Z",
+  "file_format": ".csv",
+  "file_size_bytes": 209,
+  "symbol_filter": "SPY",
+  "start_date_filter": null,
+  "end_date_filter": null,
+  "original_shape": [
+    5,
+    7
+  ],
+  "final_shape": [
+    5,
+    6
+  ],
+  "columns_original": [
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "splits"
+  ],
+  "columns_final": [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "splits"
+  ],
+  "date_range_original": null,
+  "date_range_final": [
+    "2020-01-01 00:00:00",
+    "2020-01-05 00:00:00"
+  ],
+  "validation_passed": true,
+  "validation_messages": [],
+  "transformations_applied": [
+    "column_names_lowercase_stripped",
+    "set_index_from_date",
+    "sorted_index",
+    "coerced_numeric_types"
+  ],
+  "checksum": "d524d9e8e7a7d1e7",
+  "total_return_type": "price"
+}
