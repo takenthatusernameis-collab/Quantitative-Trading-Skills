@@ -129,6 +129,11 @@ def walk_forward_analysis(
     borrow_cost: float = 0.0,
     funding_cost: float = 0.0,
     apply_deflation: bool = False,
+    benchmark: Optional[pd.DataFrame] = None,
+    total_return_benchmark: bool = False,
+    benchmark_commission: float = 0.0,
+    benchmark_slippage: float = 0.0,
+    benchmark_expense_ratio: float = 0.0,
 ) -> Dict[str, Any]:
     """
     Perform walk-forward analysis with expanding training windows.
@@ -156,6 +161,12 @@ def walk_forward_analysis(
             parameter selection, plus an aggregate correction on the
             combined out-of-sample returns with n_trials equal to the
             total number of configurations evaluated across all periods.
+        benchmark: Optional benchmark OHLCV DataFrame for buy-and-hold comparison
+        total_return_benchmark: If True, compute benchmark returns using total return
+            (dividends + price) when dividend/adj_close data is available
+        benchmark_commission: Commission per trade for benchmark (as decimal)
+        benchmark_slippage: Slippage per trade for benchmark (as decimal)
+        benchmark_expense_ratio: Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%)
 
     Returns:
         Dictionary with walk-forward results including:
@@ -307,6 +318,16 @@ def walk_forward_analysis(
 
     # Summary metrics
     summary = _calculate_walk_forward_summary(oos_returns, periods)
+
+    # Benchmark comparison on combined OOS returns
+    if benchmark is not None and len(oos_returns) > 0:
+        benchmark_returns = _compute_benchmark_returns(benchmark, oos_returns, total_return_benchmark)
+        if benchmark_returns is not None:
+            summary = _add_benchmark_to_summary(
+                summary, oos_returns, benchmark_returns,
+                commission=benchmark_commission, slippage=benchmark_slippage,
+                benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark
+            )
 
     # Aggregate multiple-testing correction on the combined out-of-sample
     # returns. The conservative interpretation: the OOS record was produced
@@ -872,6 +893,11 @@ def cpcv_analysis(
     borrow_cost: float = 0.0,
     funding_cost: float = 0.0,
     apply_deflation: bool = False,
+    benchmark: Optional[pd.DataFrame] = None,
+    total_return_benchmark: bool = False,
+    benchmark_commission: float = 0.0,
+    benchmark_slippage: float = 0.0,
+    benchmark_expense_ratio: float = 0.0,
 ) -> Dict[str, Any]:
     """
     Perform Combinatorially Purged Cross-Validation (CPCV).
@@ -906,7 +932,13 @@ def cpcv_analysis(
             (multiple-testing correction) for each fold's in-sample
             parameter selection, plus an aggregate correction on the
             combined out-of-sample returns with n_trials equal to the
-            total number of configurations evaluated across all folds.
+             total number of configurations evaluated across all folds.
+        benchmark: Optional benchmark OHLCV DataFrame for buy-and-hold comparison
+        total_return_benchmark: If True, compute benchmark returns using total return
+            (dividends + price) when dividend/adj_close data is available
+        benchmark_commission: Commission per trade for benchmark (as decimal)
+        benchmark_slippage: Slippage per trade for benchmark (as decimal)
+        benchmark_expense_ratio: Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%)
 
     Returns:
         Dictionary with CPCV results including:
@@ -1139,6 +1171,16 @@ def cpcv_analysis(
             trial_sharpes=all_trial_sharpes if all_trial_sharpes else None,
         )
 
+    # Benchmark comparison on combined OOS returns
+    if benchmark is not None and len(oos_returns) > 0:
+        benchmark_returns = _compute_benchmark_returns(benchmark, oos_returns, total_return_benchmark)
+        if benchmark_returns is not None:
+            summary = _add_benchmark_to_summary(
+                summary, oos_returns, benchmark_returns,
+                commission=benchmark_commission, slippage=benchmark_slippage,
+                benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark
+            )
+
     return {
         "folds": folds,
         "best_params_per_fold": best_params_per_fold,
@@ -1218,6 +1260,7 @@ def out_of_sample_validation(
     total_return_benchmark: bool = False,
     benchmark_commission: float = 0.0,
     benchmark_slippage: float = 0.0,
+    benchmark_expense_ratio: float = 0.0,
 ) -> Dict[str, Any]:
     """
     Perform rigorous out-of-sample validation with chronological train/validation/test split.
@@ -1258,7 +1301,7 @@ def out_of_sample_validation(
         total_return_benchmark: Compute benchmark returns using total return (dividends + price)
         benchmark_commission: Commission per trade for benchmark
         benchmark_slippage: Slippage per trade for benchmark
-
+        benchmark_expense_ratio: Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%)
     Returns:
         Dictionary with:
             - 'train_val_test_split': Dict with split boundaries and sizes
@@ -1323,6 +1366,11 @@ def out_of_sample_validation(
             borrow_cost=borrow_cost,
             funding_cost=funding_cost,
             apply_deflation=apply_deflation,
+            benchmark=benchmark,
+            total_return_benchmark=total_return_benchmark,
+            benchmark_commission=benchmark_commission,
+            benchmark_slippage=benchmark_slippage,
+            benchmark_expense_ratio=benchmark_expense_ratio,
         )
     elif validation_method == "cpcv":
         validation_results = cpcv_analysis(
@@ -1341,6 +1389,11 @@ def out_of_sample_validation(
             borrow_cost=borrow_cost,
             funding_cost=funding_cost,
             apply_deflation=apply_deflation,
+            benchmark=benchmark,
+            total_return_benchmark=total_return_benchmark,
+            benchmark_commission=benchmark_commission,
+            benchmark_slippage=benchmark_slippage,
+            benchmark_expense_ratio=benchmark_expense_ratio,
         )
     else:
         raise ValueError(f"Unknown validation_method: {validation_method}. Use 'walk_forward' or 'cpcv'.")
@@ -1407,7 +1460,7 @@ def out_of_sample_validation(
         "test_returns": test_returns,
     }
 
-    # Benchmark comparison on test set
+# Benchmark comparison on test set
     test_benchmark = None
     if benchmark is not None and len(test_returns) > 0:
         benchmark_returns = _compute_benchmark_returns(benchmark, test_returns, total_return_benchmark)
@@ -1417,6 +1470,7 @@ def out_of_sample_validation(
                 total_return_benchmark=total_return_benchmark,
                 benchmark_commission=benchmark_commission,
                 benchmark_slippage=benchmark_slippage,
+                benchmark_expense_ratio=benchmark_expense_ratio,
             )
             test_performance.update(test_benchmark)
 
@@ -1563,6 +1617,7 @@ def run_cpcv(args) -> int:
     total_return_benchmark = getattr(args, "total_return_benchmark", False)
     bench_commission = getattr(args, "benchmark_commission", None) if getattr(args, "benchmark_commission", None) is not None else args.commission
     bench_slippage = getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage
+    bench_expense_ratio = getattr(args, "benchmark_expense_ratio", None) if getattr(args, "benchmark_expense_ratio", None) is not None else 0.0
     if getattr(args, "benchmark", None):
         print(f"Loading benchmark data from {args.benchmark}...")
         benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
@@ -1586,6 +1641,11 @@ def run_cpcv(args) -> int:
         borrow_cost=args.borrow_cost,
         funding_cost=args.funding_cost,
         apply_deflation=args.deflate,
+        benchmark=benchmark,
+        total_return_benchmark=total_return_benchmark,
+        benchmark_commission=bench_commission,
+        benchmark_slippage=bench_slippage,
+        benchmark_expense_ratio=bench_expense_ratio,
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
@@ -1598,7 +1658,8 @@ def run_cpcv(args) -> int:
             # Add benchmark metrics to summary
             results["summary"] = _add_benchmark_to_summary(
                 results["summary"], results["oos_returns"], benchmark_returns,
-                commission=bench_commission, slippage=bench_slippage, total_return_benchmark=total_return_benchmark
+                commission=bench_commission, slippage=bench_slippage,
+                benchmark_expense_ratio=bench_expense_ratio, total_return_benchmark=total_return_benchmark
             )
             print(
                 f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
@@ -1662,6 +1723,7 @@ def run_cpcv(args) -> int:
             "total_return_benchmark": total_return_benchmark,
             "benchmark_commission": bench_commission,
             "benchmark_slippage": bench_slippage,
+            "benchmark_expense_ratio": bench_expense_ratio,
         },
     }
     if pit_results is not None:
@@ -1806,6 +1868,7 @@ def _add_benchmark_to_summary(
     benchmark_returns: pd.Series,
     commission: float = 0.0,
     slippage: float = 0.0,
+    benchmark_expense_ratio: float = 0.0,
     total_return_benchmark: bool = False,
 ) -> Dict[str, Any]:
     """Add benchmark comparison metrics to a summary dict.
@@ -1813,6 +1876,15 @@ def _add_benchmark_to_summary(
     Computes benchmark total/annualized return, correlation, alpha, beta,
     the alpha t-statistic, its two-sided p-value, and the regression R^2
     from the aligned return series (delegates to ``_benchmark_stats``).
+
+    Args:
+        summary: Dictionary to update with benchmark metrics.
+        strategy_returns: Strategy returns series.
+        benchmark_returns: Benchmark returns series.
+        commission: Commission rate per trade.
+        slippage: Slippage rate per trade.
+        benchmark_expense_ratio: Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%).
+        total_return_benchmark: If True, compute benchmark returns using total return (dividends + price).
     """
     if len(benchmark_returns) == 0:
         return summary
@@ -1823,6 +1895,7 @@ def _add_benchmark_to_summary(
         total_return_benchmark=total_return_benchmark,
         benchmark_commission=commission,
         benchmark_slippage=slippage,
+        benchmark_expense_ratio=benchmark_expense_ratio,
     ))
     return summary
 
@@ -1855,6 +1928,7 @@ def run_walk_forward(args) -> int:
     total_return_benchmark = getattr(args, "total_return_benchmark", False)
     bench_commission = getattr(args, "benchmark_commission", None) if getattr(args, "benchmark_commission", None) is not None else args.commission
     bench_slippage = getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage
+    bench_expense_ratio = getattr(args, "benchmark_expense_ratio", None) if getattr(args, "benchmark_expense_ratio", None) is not None else 0.0
     if getattr(args, "benchmark", None):
         print(f"Loading benchmark data from {args.benchmark}...")
         benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
@@ -1877,6 +1951,11 @@ def run_walk_forward(args) -> int:
         borrow_cost=args.borrow_cost,
         funding_cost=args.funding_cost,
         apply_deflation=args.deflate,
+        benchmark=benchmark,
+        total_return_benchmark=total_return_benchmark,
+        benchmark_commission=bench_commission,
+        benchmark_slippage=bench_slippage,
+        benchmark_expense_ratio=bench_expense_ratio,
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
@@ -1889,7 +1968,8 @@ def run_walk_forward(args) -> int:
             # Add benchmark metrics to summary
             results["summary"] = _add_benchmark_to_summary(
                 results["summary"], results["oos_returns"], benchmark_returns,
-                commission=bench_commission, slippage=bench_slippage, total_return_benchmark=total_return_benchmark
+                commission=bench_commission, slippage=bench_slippage,
+                benchmark_expense_ratio=bench_expense_ratio, total_return_benchmark=total_return_benchmark
             )
             print(
                 f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
@@ -1954,6 +2034,7 @@ def run_walk_forward(args) -> int:
             "total_return_benchmark": total_return_benchmark,
             "benchmark_commission": bench_commission,
             "benchmark_slippage": bench_slippage,
+            "benchmark_expense_ratio": bench_expense_ratio,
         },
     }
     if pit_results is not None:
@@ -2014,6 +2095,7 @@ def run_parameter_optimization(args) -> int:
     total_return_benchmark = getattr(args, "total_return_benchmark", False)
     bench_commission = getattr(args, "benchmark_commission", None) if getattr(args, "benchmark_commission", None) is not None else args.commission
     bench_slippage = getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage
+    bench_expense_ratio = getattr(args, "benchmark_expense_ratio", None) if getattr(args, "benchmark_expense_ratio", None) is not None else 0.0
     if getattr(args, "benchmark", None):
         print(f"Loading benchmark data from {args.benchmark}...")
         benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
@@ -2037,6 +2119,7 @@ def run_parameter_optimization(args) -> int:
         total_return_benchmark=total_return_benchmark,
         benchmark_commission=bench_commission,
         benchmark_slippage=bench_slippage,
+        benchmark_expense_ratio=bench_expense_ratio,
     )
 
     if not results:
@@ -2128,6 +2211,7 @@ def run_monte_carlo(args) -> int:
     total_return_benchmark = getattr(args, "total_return_benchmark", False)
     bench_commission = getattr(args, "benchmark_commission", None) if getattr(args, "benchmark_commission", None) is not None else args.commission
     bench_slippage = getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage
+    bench_expense_ratio = getattr(args, "benchmark_expense_ratio", None) if getattr(args, "benchmark_expense_ratio", None) is not None else 0.0
     if getattr(args, "benchmark", None):
         print(f"Loading benchmark data from {args.benchmark}...")
         benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
@@ -2150,6 +2234,11 @@ def run_monte_carlo(args) -> int:
             adv_window=args.adv_window,
             borrow_cost=args.borrow_cost,
             funding_cost=args.funding_cost,
+            benchmark=benchmark,
+            total_return_benchmark=total_return_benchmark,
+            benchmark_commission=bench_commission,
+            benchmark_slippage=bench_slippage,
+            benchmark_expense_ratio=bench_expense_ratio,
         )
         if opt_results:
             best_params = opt_results[0]["params"]
@@ -2229,6 +2318,7 @@ def run_monte_carlo(args) -> int:
                 total_return_benchmark=total_return_benchmark,
                 benchmark_commission=bench_commission,
                 benchmark_slippage=bench_slippage,
+                benchmark_expense_ratio=bench_expense_ratio,
             )
             print(
                 f"Benchmark Correlation: {bstats.get('correlation_with_benchmark', 0):.4f}"
@@ -2293,6 +2383,7 @@ def run_monte_carlo(args) -> int:
             "total_return_benchmark": total_return_benchmark,
             "benchmark_commission": bench_commission,
             "benchmark_slippage": bench_slippage,
+            "benchmark_expense_ratio": bench_expense_ratio,
         },
     }
     if pit_results is not None:
@@ -2305,7 +2396,8 @@ def run_monte_carlo(args) -> int:
     if benchmark_returns is not None:
         mc_save["summary"] = _add_benchmark_to_summary(
             mc_save["summary"], returns, benchmark_returns,
-            commission=bench_commission, slippage=bench_slippage, total_return_benchmark=total_return_benchmark
+            commission=bench_commission, slippage=bench_slippage,
+            benchmark_expense_ratio=bench_expense_ratio, total_return_benchmark=total_return_benchmark
         )
     with open(mc_path, "w") as f:
         json.dump(mc_save, f, indent=2, default=str)
@@ -2325,8 +2417,9 @@ def run_monte_carlo(args) -> int:
                 "total_return_benchmark": total_return_benchmark,
                 "benchmark_commission": getattr(args, "benchmark_commission", None) if getattr(args, "benchmark_commission", None) is not None else args.commission,
                 "benchmark_slippage": getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage,
+                "benchmark_expense_ratio": bench_expense_ratio,
             },
-    }
+        }
     if benchmark_returns is not None:
         mc_base_results["benchmark"] = benchmark_returns
     mc_base_metrics = calculate_metrics(mc_base_results)
@@ -2360,6 +2453,7 @@ def run_out_of_sample_validation(args) -> int:
     total_return_benchmark = getattr(args, "total_return_benchmark", False)
     bench_commission = getattr(args, "benchmark_commission", None) if getattr(args, "benchmark_commission", None) is not None else args.commission
     bench_slippage = getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage
+    bench_expense_ratio = getattr(args, "benchmark_expense_ratio", None) if getattr(args, "benchmark_expense_ratio", None) is not None else 0.0
     if getattr(args, "benchmark", None):
         print(f"Loading benchmark data from {args.benchmark}...")
         benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
@@ -2400,6 +2494,7 @@ def run_out_of_sample_validation(args) -> int:
         total_return_benchmark=total_return_benchmark,
         benchmark_commission=bench_commission,
         benchmark_slippage=bench_slippage,
+        benchmark_expense_ratio=bench_expense_ratio,
     )
 
     if pit_results is not None:
@@ -2499,6 +2594,7 @@ def run_out_of_sample_validation(args) -> int:
             "total_return_benchmark": total_return_benchmark,
             "benchmark_commission": bench_commission,
             "benchmark_slippage": bench_slippage,
+            "benchmark_expense_ratio": bench_expense_ratio,
             # Validation method specific config
             "wf_train_months": args.wf_train_months,
             "wf_test_months": args.wf_test_months,
@@ -2532,6 +2628,7 @@ def run_out_of_sample_validation(args) -> int:
                 "total_return_benchmark": total_return_benchmark,
                 "benchmark_commission": bench_commission,
                 "benchmark_slippage": bench_slippage,
+                "benchmark_expense_ratio": bench_expense_ratio,
             },
         }
         if results["test_benchmark"] is not None:
@@ -2581,6 +2678,7 @@ def main():
     common_parser.add_argument("--total-return-benchmark", action="store_true", help="Compute benchmark returns using total return (dividends + price) when dividend/adj_close data is available, instead of price-only returns")
     common_parser.add_argument("--benchmark-commission", type=float, default=None, help="Commission per trade for benchmark (as decimal). Defaults to strategy commission if not specified.")
     common_parser.add_argument("--benchmark-slippage", type=float, default=None, help="Slippage per trade for benchmark (as decimal). Defaults to strategy slippage if not specified.")
+    common_parser.add_argument("--benchmark-expense-ratio", type=float, default=None, help="Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%). Defaults to 0.")
 
     # Walk-forward analysis
     wf_parser = subparsers.add_parser("walk-forward", parents=[common_parser], help="Run walk-forward analysis")
