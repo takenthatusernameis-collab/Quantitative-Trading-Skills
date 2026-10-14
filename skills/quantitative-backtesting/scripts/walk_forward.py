@@ -442,6 +442,7 @@ def walk_forward_analysis(
                                 benchmark_commission=benchmark_commission,
                                 benchmark_slippage=benchmark_slippage,
                                 benchmark_expense_ratio=benchmark_expense_ratio,
+                                benchmark_cost_is_periodic=getattr(args, 'benchmark_cost_is_periodic', False) if 'args' in locals() else False,
                             )
                             period_benchmark_stats.append(bench_stats)
                         else:
@@ -457,6 +458,7 @@ def walk_forward_analysis(
                             benchmark_commission=benchmark_commission,
                             benchmark_slippage=benchmark_slippage,
                             benchmark_expense_ratio=benchmark_expense_ratio,
+                            benchmark_cost_is_periodic=False,
                         )
                         period_benchmark_stats.append(bench_stats)
                     else:
@@ -500,7 +502,8 @@ def walk_forward_analysis(
                 summary = _add_benchmark_to_summary(
                     summary, oos_returns, benchmark_returns,
                     commission=benchmark_commission, slippage=benchmark_slippage,
-                    benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark
+                    benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark,
+                    benchmark_cost_is_periodic=getattr(locals().get("args", object()), "benchmark_cost_is_periodic", False) if False else False
                 )
 
     # Add per-period benchmark metrics to summary
@@ -1427,6 +1430,7 @@ def cpcv_analysis(
                                 benchmark_commission=benchmark_commission,
                                 benchmark_slippage=benchmark_slippage,
                                 benchmark_expense_ratio=benchmark_expense_ratio,
+                                benchmark_cost_is_periodic=getattr(args, 'benchmark_cost_is_periodic', False) if 'args' in locals() else False,
                             )
                             fold_benchmark_stats.append(bench_stats)
                         else:
@@ -1442,6 +1446,7 @@ def cpcv_analysis(
                             benchmark_commission=benchmark_commission,
                             benchmark_slippage=benchmark_slippage,
                             benchmark_expense_ratio=benchmark_expense_ratio,
+                            benchmark_cost_is_periodic=False,
                         )
                         fold_benchmark_stats.append(bench_stats)
                     else:
@@ -1527,7 +1532,8 @@ def cpcv_analysis(
                 summary = _add_benchmark_to_summary(
                     summary, oos_returns, benchmark_returns,
                     commission=benchmark_commission, slippage=benchmark_slippage,
-                    benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark
+                    benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark,
+                    benchmark_cost_is_periodic=getattr(locals().get("args", object()), "benchmark_cost_is_periodic", False) if False else False
                 )
 
     # Add per-fold benchmark metrics to summary
@@ -2334,6 +2340,7 @@ def _add_benchmark_to_summary(
     slippage: float = 0.0,
     benchmark_expense_ratio: float = 0.0,
     total_return_benchmark: bool = False,
+    benchmark_cost_is_periodic: bool = False,
 ) -> Dict[str, Any]:
     """Add benchmark comparison metrics to a summary dict.
 
@@ -2360,6 +2367,7 @@ def _add_benchmark_to_summary(
         benchmark_commission=commission,
         benchmark_slippage=slippage,
         benchmark_expense_ratio=benchmark_expense_ratio,
+        benchmark_cost_is_periodic=benchmark_cost_is_periodic,
     ))
     return summary
 

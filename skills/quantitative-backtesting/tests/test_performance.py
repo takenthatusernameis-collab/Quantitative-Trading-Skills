@@ -382,3 +382,26 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+def test_benchmark_stats_applies_periodic_benchmark_costs():
+    """When benchmark_cost_is_periodic is True, costs are deducted each period."""
+    ret = pd.Series([0.01, 0.00, 0.01, -0.005])
+    bench = pd.Series([0.005, 0.005, 0.005, 0.005])
+    ann_factor = 252
+    stats_periodic = _benchmark_stats(
+        ret, bench, ann_factor,
+        benchmark_commission=0.001,
+        benchmark_slippage=0.001,
+        benchmark_cost_is_periodic=True,
+    )
+    stats_roundtrip = _benchmark_stats(
+        ret, bench, ann_factor,
+        benchmark_commission=0.001,
+        benchmark_slippage=0.001,
+        benchmark_cost_is_periodic=False,
+    )
+    assert stats_periodic["benchmark_cost_is_periodic"] is True
+    assert stats_roundtrip["benchmark_cost_is_periodic"] is False
+    # Both should be different from zero-cost case
+    stats_none = _benchmark_stats(ret, bench, ann_factor)
+    assert stats_periodic["benchmark_total_return"] != stats_none["benchmark_total_return"]
+    assert stats_roundtrip["benchmark_total_return"] != stats_none["benchmark_total_return"]

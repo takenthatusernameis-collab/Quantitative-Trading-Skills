@@ -402,6 +402,7 @@ def calculate_metrics(
                     benchmark_commission=config.get("benchmark_commission", 0.0),
                     benchmark_slippage=config.get("benchmark_slippage", 0.0),
                     benchmark_expense_ratio=config.get("benchmark_expense_ratio", 0.0),
+                    benchmark_cost_is_periodic=config.get("benchmark_cost_is_periodic", False),
                 )
                 # Add index to distinguish between benchmarks
                 indexed_stats = {f"benchmark_{i}_{k}": v for k, v in bench_stats.items()}
@@ -456,6 +457,7 @@ def calculate_metrics(
             benchmark_commission=config.get("benchmark_commission", 0.0),
             benchmark_slippage=config.get("benchmark_slippage", 0.0),
             benchmark_expense_ratio=config.get("benchmark_expense_ratio", 0.0),
+            benchmark_cost_is_periodic=config.get("benchmark_cost_is_periodic", False),
         ))
         # Apply Deflated Alpha Ratio correction for single benchmark (n_benchmarks=1)
         # With n_benchmarks=1, the deflated alpha should equal the regular alpha
