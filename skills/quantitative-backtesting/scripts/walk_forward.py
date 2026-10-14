@@ -225,6 +225,7 @@ def walk_forward_analysis(
     oos_returns_list = []
     total_evaluated_trials = 0
     all_trial_sharpes: List[float] = []
+    period_benchmark_stats = []
 
     for period in periods:
         train_data = period["train_data"]
@@ -296,6 +297,23 @@ def walk_forward_analysis(
             period["best_params"] = best_params
             period["best_sharpe"] = best_sharpe
             period["test_returns"] = best_test_returns
+            # Compute benchmark stats for this period
+            if benchmark is not None:
+                benchmark_returns = _compute_benchmark_returns(benchmark, best_test_returns, total_return_benchmark)
+                if benchmark_returns is not None:
+                    ann_factor = _annualization_factor(best_test_returns.index)
+                    bench_stats = _benchmark_stats(
+                        best_test_returns, benchmark_returns, ann_factor,
+                        total_return_benchmark=total_return_benchmark,
+                        benchmark_commission=benchmark_commission,
+                        benchmark_slippage=benchmark_slippage,
+                        benchmark_expense_ratio=benchmark_expense_ratio,
+                    )
+                    period_benchmark_stats.append(bench_stats)
+                else:
+                    period_benchmark_stats.append(None)
+            else:
+                period_benchmark_stats.append(None)
             if apply_deflation and best_train_returns is not None and period_trial_sharpes:
                 # Deflate the in-sample selection Sharpe by the number of
                 # configurations compared in this period's grid search.
@@ -328,6 +346,10 @@ def walk_forward_analysis(
                 commission=benchmark_commission, slippage=benchmark_slippage,
                 benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark
             )
+
+    # Add per-period benchmark metrics to summary
+    if period_benchmark_stats:
+        summary['benchmark_metrics_per_period'] = period_benchmark_stats
 
     # Aggregate multiple-testing correction on the combined out-of-sample
     # returns. The conservative interpretation: the OOS record was produced
@@ -1040,6 +1062,7 @@ def cpcv_analysis(
     oos_returns_list = []
     total_evaluated_trials = 0
     all_trial_sharpes: List[float] = []
+    fold_benchmark_stats = []
 
     for fold in folds:
         train_data = fold["train_data"]
@@ -1107,6 +1130,23 @@ def cpcv_analysis(
             fold["best_params"] = best_params
             fold["best_sharpe"] = best_sharpe
             fold["test_returns"] = best_test_returns
+            # Compute benchmark stats for this fold
+            if benchmark is not None:
+                benchmark_returns = _compute_benchmark_returns(benchmark, best_test_returns, total_return_benchmark)
+                if benchmark_returns is not None:
+                    ann_factor = _annualization_factor(best_test_returns.index)
+                    bench_stats = _benchmark_stats(
+                        best_test_returns, benchmark_returns, ann_factor,
+                        total_return_benchmark=total_return_benchmark,
+                        benchmark_commission=benchmark_commission,
+                        benchmark_slippage=benchmark_slippage,
+                        benchmark_expense_ratio=benchmark_expense_ratio,
+                    )
+                    fold_benchmark_stats.append(bench_stats)
+                else:
+                    fold_benchmark_stats.append(None)
+            else:
+                fold_benchmark_stats.append(None)
             if apply_deflation and best_train_returns is not None and fold_trial_sharpes:
                 # Deflate the in-sample selection Sharpe by the number
                 # of configurations compared in this fold's grid search.
@@ -1120,6 +1160,7 @@ def cpcv_analysis(
             fold["best_params"] = None
             fold["best_sharpe"] = None
             fold["test_returns"] = pd.Series(dtype=float)
+            fold_benchmark_stats.append(None)
 
     # Combine all out-of-sample returns
     if oos_returns_list:
@@ -1180,6 +1221,10 @@ def cpcv_analysis(
                 commission=benchmark_commission, slippage=benchmark_slippage,
                 benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark
             )
+
+    # Add per-fold benchmark metrics to summary
+    if fold_benchmark_stats:
+        summary['benchmark_metrics_per_fold'] = fold_benchmark_stats
 
     return {
         "folds": folds,
