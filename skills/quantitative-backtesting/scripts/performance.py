@@ -121,6 +121,10 @@ def _benchmark_stats(
     is reduced by the round-trip cost (buy + sell) applied once to the total
     benchmark return, simulating a buy-and-hold investor who pays transaction
     costs at entry and exit.
+
+    Additionally, computes the tracking error (annualized standard deviation of
+    active return) and the information ratio (annualized alpha divided by
+    tracking error).
     """
     stats: Dict[str, Any] = {}
     if benchmark_returns is None or len(benchmark_returns) == 0:
@@ -159,6 +163,17 @@ def _benchmark_stats(
     alpha = y_mean - beta * x_mean  # per-period OLS intercept
     stats["alpha"] = float(alpha * ann_factor)
     stats["beta"] = float(beta)
+
+    # Compute tracking error and information ratio
+    active_return = aligned_ret - aligned_bench
+    tracking_error = active_return.std() * np.sqrt(ann_factor)
+    stats["tracking_error"] = float(tracking_error)
+    if tracking_error > 0:
+        stats["information_ratio"] = float(stats["alpha"] / tracking_error)
+    else:
+        # If tracking error is zero, information ratio is infinite if alpha is non-zero,
+        # otherwise undefined (set to 0.0)
+        stats["information_ratio"] = float("inf") if stats["alpha"] != 0 else 0.0
 
     # Significance of the alpha intercept (Jensen's alpha t-test).
     if n >= 3:
