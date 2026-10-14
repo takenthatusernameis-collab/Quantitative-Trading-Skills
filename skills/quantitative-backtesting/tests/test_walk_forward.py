@@ -1032,6 +1032,88 @@ def test_run_parameter_optimization_cli_persists_pit_results():
         Path(data_file).unlink()
 
 
+def test_run_parameter_optimization_cli_with_benchmark():
+    """Parameter optimization CLI with --benchmark computes alpha/beta for each combo."""
+    data_file = _make_test_data_file()
+    bench_file = _make_benchmark_data_with_dividends()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Price-only benchmark run
+            args_price = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=os.path.join(tmpdir, "out_price"),
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                top_n=4,
+                deflate=False,
+                benchmark=bench_file,
+            )
+            assert run_parameter_optimization(args_price) == 0
+
+            results_path_price = Path(tmpdir) / "out_price" / "parameter_optimization.json"
+            with open(results_path_price) as f:
+                results_price = json.load(f)
+
+            # Total-return benchmark run
+            args_total = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=os.path.join(tmpdir, "out_total"),
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                top_n=4,
+                deflate=False,
+                benchmark=bench_file,
+                total_return_benchmark=True,
+            )
+            assert run_parameter_optimization(args_total) == 0
+
+            results_path_total = Path(tmpdir) / "out_total" / "parameter_optimization.json"
+            with open(results_path_total) as f:
+                results_total = json.load(f)
+
+            # Each result should have benchmark metrics
+            for r in results_price:
+                assert "correlation_with_benchmark" in r
+                assert "alpha" in r
+                assert "beta" in r
+                assert r["benchmark_total_return_type"] == "price"
+            for r in results_total:
+                assert "correlation_with_benchmark" in r
+                assert "alpha" in r
+                assert "beta" in r
+                assert r["benchmark_total_return_type"] == "total"
+
+            # Total-return benchmark has higher total return (dividends add value)
+            # Check best result from each
+            best_price = results_price[0]
+            best_total = results_total[0]
+            assert best_total["benchmark_total_return"] > best_price["benchmark_total_return"]
+
+            # Alpha and beta differ between price-only and total-return
+            assert abs(best_total["alpha"] - best_price["alpha"]) > 1e-6
+            assert abs(best_total["beta"] - best_price["beta"]) > 1e-6
+
+            # Benchmark provenance written
+            prov_path_total = Path(tmpdir) / "out_total" / "benchmark_provenance.json"
+            assert prov_path_total.exists()
+            with open(prov_path_total) as f:
+                prov = json.load(f)
+            assert prov["total_return_type"] == "total"
+    finally:
+        Path(data_file).unlink()
+        Path(bench_file).unlink()
+
+
 def test_parse_param_grid():
     """Test parameter grid parsing from JSON string."""
     # Simple grid
@@ -2324,6 +2406,7 @@ def main() -> int:
         ("run_cpcv_cli_persists_pit_results", test_run_cpcv_cli_persists_pit_results),
         ("run_monte_carlo_cli_persists_pit_and_preserves_block_size", test_run_monte_carlo_cli_persists_pit_and_preserves_block_size),
         ("run_parameter_optimization_cli_persists_pit_results", test_run_parameter_optimization_cli_persists_pit_results),
+        ("run_parameter_optimization_cli_with_benchmark", test_run_parameter_optimization_cli_with_benchmark),
         ("parse_param_grid", test_parse_param_grid),
         ("walk_forward_multi_asset_cross_sectional_momentum", test_walk_forward_multi_asset_cross_sectional_momentum),
         ("walk_forward_multi_asset_dual_momentum", test_walk_forward_multi_asset_dual_momentum),

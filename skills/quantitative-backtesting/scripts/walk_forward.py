@@ -300,6 +300,10 @@ def parameter_optimization(
     funding_cost: float = 0.0,
     n_splits: int = 5,
     apply_deflation: bool = False,
+    benchmark: Optional[pd.DataFrame] = None,
+    total_return_benchmark: bool = False,
+    benchmark_commission: float = 0.0,
+    benchmark_slippage: float = 0.0,
 ) -> List[Dict[str, Any]]:
     """
     Perform parameter optimization using walk-forward-like splits.
@@ -326,6 +330,11 @@ def parameter_optimization(
             the grid. Adds a 'deflated_sharpe' dict to each result
             with keys 'deflated_sharpe_ratio', 'p_value',
             'expected_max_sharpe', 'n_trials', etc.
+        benchmark: Optional benchmark OHLCV DataFrame for buy-and-hold comparison
+        total_return_benchmark: If True, compute benchmark returns using total return
+            (dividends + price) when dividend/adj_close data is available
+        benchmark_commission: Commission per trade for benchmark (as decimal)
+        benchmark_slippage: Slippage per trade for benchmark (as decimal)
 
     Returns:
         List of result dictionaries sorted by Sharpe ratio (descending)
@@ -348,6 +357,15 @@ def parameter_optimization(
         if not isinstance(data.index, pd.DatetimeIndex):
             raise ValueError("Data must be indexed by DatetimeIndex")
         data = data.sort_index()
+
+    # Pre-compute benchmark returns if benchmark provided
+    benchmark_returns = None
+    if benchmark is not None:
+        if total_return_benchmark:
+            benchmark_returns = _compute_benchmark_total_return(benchmark)
+        else:
+            benchmark_returns = benchmark["close"].pct_change()
+
     param_names = list(param_grid.keys())
     param_values = list(param_grid.values())
 
@@ -379,12 +397,24 @@ def parameter_optimization(
                 sharpe = excess.mean() / excess.std() * np.sqrt(ann_factor) if returns.std() > 0 else 0
                 total_return = (1 + returns).prod() - 1
 
-                results.append({
+                result = {
                     "params": params,
                     "sharpe_ratio": float(sharpe),
                     "total_return": float(total_return),
                     "n_periods": len(returns),
-                })
+                }
+
+                # Add benchmark comparison metrics if benchmark provided
+                if benchmark_returns is not None and len(benchmark_returns) > 0:
+                    bench_stats = _benchmark_stats(
+                        returns, benchmark_returns, ann_factor,
+                        total_return_benchmark=total_return_benchmark,
+                        benchmark_commission=benchmark_commission,
+                        benchmark_slippage=benchmark_slippage,
+                    )
+                    result.update(bench_stats)
+
+                results.append(result)
                 if apply_deflation:
                     # Transient key: the return series is consumed by
                     # the deflation step below and never returned.
@@ -1561,6 +1591,16 @@ def run_parameter_optimization(args) -> int:
         pit_strict=getattr(args, "point_in_time_strict", False),
     )
 
+    # Load benchmark if provided
+    benchmark = None
+    benchmark_provenance = None
+    total_return_benchmark = getattr(args, "total_return_benchmark", False)
+    bench_commission = getattr(args, "benchmark_commission", None) if getattr(args, "benchmark_commission", None) is not None else args.commission
+    bench_slippage = getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage
+    if getattr(args, "benchmark", None):
+        print(f"Loading benchmark data from {args.benchmark}...")
+        benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
+
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -1576,6 +1616,10 @@ def run_parameter_optimization(args) -> int:
         borrow_cost=args.borrow_cost,
         funding_cost=args.funding_cost,
         apply_deflation=args.deflate,
+        benchmark=benchmark,
+        total_return_benchmark=total_return_benchmark,
+        benchmark_commission=bench_commission,
+        benchmark_slippage=bench_slippage,
     )
 
     if not results:
@@ -1584,10 +1628,13 @@ def run_parameter_optimization(args) -> int:
 
     print(f"\nTop {min(args.top_n, len(results))} parameter combinations:")
     print("-" * 80)
-    print(f"{'Rank':<5} {'Sharpe':<10} {'Total Return':<15} {'Params'}")
+    print(f"{'Rank':<5} {'Sharpe':<10} {'Total Return':<15} {'Alpha':<12} {'Beta':<8} {'Corr':<8} {'Params'}")
     print("-" * 80)
     for i, r in enumerate(results[:args.top_n]):
-        print(f"{i+1:<5} {r['sharpe_ratio']:<10.4f} {r['total_return']:<15.2%} {r['params']}")
+        alpha_str = f"{r.get('alpha', 0):.2%}" if 'alpha' in r else "N/A"
+        beta_str = f"{r.get('beta', 0):.4f}" if 'beta' in r else "N/A"
+        corr_str = f"{r.get('correlation_with_benchmark', 0):.4f}" if 'correlation_with_benchmark' in r else "N/A"
+        print(f"{i+1:<5} {r['sharpe_ratio']:<10.4f} {r['total_return']:<15.2%} {alpha_str:<12} {beta_str:<8} {corr_str:<8} {r['params']}")
         if "deflated_sharpe" in r:
             dsr = r["deflated_sharpe"]
             print(
@@ -1595,6 +1642,33 @@ def run_parameter_optimization(args) -> int:
                 f"(p-value {dsr['p_value']:.4f}, expected max Sharpe "
                 f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
             )
+
+    # Print benchmark comparison summary if benchmark provided
+    if benchmark is not None and results and 'alpha' in results[0]:
+        best = results[0]
+        print(
+            f"\nBenchmark Comparison (best params):"
+        )
+        print(
+            f"  Correlation: {best.get('correlation_with_benchmark', 'N/A'):.4f}"
+        )
+        print(
+            f"  Alpha (annualized): {best.get('alpha', 'N/A'):.2%}"
+        )
+        print(
+            f"  Beta: {best.get('beta', 'N/A'):.4f}"
+        )
+        pval = best.get("alpha_pvalue")
+        print(
+            f"  Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
+        )
+        rs = best.get("r_squared")
+        print(
+            f"  R-squared: {rs if rs is None else f'{rs:.4f}'}"
+        )
+        ir = best.get("information_ratio")
+        if ir is not None and np.isfinite(ir):
+            print(f"  Information Ratio: {ir:.4f}")
 
     # Save results
     output_dir = Path(args.output)
@@ -1611,6 +1685,13 @@ def run_parameter_optimization(args) -> int:
         pit_path = output_dir / "point_in_time_validation.json"
         with open(pit_path, "w") as f:
             json.dump(pit_results, f, indent=2, default=str)
+
+    # Persist benchmark provenance if available
+    if benchmark_provenance is not None:
+        bench_prov_path = output_dir / "benchmark_provenance.json"
+        with open(bench_prov_path, "w") as f:
+            json.dump(benchmark_provenance.to_dict(), f, indent=2, default=str)
+        print(f"Benchmark provenance saved to: {bench_prov_path}")
 
     return 0
 
