@@ -81,6 +81,44 @@ class EMACrossoverStrategy(StrategyBase):
         return signals
 
 
+class MACDStrategy(StrategyBase):
+    """MACD (Moving Average Convergence Divergence) Strategy.
+
+    Long when MACD line crosses above signal line, short when MACD line crosses below signal line.
+    """
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+        fast_period = self.parameters.get("fast_period", 12)
+        slow_period = self.parameters.get("slow_period", 26)
+        signal_period = self.parameters.get("signal_period", 9)
+
+        fast_ema = data["close"].ewm(span=fast_period, adjust=False).mean()
+        slow_ema = data["close"].ewm(span=slow_period, adjust=False).mean()
+        macd = fast_ema - slow_ema
+        signal = macd.ewm(span=signal_period, adjust=False).mean()
+
+        signals = pd.Series(0, index=data.index)
+        position = 0
+
+        for i in range(len(data)):
+            macd_val = macd.iloc[i]
+            signal_val = signal.iloc[i]
+
+            if position == 0:
+                if macd_val > signal_val:
+                    position = 1
+                elif macd_val < signal_val:
+                    position = -1
+            elif position == 1 and macd_val < signal_val:
+                position = 0
+            elif position == -1 and macd_val > signal_val:
+                position = 0
+
+            signals.iloc[i] = position
+
+        return signals
+
+
 class BollingerBandsMeanReversion(StrategyBase):
     """Bollinger Bands Mean Reversion Strategy.
 
@@ -828,6 +866,7 @@ class VolatilityTargeting(StrategyBase):
 STRATEGY_REGISTRY = {
     "sma_crossover": SMACrossoverStrategy,
     "ema_crossover": EMACrossoverStrategy,
+    "macd": MACDStrategy,
     "bollinger_bands": BollingerBandsMeanReversion,
     "rsi_mean_reversion": RSIMeanReversion,
     "donchian_breakout": DonchianChannelBreakout,
@@ -870,6 +909,7 @@ def list_strategies() -> Dict[str, str]:
     return {
         "sma_crossover": "Simple Moving Average Crossover (Trend Following)",
         "ema_crossover": "Exponential Moving Average Crossover (Trend Following)",
+        "macd": "MACD (Moving Average Convergence Divergence)",
         "bollinger_bands": "Bollinger Bands Mean Reversion",
         "rsi_mean_reversion": "RSI Mean Reversion",
         "donchian_breakout": "Donchian Channel Breakout (Trend Following)",
@@ -884,6 +924,7 @@ def get_strategy_defaults(strategy_type: str) -> Dict[str, Any]:
     defaults = {
         "sma_crossover": {"fast_period": 20, "slow_period": 50},
         "ema_crossover": {"fast_period": 12, "slow_period": 26},
+        "macd": {"fast_period": 12, "slow_period": 26, "signal_period": 9},
         "bollinger_bands": {"period": 20, "std_dev": 2.0},
         "rsi_mean_reversion": {"period": 14, "oversold": 30, "overbought": 70, "neutral": 50},
         "donchian_breakout": {"period": 20, "exit_period": 10},

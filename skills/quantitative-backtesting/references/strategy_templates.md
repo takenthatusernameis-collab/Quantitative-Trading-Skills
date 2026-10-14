@@ -28,6 +28,17 @@ strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 3
 - **Parameters**: `fast_period` (default 12), `slow_period` (default 26).
 - **Use case**: Faster response than SMA; good for volatile markets.
 
+### MACD (`macd`)
+
+- **Signal**: Long when MACD line crosses above signal line, short when MACD line crosses below signal line.
+- **Parameters**: `fast_period` (default 12), `slow_period` (default 26), `signal_period` (default 9).
+- **Use case**: Trend-following momentum strategy; works well in trending markets.
+
+```python
+from scripts.strategy_builder import build_strategy
+strategy = build_strategy("macd", '{"fast_period": 12, "slow_period": 26, "signal_period": 9}')
+```
+
 ### Donchian Channel Breakout (`donchian_breakout`)
 
 - **Signal**: Long when price breaks above the N-period high; short when it
