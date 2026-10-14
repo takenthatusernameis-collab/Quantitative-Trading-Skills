@@ -304,6 +304,46 @@ python3 scripts/walk_forward.py monte-carlo \
     --n-trials 50
 ```
 
+## Out-of-Sample Validation Framework
+
+`out_of_sample_validation` implements a three-phase validation framework
+that prevents data leakage between parameter selection and final
+evaluation:
+
+1. **TRAIN**: Walk-forward analysis or CPCV on the training portion to
+   select optimal parameters.
+2. **VALIDATE**: Evaluate the selected parameters on the validation
+   portion (confirmation).
+3. **TEST**: Final evaluation on the held-out test set, which has never
+   been used in any optimization or selection step.
+
+### Strict Train/Validation/Test Separation
+
+The framework depends on the held-out test set having **never** been
+used in any parameter selection or confirmation step. That guarantee is
+enforced as an executable invariant rather than a documentation note:
+
+- `_split_train_val_test` calls `_verify_split_separation` on the three
+  splits before returning. The check asserts that the train, validation
+  and test index sets are pairwise disjoint and chronologically ordered
+  (`train_end < val_start` and `val_end < test_start`). Any overlap or
+  ordering violation raises `ValueError`.
+- The check result is recorded in the returned
+  `train_val_test_split` dictionary under the `separation_check` key,
+  exposing `disjoint`, `chronological`, the three pairwise overlap
+  counts, and the split sizes for audit.
+- `_verify_split_separation` is also a standalone helper
+  (`walk_forward._verify_split_separation`) with a `strict` flag: in
+  non-strict mode it returns the diagnostic dict without raising, so the
+  invariant can be reused and tested independently of the full pipeline.
+
+This catches the class of defect where an inclusive boundary (e.g. an
+`<=` slice or an overlapping rolling window) silently leaks future
+information into the training or validation phase. A leak there would
+produce an in-sample-optimistic result that is indistinguishable from a
+genuine out-of-sample one, so the check is a correctness guard, not a
+cosmetic one.
+
 ## Overfitting Detection
 
 `overfitting_check` analyzes walk-forward results to flag overfitting risk:

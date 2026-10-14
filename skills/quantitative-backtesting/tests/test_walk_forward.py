@@ -38,6 +38,7 @@ from walk_forward import (  # noqa: E402
     _annualization_factor,
     _calculate_strategy_returns,
     _split_train_val_test,
+    _verify_split_separation,
 )
 from strategy_builder import build_strategy  # noqa: E402
 from data_loader import load_data  # noqa: E402
@@ -2462,6 +2463,13 @@ def main() -> int:
         ("run_out_of_sample_validation_cli", test_run_out_of_sample_validation_cli),
         ("run_out_of_sample_validation_cli_with_benchmark", test_run_out_of_sample_validation_cli_with_benchmark),
         ("run_out_of_sample_validation_cli_cpcv_method", test_run_out_of_sample_validation_cli_cpcv_method),
+        # Strict train/validation/test separation invariant tests
+        ("verify_split_separation_clean_split", test_verify_split_separation_clean_split),
+        ("verify_split_separation_detects_train_val_overlap", test_verify_split_separation_detects_train_val_overlap),
+        ("verify_split_separation_detects_val_test_overlap", test_verify_split_separation_detects_val_test_overlap),
+        ("verify_split_separation_detects_train_test_overlap", test_verify_split_separation_detects_train_test_overlap),
+        ("verify_split_separation_rejects_empty_split", test_verify_split_separation_rejects_empty_split),
+        ("out_of_sample_validation_surfaces_separation_check", test_out_of_sample_validation_surfaces_separation_check),
     ]
 
     failures = 0
@@ -3254,6 +3262,126 @@ def test_split_train_val_test():
     assert len(train_dict) == 600
     assert len(val_dict) == 200
     assert len(test_dict) == 200
+
+
+def test_verify_split_separation_clean_split():
+    """_verify_split_separation reports disjoint + chronological for a clean split."""
+    data = _make_data(periods=1000)
+    train, val, test = _split_train_val_test(data, 0.6, 0.2, 0.2)
+
+    result = _verify_split_separation(train, val, test, strict=False)
+
+    assert result["disjoint"] is True
+    assert result["chronological"] is True
+    assert result["train_val_overlap"] == 0
+    assert result["val_test_overlap"] == 0
+    assert result["train_test_overlap"] == 0
+    assert result["train_size"] == 600
+    assert result["val_size"] == 200
+    assert result["test_size"] == 200
+    assert result["train_end"] is not None
+    assert result["val_start"] is not None
+
+
+def test_verify_split_separation_detects_train_val_overlap():
+    """A shared timestamp between train and validation must be flagged."""
+    data = _make_data(periods=1000)
+    train, val, test = _split_train_val_test(data, 0.6, 0.2, 0.2)
+
+    # Leak the last training bar into the validation set.
+    leaked = data.loc[[train.index[-1]]]
+    val_overlap = pd.concat([leaked, val])
+
+    result = _verify_split_separation(train, val_overlap, test, strict=False)
+    assert result["disjoint"] is False
+    assert result["train_val_overlap"] == 1
+    assert result["chronological"] is False
+
+    # In strict mode the leak must raise.
+    try:
+        _verify_split_separation(train, val_overlap, test, strict=True)
+        assert False, "Expected ValueError for train/validation overlap"
+    except ValueError as e:
+        assert "train/validation share" in str(e)
+
+
+def test_verify_split_separation_detects_val_test_overlap():
+    """A shared timestamp between validation and test must be flagged."""
+    data = _make_data(periods=1000)
+    train, val, test = _split_train_val_test(data, 0.6, 0.2, 0.2)
+
+    # Leak the last validation bar into the test set.
+    leaked = data.loc[[val.index[-1]]]
+    test_overlap = pd.concat([leaked, test])
+
+    result = _verify_split_separation(train, val, test_overlap, strict=False)
+    assert result["disjoint"] is False
+    assert result["val_test_overlap"] == 1
+
+    try:
+        _verify_split_separation(train, val, test_overlap, strict=True)
+        assert False, "Expected ValueError for validation/test overlap"
+    except ValueError as e:
+        assert "validation/test share" in str(e)
+
+
+def test_verify_split_separation_detects_train_test_overlap():
+    """A shared timestamp between train and test must be flagged."""
+    data = _make_data(periods=1000)
+    train, val, test = _split_train_val_test(data, 0.6, 0.2, 0.2)
+
+    # Leak the first test bar into the training set.
+    leaked = data.loc[[test.index[0]]]
+    train_overlap = pd.concat([train, leaked]).drop_duplicates()
+
+    result = _verify_split_separation(train_overlap, val, test, strict=False)
+    assert result["disjoint"] is False
+    assert result["train_test_overlap"] == 1
+
+    try:
+        _verify_split_separation(train_overlap, val, test, strict=True)
+        assert False, "Expected ValueError for train/test overlap"
+    except ValueError as e:
+        assert "train/test share" in str(e)
+
+
+def test_verify_split_separation_rejects_empty_split():
+    """An empty segment is not a valid separation and must raise in strict mode."""
+    data = _make_data(periods=1000)
+    train, val, test = _split_train_val_test(data, 0.6, 0.2, 0.2)
+
+    empty = train.iloc[0:0]
+    try:
+        _verify_split_separation(empty, val, test, strict=True)
+        assert False, "Expected ValueError for empty split"
+    except ValueError as e:
+        assert "empty segment" in str(e)
+
+
+def test_out_of_sample_validation_surfaces_separation_check():
+    """out_of_sample_validation records the separation check in the split info."""
+    data = _make_data(periods=1000)
+    results = out_of_sample_validation(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid={"fast_period": [10, 20], "slow_period": [30, 50]},
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+    )
+
+    split = results["train_val_test_split"]
+    assert "separation_check" in split
+    check = split["separation_check"]
+    assert check["disjoint"] is True
+    assert check["chronological"] is True
+    assert check["train_val_overlap"] == 0
+    assert check["val_test_overlap"] == 0
+    assert check["train_test_overlap"] == 0
 
 
 def test_run_out_of_sample_validation_cli():

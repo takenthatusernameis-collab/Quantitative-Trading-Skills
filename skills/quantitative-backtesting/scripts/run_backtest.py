@@ -395,16 +395,16 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None):
                     benchmark_results.append(aligned_benchmark)
                 else:
                     benchmark_results.append(None)
-            # Store the list of benchmark results in results
-            # We'll store them as benchmark_0, benchmark_1, etc. for backward compatibility
-            # but also keep the list
-            results["benchmark_list"] = benchmark_results
-            # For backward compatibility, if there's only one benchmark, store it as "benchmark"
+            # When exactly one benchmark is provided, keep the single-benchmark
+            # path so calculate_metrics() emits the non-prefixed keys
+            # (alpha, beta, benchmark_total_return, ...) expected by
+            # existing callers and tests. The multi-benchmark path
+            # (benchmark_list + Deflated Alpha correction) is only used
+            # when 2+ benchmarks are supplied.
             if len(benchmark_results) == 1 and benchmark_results[0] is not None:
                 results["benchmark"] = benchmark_results[0]
             elif len(benchmark_results) > 1:
-                # If multiple benchmarks, don't set the single "benchmark" key to avoid confusion
-                pass
+                results["benchmark_list"] = benchmark_results
         else:
             # Single benchmark (backward compatibility)
             if getattr(args, "total_return_benchmark", False):
@@ -472,26 +472,45 @@ def main():
         return 1
 
     # Optional benchmark baseline (buy-and-hold comparison).
+    # --benchmark accepts one or more paths (nargs="+"), so args.benchmark
+    # is a list. Each path is loaded separately and the resulting
+    # DataFrames are passed as a list to run_backtest(), which aligns
+    # each one independently and supports multiple-testing correction
+    # across benchmarks.
     benchmark = None
     benchmark_provenance = None
-    if getattr(args, "benchmark", None):
-        print(f"Loading benchmark data from {args.benchmark}...")
-        benchmark, benchmark_provenance = load_data(
-            args.benchmark, return_provenance=True,
-        )
-        print(
-            f"Loaded benchmark: {benchmark_provenance.final_shape[0]} rows "
-            f"(checksum {benchmark_provenance.checksum}, "
-            f"total_return_type: {benchmark_provenance.total_return_type})"
-        )
-        if getattr(args, "total_return_benchmark", False):
-            if benchmark_provenance.total_return_type == "total":
-                print("Using total-return benchmark (dividends/adj_close included)")
-            else:
-                print("Warning: --total-return-benchmark requested but benchmark data has no dividends/adj_close column; falling back to price-only returns")
-        if not validate_data(benchmark):
-            print("Benchmark data validation failed!")
-            return 1
+    benchmark_paths = getattr(args, "benchmark", None)
+    if benchmark_paths:
+        # Normalize to a list of paths for uniform handling.
+        if isinstance(benchmark_paths, str):
+            benchmark_paths = [benchmark_paths]
+        benchmark_frames = []
+        benchmark_provenances = []
+        for path in benchmark_paths:
+            print(f"Loading benchmark data from {path}...")
+            bench_df, bench_prov = load_data(path, return_provenance=True)
+            print(
+                f"Loaded benchmark: {bench_prov.final_shape[0]} rows "
+                f"(checksum {bench_prov.checksum}, "
+                f"total_return_type: {bench_prov.total_return_type})"
+            )
+            if getattr(args, "total_return_benchmark", False):
+                if bench_prov.total_return_type == "total":
+                    print("Using total-return benchmark (dividends/adj_close included)")
+                else:
+                    print("Warning: --total-return-benchmark requested but benchmark data has no dividends/adj_close column; falling back to price-only returns")
+            if not validate_data(bench_df):
+                print("Benchmark data validation failed!")
+                return 1
+            benchmark_frames.append(bench_df)
+            benchmark_provenances.append(bench_prov)
+        # Pass the list of benchmark DataFrames to run_backtest();
+        # a single-element list is also accepted (backward compatible).
+        benchmark = benchmark_frames if len(benchmark_frames) > 1 else benchmark_frames[0]
+        # Keep the first provenance for the artifact/report (the primary benchmark).
+        benchmark_provenance = benchmark_provenances[0]
+        # Stash all provenances on args so downstream code can serialize them.
+        args._benchmark_provenances = benchmark_provenances
 
     print(f"Building strategy: {args.strategy}...")
     strategy = build_strategy(args.strategy, args.params)

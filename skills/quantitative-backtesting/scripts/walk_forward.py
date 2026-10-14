@@ -76,7 +76,137 @@ def _split_train_val_test(
     val_data = data.iloc[train_end:val_end]
     test_data = data.iloc[val_end:]
 
+    # Enforce strict chronological separation between the three splits.
+    # A leak (a validation or test bar appearing in the training set, or
+    # a test bar appearing in the validation set) would silently invalidate
+    # the "held-out test set has never been used in any selection step"
+    # guarantee, so the check is an executable invariant rather than a
+    # documentation note. The check is also exposed as a standalone
+    # helper (`_verify_split_separation`) so it can be reused and tested
+    # independently of the full out-of-sample pipeline.
+    _verify_split_separation(train_data, val_data, test_data)
+
     return train_data, val_data, test_data
+
+
+def _verify_split_separation(
+    train_data: pd.DataFrame,
+    val_data: pd.DataFrame,
+    test_data: pd.DataFrame,
+    strict: bool = True,
+) -> Dict[str, Any]:
+    """Verify that train/validation/test splits are pairwise disjoint and
+    chronologically ordered.
+
+    This encodes the critical invariant that the held-out test set has
+    never been used in any parameter selection or confirmation step.
+    Without this check, a slicing bug (e.g. an inclusive ``<=`` boundary
+    or an overlapping window) would silently leak future information
+    into the training/selection phase, producing an in-sample-optimistic
+    result that is indistinguishable from a genuine out-of-sample one.
+
+    Args:
+        train_data: Training split (earliest).
+        val_data: Validation split (middle).
+        test_data: Test split (latest, held out).
+        strict: If True, raise ValueError on any violation. If False,
+            return the check result without raising (useful for diagnostics).
+
+    Returns:
+        Dict with keys:
+            - 'disjoint': bool, True when all three index sets are pairwise disjoint
+            - 'chronological': bool, True when train_end < val_start and val_end < test_start
+            - 'train_val_overlap': int, number of timestamps shared by train and val
+            - 'val_test_overlap': int, number of timestamps shared by val and test
+            - 'train_test_overlap': int, number of timestamps shared by train and test
+            - 'train_end': last train timestamp (or None)
+            - 'val_start': first validation timestamp (or None)
+            - 'val_end': last validation timestamp (or None)
+            - 'test_start': first test timestamp (or None)
+            - 'train_size'/'val_size'/'test_size': bar counts
+
+    Raises:
+        ValueError: When strict=True and any overlap or chronological
+            violation is detected.
+    """
+    result: Dict[str, Any] = {
+        "disjoint": True,
+        "chronological": True,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": None,
+        "val_start": None,
+        "val_end": None,
+        "test_start": None,
+        "train_size": int(len(train_data)),
+        "val_size": int(len(val_data)),
+        "test_size": int(len(test_data)),
+    }
+
+    # Empty splits are not a separation *violation* per se (they are a
+    # data-availability problem caught by the caller), but they make the
+    # overlap arithmetic trivial and must not be treated as "disjoint".
+    if len(train_data) == 0 or len(val_data) == 0 or len(test_data) == 0:
+        result["disjoint"] = False
+        result["chronological"] = False
+        if strict:
+            raise ValueError(
+                "Split contains an empty segment: "
+                f"train={len(train_data)}, val={len(val_data)}, test={len(test_data)}"
+            )
+        return result
+
+    train_idx = set(train_data.index)
+    val_idx = set(val_data.index)
+    test_idx = set(test_data.index)
+
+    tv_overlap = len(train_idx & val_idx)
+    vt_overlap = len(val_idx & test_idx)
+    tt_overlap = len(train_idx & test_idx)
+
+    result["train_val_overlap"] = tv_overlap
+    result["val_test_overlap"] = vt_overlap
+    result["train_test_overlap"] = tt_overlap
+    result["disjoint"] = (tv_overlap == 0 and vt_overlap == 0 and tt_overlap == 0)
+
+    train_end_ts = train_data.index[-1]
+    val_start_ts = val_data.index[0]
+    val_end_ts = val_data.index[-1]
+    test_start_ts = test_data.index[0]
+
+    result["train_end"] = str(train_end_ts)
+    result["val_start"] = str(val_start_ts)
+    result["val_end"] = str(val_end_ts)
+    result["test_start"] = str(test_start_ts)
+
+    # Chronological ordering: the last training bar must precede the first
+    # validation bar, and the last validation bar must precede the first
+    # test bar. Using ``<=`` (rather than ``<``) would allow adjacent
+    # splits to share a boundary timestamp, which is a leak.
+    chronological = (train_end_ts < val_start_ts) and (val_end_ts < test_start_ts)
+    result["chronological"] = bool(chronological)
+
+    if strict and (not result["disjoint"] or not result["chronological"]):
+        reasons = []
+        if tv_overlap:
+            reasons.append(f"train/validation share {tv_overlap} timestamp(s)")
+        if vt_overlap:
+            reasons.append(f"validation/test share {vt_overlap} timestamp(s)")
+        if tt_overlap:
+            reasons.append(f"train/test share {tt_overlap} timestamp(s)")
+        if not chronological:
+            reasons.append(
+                f"chronological order violated: train_end={train_end_ts}, "
+                f"val_start={val_start_ts}, val_end={val_end_ts}, "
+                f"test_start={test_start_ts}"
+            )
+        raise ValueError(
+            "Train/validation/test split is not strictly separated: "
+            + "; ".join(reasons)
+        )
+
+    return result
 
 
 def _dict_to_multiindex(data_dict: dict) -> pd.DataFrame:
@@ -1572,6 +1702,13 @@ def out_of_sample_validation(
         "test_frac": test_frac,
     }
 
+    # Executable invariant: assert the three splits are pairwise disjoint
+    # and chronologically ordered. A leak here would silently invalidate
+    # the "held-out test set has never been used in any selection step"
+    # guarantee, so the check result is recorded in the summary for audit.
+    separation_check = _verify_split_separation(train_data, val_data, test_data)
+    split_info["separation_check"] = separation_check
+
     # Phase 1: VALIDATION - Run walk-forward or CPCV on training data
     if validation_method == "walk_forward":
         validation_results = walk_forward_analysis(
@@ -2977,7 +3114,15 @@ def run_out_of_sample_validation(args) -> int:
     if pit_results is not None:
         summary_data["point_in_time_validation"] = pit_results
     if benchmark_provenance is not None:
-        summary_data["benchmark_provenance"] = benchmark_provenance.to_dict()
+        # benchmark_provenance is a single DataProvenance when one benchmark
+        # was supplied, or a list of them when multiple benchmarks were
+        # supplied (multi-benchmark alpha multiple-testing correction).
+        if isinstance(benchmark_provenance, list):
+            summary_data["benchmark_provenance"] = [
+                prov.to_dict() for prov in benchmark_provenance
+            ]
+        else:
+            summary_data["benchmark_provenance"] = benchmark_provenance.to_dict()
     with open(summary_path, "w") as f:
         json.dump(summary_data, f, indent=2, default=str)
     print(f"\nOut-of-sample summary saved to: {summary_path}")
@@ -3001,8 +3146,18 @@ def run_out_of_sample_validation(args) -> int:
             },
         }
         if results["test_benchmark"] is not None:
-            # Need benchmark returns for the report
-            bench_returns = _compute_benchmark_returns(benchmark, results["test_performance"]["test_returns"], total_return_benchmark)
+            # The report/tear sheet path is single-benchmark by design, so
+            # use the first benchmark when multiple were supplied. The
+            # multi-benchmark comparison (with Deflated Alpha correction)
+            # is already surfaced in the printed summary and the JSON.
+            bench_for_report = benchmark
+            if isinstance(benchmark, list) and len(benchmark) > 0:
+                bench_for_report = benchmark[0]
+            bench_returns = _compute_benchmark_returns(
+                bench_for_report,
+                results["test_performance"]["test_returns"],
+                total_return_benchmark,
+            )
             if bench_returns is not None:
                 report_results["benchmark"] = bench_returns
         if pit_results is not None:
