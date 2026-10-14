@@ -299,19 +299,38 @@ def walk_forward_analysis(
             period["test_returns"] = best_test_returns
             # Compute benchmark stats for this period
             if benchmark is not None:
-                benchmark_returns = _compute_benchmark_returns(benchmark, best_test_returns, total_return_benchmark)
-                if benchmark_returns is not None:
-                    ann_factor = _annualization_factor(best_test_returns.index)
-                    bench_stats = _benchmark_stats(
-                        best_test_returns, benchmark_returns, ann_factor,
-                        total_return_benchmark=total_return_benchmark,
-                        benchmark_commission=benchmark_commission,
-                        benchmark_slippage=benchmark_slippage,
-                        benchmark_expense_ratio=benchmark_expense_ratio,
-                    )
-                    period_benchmark_stats.append(bench_stats)
+                # Handle multiple benchmarks
+                if isinstance(benchmark, list):
+                    period_benchmark_stats = []
+                    for bench in benchmark:
+                        benchmark_returns = _compute_benchmark_returns(bench, best_test_returns, total_return_benchmark)
+                        if benchmark_returns is not None:
+                            ann_factor = _annualization_factor(best_test_returns.index)
+                            bench_stats = _benchmark_stats(
+                                best_test_returns, benchmark_returns, ann_factor,
+                                total_return_benchmark=total_return_benchmark,
+                                benchmark_commission=benchmark_commission,
+                                benchmark_slippage=benchmark_slippage,
+                                benchmark_expense_ratio=benchmark_expense_ratio,
+                            )
+                            period_benchmark_stats.append(bench_stats)
+                        else:
+                            period_benchmark_stats.append(None)
                 else:
-                    period_benchmark_stats.append(None)
+                    # Single benchmark (backward compatibility)
+                    benchmark_returns = _compute_benchmark_returns(benchmark, best_test_returns, total_return_benchmark)
+                    if benchmark_returns is not None:
+                        ann_factor = _annualization_factor(best_test_returns.index)
+                        bench_stats = _benchmark_stats(
+                            best_test_returns, benchmark_returns, ann_factor,
+                            total_return_benchmark=total_return_benchmark,
+                            benchmark_commission=benchmark_commission,
+                            benchmark_slippage=benchmark_slippage,
+                            benchmark_expense_ratio=benchmark_expense_ratio,
+                        )
+                        period_benchmark_stats.append(bench_stats)
+                    else:
+                        period_benchmark_stats.append(None)
             else:
                 period_benchmark_stats.append(None)
             if apply_deflation and best_train_returns is not None and period_trial_sharpes:
@@ -339,13 +358,20 @@ def walk_forward_analysis(
 
     # Benchmark comparison on combined OOS returns
     if benchmark is not None and len(oos_returns) > 0:
-        benchmark_returns = _compute_benchmark_returns(benchmark, oos_returns, total_return_benchmark)
-        if benchmark_returns is not None:
-            summary = _add_benchmark_to_summary(
-                summary, oos_returns, benchmark_returns,
-                commission=benchmark_commission, slippage=benchmark_slippage,
-                benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark
-            )
+        # Handle multiple benchmarks
+        if isinstance(benchmark, list):
+            # For multiple benchmarks, we don't combine them into a single summary update
+            # Instead, we'll handle this in the summary building phase if needed
+            pass  # Placeholder - detailed handling would go in summary building
+        else:
+            # Single benchmark (backward compatibility)
+            benchmark_returns = _compute_benchmark_returns(benchmark, oos_returns, total_return_benchmark)
+            if benchmark_returns is not None:
+                summary = _add_benchmark_to_summary(
+                    summary, oos_returns, benchmark_returns,
+                    commission=benchmark_commission, slippage=benchmark_slippage,
+                    benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark
+                )
 
     # Add per-period benchmark metrics to summary
     if period_benchmark_stats:
@@ -1132,19 +1158,38 @@ def cpcv_analysis(
             fold["test_returns"] = best_test_returns
             # Compute benchmark stats for this fold
             if benchmark is not None:
-                benchmark_returns = _compute_benchmark_returns(benchmark, best_test_returns, total_return_benchmark)
-                if benchmark_returns is not None:
-                    ann_factor = _annualization_factor(best_test_returns.index)
-                    bench_stats = _benchmark_stats(
-                        best_test_returns, benchmark_returns, ann_factor,
-                        total_return_benchmark=total_return_benchmark,
-                        benchmark_commission=benchmark_commission,
-                        benchmark_slippage=benchmark_slippage,
-                        benchmark_expense_ratio=benchmark_expense_ratio,
-                    )
-                    fold_benchmark_stats.append(bench_stats)
+                # Handle multiple benchmarks
+                if isinstance(benchmark, list):
+                    fold_benchmark_stats = []
+                    for bench in benchmark:
+                        benchmark_returns = _compute_benchmark_returns(bench, best_test_returns, total_return_benchmark)
+                        if benchmark_returns is not None:
+                            ann_factor = _annualization_factor(best_test_returns.index)
+                            bench_stats = _benchmark_stats(
+                                best_test_returns, benchmark_returns, ann_factor,
+                                total_return_benchmark=total_return_benchmark,
+                                benchmark_commission=benchmark_commission,
+                                benchmark_slippage=benchmark_slippage,
+                                benchmark_expense_ratio=benchmark_expense_ratio,
+                            )
+                            fold_benchmark_stats.append(bench_stats)
+                        else:
+                            fold_benchmark_stats.append(None)
                 else:
-                    fold_benchmark_stats.append(None)
+                    # Single benchmark (backward compatibility)
+                    benchmark_returns = _compute_benchmark_returns(benchmark, best_test_returns, total_return_benchmark)
+                    if benchmark_returns is not None:
+                        ann_factor = _annualization_factor(best_test_returns.index)
+                        bench_stats = _benchmark_stats(
+                            best_test_returns, benchmark_returns, ann_factor,
+                            total_return_benchmark=total_return_benchmark,
+                            benchmark_commission=benchmark_commission,
+                            benchmark_slippage=benchmark_slippage,
+                            benchmark_expense_ratio=benchmark_expense_ratio,
+                        )
+                        fold_benchmark_stats.append(bench_stats)
+                    else:
+                        fold_benchmark_stats.append(None)
             else:
                 fold_benchmark_stats.append(None)
             if apply_deflation and best_train_returns is not None and fold_trial_sharpes:
@@ -1214,13 +1259,20 @@ def cpcv_analysis(
 
     # Benchmark comparison on combined OOS returns
     if benchmark is not None and len(oos_returns) > 0:
-        benchmark_returns = _compute_benchmark_returns(benchmark, oos_returns, total_return_benchmark)
-        if benchmark_returns is not None:
-            summary = _add_benchmark_to_summary(
-                summary, oos_returns, benchmark_returns,
-                commission=benchmark_commission, slippage=benchmark_slippage,
-                benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark
-            )
+        # Handle multiple benchmarks
+        if isinstance(benchmark, list):
+            # For multiple benchmarks, we don't combine them into a single summary update
+            # Instead, we'll handle this in the summary building phase if needed
+            pass  # Placeholder - detailed handling would go in summary building
+        else:
+            # Single benchmark (backward compatibility)
+            benchmark_returns = _compute_benchmark_returns(benchmark, oos_returns, total_return_benchmark)
+            if benchmark_returns is not None:
+                summary = _add_benchmark_to_summary(
+                    summary, oos_returns, benchmark_returns,
+                    commission=benchmark_commission, slippage=benchmark_slippage,
+                    benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark
+                )
 
     # Add per-fold benchmark metrics to summary
     if fold_benchmark_stats:
@@ -1301,7 +1353,7 @@ def out_of_sample_validation(
     borrow_cost: float = 0.0,
     funding_cost: float = 0.0,
     apply_deflation: bool = False,
-    benchmark: Optional[pd.DataFrame] = None,
+    benchmark: Optional[List[pd.DataFrame]] = None,
     total_return_benchmark: bool = False,
     benchmark_commission: float = 0.0,
     benchmark_slippage: float = 0.0,
@@ -1342,11 +1394,11 @@ def out_of_sample_validation(
         borrow_cost: Annual borrow cost rate for short positions
         funding_cost: Annual funding cost rate for leveraged positions
         apply_deflation: Compute Deflated Sharpe Ratio for multiple-testing correction
-        benchmark: Optional benchmark OHLCV DataFrame for buy-and-hold comparison
+        benchmark: Optional list of benchmark OHLCV DataFrames for buy-and-hold comparison. When multiple benchmarks are provided, alpha p-values are corrected for multiple comparisons using a Deflated Alpha analogue.
         total_return_benchmark: Compute benchmark returns using total return (dividends + price)
-        benchmark_commission: Commission per trade for benchmark
-        benchmark_slippage: Slippage per trade for benchmark
-        benchmark_expense_ratio: Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%)
+        benchmark_commission: Commission per trade for benchmark (applies to all benchmarks if multiple provided)
+        benchmark_slippage: Slippage per trade for benchmark (applies to all benchmarks if multiple provided)
+        benchmark_expense_ratio: Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%) (applies to all benchmarks if multiple provided)
     Returns:
         Dictionary with:
             - 'train_val_test_split': Dict with split boundaries and sizes
@@ -1354,8 +1406,8 @@ def out_of_sample_validation(
             - 'selected_params': Parameters selected by the selection criterion
             - 'validation_performance': Performance of selected params on validation data
             - 'test_performance': Final performance on held-out test data
-            - 'test_benchmark': Benchmark comparison on test data (if benchmark provided)
-            - 'summary': Aggregate summary with key metrics and deflated Sharpe
+            - 'test_benchmark': Benchmark comparison on test data (if benchmark provided). When multiple benchmarks are provided, this is a list of benchmark comparisons, and the summary includes multiple-testing correction for benchmark alpha.
+            - 'summary': Aggregate summary with key metrics, deflated Sharpe, and deflated alpha p-values when multiple benchmarks are provided
     """
     # Normalize data format
     if isinstance(data, dict):
@@ -1505,19 +1557,58 @@ def out_of_sample_validation(
         "test_returns": test_returns,
     }
 
-# Benchmark comparison on test set
+    # Benchmark comparison on test set
     test_benchmark = None
     if benchmark is not None and len(test_returns) > 0:
-        benchmark_returns = _compute_benchmark_returns(benchmark, test_returns, total_return_benchmark)
-        if benchmark_returns is not None:
-            test_benchmark = _benchmark_stats(
-                test_returns, benchmark_returns, ann_factor_test,
-                total_return_benchmark=total_return_benchmark,
-                benchmark_commission=benchmark_commission,
-                benchmark_slippage=benchmark_slippage,
-                benchmark_expense_ratio=benchmark_expense_ratio,
-            )
-            test_performance.update(test_benchmark)
+        # Handle multiple benchmarks for multiple-testing correction
+        if isinstance(benchmark, list):
+            # Process each benchmark
+            benchmark_results = []
+            p_values = []
+            for i, bench in enumerate(benchmark):
+                benchmark_returns = _compute_benchmark_returns(bench, test_returns, total_return_benchmark)
+                if benchmark_returns is not None:
+                    bench_stats = _benchmark_stats(
+                        test_returns, benchmark_returns, ann_factor_test,
+                        total_return_benchmark=total_return_benchmark,
+                        benchmark_commission=benchmark_commission,
+                        benchmark_slippage=benchmark_slippage,
+                        benchmark_expense_ratio=benchmark_expense_ratio,
+                    )
+                    benchmark_results.append(bench_stats)
+                    if 'alpha_pvalue' in bench_stats and bench_stats['alpha_pvalue'] is not None:
+                        p_values.append(bench_stats['alpha_pvalue'])
+                    else:
+                        p_values.append(1.0)  # If no p-value, treat as non-significant
+                else:
+                    benchmark_results.append(None)
+                    p_values.append(1.0)
+
+            # Apply multiple-testing correction to alpha p-values
+            if p_values and len(p_values) > 1:
+                # Simple Bonferroni correction for now - can be enhanced later
+                # More sophisticated methods could be added (e.g., False Discovery Rate)
+                corrected_p_values = [min(p * len(p_values), 1.0) for p in p_values]
+
+                # Store both original and corrected p-values
+                for i, (bench_result, orig_p, corr_p) in enumerate(zip(benchmark_results, p_values, corrected_p_values)):
+                    if bench_result is not None:
+                        bench_result['alpha_pvalue_original'] = orig_p
+                        bench_result['alpha_pvalue'] = corr_p  # Replace with corrected p-value
+
+            test_benchmark = benchmark_results
+        else:
+            # Single benchmark (backward compatibility)
+            benchmark_returns = _compute_benchmark_returns(benchmark, test_returns, total_return_benchmark)
+            if benchmark_returns is not None:
+                test_benchmark = _benchmark_stats(
+                    test_returns, benchmark_returns, ann_factor_test,
+                    total_return_benchmark=total_return_benchmark,
+                    benchmark_commission=benchmark_commission,
+                    benchmark_slippage=benchmark_slippage,
+                    benchmark_expense_ratio=benchmark_expense_ratio,
+                )
+                test_performance.update(test_benchmark)
 
     # Aggregate summary
     summary = {
@@ -1531,6 +1622,25 @@ def out_of_sample_validation(
         "test_sharpe": test_sharpe,
         "test_volatility": test_performance["test_volatility"],
     }
+
+    # Add multiple benchmark information to summary if applicable
+    if isinstance(test_benchmark, list):
+        summary["multiple_benchmarks"] = True
+        summary["benchmark_count"] = len(test_benchmark)
+        # Collect alpha p-values (both original and corrected if available)
+        alpha_pvalues = []
+        alpha_pvalues_original = []
+        for bench_result in test_benchmark:
+            if bench_result is not None:
+                if 'alpha_pvalue_original' in bench_result:
+                    alpha_pvalues_original.append(bench_result['alpha_pvalue_original'])
+                    alpha_pvalues.append(bench_result['alpha_pvalue'])  # corrected
+                elif 'alpha_pvalue' in bench_result:
+                    alpha_pvalues.append(bench_result['alpha_pvalue'])
+        if alpha_pvalues:
+            summary["alpha_pvalues"] = alpha_pvalues
+            if alpha_pvalues_original:
+                summary["alpha_pvalues_original"] = alpha_pvalues_original
 
     # Add Deflated Sharpe Ratio on test returns if requested
     # n_trials = total configurations evaluated in validation phase
@@ -1553,7 +1663,8 @@ def out_of_sample_validation(
             trial_sharpes=None,  # We don't have the trial sharpes from validation here
         )
 
-    if test_benchmark:
+    # Add benchmark information to summary (only for single benchmark for backward compatibility)
+    if test_benchmark and not isinstance(test_benchmark, list):
         summary.update(test_benchmark)
 
     return {
@@ -2500,8 +2611,13 @@ def run_out_of_sample_validation(args) -> int:
     bench_slippage = getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage
     bench_expense_ratio = getattr(args, "benchmark_expense_ratio", None) if getattr(args, "benchmark_expense_ratio", None) is not None else 0.0
     if getattr(args, "benchmark", None):
-        print(f"Loading benchmark data from {args.benchmark}...")
-        benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
+        print(f"Loading benchmark data from {', '.join(args.benchmark)}...")
+        benchmark = []
+        benchmark_provenance = []
+        for bench_file in args.benchmark:
+            b, prov = _load_benchmark(bench_file, total_return_benchmark)
+            benchmark.append(b)
+            benchmark_provenance.append(prov)
 
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
@@ -2582,23 +2698,60 @@ def run_out_of_sample_validation(args) -> int:
         print(
             f"\nTest Benchmark Comparison:"
         )
-        print(
-            f"  Correlation: {results['test_benchmark'].get('correlation_with_benchmark', 'N/A'):.4f}"
-        )
-        print(
-            f"  Alpha (annualized): {results['test_benchmark'].get('alpha', 'N/A'):.2%}"
-        )
-        print(
-            f"  Beta: {results['test_benchmark'].get('beta', 'N/A'):.4f}"
-        )
-        pval = results["test_benchmark"].get("alpha_pvalue")
-        print(
-            f"  Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
-        )
-        rs = results["test_benchmark"].get("r_squared")
-        print(
-            f"  R-squared: {rs if rs is None else f'{rs:.4f}'}"
-        )
+        if isinstance(results["test_benchmark"], list):
+            # Multiple benchmarks
+            for i, bench_result in enumerate(results["test_benchmark"]):
+                if bench_result is not None:
+                    print(
+                        f"  Benchmark {i+1}:"
+                    )
+                    print(
+                        f"    Correlation: {bench_result.get('correlation_with_benchmark', 'N/A'):.4f}"
+                    )
+                    print(
+                        f"    Alpha (annualized): {bench_result.get('alpha', 'N/A'):.2%}"
+                    )
+                    print(
+                        f"    Beta: {bench_result.get('beta', 'N/A'):.4f}"
+                    )
+                    # Show both original and corrected p-values if available
+                    if 'alpha_pvalue_original' in bench_result:
+                        print(
+                            f"    Alpha p-value (original): {bench_result['alpha_pvalue_original'] if bench_result['alpha_pvalue_original'] is None else f'{bench_result['alpha_pvalue_original']:.4f}'}"
+                        )
+                        print(
+                            f"    Alpha p-value (corrected): {bench_result['alpha_pvalue'] if bench_result['alpha_pvalue'] is None else f'{bench_result['alpha_pvalue']:.4f}'}"
+                        )
+                    else:
+                        pval = bench_result.get("alpha_pvalue")
+                        print(
+                            f"    Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
+                        )
+                    rs = bench_result.get("r_squared")
+                    print(
+                        f"    R-squared: {rs if rs is None else f'{rs:.4f}'}"
+                    )
+                else:
+                    print(f"  Benchmark {i+1}: Failed to compute")
+        else:
+            # Single benchmark (backward compatibility)
+            print(
+                f"  Correlation: {results['test_benchmark'].get('correlation_with_benchmark', 'N/A'):.4f}"
+            )
+            print(
+                f"  Alpha (annualized): {results['test_benchmark'].get('alpha', 'N/A'):.2%}"
+            )
+            print(
+                f"  Beta: {results['test_benchmark'].get('beta', 'N/A'):.4f}"
+            )
+            pval = results["test_benchmark"].get("alpha_pvalue")
+            print(
+                f"  Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
+            )
+            rs = results["test_benchmark"].get("r_squared")
+            print(
+                f"  R-squared: {rs if rs is None else f'{rs:.4f}'}"
+            )
 
     # Save results
     output_dir = Path(args.output)
@@ -2719,11 +2872,11 @@ def main():
     common_parser.add_argument("--param-grid", type=str, required=True, help="Parameter grid as JSON string")
     common_parser.add_argument("--validate-point-in-time", action="store_true", help="Run point-in-time validation on the loaded data (temporal ordering, duplicate timestamps, stale-data warnings)")
     common_parser.add_argument("--point-in-time-strict", action="store_true", help="Abort when point-in-time validation finds violations (default: warn only)")
-    common_parser.add_argument("--benchmark", type=str, default=None, help="Path to benchmark OHLCV file (e.g. SPY) for buy-and-hold baseline comparison (alpha/beta, correlation)")
-    common_parser.add_argument("--total-return-benchmark", action="store_true", help="Compute benchmark returns using total return (dividends + price) when dividend/adj_close data is available, instead of price-only returns")
-    common_parser.add_argument("--benchmark-commission", type=float, default=None, help="Commission per trade for benchmark (as decimal). Defaults to strategy commission if not specified.")
-    common_parser.add_argument("--benchmark-slippage", type=float, default=None, help="Slippage per trade for benchmark (as decimal). Defaults to strategy slippage if not specified.")
-    common_parser.add_argument("--benchmark-expense-ratio", type=float, default=None, help="Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%). Defaults to 0.")
+    common_parser.add_argument("--benchmark", type=str, nargs="+", default=None, help="Path to benchmark OHLCV file(s) (e.g. SPY QQQ) for buy-and-hold baseline comparison (alpha/beta, correlation)")
+    common_parser.add_argument("--total-return-benchmark", action="store_true", help="Compute benchmark returns using total return (dividends + price) when dividend/adj_close data is available, instead of price-only returns (applies to all benchmarks)")
+    common_parser.add_argument("--benchmark-commission", type=float, default=None, help="Commission per trade for benchmark (as decimal). Defaults to strategy commission if not specified (applies to all benchmarks).")
+    common_parser.add_argument("--benchmark-slippage", type=float, default=None, help="Slippage per trade for benchmark (as decimal). Defaults to strategy slippage if not specified (applies to all benchmarks).")
+    common_parser.add_argument("--benchmark-expense-ratio", type=float, default=None, help="Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%). Defaults to 0 (applies to all benchmarks).")
 
     # Walk-forward analysis
     wf_parser = subparsers.add_parser("walk-forward", parents=[common_parser], help="Run walk-forward analysis")

@@ -52,11 +52,11 @@ def parse_args():
     parser.add_argument("--validate-point-in-time", action="store_true", help="Run point-in-time validation on the loaded data and strategy signals (temporal ordering, duplicate timestamps, signal/next-return correlation for look-ahead bias screening)")
     parser.add_argument("--point-in-time-strict", action="store_true", help="Abort with a non-zero exit code when point-in-time validation finds violations (default: warn only)")
     parser.add_argument("--multi-symbol", action="store_true", help="Load every symbol in a multi-symbol file (with a 'symbol' or 'ticker' column) as a panel, run survivorship-bias detection, and backtest a panel. Requires a panel strategy such as cross_sectional_momentum or dual_momentum.")
-    parser.add_argument("--benchmark", type=str, default=None, help="Path to benchmark OHLCV file (e.g. SPY) for buy-and-hold baseline comparison (alpha/beta, correlation)")
-    parser.add_argument("--total-return-benchmark", action="store_true", help="Compute benchmark returns using total return (dividends + price) when dividend/adj_close data is available, instead of price-only returns")
-    parser.add_argument("--benchmark-commission", type=float, default=None, help="Commission per trade for benchmark (as decimal). Defaults to strategy commission if not specified.")
-    parser.add_argument("--benchmark-slippage", type=float, default=None, help="Slippage per trade for benchmark (as decimal). Defaults to strategy slippage if not specified.")
-    parser.add_argument("--benchmark-expense-ratio", type=float, default=None, help="Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%). Defaults to 0.")
+    parser.add_argument("--benchmark", type=str, nargs="+", default=None, help="Path to benchmark OHLCV file(s) (e.g. SPY QQQ) for buy-and-hold baseline comparison (alpha/beta, correlation)")
+    parser.add_argument("--total-return-benchmark", action="store_true", help="Compute benchmark returns using total return (dividends + price) when dividend/adj_close data is available, instead of price-only returns (applies to all benchmarks)")
+    parser.add_argument("--benchmark-commission", type=float, default=None, help="Commission per trade for benchmark (as decimal). Defaults to strategy commission if not specified (applies to all benchmarks).")
+    parser.add_argument("--benchmark-slippage", type=float, default=None, help="Slippage per trade for benchmark (as decimal). Defaults to strategy slippage if not specified (applies to all benchmarks).")
+    parser.add_argument("--benchmark-expense-ratio", type=float, default=None, help="Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%). Defaults to 0 (applies to all benchmarks).")
     return parser.parse_args()
 
 
@@ -372,21 +372,48 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None):
     if pit_result is not None:
         results["point_in_time_validation"] = pit_result
 
-    # Optional buy-and-hold benchmark baseline.
+    # Optional buy-and-hold benchmark baseline(s).
     # The benchmark return for period t is the close-to-close return
     # from t-1 to t (no shift): the strategy already trades at the next
     # period's open, so this is an apples-to-apples comparison window.
     # Align to the strategy returns index on common trading dates (inner
     # join handles a benchmark that is a strict superset of the strategy
     # date range without misaligning).
+    # When multiple benchmarks are provided, each is processed separately.
     if benchmark is not None:
-        if getattr(args, "total_return_benchmark", False):
-            benchmark_returns = _compute_benchmark_total_return(benchmark)
+        # Handle multiple benchmarks
+        if isinstance(benchmark, list):
+            # Process each benchmark separately
+            benchmark_results = []
+            for i, bench in enumerate(benchmark):
+                if getattr(args, "total_return_benchmark", False):
+                    benchmark_returns = _compute_benchmark_total_return(bench)
+                else:
+                    benchmark_returns = bench["close"].pct_change()
+                _, aligned_benchmark = strategy_returns.align(benchmark_returns, join="inner")
+                if len(aligned_benchmark) > 0:
+                    benchmark_results.append(aligned_benchmark)
+                else:
+                    benchmark_results.append(None)
+            # Store the list of benchmark results in results
+            # We'll store them as benchmark_0, benchmark_1, etc. for backward compatibility
+            # but also keep the list
+            results["benchmark_list"] = benchmark_results
+            # For backward compatibility, if there's only one benchmark, store it as "benchmark"
+            if len(benchmark_results) == 1 and benchmark_results[0] is not None:
+                results["benchmark"] = benchmark_results[0]
+            elif len(benchmark_results) > 1:
+                # If multiple benchmarks, don't set the single "benchmark" key to avoid confusion
+                pass
         else:
-            benchmark_returns = benchmark["close"].pct_change()
-        _, aligned_benchmark = strategy_returns.align(benchmark_returns, join="inner")
-        if len(aligned_benchmark) > 0:
-            results["benchmark"] = aligned_benchmark
+            # Single benchmark (backward compatibility)
+            if getattr(args, "total_return_benchmark", False):
+                benchmark_returns = _compute_benchmark_total_return(benchmark)
+            else:
+                benchmark_returns = benchmark["close"].pct_change()
+            _, aligned_benchmark = strategy_returns.align(benchmark_returns, join="inner")
+            if len(aligned_benchmark) > 0:
+                results["benchmark"] = aligned_benchmark
 
     return results
 
