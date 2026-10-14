@@ -54,6 +54,8 @@ def parse_args():
     parser.add_argument("--multi-symbol", action="store_true", help="Load every symbol in a multi-symbol file (with a 'symbol' or 'ticker' column) as a panel, run survivorship-bias detection, and backtest a panel. Requires a panel strategy such as cross_sectional_momentum or dual_momentum.")
     parser.add_argument("--benchmark", type=str, default=None, help="Path to benchmark OHLCV file (e.g. SPY) for buy-and-hold baseline comparison (alpha/beta, correlation)")
     parser.add_argument("--total-return-benchmark", action="store_true", help="Compute benchmark returns using total return (dividends + price) when dividend/adj_close data is available, instead of price-only returns")
+    parser.add_argument("--benchmark-commission", type=float, default=None, help="Commission per trade for benchmark (as decimal). Defaults to strategy commission if not specified.")
+    parser.add_argument("--benchmark-slippage", type=float, default=None, help="Slippage per trade for benchmark (as decimal). Defaults to strategy slippage if not specified.")
     return parser.parse_args()
 
 
@@ -349,8 +351,8 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None):
             "risk_free_rate": getattr(args, "risk_free_rate", None),
             "benchmark": getattr(args, "benchmark", None),
             "total_return_benchmark": getattr(args, "total_return_benchmark", False),
-            "benchmark_commission": args.commission,
-            "benchmark_slippage": args.slippage,
+            "benchmark_commission": getattr(args, "benchmark_commission", None) if getattr(args, "benchmark_commission", None) is not None else args.commission,
+            "benchmark_slippage": getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage,
         },
     }
 

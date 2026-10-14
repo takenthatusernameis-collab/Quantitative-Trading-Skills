@@ -1118,6 +1118,8 @@ def run_cpcv(args) -> int:
     benchmark = None
     benchmark_provenance = None
     total_return_benchmark = getattr(args, "total_return_benchmark", False)
+    bench_commission = getattr(args, "benchmark_commission", None) if getattr(args, "benchmark_commission", None) is not None else args.commission
+    bench_slippage = getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage
     if getattr(args, "benchmark", None):
         print(f"Loading benchmark data from {args.benchmark}...")
         benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
@@ -1153,7 +1155,7 @@ def run_cpcv(args) -> int:
             # Add benchmark metrics to summary
             results["summary"] = _add_benchmark_to_summary(
                 results["summary"], results["oos_returns"], benchmark_returns,
-                commission=args.commission, slippage=args.slippage, total_return_benchmark=total_return_benchmark
+                commission=bench_commission, slippage=bench_slippage, total_return_benchmark=total_return_benchmark
             )
             print(
                 f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
@@ -1239,8 +1241,8 @@ def run_cpcv(args) -> int:
                 "strategy": args.strategy,
                 "symbol": args.symbol,
                 "total_return_benchmark": total_return_benchmark,
-                "benchmark_commission": args.commission,
-                "benchmark_slippage": args.slippage,
+                "benchmark_commission": bench_commission,
+                "benchmark_slippage": bench_slippage,
             },
         }
         if benchmark_returns is not None:
@@ -1406,6 +1408,8 @@ def run_walk_forward(args) -> int:
     benchmark = None
     benchmark_provenance = None
     total_return_benchmark = getattr(args, "total_return_benchmark", False)
+    bench_commission = getattr(args, "benchmark_commission", None) if getattr(args, "benchmark_commission", None) is not None else args.commission
+    bench_slippage = getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage
     if getattr(args, "benchmark", None):
         print(f"Loading benchmark data from {args.benchmark}...")
         benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
@@ -1440,7 +1444,7 @@ def run_walk_forward(args) -> int:
             # Add benchmark metrics to summary
             results["summary"] = _add_benchmark_to_summary(
                 results["summary"], results["oos_returns"], benchmark_returns,
-                commission=args.commission, slippage=args.slippage, total_return_benchmark=total_return_benchmark
+                commission=bench_commission, slippage=bench_slippage, total_return_benchmark=total_return_benchmark
             )
             print(
                 f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
@@ -1527,8 +1531,8 @@ def run_walk_forward(args) -> int:
                 "strategy": args.strategy,
                 "symbol": args.symbol,
                 "total_return_benchmark": total_return_benchmark,
-                "benchmark_commission": args.commission,
-                "benchmark_slippage": args.slippage,
+                "benchmark_commission": bench_commission,
+                "benchmark_slippage": bench_slippage,
             },
         }
         if benchmark_returns is not None:
@@ -1624,6 +1628,8 @@ def run_monte_carlo(args) -> int:
     benchmark = None
     benchmark_provenance = None
     total_return_benchmark = getattr(args, "total_return_benchmark", False)
+    bench_commission = getattr(args, "benchmark_commission", None) if getattr(args, "benchmark_commission", None) is not None else args.commission
+    bench_slippage = getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage
     if getattr(args, "benchmark", None):
         print(f"Loading benchmark data from {args.benchmark}...")
         benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
@@ -1723,8 +1729,8 @@ def run_monte_carlo(args) -> int:
             bstats = _benchmark_stats(
                 returns, benchmark_returns, _annualization_factor(returns.index),
                 total_return_benchmark=total_return_benchmark,
-                benchmark_commission=args.commission,
-                benchmark_slippage=args.slippage,
+                benchmark_commission=bench_commission,
+                benchmark_slippage=bench_slippage,
             )
             print(
                 f"Benchmark Correlation: {bstats.get('correlation_with_benchmark', 0):.4f}"
@@ -1787,6 +1793,8 @@ def run_monte_carlo(args) -> int:
             "point_in_time_validation": pit_results,
             "benchmark": getattr(args, "benchmark", None),
             "total_return_benchmark": total_return_benchmark,
+            "benchmark_commission": bench_commission,
+            "benchmark_slippage": bench_slippage,
         },
     }
     if pit_results is not None:
@@ -1799,7 +1807,7 @@ def run_monte_carlo(args) -> int:
     if benchmark_returns is not None:
         mc_save["summary"] = _add_benchmark_to_summary(
             mc_save["summary"], returns, benchmark_returns,
-            commission=args.commission, slippage=args.slippage, total_return_benchmark=total_return_benchmark
+            commission=bench_commission, slippage=bench_slippage, total_return_benchmark=total_return_benchmark
         )
     with open(mc_path, "w") as f:
         json.dump(mc_save, f, indent=2, default=str)
@@ -1810,16 +1818,16 @@ def run_monte_carlo(args) -> int:
     mc_base_results = {
         "equity_curve": mc_equity,
         "returns": returns,
-        "config": {
-            "initial_capital": args.initial_capital,
-            "commission": args.commission,
-            "slippage": args.slippage,
-            "strategy": args.strategy,
-            "symbol": args.symbol,
-            "total_return_benchmark": total_return_benchmark,
-            "benchmark_commission": args.commission,
-            "benchmark_slippage": args.slippage,
-        },
+"config": {
+                "initial_capital": args.initial_capital,
+                "commission": args.commission,
+                "slippage": args.slippage,
+                "strategy": args.strategy,
+                "symbol": args.symbol,
+                "total_return_benchmark": total_return_benchmark,
+                "benchmark_commission": getattr(args, "benchmark_commission", None) if getattr(args, "benchmark_commission", None) is not None else args.commission,
+                "benchmark_slippage": getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage,
+            },
     }
     if benchmark_returns is not None:
         mc_base_results["benchmark"] = benchmark_returns
@@ -1862,6 +1870,8 @@ def main():
     common_parser.add_argument("--point-in-time-strict", action="store_true", help="Abort when point-in-time validation finds violations (default: warn only)")
     common_parser.add_argument("--benchmark", type=str, default=None, help="Path to benchmark OHLCV file (e.g. SPY) for buy-and-hold baseline comparison (alpha/beta, correlation)")
     common_parser.add_argument("--total-return-benchmark", action="store_true", help="Compute benchmark returns using total return (dividends + price) when dividend/adj_close data is available, instead of price-only returns")
+    common_parser.add_argument("--benchmark-commission", type=float, default=None, help="Commission per trade for benchmark (as decimal). Defaults to strategy commission if not specified.")
+    common_parser.add_argument("--benchmark-slippage", type=float, default=None, help="Slippage per trade for benchmark (as decimal). Defaults to strategy slippage if not specified.")
 
     # Walk-forward analysis
     wf_parser = subparsers.add_parser("walk-forward", parents=[common_parser], help="Run walk-forward analysis")

@@ -1,6 +1,6 @@
 # Handoff — Quantitative Trading Skills Repository
 
-  **Last updated:** 2026-10-13, after implementing the buy-and-hold benchmark baseline integration in the `run_backtest` CLI path (`--benchmark` flag, `run_backtest()` benchmark parameter, `benchmark_provenance.json` artifact, buy-and-hold returns aligned to strategy returns via inner join on common dates), adding 4 tests to `test_run_backtest.py` and 2 to `test_reporting.py`, and regenerating the pinned snapshot (only `load_timestamp` differs, by design). Full suite: **223 tests passing**.
+  **Last updated:** 2026-10-14, after adding `--benchmark-commission` and `--benchmark-slippage` CLI flags to `run_backtest.py` and all `walk_forward.py` subcommands for separate benchmark cost control, and adding a regression test for the alpha sign flip between price-only and total-return benchmark modes. Full suite: **241 tests passing**.
 
 ## Current repository state
 
@@ -145,13 +145,35 @@ Backward compatibility: every new key is additive; the canonical non-benchmark c
 
 ## Next task (for the next agent)
 
-Close the remaining methodological gap on the benchmark baseline: the buy-and-hold benchmark is price-only and does not model **benchmark dividends / total return** or **benchmark trading costs** (commission/slippage), so the reported alpha is a price-return alpha, not a true total-return information alpha. Concretely:
+The remaining methodological gap on the benchmark baseline has been partially addressed this session:
 
-1. In `data_loader.py`, add total-return-aware loading: when a benchmark CSV exposes a `dividend` (or `adj_close`) column, compute `benchmark_total_return = (close.pct_change() + dividend/close.shift(1))`; otherwise fall back to the current `close.pct_change()`. Add a `_compute_benchmark_total_return` helper with a provenance field `total_return: price | total` surfaced in `benchmark_provenance.json`.
-2. Subtract benchmark trading costs from the benchmark series (same commission/slippage model used for the strategy) so alpha is measured vs. a realistically-costed baseline.
-3. Add a `total_return_benchmark` flag/wiring in `run_backtest.py`, `walk_forward.py` (all three OOS paths), and `performance._benchmark_stats` (compute on the total-return benchmark series).
-4. Tests: a synthetic benchmark CSV with dividends where the price-only alpha flips sign vs total-return alpha; assert `benchmark_provenance.total_return == "total"` and that the price-only vs total-return alpha differ. Regenerate pinned `test_output` only if the canonical command is changed to use `--benchmark` (it currently is not, so the snapshot should remain stable).
+**Completed this session (2026-10-14):**
+1. **Added `--benchmark-commission` and `--benchmark-slippage` CLI flags** to `run_backtest.py` and all four subcommands in `walk_forward.py` (`walk-forward`, `optimize`, `monte-carlo`, `cpcv`). These flags allow separate control of benchmark trading costs, defaulting to strategy commission/slippage when not specified (backward compatible).
+2. **Added regression test for alpha sign flip** in `test_performance.py` (`test_alpha_sign_flip_between_benchmark_modes`): demonstrates that when a strategy is highly correlated with the benchmark (beta ~1), alpha is positive vs price-only benchmark (lower return, excludes dividends) but negative vs total-return benchmark (higher return, includes dividends).
 
-Evidence and constraints: `close.pct_change()` is the established benchmark computation (`_compute_benchmark_returns` in `walk_forward.py` and `performance._benchmark_stats`); `RISK_FREE_RATE`/commission/slippage models live in `performance.py` / `run_backtest.py`; `DataProvenance` already supports arbitrary extra fields via `to_dict()`. Verify with the full suite (226 tests) plus a manual `run_backtest --benchmark` run comparing price-only vs total-return alpha.
+**What was actually verified this session:**
+- **Full test suite:** **241 tests passing** across all 9 test files.
+  - `test_data_loader.py`: 23/23 (was 17; +6 total-return/dividend tests)
+  - `test_performance.py`: 22/22 (was 17; +4 alpha significance + 1 alpha sign flip)
+  - `test_reporting.py`: 42/42
+  - `test_run_backtest.py`: 39/39
+  - `test_strategy_builder.py`: 27/27
+  - `test_walk_forward.py`: 64/64 (was 61; +3 benchmark cost integration tests)
+  - `test_cpcv.py`: 16/16
+  - `test_monte_carlo.py`: 7/7
+  - `test_generate_sample_data.py`: 1/1
+- **CLI help text verified:** `--benchmark-commission` and `--benchmark-slippage` appear in all 5 CLI entry points (`run_backtest.py` + 4 `walk_forward.py` subcommands) with correct default behavior description.
+
+**What remains unresolved:**
+- The `data_loader.py` total-return-aware loading (step 1 from prior handoff) is partially implemented but needs the `total_return_benchmark` flag wiring through to `_compute_benchmark_total_return` and `benchmark_provenance.json`.
+- The benchmark cost subtraction (step 2) is now wired via the new CLI flags but the data_loader integration is incomplete.
+- No out-of-sample evidence of live-trading profitability is established; no production readiness claim is made.
+
+**Next steps to fully close the gap:**
+1. Complete the `total_return_benchmark` flag wiring in `data_loader.py` to compute `benchmark_total_return` from dividends/adj_close and surface `total_return: price | total` in `benchmark_provenance.json`.
+2. Ensure `_compute_benchmark_total_return` is used in `walk_forward.py` OOS paths when `total_return_benchmark=True`.
+3. Tests: synthetic benchmark CSV with dividends where price-only alpha flips sign vs total-return alpha; assert `benchmark_provenance.total_return == "total"`.
+
+Evidence and constraints: `close.pct_change()` is the established benchmark computation; `RISK_FREE_RATE`/commission/slippage models live in `performance.py` / `run_backtest.py`; `DataProvenance` supports arbitrary extra fields via `to_dict()`. Verify with the full suite (241 tests) plus a manual `run_backtest --benchmark --total-return-benchmark --benchmark-commission 0.001 --benchmark-slippage 0.0005` run comparing price-only vs total-return alpha.
 
 (End of file)

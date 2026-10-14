@@ -286,6 +286,60 @@ def test_calculate_metrics_passes_benchmark_costs():
     assert metrics["benchmark_total_return"] < metrics_no_cost["benchmark_total_return"]
 
 
+def test_alpha_sign_flip_between_benchmark_modes():
+    """
+    Alpha sign flips when switching between price-only and total-return benchmark.
+
+    When strategy returns are highly correlated with benchmark (beta ~1):
+    - Price-only benchmark: lower return (excludes dividends) -> positive alpha
+    - Total-return benchmark: higher return (includes dividends) -> negative alpha
+    """
+    np.random.seed(42)
+    periods = 252
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+
+    # Price benchmark: moderate positive drift (e.g., ~10% annual price return)
+    bench_price_returns = pd.Series(np.random.normal(0.0004, 0.01, periods), index=dates)
+
+    # Total return benchmark: same price returns + dividend yield (~8% annual)
+    daily_div_yield = 0.08 / 252
+    bench_total_returns = bench_price_returns + daily_div_yield
+
+    # Strategy: closely tracks price benchmark (beta ~1, slight positive alpha vs price)
+    strategy_returns = bench_price_returns * 0.98 + np.random.normal(0.0001, 0.002, periods)
+    strategy_returns = pd.Series(strategy_returns, index=dates)
+
+    config = {
+        "total_return_benchmark": False,
+        "benchmark_commission": 0.0,
+        "benchmark_slippage": 0.0
+    }
+
+    # Test with price benchmark (lower total return)
+    metrics_price = calculate_metrics({
+        "returns": strategy_returns,
+        "benchmark": bench_price_returns,
+        "config": config
+    })
+
+    # Test with total return benchmark (higher total return due to dividends)
+    # The config flag just changes the label; the actual benchmark series differs
+    config_total = {**config, "total_return_benchmark": True}
+    metrics_total = calculate_metrics({
+        "returns": strategy_returns,
+        "benchmark": bench_total_returns,  # different series with dividends
+        "config": config_total
+    })
+
+    # The total-return benchmark should have higher return
+    assert metrics_total["benchmark_total_return"] > metrics_price["benchmark_total_return"]
+
+    # Alpha should flip sign: positive vs price benchmark, negative vs total-return benchmark
+    # (because total return benchmark includes dividends making it much higher)
+    assert metrics_price["alpha"] > 0, f"Expected positive alpha vs price benchmark, got {metrics_price['alpha']}"
+    assert metrics_total["alpha"] < 0, f"Expected negative alpha vs total-return benchmark, got {metrics_total['alpha']}"
+
+
 def main() -> int:
     tests = [
         ("calculate_metrics_empty_returns_returns_error", test_calculate_metrics_empty_returns_returns_error),
@@ -309,6 +363,7 @@ def main() -> int:
         ("benchmark_stats_applies_trading_costs", test_benchmark_stats_applies_trading_costs),
         ("calculate_metrics_passes_total_return_benchmark_flag", test_calculate_metrics_passes_total_return_benchmark_flag),
         ("calculate_metrics_passes_benchmark_costs", test_calculate_metrics_passes_benchmark_costs),
+        ("alpha_sign_flip_between_benchmark_modes", test_alpha_sign_flip_between_benchmark_modes),
     ]
 
     failures = 0
