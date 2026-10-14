@@ -12,6 +12,8 @@ import sys
 import tempfile
 import traceback
 from pathlib import Path
+from io import StringIO
+from contextlib import redirect_stdout, redirect_stderr
 
 import numpy as np
 import pandas as pd
@@ -39,6 +41,7 @@ from walk_forward import (  # noqa: E402
     _calculate_strategy_returns,
     _split_train_val_test,
     _verify_split_separation,
+    main as walk_forward_main,
 )
 from strategy_builder import build_strategy  # noqa: E402
 from data_loader import load_data  # noqa: E402
@@ -80,6 +83,18 @@ def _make_benchmark_data(periods: int = 300, seed: int = 99) -> pd.DataFrame:
         "close": prices,
         "volume": rng.integers(1_000_000, 10_000_000, periods),
     }, index=dates)
+
+
+def _write_ohlcv_csv(path: str, periods: int = 300, seed: int = 42) -> None:
+    """Write OHLCV data to CSV for CLI testing."""
+    data = _make_ohlcv_data(periods, seed)
+    data.reset_index().rename(columns={"index": "date"}).to_csv(path, index=False)
+
+
+def _write_benchmark_csv(path: str, periods: int = 300, seed: int = 99) -> None:
+    """Write benchmark OHLCV data to CSV for CLI testing."""
+    data = _make_benchmark_data(periods, seed)
+    data.reset_index().rename(columns={"index": "date"}).to_csv(path, index=False)
 
 
 def test_out_of_sample_validation_benchmark_cost_is_periodic():
@@ -253,10 +268,185 @@ def test_out_of_sample_validation_benchmark_cost_is_periodic_cpcv():
     assert summary_true["benchmark_cost_is_periodic"] is True
 
 
+def test_cli_out_of_sample_benchmark_cost_is_periodic():
+    """CLI end-to-end test for out-of-sample with --benchmark-cost-is-periodic flag.
+
+    Verifies that the flag is correctly parsed and propagated through the
+    out-of-sample validation pipeline, and that the benchmark_cost_is_periodic
+    field is recorded in the output summary.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        bench_path = os.path.join(tmpdir, "benchmark.csv")
+        _write_ohlcv_csv(csv_path, periods=500)
+        _write_benchmark_csv(bench_path, periods=500)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--benchmark", bench_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5], "slow_period": [8, 10]}',
+            "--output", out_dir,
+            "--benchmark-commission", "0.001",
+            "--benchmark-slippage", "0.001",
+            "--benchmark-cost-is-periodic",
+            "--wf-train-months", "6",
+            "--wf-test-months", "2",
+            "--wf-step-months", "2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, "CLI with --benchmark-cost-is-periodic should exit 0"
+
+        # Check that the summary JSON contains the benchmark_cost_is_periodic flag
+        summary_path = os.path.join(out_dir, "out_of_sample_summary.json")
+        assert os.path.exists(summary_path), "out_of_sample_summary.json not written"
+        with open(summary_path) as f:
+            summary = json.load(f)
+
+        # The flag should be in the test_benchmark section
+        assert "test_benchmark" in summary, "test_benchmark missing from summary"
+        if isinstance(summary["test_benchmark"], list):
+            # Multiple benchmarks case (not expected here)
+            pass
+        else:
+            assert "benchmark_cost_is_periodic" in summary["test_benchmark"], \
+                f"benchmark_cost_is_periodic missing from test_benchmark. Keys: {list(summary['test_benchmark'].keys())}"
+            assert summary["test_benchmark"]["benchmark_cost_is_periodic"] is True, \
+                f"Expected benchmark_cost_is_periodic=True, got {summary['test_benchmark']['benchmark_cost_is_periodic']}"
+
+        # Also verify it's in the config
+        assert "config" in summary, "config missing from summary"
+        assert "benchmark_cost_is_periodic" in summary["config"], \
+            f"benchmark_cost_is_periodic missing from config. Keys: {list(summary['config'].keys())}"
+        assert summary["config"]["benchmark_cost_is_periodic"] is True, \
+            f"Expected benchmark_cost_is_periodic=True in config, got {summary['config']['benchmark_cost_is_periodic']}"
+
+
+def test_cli_out_of_sample_benchmark_cost_is_periodic_false():
+    """CLI end-to-end test for out-of-sample without --benchmark-cost-is-periodic flag (default False).
+
+    Verifies that when the flag is not provided, it defaults to False and is
+    correctly recorded in the output summary.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        bench_path = os.path.join(tmpdir, "benchmark.csv")
+        _write_ohlcv_csv(csv_path, periods=500)
+        _write_benchmark_csv(bench_path, periods=500)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--benchmark", bench_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5], "slow_period": [8, 10]}',
+            "--output", out_dir,
+            "--benchmark-commission", "0.001",
+            "--benchmark-slippage", "0.001",
+            # Note: --benchmark-cost-is-periodic NOT provided (should default to False)
+            "--wf-train-months", "6",
+            "--wf-test-months", "2",
+            "--wf-step-months", "2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, "CLI without --benchmark-cost-is-periodic should exit 0"
+
+        # Check that the summary JSON contains the benchmark_cost_is_periodic flag as False
+        summary_path = os.path.join(out_dir, "out_of_sample_summary.json")
+        assert os.path.exists(summary_path), "out_of_sample_summary.json not written"
+        with open(summary_path) as f:
+            summary = json.load(f)
+
+        # The flag should be in the test_benchmark section
+        assert "test_benchmark" in summary, "test_benchmark missing from summary"
+        if isinstance(summary["test_benchmark"], list):
+            pass
+        else:
+            assert "benchmark_cost_is_periodic" in summary["test_benchmark"], \
+                f"benchmark_cost_is_periodic missing from test_benchmark. Keys: {list(summary['test_benchmark'].keys())}"
+            assert summary["test_benchmark"]["benchmark_cost_is_periodic"] is False, \
+                f"Expected benchmark_cost_is_periodic=False, got {summary['test_benchmark']['benchmark_cost_is_periodic']}"
+
+        # Also verify it's in the config as False
+        assert "config" in summary, "config missing from summary"
+        assert "benchmark_cost_is_periodic" in summary["config"], \
+            f"benchmark_cost_is_periodic missing from config. Keys: {list(summary['config'].keys())}"
+        assert summary["config"]["benchmark_cost_is_periodic"] is False, \
+            f"Expected benchmark_cost_is_periodic=False in config, got {summary['config']['benchmark_cost_is_periodic']}"
+
+
+def test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv():
+    """CLI end-to-end test for out-of-sample with CPCV validation and --benchmark-cost-is-periodic flag.
+
+    Verifies that the flag works correctly when using CPCV as the validation method.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        bench_path = os.path.join(tmpdir, "benchmark.csv")
+        _write_ohlcv_csv(csv_path, periods=800)
+        _write_benchmark_csv(bench_path, periods=800)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--benchmark", bench_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--benchmark-commission", "0.001",
+            "--benchmark-slippage", "0.001",
+            "--benchmark-cost-is-periodic",
+            "--validation-method", "cpcv",
+            "--cpcv-n-splits", "5",
+            "--cpcv-test-size", "0.2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, "CLI with CPCV and --benchmark-cost-is-periodic should exit 0"
+
+        # Check that the summary JSON contains the benchmark_cost_is_periodic flag
+        summary_path = os.path.join(out_dir, "out_of_sample_summary.json")
+        assert os.path.exists(summary_path), "out_of_sample_summary.json not written"
+        with open(summary_path) as f:
+            summary = json.load(f)
+
+        assert "test_benchmark" in summary, "test_benchmark missing from summary"
+        if isinstance(summary["test_benchmark"], list):
+            pass
+        else:
+            assert "benchmark_cost_is_periodic" in summary["test_benchmark"], \
+                f"benchmark_cost_is_periodic missing from test_benchmark. Keys: {list(summary['test_benchmark'].keys())}"
+            assert summary["test_benchmark"]["benchmark_cost_is_periodic"] is True, \
+                f"Expected benchmark_cost_is_periodic=True, got {summary['test_benchmark']['benchmark_cost_is_periodic']}"
+
+        # Also verify it's in the config
+        assert "config" in summary, "config missing from summary"
+        assert "benchmark_cost_is_periodic" in summary["config"], \
+            f"benchmark_cost_is_periodic missing from config. Keys: {list(summary['config'].keys())}"
+        assert summary["config"]["benchmark_cost_is_periodic"] is True, \
+            f"Expected benchmark_cost_is_periodic=True in config, got {summary['config']['benchmark_cost_is_periodic']}"
+
+
+# Need to import patch for mocking
+from unittest.mock import patch
+
+
 def main() -> int:
     tests = [
         ("test_out_of_sample_validation_benchmark_cost_is_periodic", test_out_of_sample_validation_benchmark_cost_is_periodic),
         ("test_out_of_sample_validation_benchmark_cost_is_periodic_cpcv", test_out_of_sample_validation_benchmark_cost_is_periodic_cpcv),
+        ("test_cli_out_of_sample_benchmark_cost_is_periodic", test_cli_out_of_sample_benchmark_cost_is_periodic),
+        ("test_cli_out_of_sample_benchmark_cost_is_periodic_false", test_cli_out_of_sample_benchmark_cost_is_periodic_false),
+        ("test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv", test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv),
     ]
 
     failures = 0

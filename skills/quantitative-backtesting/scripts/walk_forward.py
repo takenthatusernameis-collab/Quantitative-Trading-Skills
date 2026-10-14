@@ -3126,6 +3126,7 @@ def run_out_of_sample_validation(args) -> int:
             "benchmark_commission": bench_commission,
             "benchmark_slippage": bench_slippage,
             "benchmark_expense_ratio": bench_expense_ratio,
+            "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
             # Validation method specific config
             "wf_train_months": args.wf_train_months,
             "wf_test_months": args.wf_test_months,
@@ -3168,6 +3169,7 @@ def run_out_of_sample_validation(args) -> int:
                 "benchmark_commission": bench_commission,
                 "benchmark_slippage": bench_slippage,
                 "benchmark_expense_ratio": bench_expense_ratio,
+                "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
             },
         }
         if results["test_benchmark"] is not None:
