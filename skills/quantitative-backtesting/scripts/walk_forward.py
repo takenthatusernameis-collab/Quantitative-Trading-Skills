@@ -1247,6 +1247,8 @@ def run_cpcv(args) -> int:
             "point_in_time_validation": pit_results,
             "benchmark": getattr(args, "benchmark", None),
             "total_return_benchmark": total_return_benchmark,
+            "benchmark_commission": bench_commission,
+            "benchmark_slippage": bench_slippage,
         },
     }
     if pit_results is not None:
@@ -1537,6 +1539,8 @@ def run_walk_forward(args) -> int:
             "point_in_time_validation": pit_results,
             "benchmark": getattr(args, "benchmark", None),
             "total_return_benchmark": total_return_benchmark,
+            "benchmark_commission": bench_commission,
+            "benchmark_slippage": bench_slippage,
         },
     }
     if pit_results is not None:
