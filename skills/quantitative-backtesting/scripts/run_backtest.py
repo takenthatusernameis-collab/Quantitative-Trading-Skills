@@ -58,6 +58,7 @@ def parse_args():
     parser.add_argument("--benchmark-slippage", type=float, default=None, help="Slippage per trade for benchmark (as decimal). Defaults to strategy slippage if not specified (applies to all benchmarks).")
     parser.add_argument("--benchmark-expense-ratio", type=float, default=None, help="Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%). Defaults to 0 (applies to all benchmarks).")
     parser.add_argument("--benchmark-cost-is-periodic", action="store_true", help="If set, apply benchmark trading costs (commission+slippage) as periodic deductions each period instead of as a round-trip cost on total return (applies to all benchmarks).")
+    parser.add_argument("--adjust-splits", action="store_true", help="Adjust prices for stock splits using the splits column if present.")
     return parser.parse_args()
 
 
@@ -460,6 +461,7 @@ def main():
             start=args.start,
             end=args.end,
             return_provenance=True,
+            adjust_splits=getattr(args, "adjust_splits", False),
         )
         print(
             f"Loaded {provenance.final_shape[0]} rows x "
@@ -490,7 +492,7 @@ def main():
         benchmark_provenances = []
         for path in benchmark_paths:
             print(f"Loading benchmark data from {path}...")
-            bench_df, bench_prov = load_data(path, return_provenance=True)
+            bench_df, bench_prov = load_data(path, return_provenance=True, adjust_splits=getattr(args, "adjust_splits", False))
             print(
                 f"Loaded benchmark: {bench_prov.final_shape[0]} rows "
                 f"(checksum {bench_prov.checksum}, "

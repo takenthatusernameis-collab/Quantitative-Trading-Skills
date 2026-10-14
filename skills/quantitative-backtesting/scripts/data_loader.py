@@ -97,6 +97,54 @@ def _compute_benchmark_total_return(df: pd.DataFrame) -> pd.Series:
         return df["close"].pct_change()
 
 
+
+
+def _adjust_for_splits(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Adjust OHLCV prices for stock splits using the 'splits' column.
+
+    Adjusts prices so that all prices are on a consistent basis. For a split
+    with ratio r = new_shares / old_shares (e.g., 2.0 for 2-for-1), historical
+    prices before the split are multiplied by r to be comparable to post-split prices.
+
+    Args:
+        df: DataFrame with OHLCV data and optional 'splits' column
+
+    Returns:
+        DataFrame with split-adjusted OHLCV prices
+    """
+    if "splits" not in df.columns:
+        return df
+
+    df = df.copy()
+    split_mask = df["splits"].notna() & (df["splits"] != 0) & (df["splits"] != 1.0)
+    if not split_mask.any():
+        return df
+
+    cum_adj = pd.Series(1.0, index=df.index)
+    for idx in sorted(df[split_mask].index):
+        ratio = df.at[idx, "splits"]
+        # Multiply all dates before this split by ratio
+        # If prices on split date are post-split, don't multiply the split date
+        mask_pre = df.index < idx
+        cum_adj[mask_pre] *= ratio
+
+    price_cols = ["open", "high", "low", "close"]
+    for col in price_cols:
+        if col in df.columns:
+            df[col] = df[col] * cum_adj
+
+    if "volume" in df.columns:
+        df["volume"] = df["volume"] / cum_adj
+
+    df["splits_adjusted"] = True
+    return df
+
+
+# Alias for common naming
+adjust_for_splits = _adjust_for_splits
+
+
 def _detect_benchmark_total_return_type(df: pd.DataFrame) -> str:
     """
     Detect whether the benchmark data supports total-return computation.
@@ -117,6 +165,7 @@ def load_data(
     start: Optional[str] = None,
     end: Optional[str] = None,
     date_column: str = "date",
+    adjust_splits: bool = False,
     return_provenance: bool = False,
     **kwargs
 ) -> Union[pd.DataFrame, Tuple[pd.DataFrame, DataProvenance]]:
@@ -129,6 +178,7 @@ def load_data(
         start: Start date filter (YYYY-MM-DD)
         end: End date filter (YYYY-MM-DD)
         date_column: Name of date column
+        adjust_splits: If True, adjust prices for splits
         return_provenance: If True, return (DataFrame, DataProvenance) tuple
         **kwargs: Additional arguments passed to pd.read_csv/read_parquet
 
@@ -215,6 +265,11 @@ def load_data(
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     provenance.transformations_applied.append("coerced_numeric_types")
+
+    # Apply split adjustments if requested
+    if adjust_splits and "splits" in df.columns:
+        df = _adjust_for_splits(df)
+        provenance.transformations_applied.append("split_adjustment_applied")
 
     provenance.final_shape = df.shape
     provenance.columns_final = list(df.columns)
@@ -555,6 +610,7 @@ def load_multi_symbol(
     path: Union[str, Path],
     symbols: Optional[List[str]] = None,
     return_provenance: bool = False,
+    adjust_splits: bool = False,
     **kwargs
 ) -> Union[dict, Tuple[dict, Dict[str, DataProvenance]]]:
     """
@@ -590,6 +646,8 @@ def load_multi_symbol(
     for sym in unique_symbols:
         sym_df = df[df[sym_col] == sym].drop(columns=[sym_col])
         if validate_data(sym_df):
+            if adjust_splits and "splits" in sym_df.columns:
+                sym_df = _adjust_for_splits(sym_df)
             result[sym] = sym_df
             if return_provenance:
                 # Create provenance for this symbol
@@ -606,10 +664,13 @@ def load_multi_symbol(
                     validation_passed=True,
                     checksum=_compute_checksum(sym_df),
                     total_return_type=_detect_benchmark_total_return_type(sym_df),
+                    transformations_applied=[]
                 )
-                if isinstance(sym_df.index, pd.DatetimeIndex) and len(sym_df) > 0:
+                if adjust_splits and "splits" in result[sym].columns and result[sym].get("splits_adjusted", False) if "splits_adjusted" in result[sym] else False:
+                    prov.transformations_applied.append("split_adjustment_applied")
+                if isinstance(result[sym].index, pd.DatetimeIndex) and len(result[sym]) > 0:
                     prov.date_range_final = (
-                        str(sym_df.index.min()), str(sym_df.index.max())
+                        str(result[sym].index.min()), str(result[sym].index.max())
                     )
                 provenance_dict[sym] = prov
 
