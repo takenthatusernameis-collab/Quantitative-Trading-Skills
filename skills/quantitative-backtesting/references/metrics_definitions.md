@@ -284,3 +284,31 @@ correlation = corr(r_t, b_t)
 
 Pearson correlation between strategy and benchmark returns, computed on the
 inner-aligned index.
+### Deflated Alpha Ratio
+
+The Deflated Alpha Ratio (DAR) corrects the estimated alpha for multiple-testing bias when comparing a strategy against multiple benchmarks. Testing many benchmarks increases the probability of finding spurious alpha by chance alone.
+
+**Formula:**
+```
+DAR = Φ( (α̂ - α*) * sqrt(T - 1) / sqrt(1 - γ3*α̂ + ((γ4-1)/4)*α̂²) )
+```
+Where:
+- α̂ is the estimated annualized alpha
+- α* is the expected maximum alpha under the null hypothesis (no skill)
+- T is the number of observations
+- γ3 is the skewness of returns, γ4 is the kurtosis of returns (not excess)
+- Φ is the standard normal CDF
+
+**Expected Maximum Alpha (α*):**
+- When trial alphas are provided: `α* = std(α_trials) * sqrt(2*ln(N)) * σ_benchmark` (cross-sectional estimate)
+- When trial alphas are unavailable: `α* = sqrt(2*ln(N)/T) * σ_benchmark` (i.i.d. normal approximation)
+
+**Interpretation:**
+- DAR ∈ [0,1] represents the probability that the strategy's true alpha exceeds the best alpha expected from luck alone
+- Higher N (more benchmarks tested) increases α*, making it harder to achieve high DAR
+- The correction accounts for non-normality in return distributions
+
+**When to use:**
+- When comparing against multiple benchmarks (N > 1)
+- When the search over benchmarks constitutes multiple testing
+- To avoid overstating statistical significance of alpha

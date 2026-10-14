@@ -55,3 +55,27 @@ All examples use the included synthetic sample data: `../assets/example_data/sam
 - **Realistic cost modeling** (commissions, slippage, benchmark costs)
 - **Benchmark comparison with statistical tests** (alpha, beta, correlation, t-stats)
 - **Out-of-sample thinking** and rigorous validation practices
+
+### `deflated_alpha_example.py`
+
+Demonstrates the Deflated Alpha Ratio (multiple-testing correction for benchmark alpha):
+
+1. **Single benchmark case** - With N=1, correction is minimal
+2. **Multiple benchmarks with trial alphas** - Using cross-sectional dispersion of alphas to estimate expected max alpha
+3. **Multiple benchmarks with fallback** - Using i.i.d. normal approximation when trial alphas are unavailable
+
+Run with:
+```bash
+python3 skills/quantitative-backtesting/examples/deflated_alpha_example.py
+```
+
+### `real_data_workflow.md`
+
+Comprehensive guide for working with real market data including:
+- Data provenance best practices
+- Point-in-time validation to prevent look-ahead bias
+- Survivorship bias detection for universe construction
+- Split/dividend adjustments and total-return benchmarks
+- Realistic cost modeling (commissions, slippage, market impact, borrow/funding)
+- Multiple-testing correction with deflated alpha
+- Walk-forward analysis and Monte Carlo robustness checks
