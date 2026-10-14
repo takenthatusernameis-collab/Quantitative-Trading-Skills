@@ -1,12 +1,38 @@
 # Handoff — Quantitative Trading Skills Repository
 
-**Last updated:** 2026-10-14. Core quant tests passing; reporting failures are pre-existing (matplotlib-dependent).
+**Last updated:** 2026-10-14. Core quant tests passing (153/153); reporting failures are pre-existing (matplotlib-dependent).
 
 ## Current repository state
 
 - Default branch: `main`.
 - Main package: `skills/quantitative-backtesting/` (strategies, scripts, tests, and validation references).
 - Dependencies used by the test suite include `pandas` and `numpy`; plotting tests require Matplotlib (not installed in this environment). `test_reporting.py` has 9 pre-existing failures that are all matplotlib-dependent (heatmap figures and equity-curve PNGs) and are unrelated to the changes in this session.
+
+## Recent durable work (this session)
+
+1. **Fixed `_adjust_for_splits()` direction bug (deterministic methodological defect).** The prior implementation multiplied pre-split prices by the split ratio, which inverted the adjustment for the Yahoo Finance convention (`splits` = new_shares/old_shares, split-date close already at the post-split level). It produced a spurious large negative return on the split date (e.g. -0.75 for a 2-for-1 split) and inflated pre-split price levels. The fix divides pre-split prices by the cumulative product of split ratios, so adjusted prices match ground-truth `adj_close` and the split-date return matches the `adj_close` return (no artificial drop). Pre-split volume is now scaled **up** by the cumulative ratio (was incorrectly divided). Multiple consecutive splits accumulate correctly.
+2. **Added regression tests for split adjustment.** Six new tests in `tests/test_data_loader.py`:
+   - `test_adjust_for_splits_divides_pre_split_prices` — adjusted close matches `adj_close` ground truth
+   - `test_adjust_for_splits_zero_return_on_split_date` — split-date return matches `adj_close` return, not the raw spurious drop
+   - `test_adjust_for_splits_no_split_column_is_identity` — no `splits` column returns frame unchanged
+   - `test_adjust_for_splits_no_actual_splits_is_identity` — all-1.0 splits leave prices unchanged
+   - `test_adjust_for_splits_multiple_splits_accumulate` — two consecutive splits accumulate ratios correctly
+   - `test_adjust_for_splits_volume_scaled` — pre-split volume scaled up by cumulative ratio
+3. **Documented split adjustment conventions** in `references/data_schema.md` (new "Split Adjustment Conventions" section).
+
+## Verification status (this session)
+
+- `test_data_loader.py`: 29/29 passed (23 prior + 6 new split-adjustment tests)
+- `test_performance.py`: 23/23 passed
+- `test_run_backtest.py`: 41/41 passed
+- `test_strategy_builder.py`: 27/27 passed
+- `test_walk_forward.py`: 9/9 passed (split-aware benchmark path still works after the fix)
+- `test_cpcv.py`: 16/16 passed
+- `test_monte_carlo.py`: 7/7 passed
+- `test_generate_sample_data.py`: 1/1 passed
+- `test_reporting.py`: 9 failures, all pre-existing and matplotlib-dependent
+
+All non-reporting tests pass (153/153 core quant tests).
 
 ## Recent durable work (this session)
 

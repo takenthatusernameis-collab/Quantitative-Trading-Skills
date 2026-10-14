@@ -104,8 +104,13 @@ def _adjust_for_splits(df: pd.DataFrame) -> pd.DataFrame:
     Adjust OHLCV prices for stock splits using the 'splits' column.
 
     Adjusts prices so that all prices are on a consistent basis. For a split
-    with ratio r = new_shares / old_shares (e.g., 2.0 for 2-for-1), historical
-    prices before the split are multiplied by r to be comparable to post-split prices.
+    with ratio r = new_shares / old_shares (e.g., 2.0 for a 2-for-1), historical
+    prices before the split are DIVIDED by r to be comparable to post-split
+    prices. This is the inverse of the multiplicative convention used by some
+    data vendors (where ``splits`` is expressed as old/new), and matches the
+    Yahoo Finance convention where the ``splits`` column records the ratio
+    ``new_shares / old_shares`` and the split-date close is already at the
+    post-split price level.
 
     Args:
         df: DataFrame with OHLCV data and optional 'splits' column
@@ -124,18 +129,26 @@ def _adjust_for_splits(df: pd.DataFrame) -> pd.DataFrame:
     cum_adj = pd.Series(1.0, index=df.index)
     for idx in sorted(df[split_mask].index):
         ratio = df.at[idx, "splits"]
-        # Multiply all dates before this split by ratio
-        # If prices on split date are post-split, don't multiply the split date
+        # Accumulate the product of split ratios for all dates strictly before
+        # this split.  For a 2-for-1 split (ratio=2.0), pre-split dates get a
+        # cumulative factor of 2.0, so dividing their raw (pre-split) prices by
+        # 2.0 brings them down to the post-split price level.  This keeps the
+        # split-date return at zero (no artificial drop) when the split-date
+        # close is already at the post-split level, matching the Yahoo Finance
+        # convention where ``splits`` records new_shares / old_shares.
         mask_pre = df.index < idx
         cum_adj[mask_pre] *= ratio
 
     price_cols = ["open", "high", "low", "close"]
     for col in price_cols:
         if col in df.columns:
-            df[col] = df[col] * cum_adj
+            df[col] = df[col] / cum_adj
 
     if "volume" in df.columns:
-        df["volume"] = df["volume"] / cum_adj
+        # Pre-split volume was recorded in pre-split share units; multiplying
+        # by the cumulative ratio expresses it in post-split share units so the
+        # series is comparable across the split date.
+        df["volume"] = df["volume"] * cum_adj
 
     df["splits_adjusted"] = True
     return df

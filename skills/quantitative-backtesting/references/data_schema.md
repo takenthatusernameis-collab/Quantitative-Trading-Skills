@@ -79,3 +79,27 @@ Use `resample_data` to convert between frequencies. OHLCV aggregation rules:
 | `low`   | `min`       |
 | `close` | `last`      |
 | `volume`| `sum`       |
+
+## Split Adjustment Conventions
+
+The `splits` column records the split ratio as `new_shares / old_shares`
+(e.g. `2.0` for a 2-for-1 split), matching the Yahoo Finance convention.
+The close price on the split date is already at the **post-split** price level.
+
+`adjust_for_splits()` (a.k.a. `_adjust_for_splits`) brings all pre-split prices
+to the post-split level by **dividing** them by the cumulative product of the
+split ratios that occur on or after each date. This is the inverse of the
+multiplicative convention used by some vendors, and it keeps the split-date
+return at zero (no artificial drop) when the split-date close is already at
+the post-split level.
+
+For multiple consecutive splits, the ratios accumulate: a 2-for-1 split
+followed by a 3-for-1 split applies a cumulative factor of `2.0 * 3.0 = 6.0`
+to dates before the first split, `3.0` to dates between the two splits, and
+`1.0` to dates after the last split.
+
+Pre-split **volume** is scaled **up** by the cumulative ratio so the series
+stays comparable across the split date (volume was recorded in pre-split share
+units). When an `adj_close` column is available, it may be used as ground
+truth: after adjustment, `close` should match `adj_close` and the split-date
+return should match the `adj_close` return.
