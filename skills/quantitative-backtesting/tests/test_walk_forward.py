@@ -31,10 +31,13 @@ from walk_forward import (  # noqa: E402
     run_cpcv,
     run_parameter_optimization,
     run_monte_carlo,
+    run_out_of_sample_validation,
+    out_of_sample_validation,
     _make_strategy_factory,
     _parse_param_grid,
     _annualization_factor,
     _calculate_strategy_returns,
+    _split_train_val_test,
 )
 from strategy_builder import build_strategy  # noqa: E402
 from data_loader import load_data  # noqa: E402
@@ -356,6 +359,19 @@ class _CLIArgs:
             "adv_window": 20,
             "borrow_cost": 0.0,
             "funding_cost": 0.0,
+            # Out-of-sample validation defaults
+            "train_frac": 0.6,
+            "val_frac": 0.2,
+            "test_frac": 0.2,
+            "validation_method": "walk_forward",
+            "selection_criterion": "best_oos_sharpe",
+            "wf_train_months": 12,
+            "wf_test_months": 3,
+            "wf_step_months": 3,
+            "cpcv_n_splits": 10,
+            "cpcv_test_size": 0.1,
+            "cpcv_purge_size": 0.0,
+            "cpcv_embargo_size": 0.0,
         }
         for k, v in defaults.items():
             setattr(self, k, v)
@@ -2434,6 +2450,18 @@ def main() -> int:
         ("run_walk_forward_cli_with_total_return_benchmark", test_run_walk_forward_cli_with_total_return_benchmark),
         ("run_cpcv_cli_with_total_return_benchmark", test_run_cpcv_cli_with_total_return_benchmark),
         ("run_monte_carlo_cli_with_total_return_benchmark", test_run_monte_carlo_cli_with_total_return_benchmark),
+        # Out-of-sample validation framework tests
+        ("out_of_sample_validation_basic", test_out_of_sample_validation_basic),
+        ("out_of_sample_validation_cpcv_method", test_out_of_sample_validation_cpcv_method),
+        ("out_of_sample_validation_selection_criteria", test_out_of_sample_validation_selection_criteria),
+        ("out_of_sample_validation_with_benchmark", test_out_of_sample_validation_with_benchmark),
+        ("out_of_sample_validation_split_fractions", test_out_of_sample_validation_split_fractions),
+        ("out_of_sample_validation_test_returns_never_used_in_selection", test_out_of_sample_validation_test_returns_never_used_in_selection),
+        ("out_of_sample_validation_deflated_sharpe", test_out_of_sample_validation_deflated_sharpe),
+        ("split_train_val_test", test_split_train_val_test),
+        ("run_out_of_sample_validation_cli", test_run_out_of_sample_validation_cli),
+        ("run_out_of_sample_validation_cli_with_benchmark", test_run_out_of_sample_validation_cli_with_benchmark),
+        ("run_out_of_sample_validation_cli_cpcv_method", test_run_out_of_sample_validation_cli_cpcv_method),
     ]
 
     failures = 0
@@ -2966,5 +2994,391 @@ def test_run_monte_carlo_cli_with_total_return_benchmark():
         Path(bench_file).unlink()
 
 
-if __name__ == "__main__":
+# Out-of-sample validation framework tests
+
+def test_out_of_sample_validation_basic():
+    """Basic out-of-sample validation with walk-forward validation method."""
+    data = _make_data(periods=1000)
+    results = out_of_sample_validation(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid={"fast_period": [10, 20], "slow_period": [30, 50]},
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+        selection_criterion="best_oos_sharpe",
+        apply_deflation=False,
+    )
+
+    assert "train_val_test_split" in results
+    assert "validation_results" in results
+    assert "selected_params" in results
+    assert "validation_performance" in results
+    assert "test_performance" in results
+    assert "summary" in results
+
+    split = results["train_val_test_split"]
+    assert split["train_size"] > 0
+    assert split["val_size"] > 0
+    assert split["test_size"] > 0
+    assert split["train_frac"] == 0.6
+    assert split["val_frac"] == 0.2
+    assert split["test_frac"] == 0.2
+
+    assert results["selected_params"] is not None
+    assert "fast_period" in results["selected_params"]
+    assert "slow_period" in results["selected_params"]
+
+    val_perf = results["validation_performance"]
+    assert "val_total_return" in val_perf
+    assert "val_sharpe" in val_perf
+
+    test_perf = results["test_performance"]
+    assert "test_total_return" in test_perf
+    assert "test_sharpe" in test_perf
+    assert "test_returns" in test_perf
+
+
+def test_out_of_sample_validation_cpcv_method():
+    """Out-of-sample validation with CPCV validation method."""
+    data = _make_data(periods=1500)
+    results = out_of_sample_validation(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid={"fast_period": [10, 20], "slow_period": [30, 50]},
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="cpcv",
+        cpcv_n_splits=5,
+        cpcv_test_size=0.2,
+        cpcv_purge_size=0.0,
+        cpcv_embargo_size=0.0,
+        selection_criterion="best_oos_sharpe",
+        apply_deflation=False,
+    )
+
+    assert results["selected_params"] is not None
+    assert results["validation_results"]["folds"] is not None
+    assert len(results["validation_results"]["folds"]) > 0
+
+
+def test_out_of_sample_validation_selection_criteria():
+    """Test different parameter selection criteria."""
+    data = _make_data(periods=1000)
+    param_grid = {"fast_period": [10, 20], "slow_period": [30, 50]}
+
+    # Test best_oos_sharpe
+    results_sharpe = out_of_sample_validation(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid=param_grid,
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+        selection_criterion="best_oos_sharpe",
+    )
+    assert results_sharpe["selected_params"] is not None
+
+    # Test most_stable
+    results_stable = out_of_sample_validation(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid=param_grid,
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+        selection_criterion="most_stable",
+    )
+    assert results_stable["selected_params"] is not None
+
+    # Test best_avg_sharpe
+    results_avg = out_of_sample_validation(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid=param_grid,
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+        selection_criterion="best_avg_sharpe",
+    )
+    assert results_avg["selected_params"] is not None
+
+
+def test_out_of_sample_validation_with_benchmark():
+    """Out-of-sample validation with benchmark comparison on test set."""
+    data = _make_data(periods=1000)
+    bench = _make_data(periods=1000, seed=99)
+
+    results = out_of_sample_validation(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid={"fast_period": [10, 20], "slow_period": [30, 50]},
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+        benchmark=bench,
+        total_return_benchmark=False,
+    )
+
+    assert results["test_benchmark"] is not None
+    assert "correlation_with_benchmark" in results["test_benchmark"]
+    assert "alpha" in results["test_benchmark"]
+    assert "beta" in results["test_benchmark"]
+    assert results["summary"]["correlation_with_benchmark"] == results["test_benchmark"]["correlation_with_benchmark"]
+
+
+def test_out_of_sample_validation_split_fractions():
+    """Test that split fractions are enforced and sum to 1."""
+    data = _make_data(periods=1000)
+
+    # Valid fractions
+    results = out_of_sample_validation(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid={"fast_period": [10, 20], "slow_period": [30, 50]},
+        train_frac=0.7,
+        val_frac=0.15,
+        test_frac=0.15,
+    )
+    split = results["train_val_test_split"]
+    assert abs(split["train_frac"] - 0.7) < 0.01
+    assert abs(split["val_frac"] - 0.15) < 0.01
+    assert abs(split["test_frac"] - 0.15) < 0.01
+
+    # Invalid fractions should raise
+    try:
+        out_of_sample_validation(
+            data=data,
+            strategy_factory=lambda p: _factory("sma_crossover", p),
+            param_grid={"fast_period": [10, 20], "slow_period": [30, 50]},
+            train_frac=0.5,
+            val_frac=0.2,
+            test_frac=0.2,  # sums to 0.9
+        )
+        assert False, "Expected ValueError for fractions not summing to 1"
+    except ValueError as e:
+        assert "Fractions must sum to 1.0" in str(e)
+
+
+def test_out_of_sample_validation_test_returns_never_used_in_selection():
+    """Verify test set is never used during parameter selection."""
+    data = _make_data(periods=1000)
+    param_grid = {"fast_period": [10, 20], "slow_period": [30, 50]}
+
+    results = out_of_sample_validation(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid=param_grid,
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+    )
+
+    # The validation results should only contain periods from the training split
+    val_results = results["validation_results"]
+    for period in val_results.get("periods", []):
+        if period.get("test_end") is not None:
+            # All test_end dates should be within the training split
+            assert period["test_end"] <= results["train_val_test_split"]["train_end"], (
+                f"Validation period test_end {period['test_end']} exceeds train split end "
+                f"{results['train_val_test_split']['train_end']}"
+            )
+
+
+def test_out_of_sample_validation_deflated_sharpe():
+    """Out-of-sample validation with Deflated Sharpe Ratio on test results."""
+    data = _make_data(periods=1000)
+    results = out_of_sample_validation(
+        data=data,
+        strategy_factory=lambda p: _factory("sma_crossover", p),
+        param_grid={"fast_period": [10, 20], "slow_period": [30, 50]},
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+        apply_deflation=True,
+    )
+
+    assert "deflated_sharpe" in results["summary"]
+    dsr = results["summary"]["deflated_sharpe"]
+    assert 0.0 <= dsr["deflated_sharpe_ratio"] <= 1.0
+    assert dsr["n_trials"] > 0
+    assert dsr["n_observations"] == len(results["test_performance"]["test_returns"])
+
+
+def test_split_train_val_test():
+    """Test the _split_train_val_test helper function."""
+    data = _make_data(periods=1000)
+
+    train, val, test = _split_train_val_test(data, train_frac=0.6, val_frac=0.2, test_frac=0.2)
+
+    assert len(train) == 600
+    assert len(val) == 200
+    assert len(test) == 200
+
+    # Check chronological order
+    assert train.index[-1] < val.index[0]
+    assert val.index[-1] < test.index[0]
+
+    # Test with dict panel data
+    data_dict = _make_multiasset_dict(n=1000, n_assets=3)
+    train_dict, val_dict, test_dict = _split_train_val_test(data_dict, 0.6, 0.2, 0.2)
+    assert len(train_dict) == 600
+    assert len(val_dict) == 200
+    assert len(test_dict) == 200
+
+
+def test_run_out_of_sample_validation_cli():
+    """Test out-of-sample validation CLI function."""
+    data_file = _make_test_data_file(periods=1000)
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                train_frac=0.6,
+                val_frac=0.2,
+                test_frac=0.2,
+                validation_method="walk_forward",
+                selection_criterion="best_oos_sharpe",
+                wf_train_months=6,
+                wf_test_months=2,
+                wf_step_months=2,
+                initial_capital=100000,
+                deflate=False,
+            )
+            result = run_out_of_sample_validation(args)
+            assert result == 0
+
+            # Check output files exist
+            summary_path = Path(tmpdir) / "out_of_sample_summary.json"
+            assert summary_path.exists(), "Summary JSON not created"
+
+            with open(summary_path) as f:
+                summary = json.load(f)
+            assert "summary" in summary
+            assert "train_val_test_split" in summary
+            assert "selected_params" in summary
+            assert "validation_performance" in summary
+            assert "test_performance" in summary
+            assert summary["summary"]["test_sharpe"] is not None
+    finally:
+        Path(data_file).unlink()
+
+
+def test_run_out_of_sample_validation_cli_with_benchmark():
+    """Test out-of-sample validation CLI with benchmark."""
+    data_file = _make_test_data_file(periods=1000)
+    # Use same date range for benchmark to ensure alignment
+    bench_file = _make_benchmark_data_with_dividends(periods=1000)
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                train_frac=0.6,
+                val_frac=0.2,
+                test_frac=0.2,
+                validation_method="walk_forward",
+                selection_criterion="best_oos_sharpe",
+                wf_train_months=6,
+                wf_test_months=2,
+                wf_step_months=2,
+                initial_capital=100000,
+                deflate=False,
+                benchmark=bench_file,
+                total_return_benchmark=True,
+            )
+            result = run_out_of_sample_validation(args)
+            assert result == 0
+
+            summary_path = Path(tmpdir) / "out_of_sample_summary.json"
+            with open(summary_path) as f:
+                summary = json.load(f)
+            assert "test_benchmark" in summary
+            assert summary["test_benchmark"] is not None
+            assert "correlation_with_benchmark" in summary["test_benchmark"]
+    finally:
+        Path(data_file).unlink()
+        Path(bench_file).unlink()
+
+
+def test_run_out_of_sample_validation_cli_cpcv_method():
+    """Test out-of-sample validation CLI with CPCV validation method."""
+    data_file = _make_test_data_file(periods=1500)
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = _CLIArgs(
+                data=data_file,
+                strategy="sma_crossover",
+                symbol="SPY",
+                start=None,
+                end=None,
+                commission=0.0002,
+                slippage=0.0001,
+                output=tmpdir,
+                param_grid='{"fast_period": [10, 20], "slow_period": [30, 50]}',
+                train_frac=0.6,
+                val_frac=0.2,
+                test_frac=0.2,
+                validation_method="cpcv",
+                selection_criterion="best_oos_sharpe",
+                cpcv_n_splits=5,
+                cpcv_test_size=0.2,
+                cpcv_purge_size=0.0,
+                cpcv_embargo_size=0.0,
+                initial_capital=100000,
+                deflate=False,
+            )
+            result = run_out_of_sample_validation(args)
+            assert result == 0
+
+            summary_path = Path(tmpdir) / "out_of_sample_summary.json"
+            with open(summary_path) as f:
+                summary = json.load(f)
+            assert summary["config"]["validation_method"] == "cpcv"
+    finally:
+        Path(data_file).unlink()
     sys.exit(main())

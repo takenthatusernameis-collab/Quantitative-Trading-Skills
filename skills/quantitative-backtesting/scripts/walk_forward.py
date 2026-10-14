@@ -27,6 +27,58 @@ from scripts.reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
 
 
+def _split_train_val_test(
+    data: Union[pd.DataFrame, dict],
+    train_frac: float = 0.6,
+    val_frac: float = 0.2,
+    test_frac: float = 0.2,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Split data chronologically into train/validation/test sets.
+
+    Args:
+        data: DataFrame with OHLCV data indexed by date (or dict panel)
+        train_frac: Fraction of data for training (default 0.6)
+        val_frac: Fraction of data for validation (default 0.2)
+        test_frac: Fraction of data for testing (default 0.2)
+
+    Returns:
+        Tuple of (train_data, val_data, test_data) DataFrames
+
+    Raises:
+        ValueError: If fractions don't sum to ~1.0 or data is empty
+    """
+    if isinstance(data, dict):
+        data = _dict_to_multiindex(data)
+
+    if not isinstance(data.index, pd.DatetimeIndex):
+        try:
+            data.index = pd.DatetimeIndex(data.index)
+        except Exception:
+            pass
+    data = data.sort_index()
+
+    n = len(data)
+    if n == 0:
+        raise ValueError("Data is empty")
+
+    total_frac = train_frac + val_frac + test_frac
+    if abs(total_frac - 1.0) > 1e-9:
+        raise ValueError(f"Fractions must sum to 1.0, got {total_frac}")
+
+    train_end = int(n * train_frac)
+    val_end = train_end + int(n * val_frac)
+
+    # Ensure each split has at least some data
+    if train_end == 0 or val_end == train_end or val_end >= n:
+        raise ValueError("Data too small for requested split fractions")
+
+    train_data = data.iloc[:train_end]
+    val_data = data.iloc[train_end:val_end]
+    test_data = data.iloc[val_end:]
+
+    return train_data, val_data, test_data
+
+
 def _dict_to_multiindex(data_dict: dict) -> pd.DataFrame:
     """Convert dict panel data (symbol -> OHLCV DataFrame) to a
     MultiIndex (field, symbol) DataFrame aligned on the common date index.
@@ -1135,6 +1187,364 @@ def _calculate_cpcv_summary(
     return summary
 
 
+def out_of_sample_validation(
+    data: Union[pd.DataFrame, dict],
+    strategy_factory: Callable,
+    param_grid: Dict[str, List[Any]],
+    train_frac: float = 0.6,
+    val_frac: float = 0.2,
+    test_frac: float = 0.2,
+    validation_method: str = "walk_forward",
+    walk_forward_train_months: int = 12,
+    walk_forward_test_months: int = 3,
+    walk_forward_step_months: int = 3,
+    cpcv_n_splits: int = 10,
+    cpcv_test_size: float = 0.1,
+    cpcv_purge_size: float = 0.0,
+    cpcv_embargo_size: float = 0.0,
+    selection_criterion: str = "best_oos_sharpe",
+    initial_capital: float = 100000,
+    commission: float = 0.0002,
+    slippage: float = 0.0001,
+    impact_coefficient: float = 0.0,
+    adv_window: int = 20,
+    borrow_cost: float = 0.0,
+    funding_cost: float = 0.0,
+    apply_deflation: bool = False,
+    benchmark: Optional[pd.DataFrame] = None,
+    total_return_benchmark: bool = False,
+    benchmark_commission: float = 0.0,
+    benchmark_slippage: float = 0.0,
+) -> Dict[str, Any]:
+    """
+    Perform rigorous out-of-sample validation with chronological train/validation/test split.
+
+    This function implements a three-phase validation framework to prevent data leakage:
+    1. TRAIN: Walk-forward analysis or CPCV on the training portion to select optimal parameters
+    2. VALIDATE: Evaluate selected parameters on the validation portion (confirmation)
+    3. TEST: Final evaluation on the held-out test set (never used in any selection step)
+
+    Args:
+        data: OHLCV DataFrame indexed by date (or dict panel)
+        strategy_factory: Function that creates a strategy from params dict
+        param_grid: Dictionary of parameter name -> list of values to search
+        train_frac: Fraction of data for training (default 0.6)
+        val_frac: Fraction of data for validation (default 0.2)
+        test_frac: Fraction of data for testing (default 0.2)
+        validation_method: "walk_forward" or "cpcv" for parameter selection on training data
+        walk_forward_train_months: Training window size in months for walk-forward
+        walk_forward_test_months: Testing window size in months for walk-forward
+        walk_forward_step_months: Step size between walk-forward iterations
+        cpcv_n_splits: Number of sequential groups for CPCV
+        cpcv_test_size: Fraction of each group to use as test set in CPCV
+        cpcv_purge_size: Fraction of observations to purge from training around test
+        cpcv_embargo_size: Fraction of observations to embargo after test set
+        selection_criterion: How to select final params from validation results:
+            - "best_oos_sharpe": Best out-of-sample Sharpe from walk-forward/CPCV
+            - "most_stable": Most frequently selected params across periods/folds
+            - "best_avg_sharpe": Best average Sharpe across periods/folds
+        initial_capital: Starting portfolio value
+        commission: Commission rate per trade
+        slippage: Slippage rate per trade
+        impact_coefficient: Market impact coefficient
+        adv_window: Rolling window for Average Daily Volume calculation
+        borrow_cost: Annual borrow cost rate for short positions
+        funding_cost: Annual funding cost rate for leveraged positions
+        apply_deflation: Compute Deflated Sharpe Ratio for multiple-testing correction
+        benchmark: Optional benchmark OHLCV DataFrame for buy-and-hold comparison
+        total_return_benchmark: Compute benchmark returns using total return (dividends + price)
+        benchmark_commission: Commission per trade for benchmark
+        benchmark_slippage: Slippage per trade for benchmark
+
+    Returns:
+        Dictionary with:
+            - 'train_val_test_split': Dict with split boundaries and sizes
+            - 'validation_results': Full results from walk_forward_analysis or cpcv_analysis on training data
+            - 'selected_params': Parameters selected by the selection criterion
+            - 'validation_performance': Performance of selected params on validation data
+            - 'test_performance': Final performance on held-out test data
+            - 'test_benchmark': Benchmark comparison on test data (if benchmark provided)
+            - 'summary': Aggregate summary with key metrics and deflated Sharpe
+    """
+    # Normalize data format
+    if isinstance(data, dict):
+        data = _dict_to_multiindex(data)
+
+    if isinstance(data.columns, pd.MultiIndex):
+        if not isinstance(data.index, pd.DatetimeIndex):
+            try:
+                data.index = pd.DatetimeIndex(data.index)
+            except Exception:
+                pass
+        data = data.sort_index()
+    else:
+        if not isinstance(data.index, pd.DatetimeIndex):
+            raise ValueError("Data must be indexed by DatetimeIndex")
+        data = data.sort_index()
+
+    # Split data chronologically
+    train_data, val_data, test_data = _split_train_val_test(
+        data, train_frac=train_frac, val_frac=val_frac, test_frac=test_frac
+    )
+
+    # Record split boundaries
+    split_info = {
+        "train_start": train_data.index[0],
+        "train_end": train_data.index[-1],
+        "val_start": val_data.index[0],
+        "val_end": val_data.index[-1],
+        "test_start": test_data.index[0],
+        "test_end": test_data.index[-1],
+        "train_size": len(train_data),
+        "val_size": len(val_data),
+        "test_size": len(test_data),
+        "train_frac": train_frac,
+        "val_frac": val_frac,
+        "test_frac": test_frac,
+    }
+
+    # Phase 1: VALIDATION - Run walk-forward or CPCV on training data
+    if validation_method == "walk_forward":
+        validation_results = walk_forward_analysis(
+            data=train_data,
+            strategy_factory=strategy_factory,
+            param_grid=param_grid,
+            train_months=walk_forward_train_months,
+            test_months=walk_forward_test_months,
+            step_months=walk_forward_step_months,
+            initial_capital=initial_capital,
+            commission=commission,
+            slippage=slippage,
+            impact_coefficient=impact_coefficient,
+            adv_window=adv_window,
+            borrow_cost=borrow_cost,
+            funding_cost=funding_cost,
+            apply_deflation=apply_deflation,
+        )
+    elif validation_method == "cpcv":
+        validation_results = cpcv_analysis(
+            data=train_data,
+            strategy_factory=strategy_factory,
+            param_grid=param_grid,
+            n_splits=cpcv_n_splits,
+            test_size=cpcv_test_size,
+            purge_size=cpcv_purge_size,
+            embargo_size=cpcv_embargo_size,
+            initial_capital=initial_capital,
+            commission=commission,
+            slippage=slippage,
+            impact_coefficient=impact_coefficient,
+            adv_window=adv_window,
+            borrow_cost=borrow_cost,
+            funding_cost=funding_cost,
+            apply_deflation=apply_deflation,
+        )
+    else:
+        raise ValueError(f"Unknown validation_method: {validation_method}. Use 'walk_forward' or 'cpcv'.")
+
+    # Phase 2: SELECTION - Select best parameters based on criterion
+    selected_params = _select_parameters(
+        validation_results=validation_results,
+        validation_method=validation_method,
+        criterion=selection_criterion,
+    )
+
+    if selected_params is None:
+        return {
+            "train_val_test_split": split_info,
+            "validation_results": validation_results,
+            "selected_params": None,
+            "validation_performance": None,
+            "test_performance": None,
+            "test_benchmark": None,
+            "summary": {
+                "error": "No valid parameters found in validation phase",
+                "train_val_test_split": split_info,
+            },
+        }
+
+    # Phase 3: CONFIRMATION - Evaluate selected params on validation data
+    strategy = strategy_factory(selected_params)
+    val_signals = strategy.generate_signals(val_data)
+    val_returns = _calculate_strategy_returns(
+        val_data, val_signals, commission, slippage,
+        impact_coefficient, adv_window, borrow_cost, funding_cost
+    )
+
+    ann_factor = _annualization_factor(val_returns.index)
+    excess = val_returns - 0.02 / ann_factor
+    val_sharpe = float(excess.mean() / excess.std() * np.sqrt(ann_factor)) if len(val_returns) > 1 and val_returns.std() > 0 else 0.0
+    val_total_return = float((1 + val_returns).prod() - 1) if len(val_returns) > 0 else 0.0
+
+    validation_performance = {
+        "selected_params": selected_params,
+        "val_total_return": val_total_return,
+        "val_sharpe": val_sharpe,
+        "val_volatility": float(val_returns.std() * np.sqrt(ann_factor)) if len(val_returns) > 1 else 0.0,
+        "val_n_periods": len(val_returns),
+    }
+
+    # Phase 4: FINAL TEST - Evaluate on held-out test data
+    test_signals = strategy.generate_signals(test_data)
+    test_returns = _calculate_strategy_returns(
+        test_data, test_signals, commission, slippage,
+        impact_coefficient, adv_window, borrow_cost, funding_cost
+    )
+
+    ann_factor_test = _annualization_factor(test_returns.index)
+    excess_test = test_returns - 0.02 / ann_factor_test
+    test_sharpe = float(excess_test.mean() / excess_test.std() * np.sqrt(ann_factor_test)) if len(test_returns) > 1 and test_returns.std() > 0 else 0.0
+    test_total_return = float((1 + test_returns).prod() - 1) if len(test_returns) > 0 else 0.0
+
+    test_performance = {
+        "test_total_return": test_total_return,
+        "test_sharpe": test_sharpe,
+        "test_volatility": float(test_returns.std() * np.sqrt(ann_factor_test)) if len(test_returns) > 1 else 0.0,
+        "test_n_periods": len(test_returns),
+        "test_returns": test_returns,
+    }
+
+    # Benchmark comparison on test set
+    test_benchmark = None
+    if benchmark is not None and len(test_returns) > 0:
+        benchmark_returns = _compute_benchmark_returns(benchmark, test_returns, total_return_benchmark)
+        if benchmark_returns is not None:
+            test_benchmark = _benchmark_stats(
+                test_returns, benchmark_returns, ann_factor_test,
+                total_return_benchmark=total_return_benchmark,
+                benchmark_commission=benchmark_commission,
+                benchmark_slippage=benchmark_slippage,
+            )
+            test_performance.update(test_benchmark)
+
+    # Aggregate summary
+    summary = {
+        "train_val_test_split": split_info,
+        "validation_method": validation_method,
+        "selection_criterion": selection_criterion,
+        "selected_params": selected_params,
+        "validation_total_return": val_total_return,
+        "validation_sharpe": val_sharpe,
+        "test_total_return": test_total_return,
+        "test_sharpe": test_sharpe,
+        "test_volatility": test_performance["test_volatility"],
+    }
+
+    # Add Deflated Sharpe Ratio on test returns if requested
+    # n_trials = total configurations evaluated in validation phase
+    total_trials = 0
+    if validation_method == "walk_forward":
+        for period in validation_results.get("periods", []):
+            if period.get("best_params") is not None:
+                # Count evaluated configs for this period
+                total_trials += len(list(product(*param_grid.values())))
+    elif validation_method == "cpcv":
+        for fold in validation_results.get("folds", []):
+            if fold.get("best_params") is not None:
+                total_trials += len(list(product(*param_grid.values())))
+
+    if apply_deflation and len(test_returns) > 1 and total_trials > 0:
+        summary["deflated_sharpe"] = deflated_sharpe_ratio(
+            sharpe_ratio=test_sharpe,
+            returns=test_returns,
+            n_trials=total_trials,
+            trial_sharpes=None,  # We don't have the trial sharpes from validation here
+        )
+
+    if test_benchmark:
+        summary.update(test_benchmark)
+
+    return {
+        "train_val_test_split": split_info,
+        "validation_results": validation_results,
+        "selected_params": selected_params,
+        "validation_performance": validation_performance,
+        "test_performance": test_performance,
+        "test_benchmark": test_benchmark,
+        "summary": summary,
+    }
+
+
+def _select_parameters(
+    validation_results: Dict[str, Any],
+    validation_method: str,
+    criterion: str = "best_oos_sharpe",
+) -> Optional[Dict[str, Any]]:
+    """Select optimal parameters from validation results based on criterion."""
+    if validation_method == "walk_forward":
+        periods = validation_results.get("periods", [])
+        valid_periods = [p for p in periods if p.get("best_params") is not None]
+
+        if not valid_periods:
+            return None
+
+        if criterion == "best_oos_sharpe":
+            # Select params from period with best test Sharpe
+            best_period = max(valid_periods, key=lambda p: p.get("best_sharpe", -np.inf))
+            return best_period["best_params"]
+
+        elif criterion == "most_stable":
+            # Most frequently selected params across periods
+            from collections import Counter
+            param_tuples = [tuple(sorted(p["best_params"].items())) for p in valid_periods]
+            if param_tuples:
+                most_common = Counter(param_tuples).most_common(1)[0][0]
+                return dict(most_common)
+            return None
+
+        elif criterion == "best_avg_sharpe":
+            # Params with best average Sharpe across periods where they were selected
+            from collections import defaultdict
+            param_sharpes = defaultdict(list)
+            for p in valid_periods:
+                key = tuple(sorted(p["best_params"].items()))
+                param_sharpes[key].append(p["best_sharpe"])
+
+            best_key = max(param_sharpes.keys(), key=lambda k: np.mean(param_sharpes[k]))
+            return dict(best_key)
+
+    elif validation_method == "cpcv":
+        folds = validation_results.get("folds", [])
+        valid_folds = [f for f in folds if f.get("best_params") is not None]
+
+        if not valid_folds:
+            return None
+
+        if criterion == "best_oos_sharpe":
+            best_fold = max(valid_folds, key=lambda f: f.get("best_sharpe", -np.inf))
+            return best_fold["best_params"]
+
+        elif criterion == "most_stable":
+            from collections import Counter
+            param_tuples = [tuple(sorted(f["best_params"].items())) for f in valid_folds]
+            if param_tuples:
+                most_common = Counter(param_tuples).most_common(1)[0][0]
+                return dict(most_common)
+            return None
+
+        elif criterion == "best_avg_sharpe":
+            from collections import defaultdict
+            param_sharpes = defaultdict(list)
+            for f in valid_folds:
+                key = tuple(sorted(f["best_params"].items()))
+                param_sharpes[key].append(f["best_sharpe"])
+
+            best_key = max(param_sharpes.keys(), key=lambda k: np.mean(param_sharpes[k]))
+            return dict(best_key)
+
+    # Default fallback
+    if validation_method == "walk_forward" and validation_results.get("periods"):
+        for p in validation_results["periods"]:
+            if p.get("best_params") is not None:
+                return p["best_params"]
+    elif validation_method == "cpcv" and validation_results.get("folds"):
+        for f in validation_results["folds"]:
+            if f.get("best_params") is not None:
+                return f["best_params"]
+
+    return None
+
+
 def run_cpcv(args) -> int:
     """Run CPCV analysis from CLI args."""
     print(f"Loading data from {args.data}...")
@@ -1932,6 +2342,217 @@ def run_monte_carlo(args) -> int:
     return 0
 
 
+def run_out_of_sample_validation(args) -> int:
+    """Run out-of-sample validation from CLI args."""
+    print(f"Loading data from {args.data}...")
+    data, pit_results = _load_and_validate_data(
+        args.data, args.symbol, args.start, args.end,
+        validate_pit=getattr(args, "validate_point_in_time", False),
+        pit_strict=getattr(args, "point_in_time_strict", False),
+    )
+
+    # Load benchmark if provided
+    benchmark = None
+    benchmark_provenance = None
+    total_return_benchmark = getattr(args, "total_return_benchmark", False)
+    bench_commission = getattr(args, "benchmark_commission", None) if getattr(args, "benchmark_commission", None) is not None else args.commission
+    bench_slippage = getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage
+    if getattr(args, "benchmark", None):
+        print(f"Loading benchmark data from {args.benchmark}...")
+        benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
+
+    param_grid = _parse_param_grid(args.param_grid)
+    strategy_factory = _make_strategy_factory(args.strategy)
+
+    print(f"Running out-of-sample validation with {args.strategy}...")
+    print(f"  Train/Val/Test split: {args.train_frac:.1%}/{args.val_frac:.1%}/{args.test_frac:.1%}")
+    print(f"  Validation method: {args.validation_method}")
+    print(f"  Selection criterion: {args.selection_criterion}")
+
+    results = out_of_sample_validation(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        train_frac=args.train_frac,
+        val_frac=args.val_frac,
+        test_frac=args.test_frac,
+        validation_method=args.validation_method,
+        walk_forward_train_months=args.wf_train_months,
+        walk_forward_test_months=args.wf_test_months,
+        walk_forward_step_months=args.wf_step_months,
+        cpcv_n_splits=args.cpcv_n_splits,
+        cpcv_test_size=args.cpcv_test_size,
+        cpcv_purge_size=args.cpcv_purge_size,
+        cpcv_embargo_size=args.cpcv_embargo_size,
+        selection_criterion=args.selection_criterion,
+        initial_capital=args.initial_capital,
+        commission=args.commission,
+        slippage=args.slippage,
+        impact_coefficient=args.impact_coefficient,
+        adv_window=args.adv_window,
+        borrow_cost=args.borrow_cost,
+        funding_cost=args.funding_cost,
+        apply_deflation=args.deflate,
+        benchmark=benchmark,
+        total_return_benchmark=total_return_benchmark,
+        benchmark_commission=bench_commission,
+        benchmark_slippage=bench_slippage,
+    )
+
+    if pit_results is not None:
+        results["point_in_time_validation"] = pit_results
+
+    # Print results
+    split_info = results["train_val_test_split"]
+    print(f"\nTrain/Validation/Test Split:")
+    print(f"  Train: {split_info['train_start'].date()} to {split_info['train_end'].date()} ({split_info['train_size']} bars)")
+    print(f"  Val:   {split_info['val_start'].date()} to {split_info['val_end'].date()} ({split_info['val_size']} bars)")
+    print(f"  Test:  {split_info['test_start'].date()} to {split_info['test_end'].date()} ({split_info['test_size']} bars)")
+
+    selected = results["selected_params"]
+    if selected is None:
+        print("No valid parameters selected from validation phase.")
+        return 1
+
+    print(f"\nSelected Parameters: {selected}")
+
+    val_perf = results["validation_performance"]
+    print(f"\nValidation Performance:")
+    print(f"  Total Return: {val_perf['val_total_return']:.2%}")
+    print(f"  Sharpe Ratio: {val_perf['val_sharpe']:.4f}")
+
+    test_perf = results["test_performance"]
+    print(f"\nTest Performance (HELD-OUT, never used in selection):")
+    print(f"  Total Return: {test_perf['test_total_return']:.2%}")
+    print(f"  Sharpe Ratio: {test_perf['test_sharpe']:.4f}")
+
+    summary = results["summary"]
+    dsr = summary.get("deflated_sharpe")
+    if dsr is not None:
+        print(
+            f"\nDeflated Sharpe Ratio (test): {dsr['deflated_sharpe_ratio']:.4f} "
+            f"(p-value {dsr['p_value']:.4f}, expected max Sharpe "
+            f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
+        )
+
+    if results["test_benchmark"]:
+        print(
+            f"\nTest Benchmark Comparison:"
+        )
+        print(
+            f"  Correlation: {results['test_benchmark'].get('correlation_with_benchmark', 'N/A'):.4f}"
+        )
+        print(
+            f"  Alpha (annualized): {results['test_benchmark'].get('alpha', 'N/A'):.2%}"
+        )
+        print(
+            f"  Beta: {results['test_benchmark'].get('beta', 'N/A'):.4f}"
+        )
+        pval = results["test_benchmark"].get("alpha_pvalue")
+        print(
+            f"  Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
+        )
+        rs = results["test_benchmark"].get("r_squared")
+        print(
+            f"  R-squared: {rs if rs is None else f'{rs:.4f}'}"
+        )
+
+    # Save results
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save summary as JSON
+    summary_path = output_dir / "out_of_sample_summary.json"
+    summary_data = {
+        "summary": results["summary"],
+        "train_val_test_split": results["train_val_test_split"],
+        "selected_params": results["selected_params"],
+        "validation_performance": results["validation_performance"],
+        "test_performance": {
+            "test_total_return": results["test_performance"]["test_total_return"],
+            "test_sharpe": results["test_performance"]["test_sharpe"],
+            "test_volatility": results["test_performance"]["test_volatility"],
+            "test_n_periods": results["test_performance"]["test_n_periods"],
+        },
+        "test_benchmark": results["test_benchmark"],
+        "config": {
+            "strategy": args.strategy,
+            "symbol": args.symbol,
+            "train_frac": args.train_frac,
+            "val_frac": args.val_frac,
+            "test_frac": args.test_frac,
+            "validation_method": args.validation_method,
+            "selection_criterion": args.selection_criterion,
+            "commission": args.commission,
+            "slippage": args.slippage,
+            "impact_coefficient": args.impact_coefficient,
+            "adv_window": args.adv_window,
+            "borrow_cost": args.borrow_cost,
+            "funding_cost": args.funding_cost,
+            "deflate": bool(getattr(args, "deflate", False)),
+            "param_grid": param_grid,
+            "point_in_time_validation": pit_results,
+            "benchmark": getattr(args, "benchmark", None),
+            "total_return_benchmark": total_return_benchmark,
+            "benchmark_commission": bench_commission,
+            "benchmark_slippage": bench_slippage,
+            # Validation method specific config
+            "wf_train_months": args.wf_train_months,
+            "wf_test_months": args.wf_test_months,
+            "wf_step_months": args.wf_step_months,
+            "cpcv_n_splits": args.cpcv_n_splits,
+            "cpcv_test_size": args.cpcv_test_size,
+            "cpcv_purge_size": args.cpcv_purge_size,
+            "cpcv_embargo_size": args.cpcv_embargo_size,
+        },
+    }
+    if pit_results is not None:
+        summary_data["point_in_time_validation"] = pit_results
+    if benchmark_provenance is not None:
+        summary_data["benchmark_provenance"] = benchmark_provenance.to_dict()
+    with open(summary_path, "w") as f:
+        json.dump(summary_data, f, indent=2, default=str)
+    print(f"\nOut-of-sample summary saved to: {summary_path}")
+
+    # Generate full report if test returns available
+    if len(results["test_performance"]["test_returns"]) > 0:
+        equity = (1 + results["test_performance"]["test_returns"]).cumprod() * args.initial_capital
+        report_results = {
+            "equity_curve": equity,
+            "returns": results["test_performance"]["test_returns"],
+            "config": {
+                "initial_capital": args.initial_capital,
+                "commission": args.commission,
+                "slippage": args.slippage,
+                "strategy": args.strategy,
+                "symbol": args.symbol,
+                "total_return_benchmark": total_return_benchmark,
+                "benchmark_commission": bench_commission,
+                "benchmark_slippage": bench_slippage,
+            },
+        }
+        if results["test_benchmark"] is not None:
+            # Need benchmark returns for the report
+            bench_returns = _compute_benchmark_returns(benchmark, results["test_performance"]["test_returns"], total_return_benchmark)
+            if bench_returns is not None:
+                report_results["benchmark"] = bench_returns
+        if pit_results is not None:
+            report_results["point_in_time_validation"] = pit_results
+        metrics = calculate_metrics(report_results)
+        if dsr is not None:
+            metrics["deflated_sharpe"] = dsr
+        generate_report(metrics, args.output, symbol=args.symbol, strategy_name=f"{args.strategy}_out_of_sample")
+        generate_tear_sheet(
+            report_results, metrics, args.output,
+            symbol=args.symbol,
+            strategy_name=f"{args.strategy}_out_of_sample",
+            analysis_results={"out_of_sample": results},
+        )
+        print(f"Detailed report saved to: {args.output}/")
+
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Walk-forward analysis and validation tools")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1991,6 +2612,26 @@ def main():
     cpcv_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     cpcv_parser.add_argument("--deflate", action="store_true", help="Compute Deflated Sharpe Ratio (multiple-testing correction) on the fold searches and OOS results")
     cpcv_parser.set_defaults(func=run_cpcv)
+
+    # Out-of-sample validation
+    oos_parser = subparsers.add_parser("out-of-sample", parents=[common_parser], help="Run rigorous out-of-sample validation with train/validation/test split")
+    oos_parser.add_argument("--train-frac", type=float, default=0.6, help="Fraction of data for training (default 0.6)")
+    oos_parser.add_argument("--val-frac", type=float, default=0.2, help="Fraction of data for validation (default 0.2)")
+    oos_parser.add_argument("--test-frac", type=float, default=0.2, help="Fraction of data for testing (default 0.2)")
+    oos_parser.add_argument("--validation-method", type=str, choices=["walk_forward", "cpcv"], default="walk_forward", help="Method for parameter selection on training data")
+    oos_parser.add_argument("--selection-criterion", type=str, choices=["best_oos_sharpe", "most_stable", "best_avg_sharpe"], default="best_oos_sharpe", help="Criterion for selecting final parameters from validation results")
+    oos_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
+    oos_parser.add_argument("--deflate", action="store_true", help="Compute Deflated Sharpe Ratio (multiple-testing correction) on the test results")
+    # Walk-forward specific args for validation phase
+    oos_parser.add_argument("--wf-train-months", type=int, default=12, help="Training window size in months for walk-forward validation")
+    oos_parser.add_argument("--wf-test-months", type=int, default=3, help="Testing window size in months for walk-forward validation")
+    oos_parser.add_argument("--wf-step-months", type=int, default=3, help="Step size between walk-forward iterations")
+    # CPCV specific args for validation phase
+    oos_parser.add_argument("--cpcv-n-splits", type=int, default=10, help="Number of sequential groups for CPCV validation")
+    oos_parser.add_argument("--cpcv-test-size", type=float, default=0.1, help="Fraction of each group to use as test set in CPCV")
+    oos_parser.add_argument("--cpcv-purge-size", type=float, default=0.0, help="Fraction of observations to purge from training around test")
+    oos_parser.add_argument("--cpcv-embargo-size", type=float, default=0.0, help="Fraction of observations to embargo after test set")
+    oos_parser.set_defaults(func=run_out_of_sample_validation)
 
     args = parser.parse_args()
     return args.func(args)
