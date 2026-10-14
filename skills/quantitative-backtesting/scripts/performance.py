@@ -11,7 +11,7 @@ import math
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, List
 
 
 RISK_FREE_RATE = 0.02  # Annual risk-free rate (2%)
@@ -385,7 +385,69 @@ def calculate_metrics(
             metrics["avg_trade_duration"] = float(np.mean(durations))
 
     # --- Benchmark Comparison ---
-    if benchmark_returns is not None and len(benchmark_returns) > 0:
+    # Handle multiple benchmarks if present (for multiple-testing correction)
+    benchmark_list = results.get("benchmark_list")
+    if benchmark_list is not None and len(benchmark_list) > 0:
+        # Process each benchmark in the list
+        benchmark_metrics = []
+        benchmark_alphas = []  # For multiple-testing correction
+
+        for i, bench_returns in enumerate(benchmark_list):
+            if bench_returns is not None and len(bench_returns) > 0:
+                bench_stats = _benchmark_stats(
+                    returns,
+                    bench_returns,
+                    ann_factor,
+                    total_return_benchmark=config.get("total_return_benchmark", False),
+                    benchmark_commission=config.get("benchmark_commission", 0.0),
+                    benchmark_slippage=config.get("benchmark_slippage", 0.0),
+                    benchmark_expense_ratio=config.get("benchmark_expense_ratio", 0.0),
+                )
+                # Add index to distinguish between benchmarks
+                indexed_stats = {f"benchmark_{i}_{k}": v for k, v in bench_stats.items()}
+                benchmark_metrics.append(indexed_stats)
+
+                # Collect alpha for multiple-testing correction
+                if "alpha" in bench_stats:
+                    benchmark_alphas.append(bench_stats["alpha"])
+            else:
+                benchmark_metrics.append({})
+
+        # Add all benchmark metrics to results
+        for bench_metric in benchmark_metrics:
+            metrics.update(bench_metric)
+
+        # Apply Deflated Alpha Ratio correction for multiple benchmarks
+        if len(benchmark_alphas) >= 2 and len(returns) >= 2:
+            # Use the first benchmark's alpha as the primary one for correction
+            # (typically the first benchmark is the main one being compared against)
+            primary_alpha = metrics.get("benchmark_0_alpha", 0.0)
+            # For multiple-testing correction, we need to know how many benchmarks were tested
+            n_benchmarks = len([a for a in benchmark_alphas if not np.isnan(a)])
+
+            if n_benchmarks >= 2:
+                try:
+                    # Import deflated_alpha_ratio with circular import protection
+                    try:
+                        from walk_forward import deflated_alpha_ratio  # noqa: E402
+                    except ImportError:
+                        from scripts.walk_forward import deflated_alpha_ratio  # noqa: E402
+
+                    # Apply Deflated Alpha Ratio correction
+                    da_result = deflated_alpha_ratio(
+                        alpha=primary_alpha,
+                        returns=returns,
+                        benchmark_returns=benchmark_list[0] if benchmark_list[0] is not None else pd.Series(),
+                        n_benchmarks=n_benchmarks,
+                        trial_alphas=benchmark_alphas if len(benchmark_alphas) == n_benchmarks else None,
+                    )
+                    # Add the deflated alpha metrics with a prefix to distinguish
+                    metrics["deflated_alpha"] = da_result
+                except Exception:
+                    # If deflated alpha calculation fails, continue without it
+                    pass
+    elif benchmark_returns is not None and len(benchmark_returns) > 0:
+        # Backward compatibility: single benchmark
         metrics.update(_benchmark_stats(
             returns,
             benchmark_returns,
@@ -395,6 +457,28 @@ def calculate_metrics(
             benchmark_slippage=config.get("benchmark_slippage", 0.0),
             benchmark_expense_ratio=config.get("benchmark_expense_ratio", 0.0),
         ))
+        # Apply Deflated Alpha Ratio correction for single benchmark (n_benchmarks=1)
+        # With n_benchmarks=1, the deflated alpha should equal the regular alpha
+        # (no multiple-testing correction needed), but we'll compute it anyway for consistency
+        if "alpha" in metrics and len(returns) >= 2:
+            try:
+                # Import deflated_alpha_ratio with circular import protection
+                try:
+                    from walk_forward import deflated_alpha_ratio  # noqa: E402
+                except ImportError:
+                    from scripts.walk_forward import deflated_alpha_ratio  # noqa: E402
+
+                da_result = deflated_alpha_ratio(
+                    alpha=metrics["alpha"],
+                    returns=returns,
+                    benchmark_returns=benchmark_returns,
+                    n_benchmarks=1,
+                    trial_alphas=[metrics["alpha"]],
+                )
+                metrics["deflated_alpha"] = da_result
+            except Exception:
+                # If deflated alpha calculation fails, continue without it
+                pass
 
     # --- Additional Ratios ---
     if returns.std() > 0:
@@ -559,6 +643,21 @@ def generate_report(
             f"Alpha t-stat:                {metrics.get('alpha_tstat', 'N/A')}",
             f"Alpha p-value:               {metrics.get('alpha_pvalue', 'N/A')}",
             f"R-squared:                   {metrics.get('r_squared', 'N/A')}",
+            "",
+        ])
+
+    # Deflated Alpha Ratio section (multiple-testing correction for benchmark alpha)
+    if "deflated_alpha" in metrics:
+        da = metrics["deflated_alpha"]
+        lines.extend([
+            "--- Deflated Alpha Ratio (Multiple-Testing Correction) ---",
+            f"Deflated Alpha Ratio:        {da.get('deflated_alpha_ratio', 0):.4f}",
+            f"P-Value:                     {da.get('p_value', 0):.4f}",
+            f"Expected Max Alpha:          {da.get('expected_max_alpha', 0):.4f}",
+            f"Z-Score:                     {da.get('z_score', 'N/A')}"
+            if da.get('z_score') is not None else "Z-Score:                     N/A",
+            f"Number of Benchmarks:        {da.get('n_benchmarks', 0)}",
+            f"Observations:                {da.get('n_observations', 0)}",
             "",
         ])
 
