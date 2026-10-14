@@ -108,6 +108,7 @@ def _benchmark_stats(
     benchmark_commission: float = 0.0,
     benchmark_slippage: float = 0.0,
     benchmark_expense_ratio: float = 0.0,
+    benchmark_cost_is_periodic: bool = False,
 ) -> Dict[str, Any]:
     """Compute buy-and-hold benchmark comparison metrics from aligned returns.
 
@@ -118,10 +119,14 @@ def _benchmark_stats(
     common-date aligned series. t-stat and p-value are invariant to annualization,
     and are only reported when at least 3 aligned observations exist.
 
-    If benchmark_commission or benchmark_slippage > 0, the benchmark total return
-    is reduced by the round-trip cost (buy + sell) applied once to the total
-    benchmark return, simulating a buy-and-hold investor who pays transaction
-    costs at entry and exit.
+    If benchmark_commission or benchmark_slippage > 0:
+      - If benchmark_cost_is_periodic is False (default), the benchmark total return
+        is reduced by the round-trip cost (buy + sell) applied once to the total
+        benchmark return, simulating a buy-and-hold investor who pays transaction
+        costs at entry and exit.
+      - If benchmark_cost_is_periodic is True, the benchmark return is reduced each
+        period by the per-period cost ( (benchmark_commission + benchmark_slippage) / ann_factor ),
+        simulating periodic trading costs (e.g., from frequent rebalancing).
 
     If benchmark_expense_ratio > 0, the benchmark return is reduced each period
     by the per-period expense ratio (benchmark_expense_ratio / ann_factor),
@@ -139,10 +144,16 @@ def _benchmark_stats(
     if benchmark_expense_ratio > 0:
         expense_per_period = benchmark_expense_ratio / ann_factor
         benchmark_returns = benchmark_returns - expense_per_period
+    # Apply benchmark trading costs as periodic deduction if specified
+    if benchmark_cost_is_periodic and (benchmark_commission > 0 or benchmark_slippage > 0):
+        periodic_cost = (benchmark_commission + benchmark_slippage) / ann_factor
+        benchmark_returns = benchmark_returns - periodic_cost
+
+    # Compute total return before applying round-trip costs (if not periodic)
     bench_total = (1 + benchmark_returns).prod() - 1
 
-    # Apply benchmark trading costs (round-trip: buy + sell)
-    if benchmark_commission > 0 or benchmark_slippage > 0:
+    # Apply benchmark trading costs (round-trip: buy + sell) if not periodic
+    if not benchmark_cost_is_periodic and (benchmark_commission > 0 or benchmark_slippage > 0):
         round_trip_cost = benchmark_commission + benchmark_slippage
         bench_total = (1 + bench_total) * (1 - round_trip_cost) - 1
 
@@ -154,6 +165,7 @@ def _benchmark_stats(
     stats["benchmark_commission"] = float(benchmark_commission)
     stats["benchmark_slippage"] = float(benchmark_slippage)
     stats["benchmark_expense_ratio"] = float(benchmark_expense_ratio)
+    stats["benchmark_cost_is_periodic"] = benchmark_cost_is_periodic
 
     aligned_ret, aligned_bench = returns.align(benchmark_returns, join="inner")
     n = len(aligned_ret)
