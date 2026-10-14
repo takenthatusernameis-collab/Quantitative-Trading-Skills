@@ -35,6 +35,7 @@ def monte_carlo_simulation(
     n_simulations: int = 2000,
     confidence_levels: List[float] = None,
     block_size: int = None,
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Perform Monte Carlo simulation on strategy returns to assess robustness.

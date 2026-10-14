@@ -2381,6 +2381,59 @@ def test_funding_cost_frequency_aware_per_period_rate():
     )
 
 
+
+def test_out_of_sample_validation_with_benchmark_periodic_costs():
+    """out_of_sample_validation should produce benchmark stats with periodic costs flag."""
+    dates = pd.date_range('2020-01-01', periods=500, freq='B')
+    np.random.seed(42)
+    data = pd.DataFrame({
+        'date': dates,
+        'open': 100 + np.cumsum(np.random.randn(500) * 0.5),
+        'high': 100 + np.cumsum(np.random.randn(500) * 0.5) + 0.5,
+        'low': 100 + np.cumsum(np.random.randn(500) * 0.5) - 0.5,
+        'close': 100 + np.cumsum(np.random.randn(500) * 0.5),
+        'volume': 1000000 + np.random.randn(500) * 10000,
+    }).set_index('date')
+
+    benchmark = pd.DataFrame({
+        'date': dates,
+        'open': data['open'] * 0.99 + np.random.randn(500) * 0.1,
+        'high': data['high'] * 0.99 + np.random.randn(500) * 0.1,
+        'low': data['low'] * 0.99 + np.random.randn(500) * 0.1,
+        'close': data['close'] * 0.99 + np.random.randn(500) * 0.1,
+        'volume': data['volume'],
+    }).set_index('date')
+
+    param_grid = {'fast': [10, 20], 'slow': [30, 50]}
+
+    results = out_of_sample_validation(
+        data=data,
+        strategy_factory=lambda p: _make_strategy_factory('sma_crossover')(p),
+        param_grid=param_grid,
+        train_frac=0.5,
+        val_frac=0.25,
+        test_frac=0.25,
+        validation_method='walk_forward',
+        walk_forward_train_months=3,
+        walk_forward_test_months=1,
+        walk_forward_step_months=1,
+        selection_criterion='best_oos_sharpe',
+        commission=0.001,
+        slippage=0.001,
+        benchmark=benchmark,
+        benchmark_commission=0.001,
+        benchmark_slippage=0.001,
+        benchmark_cost_is_periodic=True,
+    )
+
+    assert 'test_benchmark' in results
+    test_bench = results['test_benchmark']
+    if isinstance(test_bench, dict):
+        assert test_bench.get('benchmark_cost_is_periodic') is True
+    elif isinstance(test_bench, list):
+        assert len(test_bench) > 0
+        assert test_bench[0].get('benchmark_cost_is_periodic') is True
+
 def main() -> int:
     tests = [
         ("parameter_optimization_skips_flat_combos", test_parameter_optimization_skips_flat_combos),
@@ -2470,6 +2523,7 @@ def main() -> int:
         ("verify_split_separation_detects_train_test_overlap", test_verify_split_separation_detects_train_test_overlap),
         ("verify_split_separation_rejects_empty_split", test_verify_split_separation_rejects_empty_split),
         ("out_of_sample_validation_surfaces_separation_check", test_out_of_sample_validation_surfaces_separation_check),
+        ("out_of_sample_validation_with_benchmark_periodic_costs", test_out_of_sample_validation_with_benchmark_periodic_costs),
     ]
 
     failures = 0

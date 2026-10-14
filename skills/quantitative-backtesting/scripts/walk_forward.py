@@ -264,6 +264,8 @@ def walk_forward_analysis(
     benchmark_commission: float = 0.0,
     benchmark_slippage: float = 0.0,
     benchmark_expense_ratio: float = 0.0,
+    benchmark_cost_is_periodic: bool = False,
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Perform walk-forward analysis with expanding training windows.
@@ -442,7 +444,7 @@ def walk_forward_analysis(
                                 benchmark_commission=benchmark_commission,
                                 benchmark_slippage=benchmark_slippage,
                                 benchmark_expense_ratio=benchmark_expense_ratio,
-                                benchmark_cost_is_periodic=getattr(args, 'benchmark_cost_is_periodic', False) if 'args' in locals() else False,
+                                benchmark_cost_is_periodic=benchmark_cost_is_periodic,
                             )
                             period_benchmark_stats.append(bench_stats)
                         else:
@@ -458,7 +460,7 @@ def walk_forward_analysis(
                             benchmark_commission=benchmark_commission,
                             benchmark_slippage=benchmark_slippage,
                             benchmark_expense_ratio=benchmark_expense_ratio,
-                            benchmark_cost_is_periodic=False,
+                            benchmark_cost_is_periodic=benchmark_cost_is_periodic,
                         )
                         period_benchmark_stats.append(bench_stats)
                     else:
@@ -503,7 +505,7 @@ def walk_forward_analysis(
                     summary, oos_returns, benchmark_returns,
                     commission=benchmark_commission, slippage=benchmark_slippage,
                     benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark,
-                    benchmark_cost_is_periodic=getattr(locals().get("args", object()), "benchmark_cost_is_periodic", False) if False else False
+                    benchmark_cost_is_periodic=benchmark_cost_is_periodic,
                 )
 
     # Add per-period benchmark metrics to summary
@@ -559,6 +561,8 @@ def parameter_optimization(
     benchmark_commission: float = 0.0,
     benchmark_slippage: float = 0.0,
     benchmark_expense_ratio: float = 0.0,
+    benchmark_cost_is_periodic: bool = False,
+    **kwargs,
 ) -> List[Dict[str, Any]]:
     """
     Perform parameter optimization using walk-forward-like splits.
@@ -668,6 +672,7 @@ def parameter_optimization(
                         benchmark_commission=benchmark_commission,
                         benchmark_slippage=benchmark_slippage,
                         benchmark_expense_ratio=benchmark_expense_ratio,
+                        benchmark_cost_is_periodic=benchmark_cost_is_periodic,
                     )
                     result.update(bench_stats)
 
@@ -1205,6 +1210,8 @@ def cpcv_analysis(
     benchmark_commission: float = 0.0,
     benchmark_slippage: float = 0.0,
     benchmark_expense_ratio: float = 0.0,
+    benchmark_cost_is_periodic: bool = False,
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Perform Combinatorially Purged Cross-Validation (CPCV).
@@ -1430,7 +1437,7 @@ def cpcv_analysis(
                                 benchmark_commission=benchmark_commission,
                                 benchmark_slippage=benchmark_slippage,
                                 benchmark_expense_ratio=benchmark_expense_ratio,
-                                benchmark_cost_is_periodic=getattr(args, 'benchmark_cost_is_periodic', False) if 'args' in locals() else False,
+                                benchmark_cost_is_periodic=benchmark_cost_is_periodic,
                             )
                             fold_benchmark_stats.append(bench_stats)
                         else:
@@ -1446,7 +1453,7 @@ def cpcv_analysis(
                             benchmark_commission=benchmark_commission,
                             benchmark_slippage=benchmark_slippage,
                             benchmark_expense_ratio=benchmark_expense_ratio,
-                            benchmark_cost_is_periodic=False,
+                            benchmark_cost_is_periodic=benchmark_cost_is_periodic,
                         )
                         fold_benchmark_stats.append(bench_stats)
                     else:
@@ -1533,7 +1540,7 @@ def cpcv_analysis(
                     summary, oos_returns, benchmark_returns,
                     commission=benchmark_commission, slippage=benchmark_slippage,
                     benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark,
-                    benchmark_cost_is_periodic=getattr(locals().get("args", object()), "benchmark_cost_is_periodic", False) if False else False
+                    benchmark_cost_is_periodic=benchmark_cost_is_periodic,
                 )
 
     # Add per-fold benchmark metrics to summary
@@ -1620,6 +1627,8 @@ def out_of_sample_validation(
     benchmark_commission: float = 0.0,
     benchmark_slippage: float = 0.0,
     benchmark_expense_ratio: float = 0.0,
+    benchmark_cost_is_periodic: bool = False,
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Perform rigorous out-of-sample validation with chronological train/validation/test split.
@@ -1843,6 +1852,7 @@ def out_of_sample_validation(
                         benchmark_commission=benchmark_commission,
                         benchmark_slippage=benchmark_slippage,
                         benchmark_expense_ratio=benchmark_expense_ratio,
+                        benchmark_cost_is_periodic=benchmark_cost_is_periodic,
                     )
                     benchmark_results.append(bench_stats)
                     if 'alpha_pvalue' in bench_stats and bench_stats['alpha_pvalue'] is not None:
@@ -1911,6 +1921,7 @@ def out_of_sample_validation(
                     benchmark_commission=benchmark_commission,
                     benchmark_slippage=benchmark_slippage,
                     benchmark_expense_ratio=benchmark_expense_ratio,
+                    benchmark_cost_is_periodic=benchmark_cost_is_periodic,
                 )
                 test_performance.update(test_benchmark)
 
@@ -2116,6 +2127,7 @@ def run_cpcv(args) -> int:
         benchmark_commission=bench_commission,
         benchmark_slippage=bench_slippage,
         benchmark_expense_ratio=bench_expense_ratio,
+        benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
@@ -2129,7 +2141,8 @@ def run_cpcv(args) -> int:
             results["summary"] = _add_benchmark_to_summary(
                 results["summary"], results["oos_returns"], benchmark_returns,
                 commission=bench_commission, slippage=bench_slippage,
-                benchmark_expense_ratio=bench_expense_ratio, total_return_benchmark=total_return_benchmark
+                benchmark_expense_ratio=bench_expense_ratio, total_return_benchmark=total_return_benchmark,
+                benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
             )
             print(
                 f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
@@ -2428,6 +2441,7 @@ def run_walk_forward(args) -> int:
         benchmark_commission=bench_commission,
         benchmark_slippage=bench_slippage,
         benchmark_expense_ratio=bench_expense_ratio,
+        benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
@@ -2441,7 +2455,8 @@ def run_walk_forward(args) -> int:
             results["summary"] = _add_benchmark_to_summary(
                 results["summary"], results["oos_returns"], benchmark_returns,
                 commission=bench_commission, slippage=bench_slippage,
-                benchmark_expense_ratio=bench_expense_ratio, total_return_benchmark=total_return_benchmark
+                benchmark_expense_ratio=bench_expense_ratio, total_return_benchmark=total_return_benchmark,
+                benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
             )
             print(
                 f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
@@ -2592,6 +2607,7 @@ def run_parameter_optimization(args) -> int:
         benchmark_commission=bench_commission,
         benchmark_slippage=bench_slippage,
         benchmark_expense_ratio=bench_expense_ratio,
+        benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
     )
 
     if not results:
@@ -2972,6 +2988,7 @@ def run_out_of_sample_validation(args) -> int:
         benchmark_commission=bench_commission,
         benchmark_slippage=bench_slippage,
         benchmark_expense_ratio=bench_expense_ratio,
+        benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
     )
 
     if pit_results is not None:
@@ -3211,6 +3228,7 @@ def main():
     common_parser.add_argument("--benchmark-commission", type=float, default=None, help="Commission per trade for benchmark (as decimal). Defaults to strategy commission if not specified (applies to all benchmarks).")
     common_parser.add_argument("--benchmark-slippage", type=float, default=None, help="Slippage per trade for benchmark (as decimal). Defaults to strategy slippage if not specified (applies to all benchmarks).")
     common_parser.add_argument("--benchmark-expense-ratio", type=float, default=None, help="Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%). Defaults to 0 (applies to all benchmarks).")
+    common_parser.add_argument("--benchmark-cost-is-periodic", action="store_true", help="If set, apply benchmark trading costs (commission+slippage) as periodic deductions each period instead of as a round-trip cost on total return (applies to all benchmarks).")
 
     # Walk-forward analysis
     wf_parser = subparsers.add_parser("walk-forward", parents=[common_parser], help="Run walk-forward analysis")

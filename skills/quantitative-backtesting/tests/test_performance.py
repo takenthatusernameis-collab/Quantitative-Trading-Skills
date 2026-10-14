@@ -340,6 +340,30 @@ def test_alpha_sign_flip_between_benchmark_modes():
     assert metrics_total["alpha"] < 0, f"Expected negative alpha vs total-return benchmark, got {metrics_total['alpha']}"
 
 
+
+def test_benchmark_stats_applies_periodic_benchmark_costs():
+    """When benchmark_cost_is_periodic is True, costs are deducted each period."""
+    ret = pd.Series([0.01, 0.00, 0.01, -0.005])
+    bench = pd.Series([0.005, 0.005, 0.005, 0.005])
+    ann_factor = 252
+    stats_periodic = _benchmark_stats(
+        ret, bench, ann_factor,
+        benchmark_commission=0.001,
+        benchmark_slippage=0.001,
+        benchmark_cost_is_periodic=True,
+    )
+    stats_roundtrip = _benchmark_stats(
+        ret, bench, ann_factor,
+        benchmark_commission=0.001,
+        benchmark_slippage=0.001,
+        benchmark_cost_is_periodic=False,
+    )
+    assert stats_periodic["benchmark_cost_is_periodic"] is True
+    assert stats_roundtrip["benchmark_cost_is_periodic"] is False
+    stats_none = _benchmark_stats(ret, bench, ann_factor)
+    assert stats_periodic["benchmark_total_return"] != stats_none["benchmark_total_return"]
+    assert stats_roundtrip["benchmark_total_return"] != stats_none["benchmark_total_return"]
+
 def main() -> int:
     tests = [
         ("calculate_metrics_empty_returns_returns_error", test_calculate_metrics_empty_returns_returns_error),
@@ -364,6 +388,7 @@ def main() -> int:
         ("calculate_metrics_passes_total_return_benchmark_flag", test_calculate_metrics_passes_total_return_benchmark_flag),
         ("calculate_metrics_passes_benchmark_costs", test_calculate_metrics_passes_benchmark_costs),
         ("alpha_sign_flip_between_benchmark_modes", test_alpha_sign_flip_between_benchmark_modes),
+        ("benchmark_stats_applies_periodic_benchmark_costs", test_benchmark_stats_applies_periodic_benchmark_costs),
     ]
 
     failures = 0
