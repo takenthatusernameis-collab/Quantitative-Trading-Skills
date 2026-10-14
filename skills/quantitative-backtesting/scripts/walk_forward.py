@@ -356,6 +356,7 @@ def parameter_optimization(
     total_return_benchmark: bool = False,
     benchmark_commission: float = 0.0,
     benchmark_slippage: float = 0.0,
+    benchmark_expense_ratio: float = 0.0,
 ) -> List[Dict[str, Any]]:
     """
     Perform parameter optimization using walk-forward-like splits.
@@ -387,6 +388,7 @@ def parameter_optimization(
             (dividends + price) when dividend/adj_close data is available
         benchmark_commission: Commission per trade for benchmark (as decimal)
         benchmark_slippage: Slippage per trade for benchmark (as decimal)
+        benchmark_expense_ratio: Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%)
 
     Returns:
         List of result dictionaries sorted by Sharpe ratio (descending)
@@ -463,6 +465,7 @@ def parameter_optimization(
                         total_return_benchmark=total_return_benchmark,
                         benchmark_commission=benchmark_commission,
                         benchmark_slippage=benchmark_slippage,
+                        benchmark_expense_ratio=benchmark_expense_ratio,
                     )
                     result.update(bench_stats)
 

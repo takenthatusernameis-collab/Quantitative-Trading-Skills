@@ -107,6 +107,7 @@ def _benchmark_stats(
     total_return_benchmark: bool = False,
     benchmark_commission: float = 0.0,
     benchmark_slippage: float = 0.0,
+    benchmark_expense_ratio: float = 0.0,
 ) -> Dict[str, Any]:
     """Compute buy-and-hold benchmark comparison metrics from aligned returns.
 
@@ -122,6 +123,11 @@ def _benchmark_stats(
     benchmark return, simulating a buy-and-hold investor who pays transaction
     costs at entry and exit.
 
+    If benchmark_expense_ratio > 0, the benchmark return is reduced each period
+    by the per-period expense ratio (benchmark_expense_ratio / ann_factor),
+    simulating a constant annual fee deducted from the benchmark's net asset
+    value (e.g., an ETF expense ratio).
+
     Additionally, computes the tracking error (annualized standard deviation of
     active return) and the information ratio (annualized alpha divided by
     tracking error).
@@ -129,6 +135,10 @@ def _benchmark_stats(
     stats: Dict[str, Any] = {}
     if benchmark_returns is None or len(benchmark_returns) == 0:
         return stats
+    # Apply benchmark expense ratio (annual) as a periodic deduction
+    if benchmark_expense_ratio > 0:
+        expense_per_period = benchmark_expense_ratio / ann_factor
+        benchmark_returns = benchmark_returns - expense_per_period
     bench_total = (1 + benchmark_returns).prod() - 1
 
     # Apply benchmark trading costs (round-trip: buy + sell)
@@ -143,6 +153,7 @@ def _benchmark_stats(
     stats["benchmark_total_return_type"] = "total" if total_return_benchmark else "price"
     stats["benchmark_commission"] = float(benchmark_commission)
     stats["benchmark_slippage"] = float(benchmark_slippage)
+    stats["benchmark_expense_ratio"] = float(benchmark_expense_ratio)
 
     aligned_ret, aligned_bench = returns.align(benchmark_returns, join="inner")
     n = len(aligned_ret)
@@ -370,6 +381,7 @@ def calculate_metrics(
             total_return_benchmark=config.get("total_return_benchmark", False),
             benchmark_commission=config.get("benchmark_commission", 0.0),
             benchmark_slippage=config.get("benchmark_slippage", 0.0),
+            benchmark_expense_ratio=config.get("benchmark_expense_ratio", 0.0),
         ))
 
     # --- Additional Ratios ---

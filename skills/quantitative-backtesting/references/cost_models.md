@@ -206,3 +206,11 @@ Funding costs particularly penalize:
 When market impact, borrow costs, and funding costs are enabled, the effective
 cost structure creates natural capacity constraints that should be considered
 in strategy design and position sizing.
+
+## Benchmark Expense Ratio
+
+In addition to transaction costs, the benchmark (buy-and-hold) can be modeled with an annual expense ratio, simulating the cost of holding a benchmark ETF or index fund.
+
+The expense ratio is deducted each period from the benchmark's return, reducing the net benchmark return.
+
+Configuration is done via the `--benchmark-expense-ratio` flag (as decimal, e.g., 0.005 for 0.5%).
