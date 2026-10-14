@@ -669,7 +669,7 @@ def deflated_sharpe_ratio(
     Formula (all Sharpe quantities in per-period, non-annualized units):
 
         DSR = Phi( (SR_hat - SR*) * sqrt(T - 1)
-                   / sqrt(1 - gamma3 * SR_hat + ((gamma4 - 1) / 4) * SR_hat^2) )
+                    / sqrt(1 - gamma3 * SR_hat + ((gamma4 - 1) / 4) * SR_hat^2) )
 
     where SR_hat is the per-period estimated Sharpe, T the number of return
     observations, gamma3 the return skewness, gamma4 the return kurtosis
@@ -761,6 +761,132 @@ def deflated_sharpe_ratio(
         "expected_max_sharpe": float(sr_star * np.sqrt(ann_factor)),
         "z_score": float(z) if np.isfinite(z) else None,
         "n_trials": int(n_trials),
+        "n_observations": int(t_obs),
+        "skewness": float(skew),
+        "kurtosis": float(kurt),
+    }
+
+
+def deflated_alpha_ratio(
+    alpha: float,
+    returns: pd.Series,
+    benchmark_returns: pd.Series,
+    n_benchmarks: int,
+    trial_alphas: Optional[List[float]] = None,
+) -> Dict[str, Any]:
+    """
+    Compute the Deflated Alpha Ratio (analogue to Deflated Sharpe Ratio).
+
+    Testing multiple benchmarks is a multiple-testing problem: with enough
+    benchmarks, luck alone produces an attractive alpha. The Deflated Alpha
+    Ratio (DAR) corrects the estimated alpha for this selection bias and for
+    the non-normality (skewness, kurtosis) of the return distribution.
+
+    Formula (all alpha quantities in annualized units):
+
+        DAR = Phi( (alpha_hat - alpha*) * sqrt(T - 1)
+                    / sqrt(1 - gamma3 * alpha_hat + ((gamma4 - 1) / 4) * alpha_hat^2) )
+
+    where alpha_hat is the estimated alpha, T the number of return
+    observations, gamma3 the return skewness, gamma4 the return kurtosis
+    (not excess), Phi the standard normal CDF, and alpha* the expected maximum
+    alpha under the null hypothesis of no skill.
+
+    alpha* is estimated from the cross-sectional dispersion of the trial alphas
+    when `trial_alphas` is provided (alpha* = std(alpha_trials) *
+    sqrt(2 * ln(N))), and otherwise from the i.i.d.-normal null approximation
+    (alpha* = sqrt(2 * ln(N) / T) * sigma_benchmark), where sigma_benchmark
+    is the volatility of the benchmark returns. Both estimators are conservative:
+    they slightly overstate the alpha attainable from luck.
+
+    Args:
+        alpha: Annualized alpha of the strategy being evaluated.
+        returns: Per-period return series of the strategy.
+        benchmark_returns: Per-period return series of the benchmark.
+        n_benchmarks: Number of benchmarks tested (N).
+        trial_alphas: Optional list of the annualized alphas of all
+            benchmarks tested. When provided (recommended), the cross-sectional
+            dispersion of the alphas estimates alpha*; otherwise the i.i.d.-
+            normal null approximation is used.
+
+    Returns:
+        Dictionary with:
+            - 'deflated_alpha_ratio': DAR in [0, 1]; the probability that
+              the strategy's true alpha exceeds the best alpha expected
+              from luck alone across the N benchmarks
+            - 'p_value': 1 - DAR
+            - 'alpha': input annualized alpha
+            - 'expected_max_alpha': alpha* in annualized units (the deflation
+              benchmark)
+            - 'z_score': standardized distance passed to Phi
+            - 'n_benchmarks': number of benchmarks N
+            - 'n_observations': T
+            - 'skewness', 'kurtosis': return moments used in the correction
+    """
+    if n_benchmarks < 1:
+        raise ValueError("n_benchmarks must be at least 1")
+
+    returns = returns.dropna()
+    if len(returns) < 2:
+        raise ValueError("Need at least 2 return observations for Deflated Alpha Ratio")
+
+    ann_factor = _annualization_factor(returns.index)
+    t_obs = len(returns)
+    alpha_per_period = float(alpha) / np.sqrt(ann_factor)
+
+    ln_benchmarks = np.log(max(int(n_benchmarks), 1))
+
+    # Expected maximum alpha under the null (per-period units)
+    alpha_star = None
+    if trial_alphas is not None and len(trial_alphas) >= 2:
+        trial_alpha = np.asarray([float(a) for a in trial_alphas], dtype=float)
+        # Convert to per-period alpha for consistency
+        trial_alpha = trial_alpha / np.sqrt(ann_factor)
+        trial_std = float(np.std(trial_alpha, ddof=1))
+        if trial_std > 0 and np.isfinite(trial_std):
+            # Scale by benchmark volatility similar to how Sharpe uses std of returns
+            benchmark_vol = float(benchmark_returns.std() * np.sqrt(ann_factor))
+            if benchmark_vol > 0:
+                alpha_star = trial_std * np.sqrt(2.0 * ln_benchmarks) * benchmark_vol
+    if alpha_star is None:
+        # Fallback to i.i.d.-normal null approximation
+        benchmark_vol = float(benchmark_returns.std() * np.sqrt(ann_factor))
+        if benchmark_vol > 0:
+            alpha_star = float(np.sqrt(2.0 * ln_benchmarks / t_obs)) * benchmark_vol
+        else:
+            alpha_star = 0.0
+
+    # Variance of the alpha estimator under non-normality (skew/kurt are
+    # invariant to constant shifts, so raw-return moments are valid for alpha)
+    skew = float(returns.skew())
+    kurt = float(returns.kurtosis()) + 3.0  # pandas reports excess kurtosis
+    if not np.isfinite(skew):
+        skew = 0.0
+    if not np.isfinite(kurt):
+        kurt = 3.0
+
+    variance_term = 1.0 - skew * alpha_per_period + ((kurt - 1.0) / 4.0) * alpha_per_period * alpha_per_period
+    if not np.isfinite(variance_term) or variance_term <= 0.0:
+        variance_term = np.finfo(float).tiny
+    denom = np.sqrt(variance_term)
+
+    vol = float(returns.std())
+    if vol > 0:
+        z = (alpha_per_period - alpha_star) * np.sqrt(t_obs - 1) / denom
+    else:
+        # Degenerate (constant) returns carry no information about skill
+        z = -np.inf
+
+    dar = 0.5 * (1.0 + math.erf(z / np.sqrt(2.0)))
+    dar = float(min(max(dar, 0.0), 1.0))
+
+    return {
+        "deflated_alpha_ratio": dar,
+        "p_value": 1.0 - dar,
+        "alpha": float(alpha),
+        "expected_max_alpha": float(alpha_star),
+        "z_score": float(z) if np.isfinite(z) else None,
+        "n_benchmarks": int(n_benchmarks),
         "n_observations": int(t_obs),
         "skewness": float(skew),
         "kurtosis": float(kurt),
@@ -1584,17 +1710,52 @@ def out_of_sample_validation(
                     benchmark_results.append(None)
                     p_values.append(1.0)
 
-            # Apply multiple-testing correction to alpha p-values
+            # Apply multiple-testing correction to alpha p-values using Deflated Alpha analogue
             if p_values and len(p_values) > 1:
-                # Simple Bonferroni correction for now - can be enhanced later
-                # More sophisticated methods could be added (e.g., False Discovery Rate)
-                corrected_p_values = [min(p * len(p_values), 1.0) for p in p_values]
+                # Collect trial alphas for Deflated Alpha calculation
+                trial_alphas = []
+                for bench_result in benchmark_results:
+                    if bench_result is not None and 'alpha' in bench_result:
+                        trial_alphas.append(bench_result['alpha'])
 
-                # Store both original and corrected p-values
-                for i, (bench_result, orig_p, corr_p) in enumerate(zip(benchmark_results, p_values, corrected_p_values)):
-                    if bench_result is not None:
-                        bench_result['alpha_pvalue_original'] = orig_p
-                        bench_result['alpha_pvalue'] = corr_p  # Replace with corrected p-value
+                # Apply Deflated Alpha correction to each benchmark result
+                for i, bench_result in enumerate(benchmark_results):
+                    if bench_result is not None and 'alpha' in bench_result and len(trial_alphas) >= 2:
+                        # Use the benchmark returns for this specific benchmark to calculate volatility
+                        bench_idx = i if isinstance(benchmark, list) else 0
+                        if isinstance(benchmark, list) and bench_idx < len(benchmark):
+                            bench_returns = _compute_benchmark_returns(
+                                benchmark[bench_idx], test_returns, total_return_benchmark
+                            )
+                            if bench_returns is not None:
+                                dar_result = deflated_alpha_ratio(
+                                    alpha=bench_result['alpha'],
+                                    returns=test_returns,
+                                    benchmark_returns=bench_returns,
+                                    n_benchmarks=len(p_values),
+                                    trial_alphas=trial_alphas
+                                )
+                                # Store both original and corrected p-values
+                                bench_result['alpha_pvalue_original'] = p_values[i]
+                                bench_result['alpha_pvalue'] = dar_result['p_value']
+                                # Also store the deflated alpha for transparency
+                                bench_result['deflated_alpha'] = dar_result['deflated_alpha_ratio']
+                                bench_result['expected_max_alpha'] = dar_result['expected_max_alpha']
+                            else:
+                                # Fallback to Bonferroni if benchmark returns computation fails
+                                corrected_p = min(p_values[i] * len(p_values), 1.0)
+                                bench_result['alpha_pvalue_original'] = p_values[i]
+                                bench_result['alpha_pvalue'] = corrected_p
+                        else:
+                            # Fallback to Bonferroni
+                            corrected_p = min(p_values[i] * len(p_values), 1.0)
+                            bench_result['alpha_pvalue_original'] = p_values[i]
+                            bench_result['alpha_pvalue'] = corrected_p
+                    elif bench_result is not None:
+                        # Fallback to Bonferroni if we don't have enough trial alphas
+                        corrected_p = min(p_values[i] * len(p_values), 1.0)
+                        bench_result['alpha_pvalue_original'] = p_values[i]
+                        bench_result['alpha_pvalue'] = corrected_p
 
             test_benchmark = benchmark_results
         else:
@@ -1630,17 +1791,27 @@ def out_of_sample_validation(
         # Collect alpha p-values (both original and corrected if available)
         alpha_pvalues = []
         alpha_pvalues_original = []
+        deflated_alphas = []
+        expected_max_alphas = []
         for bench_result in test_benchmark:
             if bench_result is not None:
                 if 'alpha_pvalue_original' in bench_result:
                     alpha_pvalues_original.append(bench_result['alpha_pvalue_original'])
                     alpha_pvalues.append(bench_result['alpha_pvalue'])  # corrected
+                    if 'deflated_alpha' in bench_result:
+                        deflated_alphas.append(bench_result['deflated_alpha'])
+                    if 'expected_max_alpha' in bench_result:
+                        expected_max_alphas.append(bench_result['expected_max_alpha'])
                 elif 'alpha_pvalue' in bench_result:
                     alpha_pvalues.append(bench_result['alpha_pvalue'])
         if alpha_pvalues:
             summary["alpha_pvalues"] = alpha_pvalues
             if alpha_pvalues_original:
                 summary["alpha_pvalues_original"] = alpha_pvalues_original
+        if deflated_alphas:
+            summary["deflated_alphas"] = deflated_alphas
+        if expected_max_alphas:
+            summary["expected_max_alphas"] = expected_max_alphas
 
     # Add Deflated Sharpe Ratio on test returns if requested
     # n_trials = total configurations evaluated in validation phase
