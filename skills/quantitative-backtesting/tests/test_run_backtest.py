@@ -1705,3 +1705,56 @@ def test_cli_run_backtest_funding_sweep():
         assert len(payload["results"]) == 3
         returns = [r["total_return"] for r in payload["results"]]
         assert returns[2] <= returns[0]
+
+def test_cli_run_backtest_commission_sweep():
+    """CLI run_backtest --commissions writes a sweep artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 5, "slow_period": 20}',
+            "--output", out_dir,
+            "--commissions", "0.0002", "0.002", "0.004",
+        ]
+        with patch.object(sys, "argv", argv),                 redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0, f"CLI run_backtest commission sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "run_backtest_commission_sweep.json")
+        assert os.path.exists(sweep_path), "run_backtest_commission_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["commissions"] == [0.0002, 0.002, 0.004]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        assert returns[2] <= returns[0]
+
+
+def test_cli_run_backtest_slippage_sweep():
+    """CLI run_backtest --slippages writes a sweep artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 5, "slow_period": 20}',
+            "--output", out_dir,
+            "--slippages", "0.0001", "0.001", "0.002",
+        ]
+        with patch.object(sys, "argv", argv),                 redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0, f"CLI run_backtest slippage sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "run_backtest_slippage_sweep.json")
+        assert os.path.exists(sweep_path), "run_backtest_slippage_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["slippages"] == [0.0001, 0.001, 0.002]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        assert returns[2] <= returns[0]

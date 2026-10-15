@@ -39,7 +39,9 @@ def parse_args():
     parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
     parser.add_argument("--commission", type=float, default=0.0002, help="Commission per trade (as decimal)")
+    parser.add_argument("--commissions", type=float, nargs="+", default=None, help="List of commissions to sweep (overrides --commission)")
     parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (as decimal)")
+    parser.add_argument("--slippages", type=float, nargs="+", default=None, help="List of slippages to sweep (overrides --slippage)")
     parser.add_argument("--impact-coefficient", type=float, default=0.0, help="Market impact coefficient (position_notional/ADV * coefficient). 0 to disable.")
     parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="List of market impact coefficients to sweep (overrides --impact-coefficient).")
     parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
@@ -441,16 +443,23 @@ def signals_active(signals: pd.Series) -> bool:
 
 
 def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
-                                   impact_coefficient, borrow_cost=None,
-                                   funding_cost=None):
+                                   impact_coefficient=None, borrow_cost=None,
+                                   funding_cost=None, commission=None,
+                                   slippage=None):
     """Run backtest for a single cost coefficient.
 
     No file I/O or stdout; returns per-coefficient metrics dict.
     """
+    if impact_coefficient is None:
+        impact_coefficient = args.impact_coefficient
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
     if funding_cost is None:
         funding_cost = args.funding_cost
+    if commission is None:
+        commission = args.commission
+    if slippage is None:
+        slippage = args.slippage
 
     class SweepArgs:
         def __init__(self, base):
@@ -459,6 +468,8 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
             self.impact_coefficient = impact_coefficient
             self.borrow_cost = borrow_cost
             self.funding_cost = funding_cost
+            self.commission = commission
+            self.slippage = slippage
 
     sweep_args = SweepArgs(args)
     results = run_backtest(data, strategy, sweep_args,
@@ -471,6 +482,8 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
         "impact_coefficient": impact_coefficient,
         "borrow_cost": borrow_cost,
         "funding_cost": funding_cost,
+        "commission": commission,
+        "slippage": slippage,
         "total_return": metrics.get("total_return", 0.0),
         "annualized_return": metrics.get("annualized_return", 0.0),
         "sharpe_ratio": metrics.get("sharpe_ratio", 0.0),
@@ -623,6 +636,44 @@ def main():
             print("cost\treturn\tann_ret\tSharpe\tmaxDD")
             for r in sweep_results:
                 print(f"{r['funding_cost']:.4f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
+        return 0
+
+    if getattr(args, "commissions", None) is not None and len(args.commissions) > 1:
+        sweep_results = []
+        for cost in args.commissions:
+            sweep_results.append(
+                _run_backtest_sweep_coefficient(
+                    args, data, strategy, provenance, benchmark, commission=cost
+                )
+            )
+        sweep_path = output_dir / "run_backtest_commission_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump({"commissions": args.commissions, "results": sweep_results}, f, indent=2)
+        print(f"Sweep results saved to: {sweep_path}")
+        if sweep_results:
+            print("\nCommission sweep:")
+            print("comm\treturn\tann_ret\tSharpe\tmaxDD")
+            for r in sweep_results:
+                print(f"{r['commission']:.6f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
+        return 0
+
+    if getattr(args, "slippages", None) is not None and len(args.slippages) > 1:
+        sweep_results = []
+        for cost in args.slippages:
+            sweep_results.append(
+                _run_backtest_sweep_coefficient(
+                    args, data, strategy, provenance, benchmark, slippage=cost
+                )
+            )
+        sweep_path = output_dir / "run_backtest_slippage_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump({"slippages": args.slippages, "results": sweep_results}, f, indent=2)
+        print(f"Sweep results saved to: {sweep_path}")
+        if sweep_results:
+            print("\nSlippage sweep:")
+            print("slip\treturn\tann_ret\tSharpe\tmaxDD")
+            for r in sweep_results:
+                print(f"{r['slippage']:.6f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
         return 0
     print("Running backtest...")
     results = run_backtest(data, strategy, args, data_provenance=provenance, benchmark=benchmark)
