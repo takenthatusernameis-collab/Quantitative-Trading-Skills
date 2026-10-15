@@ -1410,6 +1410,307 @@ def test_cli_cpcv_funding_sweep():
         assert [r["funding_cost"] for r in payload["results"]] == [0.0, 0.03, 0.1]
 
 
+def test_cli_walk_forward_impact_sweep():
+    """CLI walk-forward --impact-coefficients writes a sweep artifact whose
+    OOS returns degrade as the market-impact coefficient rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "walk-forward",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--impact-coefficients", "0", "2", "5",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI walk-forward impact sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "walk_forward_impact_sweep.json")
+        assert os.path.exists(sweep_path), "walk_forward_impact_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["impact_coefficients"] == [0.0, 2.0, 5.0]
+        assert len(payload["results"]) == 3
+        returns = [r["total_oos_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected OOS return degradation with impact, got {returns}"
+        )
+
+
+def test_cli_walk_forward_borrow_sweep():
+    """CLI walk-forward --borrow-costs writes a sweep artifact whose OOS
+    returns degrade as the short-position borrow cost rises (MACD goes short)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "walk-forward",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+            "--output", out_dir,
+            "--borrow-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI walk-forward borrow sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "walk_forward_borrow_sweep.json")
+        assert os.path.exists(sweep_path), "walk_forward_borrow_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["borrow_costs"] == [0.0, 0.03, 0.1]
+        assert len(payload["results"]) == 3
+        returns = [r["total_oos_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected OOS return degradation with borrow cost, got {returns}"
+        )
+
+
+def test_cli_walk_forward_funding_sweep():
+    """CLI walk-forward --funding-costs writes a sweep artifact whose OOS
+    returns never increase as the leveraged-position funding cost rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "walk-forward",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--funding-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI walk-forward funding sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "walk_forward_funding_sweep.json")
+        assert os.path.exists(sweep_path), "walk_forward_funding_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["funding_costs"] == [0.0, 0.03, 0.1]
+        assert len(payload["results"]) == 3
+        returns = [r["total_oos_return"] for r in payload["results"]]
+        assert returns[2] <= returns[0], (
+            f"expected non-increasing OOS return with funding cost, got {returns}"
+        )
+        assert [r["funding_cost"] for r in payload["results"]] == [0.0, 0.03, 0.1]
+
+
+def test_cli_optimize_impact_sweep():
+    """CLI optimize --impact-coefficients writes a sweep artifact whose top
+    return degrades as the market-impact coefficient rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "optimize",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--impact-coefficients", "0", "2", "5",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI optimize impact sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "parameter_optimization_impact_sweep.json")
+        assert os.path.exists(sweep_path), "parameter_optimization_impact_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["impact_coefficients"] == [0.0, 2.0, 5.0]
+        assert len(payload["results"]) == 3
+        returns = [r["top_total_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected top return degradation with impact, got {returns}"
+        )
+
+
+def test_cli_optimize_borrow_sweep():
+    """CLI optimize --borrow-costs writes a sweep artifact whose top return
+    degrades as the short-position borrow cost rises (MACD goes short)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "optimize",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+            "--output", out_dir,
+            "--borrow-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI optimize borrow sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "parameter_optimization_borrow_sweep.json")
+        assert os.path.exists(sweep_path), "parameter_optimization_borrow_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["borrow_costs"] == [0.0, 0.03, 0.1]
+        assert len(payload["results"]) == 3
+        returns = [r["top_total_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected top return degradation with borrow cost, got {returns}"
+        )
+
+
+def test_cli_optimize_funding_sweep():
+    """CLI optimize --funding-costs writes a sweep artifact whose top return
+    never increases as the leveraged-position funding cost rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "optimize",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--funding-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI optimize funding sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "parameter_optimization_funding_sweep.json")
+        assert os.path.exists(sweep_path), "parameter_optimization_funding_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["funding_costs"] == [0.0, 0.03, 0.1]
+        assert len(payload["results"]) == 3
+        returns = [r["top_total_return"] for r in payload["results"]]
+        assert returns[2] <= returns[0], (
+            f"expected non-increasing top return with funding cost, got {returns}"
+        )
+
+
+def test_cli_out_of_sample_impact_sweep():
+    """CLI out-of-sample --impact-coefficients writes a sweep artifact whose
+    held-out test return degrades as the market-impact coefficient rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--validation-method", "walk_forward",
+            "--impact-coefficients", "0", "2", "5",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI out-of-sample impact sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "out_of_sample_impact_sweep.json")
+        assert os.path.exists(sweep_path), "out_of_sample_impact_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["impact_coefficients"] == [0.0, 2.0, 5.0]
+        assert len(payload["results"]) == 3
+        returns = [r["test_total_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected test return degradation with impact, got {returns}"
+        )
+
+
+def test_cli_out_of_sample_borrow_sweep():
+    """CLI out-of-sample --borrow-costs writes a sweep artifact whose held-out
+    test return degrades as the short-position borrow cost rises (MACD goes short)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+            "--output", out_dir,
+            "--validation-method", "walk_forward",
+            "--borrow-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI out-of-sample borrow sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "out_of_sample_borrow_sweep.json")
+        assert os.path.exists(sweep_path), "out_of_sample_borrow_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["borrow_costs"] == [0.0, 0.03, 0.1]
+        assert len(payload["results"]) == 3
+        returns = [r["test_total_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected test return degradation with borrow cost, got {returns}"
+        )
+
+
+def test_cli_out_of_sample_funding_sweep():
+    """CLI out-of-sample --funding-costs writes a sweep artifact whose held-out
+    test return never increases as the leveraged-position funding cost rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--validation-method", "walk_forward",
+            "--funding-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI out-of-sample funding sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "out_of_sample_funding_sweep.json")
+        assert os.path.exists(sweep_path), "out_of_sample_funding_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["funding_costs"] == [0.0, 0.03, 0.1]
+        assert len(payload["results"]) == 3
+        returns = [r["test_total_return"] for r in payload["results"]]
+        assert returns[2] <= returns[0], (
+            f"expected non-increasing test return with funding cost, got {returns}"
+        )
+
+
 _EXAMPLE_PATH = (
     Path(__file__).resolve().parent.parent
     / "examples" / "real_data_pipeline_example.py"
@@ -1921,6 +2222,15 @@ def main() -> int:
         ("test_cli_cpcv_borrow_sweep", test_cli_cpcv_borrow_sweep),
         ("test_cli_monte_carlo_funding_sweep", test_cli_monte_carlo_funding_sweep),
         ("test_cli_cpcv_funding_sweep", test_cli_cpcv_funding_sweep),
+        ("test_cli_walk_forward_impact_sweep", test_cli_walk_forward_impact_sweep),
+        ("test_cli_walk_forward_borrow_sweep", test_cli_walk_forward_borrow_sweep),
+        ("test_cli_walk_forward_funding_sweep", test_cli_walk_forward_funding_sweep),
+        ("test_cli_optimize_impact_sweep", test_cli_optimize_impact_sweep),
+        ("test_cli_optimize_borrow_sweep", test_cli_optimize_borrow_sweep),
+        ("test_cli_optimize_funding_sweep", test_cli_optimize_funding_sweep),
+        ("test_cli_out_of_sample_impact_sweep", test_cli_out_of_sample_impact_sweep),
+        ("test_cli_out_of_sample_borrow_sweep", test_cli_out_of_sample_borrow_sweep),
+        ("test_cli_out_of_sample_funding_sweep", test_cli_out_of_sample_funding_sweep),
         ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
         ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
         ("test_trading_costs_robustness_example_imports", test_trading_costs_robustness_example_imports),

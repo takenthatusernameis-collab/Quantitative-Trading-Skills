@@ -2157,6 +2157,178 @@ def _select_parameters(
     return None
 
 
+def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmark,
+                                    bench_commission, bench_slippage, bench_expense_ratio,
+                                    impact_coefficient, borrow_cost=None, funding_cost=None):
+    """Run walk-forward for a single cost coefficient (sweep helper).
+
+    No file I/O or stdout; returns the per-coefficient metrics used by the
+    sweep table and JSON artifact. Mirrors the single-run body of run_walk_forward
+    for one coefficient value.
+
+    `borrow_cost` / `funding_cost` default to the CLI args when None, so the
+    same helper serves the market-impact sweep (which varies only
+    `impact_coefficient`) and the borrow/funding sweeps.
+    """
+    if borrow_cost is None:
+        borrow_cost = args.borrow_cost
+    if funding_cost is None:
+        funding_cost = args.funding_cost
+    param_grid = _parse_param_grid(args.param_grid)
+    strategy_factory = _make_strategy_factory(args.strategy)
+
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        train_months=args.train_months,
+        test_months=args.test_months,
+        step_months=args.step_months,
+        initial_capital=args.initial_capital,
+        commission=args.commission,
+        slippage=args.slippage,
+        impact_coefficient=impact_coefficient,
+        adv_window=args.adv_window,
+        borrow_cost=borrow_cost,
+        funding_cost=funding_cost,
+        apply_deflation=args.deflate,
+        benchmark=benchmark,
+        total_return_benchmark=total_return_benchmark,
+        benchmark_commission=bench_commission,
+        benchmark_slippage=bench_slippage,
+        benchmark_expense_ratio=bench_expense_ratio,
+        benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+    )
+    summary = results["summary"]
+    dsr = summary.get("deflated_sharpe")
+    return {
+        "impact_coefficient": float(impact_coefficient),
+        "borrow_cost": float(borrow_cost),
+        "funding_cost": float(funding_cost),
+        "total_oos_return": float(summary.get("total_oos_return", 0.0)),
+        "oos_sharpe": (
+            float(summary["oos_sharpe"]) if summary.get("oos_sharpe") is not None else None
+        ),
+        "deflated_sharpe": (
+            float(dsr["deflated_sharpe_ratio"]) if dsr is not None else None
+        ),
+        "n_periods": int(summary.get("n_periods", 0)),
+    }
+
+
+def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
+                                bench_commission, bench_slippage, bench_expense_ratio,
+                                impact_coefficient, borrow_cost=None, funding_cost=None):
+    """Run parameter optimization for a single cost coefficient (sweep helper).
+
+    No file I/O or stdout; returns the per-coefficient metrics used by the
+    sweep table and JSON artifact. Mirrors the single-run body of
+    run_parameter_optimization for one coefficient value.
+
+    `borrow_cost` / `funding_cost` default to the CLI args when None.
+    """
+    if borrow_cost is None:
+        borrow_cost = args.borrow_cost
+    if funding_cost is None:
+        funding_cost = args.funding_cost
+    param_grid = _parse_param_grid(args.param_grid)
+    strategy_factory = _make_strategy_factory(args.strategy)
+
+    results = parameter_optimization(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        commission=args.commission,
+        slippage=args.slippage,
+        impact_coefficient=impact_coefficient,
+        adv_window=args.adv_window,
+        borrow_cost=borrow_cost,
+        funding_cost=funding_cost,
+        apply_deflation=args.deflate,
+        benchmark=benchmark,
+        total_return_benchmark=total_return_benchmark,
+        benchmark_commission=bench_commission,
+        benchmark_slippage=bench_slippage,
+        benchmark_expense_ratio=bench_expense_ratio,
+        benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+    )
+    top = results[0] if results else None
+    return {
+        "impact_coefficient": float(impact_coefficient),
+        "borrow_cost": float(borrow_cost),
+        "funding_cost": float(funding_cost),
+        "top_sharpe": (float(top["sharpe_ratio"]) if top is not None else None),
+        "top_total_return": (float(top["total_return"]) if top is not None else None),
+        "n_combos": int(len(results)),
+    }
+
+
+def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
+                           bench_commission, bench_slippage, bench_expense_ratio,
+                           impact_coefficient, borrow_cost=None, funding_cost=None):
+    """Run out-of-sample validation for a single cost coefficient (sweep helper).
+
+    No file I/O or stdout; returns the per-coefficient metrics used by the
+    sweep table and JSON artifact. Mirrors the single-run body of
+    run_out_of_sample_validation for one coefficient value.
+
+    `borrow_cost` / `funding_cost` default to the CLI args when None.
+    """
+    if borrow_cost is None:
+        borrow_cost = args.borrow_cost
+    if funding_cost is None:
+        funding_cost = args.funding_cost
+    param_grid = _parse_param_grid(args.param_grid)
+    strategy_factory = _make_strategy_factory(args.strategy)
+
+    results = out_of_sample_validation(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        train_frac=args.train_frac,
+        val_frac=args.val_frac,
+        test_frac=args.test_frac,
+        validation_method=args.validation_method,
+        walk_forward_train_months=args.wf_train_months,
+        walk_forward_test_months=args.wf_test_months,
+        walk_forward_step_months=args.wf_step_months,
+        cpcv_n_splits=args.cpcv_n_splits,
+        cpcv_test_size=args.cpcv_test_size,
+        cpcv_purge_size=args.cpcv_purge_size,
+        cpcv_embargo_size=args.cpcv_embargo_size,
+        selection_criterion=args.selection_criterion,
+        initial_capital=args.initial_capital,
+        commission=args.commission,
+        slippage=args.slippage,
+        impact_coefficient=impact_coefficient,
+        adv_window=args.adv_window,
+        borrow_cost=borrow_cost,
+        funding_cost=funding_cost,
+        apply_deflation=args.deflate,
+        benchmark=benchmark,
+        total_return_benchmark=total_return_benchmark,
+        benchmark_commission=bench_commission,
+        benchmark_slippage=bench_slippage,
+        benchmark_expense_ratio=bench_expense_ratio,
+        benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+    )
+    test_perf = results.get("test_performance") or {}
+    summary = results.get("summary") or {}
+    dsr = summary.get("deflated_sharpe")
+    return {
+        "impact_coefficient": float(impact_coefficient),
+        "borrow_cost": float(borrow_cost),
+        "funding_cost": float(funding_cost),
+        "test_total_return": float(test_perf.get("test_total_return", 0.0)),
+        "test_sharpe": (
+            float(test_perf["test_sharpe"]) if test_perf.get("test_sharpe") is not None else None
+        ),
+        "deflated_sharpe": (
+            float(dsr["deflated_sharpe_ratio"]) if dsr is not None else None
+        ),
+    }
+
+
 def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                             bench_commission, bench_slippage, bench_expense_ratio,
                             impact_coefficient, borrow_cost=None, funding_cost=None):
@@ -2944,6 +3116,105 @@ def run_walk_forward(args) -> int:
     strategy_factory = _make_strategy_factory(args.strategy)
 
     print(f"Running walk-forward analysis with {args.strategy}...")
+    impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
+    borrow_costs = [float(c) for c in (args.borrow_costs or [args.borrow_cost])]
+    funding_costs = [float(c) for c in (args.funding_costs or [args.funding_cost])]
+
+    # Capacity / cost sensitivity sweeps for walk-forward: re-run the
+    # walk-forward pipeline for each coefficient/cost and record degradation
+    # in a single artifact. Single value (default) keeps the original path.
+    if len(impact_coefficients) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for coeff in impact_coefficients:
+            row = _walk_forward_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio, coeff,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "walk_forward_impact_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"impact_coefficients": impact_coefficients, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nMarket impact sweep ({len(impact_coefficients)} coefficients) saved to: {sweep_path}")
+        print("Impact coefficient | Total OOS Return | OOS Sharpe | Deflated Sharpe | N Periods")
+        print("-" * 90)
+        for row in sweep_rows:
+            oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['impact_coefficient']:>17} | {row['total_oos_return']:>16.4f} | "
+                f"{oos_sharpe_txt:>10} | {dsr_txt:>15} | {row['n_periods']:>9}"
+            )
+        return 0
+
+    if len(borrow_costs) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in borrow_costs:
+            row = _walk_forward_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=cost, funding_cost=args.funding_cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "walk_forward_borrow_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"borrow_costs": borrow_costs, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nBorrow-cost sweep ({len(borrow_costs)} costs) saved to: {sweep_path}")
+        print("Borrow Cost | Total OOS Return | OOS Sharpe | Deflated Sharpe | N Periods")
+        print("-" * 90)
+        for row in sweep_rows:
+            oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['borrow_cost']:>13.4f} | {row['total_oos_return']:>16.4f} | "
+                f"{oos_sharpe_txt:>10} | {dsr_txt:>15} | {row['n_periods']:>9}"
+            )
+        return 0
+
+    if len(funding_costs) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in funding_costs:
+            row = _walk_forward_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "walk_forward_funding_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"funding_costs": funding_costs, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nFunding-cost sweep ({len(funding_costs)} costs) saved to: {sweep_path}")
+        print("Funding Cost | Total OOS Return | OOS Sharpe | Deflated Sharpe | N Periods")
+        print("-" * 90)
+        for row in sweep_rows:
+            oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['funding_cost']:>13.4f} | {row['total_oos_return']:>16.4f} | "
+                f"{oos_sharpe_txt:>10} | {dsr_txt:>15} | {row['n_periods']:>9}"
+            )
+        return 0
+
     results = walk_forward_analysis(
         data=data,
         strategy_factory=strategy_factory,
@@ -3149,6 +3420,102 @@ def run_parameter_optimization(args) -> int:
                 b, prov = _load_benchmark(bench_file, total_return_benchmark)
                 benchmark.append(b)
                 benchmark_provenance.append(prov)
+
+    impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
+    borrow_costs = [float(c) for c in (args.borrow_costs or [args.borrow_cost])]
+    funding_costs = [float(c) for c in (args.funding_costs or [args.funding_cost])]
+
+    # Capacity / cost sensitivity sweeps for parameter optimization: re-run
+    # the optimization pipeline for each coefficient/cost and record
+    # degradation in a single artifact. Single value keeps the original path.
+    if len(impact_coefficients) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for coeff in impact_coefficients:
+            row = _optimize_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio, coeff,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "parameter_optimization_impact_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"impact_coefficients": impact_coefficients, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nMarket impact sweep ({len(impact_coefficients)} coefficients) saved to: {sweep_path}")
+        print("Impact coefficient | Top Sharpe | Top Total Return | N Combos")
+        print("-" * 70)
+        for row in sweep_rows:
+            sharpe_txt = "N/A" if row["top_sharpe"] is None else f"{row['top_sharpe']:.4f}"
+            print(
+                f"{row['impact_coefficient']:>17} | {sharpe_txt:>10} | "
+                f"{row['top_total_return']:>16.4f} | {row['n_combos']:>7}"
+            )
+        return 0
+
+    if len(borrow_costs) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in borrow_costs:
+            row = _optimize_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=cost, funding_cost=args.funding_cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "parameter_optimization_borrow_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"borrow_costs": borrow_costs, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nBorrow-cost sweep ({len(borrow_costs)} costs) saved to: {sweep_path}")
+        print("Borrow Cost | Top Sharpe | Top Total Return | N Combos")
+        print("-" * 70)
+        for row in sweep_rows:
+            sharpe_txt = "N/A" if row["top_sharpe"] is None else f"{row['top_sharpe']:.4f}"
+            print(
+                f"{row['borrow_cost']:>13.4f} | {sharpe_txt:>10} | "
+                f"{row['top_total_return']:>16.4f} | {row['n_combos']:>7}"
+            )
+        return 0
+
+    if len(funding_costs) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in funding_costs:
+            row = _optimize_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "parameter_optimization_funding_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"funding_costs": funding_costs, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nFunding-cost sweep ({len(funding_costs)} costs) saved to: {sweep_path}")
+        print("Funding Cost | Top Sharpe | Top Total Return | N Combos")
+        print("-" * 70)
+        for row in sweep_rows:
+            sharpe_txt = "N/A" if row["top_sharpe"] is None else f"{row['top_sharpe']:.4f}"
+            print(
+                f"{row['funding_cost']:>13.4f} | {sharpe_txt:>10} | "
+                f"{row['top_total_return']:>16.4f} | {row['n_combos']:>7}"
+            )
+        return 0
 
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
@@ -3836,6 +4203,105 @@ def run_out_of_sample_validation(args) -> int:
             benchmark.append(b)
             benchmark_provenance.append(prov)
 
+    impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
+    borrow_costs = [float(c) for c in (args.borrow_costs or [args.borrow_cost])]
+    funding_costs = [float(c) for c in (args.funding_costs or [args.funding_cost])]
+
+    # Capacity / cost sensitivity sweeps for out-of-sample validation: re-run
+    # the validation pipeline for each coefficient/cost and record
+    # degradation in a single artifact. Single value keeps the original path.
+    if len(impact_coefficients) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for coeff in impact_coefficients:
+            row = _oos_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio, coeff,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "out_of_sample_impact_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"impact_coefficients": impact_coefficients, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nMarket impact sweep ({len(impact_coefficients)} coefficients) saved to: {sweep_path}")
+        print("Impact coefficient | Test Total Return | Test Sharpe | Deflated Sharpe")
+        print("-" * 74)
+        for row in sweep_rows:
+            sharpe_txt = "N/A" if row["test_sharpe"] is None else f"{row['test_sharpe']:.4f}"
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['impact_coefficient']:>17} | {row['test_total_return']:>16.4f} | "
+                f"{sharpe_txt:>11} | {dsr_txt:>15}"
+            )
+        return 0
+
+    if len(borrow_costs) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in borrow_costs:
+            row = _oos_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=cost, funding_cost=args.funding_cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "out_of_sample_borrow_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"borrow_costs": borrow_costs, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nBorrow-cost sweep ({len(borrow_costs)} costs) saved to: {sweep_path}")
+        print("Borrow Cost | Test Total Return | Test Sharpe | Deflated Sharpe")
+        print("-" * 74)
+        for row in sweep_rows:
+            sharpe_txt = "N/A" if row["test_sharpe"] is None else f"{row['test_sharpe']:.4f}"
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['borrow_cost']:>13.4f} | {row['test_total_return']:>16.4f} | "
+                f"{sharpe_txt:>11} | {dsr_txt:>15}"
+            )
+        return 0
+
+    if len(funding_costs) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in funding_costs:
+            row = _oos_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "out_of_sample_funding_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"funding_costs": funding_costs, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nFunding-cost sweep ({len(funding_costs)} costs) saved to: {sweep_path}")
+        print("Funding Cost | Test Total Return | Test Sharpe | Deflated Sharpe")
+        print("-" * 74)
+        for row in sweep_rows:
+            sharpe_txt = "N/A" if row["test_sharpe"] is None else f"{row['test_sharpe']:.4f}"
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['funding_cost']:>13.4f} | {row['test_total_return']:>16.4f} | "
+                f"{sharpe_txt:>11} | {dsr_txt:>15}"
+            )
+        return 0
+
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -4125,12 +4591,18 @@ def main():
     wf_parser.add_argument("--step-months", type=int, default=3, help="Step size between iterations in months")
     wf_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     wf_parser.add_argument("--deflate", action="store_true", help="Compute Deflated Sharpe Ratio (multiple-testing correction) on the parameter search and OOS results")
+    wf_parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="Sweep over multiple market impact coefficients for capacity/impact sensitivity; overrides --impact-coefficient when given (e.g. --impact-coefficients 0 1 2 5).")
+    wf_parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual borrow costs for short positions; overrides --borrow-cost when given (e.g. --borrow-costs 0 0.01 0.03).")
+    wf_parser.add_argument("--funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual funding costs for leveraged positions; overrides --funding-cost when given (e.g. --funding-costs 0 0.01 0.02).")
     wf_parser.set_defaults(func=run_walk_forward)
 
     # Parameter optimization
     opt_parser = subparsers.add_parser("optimize", parents=[common_parser], help="Run parameter optimization")
     opt_parser.add_argument("--top-n", type=int, default=10, help="Number of top results to display")
     opt_parser.add_argument("--deflate", action="store_true", help="Compute Deflated Sharpe Ratio (multiple-testing correction) for every parameter combination")
+    opt_parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="Sweep over multiple market impact coefficients for capacity/impact sensitivity; overrides --impact-coefficient when given (e.g. --impact-coefficients 0 1 2 5).")
+    opt_parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual borrow costs for short positions; overrides --borrow-cost when given (e.g. --borrow-costs 0 0.01 0.03).")
+    opt_parser.add_argument("--funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual funding costs for leveraged positions; overrides --funding-cost when given (e.g. --funding-costs 0 0.01 0.02).")
     opt_parser.set_defaults(func=run_parameter_optimization)
 
     # Monte Carlo simulation
@@ -4167,6 +4639,9 @@ def main():
     oos_parser.add_argument("--selection-criterion", type=str, choices=["best_oos_sharpe", "most_stable", "best_avg_sharpe"], default="best_oos_sharpe", help="Criterion for selecting final parameters from validation results")
     oos_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     oos_parser.add_argument("--deflate", action="store_true", help="Compute Deflated Sharpe Ratio (multiple-testing correction) on the test results")
+    oos_parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="Sweep over multiple market impact coefficients for capacity/impact sensitivity; overrides --impact-coefficient when given (e.g. --impact-coefficients 0 1 2 5).")
+    oos_parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual borrow costs for short positions; overrides --borrow-cost when given (e.g. --borrow-costs 0 0.01 0.03).")
+    oos_parser.add_argument("--funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual funding costs for leveraged positions; overrides --funding-cost when given (e.g. --funding-costs 0 0.01 0.02).")
     # Walk-forward specific args for validation phase
     oos_parser.add_argument("--wf-train-months", type=int, default=12, help="Training window size in months for walk-forward validation")
     oos_parser.add_argument("--wf-test-months", type=int, default=3, help="Testing window size in months for walk-forward validation")
