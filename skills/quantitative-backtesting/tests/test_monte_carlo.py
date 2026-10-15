@@ -22,7 +22,7 @@ import pandas as pd
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
-from monte_carlo import monte_carlo_simulation  # noqa: E402
+from monte_carlo import monte_carlo_simulation, estimate_optimal_block_size  # noqa: E402
 
 
 def _make_returns(periods: int = 252, seed: int = 42) -> pd.Series:
@@ -134,6 +134,81 @@ def test_standalone_reproducible_structure():
         assert not np.any(np.isnan(mc2["metric_distributions"][metric]))
 
 
+def test_estimate_optimal_block_size_basic():
+    """estimate_optimal_block_size returns a valid block size."""
+    returns = _make_returns(periods=252)
+    b = estimate_optimal_block_size(returns)
+    assert isinstance(b, int)
+    assert 2 <= b <= len(returns) // 2
+
+
+def test_estimate_optimal_block_size_ar1_vs_politis_white():
+    """AR(1) and Politis-White methods produce different (but valid) results."""
+    returns = _make_returns(periods=500)
+    b_ar1 = estimate_optimal_block_size(returns, method="simple_ar1")
+    b_pw = estimate_optimal_block_size(returns, method="politis_white_2004")
+    assert isinstance(b_ar1, int)
+    assert isinstance(b_pw, int)
+    assert 2 <= b_ar1 <= len(returns) // 2
+    assert 2 <= b_pw <= len(returns) // 2
+
+
+def test_estimate_optimal_block_size_short_series():
+    """Short series returns minimum block size."""
+    returns = _make_returns(periods=5)
+    b = estimate_optimal_block_size(returns)
+    assert b == 2
+
+
+def test_estimate_optimal_block_size_zero_variance():
+    """Constant returns (zero variance) returns minimum block size."""
+    returns = pd.Series([0.0] * 100, index=pd.date_range("2020-01-01", periods=100, freq="B"))
+    b = estimate_optimal_block_size(returns)
+    assert b == 2
+
+
+def test_monte_carlo_auto_block_size():
+    """monte_carlo_simulation with block_size='auto' estimates and uses optimal block size."""
+    returns = _make_returns(periods=252)
+    mc = monte_carlo_simulation(
+        base_returns=returns,
+        n_simulations=50,
+        block_size="auto",
+    )
+    assert "block_size_used" in mc
+    assert mc["block_size_used"] is not None
+    assert isinstance(mc["block_size_used"], int)
+    assert mc["block_size_used"] >= 2
+    assert mc["n_simulations"] == 50
+
+
+def test_monte_carlo_auto_block_size_reproducible():
+    """Auto block size is deterministic for same input (uses same algorithm)."""
+    returns = _make_returns(periods=252, seed=42)
+    mc1 = monte_carlo_simulation(base_returns=returns, n_simulations=20, block_size="auto")
+    mc2 = monte_carlo_simulation(base_returns=returns, n_simulations=20, block_size="auto")
+    assert mc1["block_size_used"] == mc2["block_size_used"]
+
+
+def test_monte_carlo_block_size_none_vs_auto_different():
+    """i.i.d. bootstrap (None) and auto block bootstrap produce different distributions."""
+    returns = _make_returns(periods=500)
+    mc_iid = monte_carlo_simulation(base_returns=returns, n_simulations=200, block_size=None)
+    mc_auto = monte_carlo_simulation(base_returns=returns, n_simulations=200, block_size="auto")
+
+    # They should both run successfully
+    assert mc_iid["n_simulations"] == 200
+    assert mc_auto["n_simulations"] == 200
+    assert mc_iid["block_size_used"] is None
+    assert mc_auto["block_size_used"] is not None
+
+    # The Sharpe ratio distributions should differ (block bootstrap preserves autocorrelation)
+    sharpe_iid = np.array(mc_iid["metric_distributions"]["sharpe_ratio"])
+    sharpe_auto = np.array(mc_auto["metric_distributions"]["sharpe_ratio"])
+    # At minimum, they should not be identical arrays
+    assert not np.allclose(sharpe_iid, sharpe_auto)
+
+
 def main() -> int:
     tests = [
         ("standalone_module_structure", test_standalone_module_structure),
@@ -143,6 +218,13 @@ def main() -> int:
         ("standalone_short_series_raises", test_standalone_short_series_raises),
         ("standalone_matches_walk_forward_re_export", test_standalone_matches_walk_forward_re_export),
         ("standalone_reproducible_structure", test_standalone_reproducible_structure),
+        ("estimate_optimal_block_size_basic", test_estimate_optimal_block_size_basic),
+        ("estimate_optimal_block_size_ar1_vs_politis_white", test_estimate_optimal_block_size_ar1_vs_politis_white),
+        ("estimate_optimal_block_size_short_series", test_estimate_optimal_block_size_short_series),
+        ("estimate_optimal_block_size_zero_variance", test_estimate_optimal_block_size_zero_variance),
+        ("monte_carlo_auto_block_size", test_monte_carlo_auto_block_size),
+        ("monte_carlo_auto_block_size_reproducible", test_monte_carlo_auto_block_size_reproducible),
+        ("monte_carlo_block_size_none_vs_auto_different", test_monte_carlo_block_size_none_vs_auto_different),
     ]
     failures = 0
     for name, fn in tests:

@@ -22,71 +22,54 @@
 <div class="container">
 <h1>Backtest Tear Sheet</h1>
 <p><strong>Symbol:</strong> SPY</p>
-<p><strong>Strategy:</strong> sma_crossover</p>
-<p><strong>Periods:</strong> 4</p>
+<p><strong>Strategy:</strong> sma_crossover_monte_carlo</p>
+<p><strong>Periods:</strong> 502</p>
 
 <h2>Summary Metrics</h2>
 <table><tr><th>Metric</th><th>Value</th></tr>
-<tr><td>Total Return</td><td class='metric negative'>-49.54%</td></tr>
-<tr><td>Annualized Return</td><td class='metric negative'>-100.00%</td></tr>
-<tr><td>Annualized Volatility</td><td class='metric '>480.67%</td></tr>
-<tr><td>Sharpe Ratio</td><td class='metric '>-9.32</td></tr>
-<tr><td>Sortino Ratio</td><td class='metric '>-8.12</td></tr>
-<tr><td>Calmar Ratio</td><td class='metric '>2.00</td></tr>
-<tr><td>Max Drawdown</td><td class='metric negative'>-50.02%</td></tr>
-<tr><td>Omega Ratio</td><td class='metric '>2.02</td></tr>
-<tr><td>Skewness</td><td class='metric '>-2.00</td></tr>
-<tr><td>Kurtosis</td><td class='metric '>3.99</td></tr>
-<tr><td>VaR (95%)</td><td class='metric '>-42.50%</td></tr>
-<tr><td>CVaR (95%)</td><td class='metric '>-50.00%</td></tr>
+<tr><td>Total Return</td><td class='metric positive'>19.13%</td></tr>
+<tr><td>Annualized Return</td><td class='metric positive'>9.19%</td></tr>
+<tr><td>Annualized Volatility</td><td class='metric '>17.78%</td></tr>
+<tr><td>Sharpe Ratio</td><td class='metric '>0.47</td></tr>
+<tr><td>Sortino Ratio</td><td class='metric '>0.68</td></tr>
+<tr><td>Calmar Ratio</td><td class='metric '>0.58</td></tr>
+<tr><td>Max Drawdown</td><td class='metric negative'>-15.83%</td></tr>
+<tr><td>Omega Ratio</td><td class='metric '>1.75</td></tr>
+<tr><td>Skewness</td><td class='metric '>0.14</td></tr>
+<tr><td>Kurtosis</td><td class='metric '>2.14</td></tr>
+<tr><td>VaR (95%)</td><td class='metric '>-1.91%</td></tr>
+<tr><td>CVaR (95%)</td><td class='metric '>-2.53%</td></tr>
 </table>
-<h2>Trade Analytics</h2>
+<h2>Monte Carlo Simulation</h2>
 <table><tr><th>Metric</th><th>Value</th></tr>
-<tr><td>Total Trades</td><td class='metric'>1.00</td></tr>
-<tr><td>Winning Trades</td><td class='metric'>0.00</td></tr>
-<tr><td>Losing Trades</td><td class='metric'>1.00</td></tr>
-<tr><td>Win Rate</td><td class='metric'>0.00%</td></tr>
-<tr><td>Avg Win</td><td class='metric'>0.00%</td></tr>
-<tr><td>Avg Loss</td><td class='metric'>49.02%</td></tr>
-<tr><td>Profit Factor</td><td class='metric'>0.00</td></tr>
-<tr><td>Expectancy</td><td class='metric'>-50.0000</td></tr>
-<tr><td>Trades Closed at End</td><td class='metric'>0.00</td></tr>
-<tr><td>Pct Trades Closed at End</td><td class='metric'>0.00%</td></tr>
+<tr><td>Number of Simulations</td><td class='metric'>10.00</td></tr>
+<tr><td>Base Observations</td><td class='metric'>502.00</td></tr>
+<tr><td>Probability of Ruin</td><td class='metric'>0.00%</td></tr>
+<tr><td>Ruin Threshold</td><td class='metric'>50.00%</td></tr>
 </table>
-<h2>Benchmark Comparison</h2>
-<table><tr><th>Metric</th><th>Value</th></tr>
-<tr><td>Benchmark Total Return</td><td class='metric'>-48.00%</td></tr>
-<tr><td>Benchmark Annualized Return</td><td class='metric'>-100.00%</td></tr>
-<tr><td>Benchmark Return Type</td><td class='metric'>price</td></tr>
-<tr><td>Benchmark Commission</td><td class='metric'>0.0002</td></tr>
-<tr><td>Benchmark Slippage</td><td class='metric'>0.0001</td></tr>
-<tr><td>Correlation</td><td class='metric'>1.00</td></tr>
-<tr><td>Alpha</td><td class='metric'>-360.07%</td></tr>
-<tr><td>Beta</td><td class='metric'>0.98</td></tr>
-<tr><td>Alpha t-statistic</td><td class='metric'>-1.80</td></tr>
-<tr><td>Alpha p-value</td><td class='metric'>0.21</td></tr>
-<tr><td>R-squared</td><td class='metric'>1.00</td></tr>
+<h3>Confidence Intervals</h3>
+<table><tr><th>Metric</th><th>90%</th><th>95%</th><th>99%</th></tr>
+<tr><td>total_return</td><td>[-0.1712, 0.5882]</td><td>[-0.1808, 0.6495]</td><td>[-0.1884, 0.6985]</td></tr>
+<tr><td>annualized_return</td><td>[-0.0900, 0.2602]</td><td>[-0.0953, 0.2848]</td><td>[-0.0995, 0.3045]</td></tr>
+<tr><td>annualized_volatility</td><td>[0.1576, 0.1953]</td><td>[0.1574, 0.1955]</td><td>[0.1572, 0.1957]</td></tr>
+<tr><td>sharpe_ratio</td><td>[-0.5448, 1.1941]</td><td>[-0.5695, 1.2862]</td><td>[-0.5893, 1.3599]</td></tr>
+<tr><td>sortino_ratio</td><td>[-0.7509, 1.7898]</td><td>[-0.7862, 1.9429]</td><td>[-0.8144, 2.0653]</td></tr>
+<tr><td>max_drawdown</td><td>[-0.2980, -0.1041]</td><td>[-0.3003, -0.1022]</td><td>[-0.3020, -0.1006]</td></tr>
+<tr><td>calmar_ratio</td><td>[0.1728, 2.3796]</td><td>[0.1391, 2.6105]</td><td>[0.1122, 2.7952]</td></tr>
 </table>
-<h2>Data Provenance</h2>
-<table><tr><th>Field</th><th>Value</th></tr>
-<tr><td>source_path</td><td class='metric'>splits_test_data.csv</td></tr>
-<tr><td>load_timestamp</td><td class='metric'>2026-10-14T21:58:57.175392Z</td></tr>
-<tr><td>file_format</td><td class='metric'>.csv</td></tr>
-<tr><td>file_size_bytes</td><td class='metric'>209</td></tr>
-<tr><td>symbol_filter</td><td class='metric'>SPY</td></tr>
-<tr><td>start_date_filter</td><td class='metric'>N/A</td></tr>
-<tr><td>end_date_filter</td><td class='metric'>N/A</td></tr>
-<tr><td>date_range_original</td><td class='metric'>N/A</td></tr>
-<tr><td>date_range_final</td><td class='metric'>('2020-01-01 00:00:00', '2020-01-05 00:00:00')</td></tr>
-<tr><td>original_shape</td><td class='metric'>(5, 7)</td></tr>
-<tr><td>final_shape</td><td class='metric'>(5, 6)</td></tr>
-<tr><td>columns_original</td><td class='metric'>["date", "open", "high", "low", "close", "volume", "splits"]</td></tr>
-<tr><td>columns_final</td><td class='metric'>["open", "high", "low", "close", "volume", "splits"]</td></tr>
-<tr><td>validation_passed</td><td class='metric'>true</td></tr>
-<tr><td>validation_messages</td><td class='metric'>[]</td></tr>
-<tr><td>transformations_applied</td><td class='metric'>["column_names_lowercase_stripped", "set_index_from_date", "sorted_index", "coerced_numeric_types"]</td></tr>
-<tr><td>checksum</td><td class='metric'>d524d9e8e7a7d1e7</td></tr>
+<h3>Metric Distributions</h3>
+<table><tr><th>Metric</th><th>Mean</th><th>Std</th><th>Median</th><th>Min</th><th>Max</th></tr>
+<tr><td>total_return</td><td>0.1580</td><td>0.2749</td><td>0.1193</td><td>-0.1903</td><td>0.7108</td></tr>
+<tr><td>annualized_return</td><td>0.0690</td><td>0.1264</td><td>0.0581</td><td>-0.1006</td><td>0.3094</td></tr>
+<tr><td>annualized_volatility</td><td>0.1751</td><td>0.0135</td><td>0.1760</td><td>0.1572</td><td>0.1957</td></tr>
+<tr><td>sharpe_ratio</td><td>0.3030</td><td>0.6408</td><td>0.3040</td><td>-0.5942</td><td>1.3783</td></tr>
+<tr><td>sortino_ratio</td><td>0.4674</td><td>0.9381</td><td>0.4456</td><td>-0.8215</td><td>2.0959</td></tr>
+<tr><td>max_drawdown</td><td>-0.1938</td><td>0.0706</td><td>-0.1635</td><td>-0.3025</td><td>-0.1003</td></tr>
+<tr><td>calmar_ratio</td><td>0.8287</td><td>0.8414</td><td>0.3922</td><td>0.1054</td><td>2.8413</td></tr>
 </table>
+<div class='chart'><img src='equity_curve.png' alt='equity_curve'></div>
+<div class='chart'><img src='returns_distribution.png' alt='returns_distribution'></div>
+<div class='chart'><img src='monte_carlo_equity_curve.png' alt='monte_carlo_equity_curve'></div>
 
 </div>
 </body>

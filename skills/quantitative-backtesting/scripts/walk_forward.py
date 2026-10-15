@@ -3321,6 +3321,7 @@ def run_monte_carlo(args) -> int:
         "summary": mc_results["summary"],
         "n_simulations": mc_results["n_simulations"],
         "base_observations": mc_results["base_observations"],
+        "block_size_used": mc_results.get("block_size_used"),
         "config": {
             "strategy": args.strategy,
             "symbol": args.symbol,
@@ -3739,7 +3740,7 @@ def main():
     mc_parser = subparsers.add_parser("monte-carlo", parents=[common_parser], help="Run Monte Carlo simulation")
     mc_parser.add_argument("--n-simulations", type=int, default=2000, help="Number of simulations")
     mc_parser.add_argument("--confidence-levels", type=float, nargs="+", default=[0.90, 0.95, 0.99], help="Confidence levels")
-    mc_parser.add_argument("--block-size", type=int, help="Block size for block bootstrap")
+    mc_parser.add_argument("--block-size", type=lambda x: x if x == "auto" else int(x), help="Block size for block bootstrap (int or 'auto' for automatic selection)")
     mc_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     mc_parser.add_argument("--n-trials", type=int, default=None, help="Number of development trials (parameter configurations) tested; when set, report the Deflated Sharpe Ratio (multiple-testing correction) for the base backtest Sharpe. When a --param-grid is searched, the effective count is max(n_trials, number of grid combinations evaluated) so the internal search is never understated")
     mc_parser.set_defaults(func=run_monte_carlo)
