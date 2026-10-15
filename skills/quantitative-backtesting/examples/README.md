@@ -110,16 +110,16 @@ Self-contained: uses temporary directories, no persistent artifacts.
 
 Systematic sensitivity analysis of trading costs and cost-modeling assumptions:
 
-1. **Strategy cost sensitivity** - Sweeps commission (0–10 bps) × slippage (0–5 bps) on the strategy side, measuring how Sharpe, Calmar, and max drawdown degrade.
-2. **Benchmark cost-model sensitivity** - Sweeps benchmark commission, expense ratio (0–1% annual), and periodic-vs-round-trip costing, showing the impact on estimated alpha and the Deflated Alpha Ratio (DAR).
-3. **CPCV robustness under cost stress** - Compares out-of-sample Sharpe, return, and DAR between low-cost and high-cost regimes (including market impact, borrow cost, and funding cost).
+1. **Strategy cost sensitivity** — Sweeps commission × slippage × borrow cost × funding cost on the strategy side, measuring how Sharpe, Calmar, and max drawdown degrade.  Borrow and funding costs are included for API completeness; on this long-only SMA-crossover strategy they have no P&L effect (no short positions or leverage).
+2. **Benchmark cost-model sensitivity** — Sweeps benchmark commission, expense ratio (0–1% annual), and periodic-vs-round-trip costing, showing the impact on estimated alpha and the Deflated Alpha Ratio (DAR).  Includes a positive-alpha scenario using a degraded-strategy benchmark (strategy asset with −30%/−60% compounding drag) that produces DAR ∈ (0, 1) and demonstrates how cost-modeling shifts statistical inference when skill is present.
+3. **CPCV robustness under cost stress** — Compares out-of-sample Sharpe, return, and DAR between low-cost and high-cost regimes (including market impact, borrow cost, and funding cost).
 
 Run with:
 ```bash
 python3 skills/quantitative-backtesting/examples/trading_costs_robustness_example.py
 ```
 
-Self-contained: uses temporary directories, no persistent artifacts. Produces a structured JSON summary and a key-findings banner.
+Self-contained: uses synthetic data, no network access required. Produces a structured JSON summary and a key-findings banner.
 
 ### `real_data_workflow.md`
 

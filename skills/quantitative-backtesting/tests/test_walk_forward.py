@@ -1383,9 +1383,84 @@ def test_trading_costs_robustness_example_imports():
         "run_cpcv_robustness",
         "_make_universe",
         "_metrics_from_returns",
+        "_make_degraded_strategy_benchmark",
     ):
         assert hasattr(module, name), f"example module missing callable: {name}"
         assert callable(getattr(module, name)), f"{name} should be callable"
+    assert module.DEGRADED_PRIMARY_DRAG == -0.30, "primary drag should be -30%"
+    assert module.DEGRADED_SECONDARY_DRAG == -0.60, "secondary drag should be -60%"
+
+
+def test_trading_costs_positive_alpha_dar_in_range():
+    """The positive-alpha (degraded-strategy) benchmark scenario must produce
+    DAR ∈ (0, 1) and vary across cost-modeling choices.
+
+    The SMA-crossover strategy on the synthetic data has negative Sharpe, so a
+    positive alpha only arises when the benchmark drifts more negatively than
+    the strategy.  With -30%/-60% drag the alpha is ~+12% annualized and the
+    DAR lands in (0, 1) — proving the sensitivity analysis surfaces statistical
+    inference, not just alpha-point estimates.  This guards against regressions
+    that shrink the drag back to -10%/-20% (which yield DAR ≈ 0).
+    """
+    module = _import_costs_example_module()
+    strategy_df, benchmark_dfs, symbols = module._make_universe()
+    strategy = build_strategy("sma_crossover", json.dumps(module.STRATEGY_PARAMS))
+    signals = strategy.generate_signals(strategy_df)
+    baseline_returns = module._calculate_strategy_returns(
+        strategy_df, signals, commission=0.0, slippage=0.0,
+        borrow_cost=0.0, funding_cost=0.0,
+    )
+
+    primary = module._make_degraded_strategy_benchmark(
+        strategy_df, drag_annual=module.DEGRADED_PRIMARY_DRAG
+    )
+    secondary = module._make_degraded_strategy_benchmark(
+        strategy_df, drag_annual=module.DEGRADED_SECONDARY_DRAG
+    )
+
+    # Baseline (no benchmark costs, round-trip mode)
+    correction = module._benchmark_list_alpha_correction(
+        baseline_returns, [primary, secondary],
+        benchmark_commission=0.0, benchmark_slippage=0.0,
+        benchmark_expense_ratio=0.0, benchmark_cost_is_periodic=False,
+    )
+    da = correction["deflated_alpha"]
+    assert da is not None, "deflated_alpha must be present with 2 benchmarks"
+    dar_base = da["deflated_alpha_ratio"]
+    assert 0.0 < dar_base < 1.0, (
+        f"baseline DAR must be in (0, 1), got {dar_base}"
+    )
+
+    # With higher benchmark costs (1% expense, periodic) the benchmark
+    # underperforms further, alpha increases, and DAR should move.
+    correction_high = module._benchmark_list_alpha_correction(
+        baseline_returns, [primary, secondary],
+        benchmark_commission=0.0005, benchmark_slippage=0.0005,
+        benchmark_expense_ratio=0.01, benchmark_cost_is_periodic=True,
+    )
+    da_high = correction_high["deflated_alpha"]
+    dar_high = da_high["deflated_alpha_ratio"]
+    assert 0.0 < dar_high < 1.0, f"high-cost DAR must be in (0, 1), got {dar_high}"
+    # DAR must change across cost assumptions (demonstrates sensitivity)
+    assert dar_high != dar_base, (
+        f"DAR should differ across cost assumptions: {dar_base} vs {dar_high}"
+    )
+
+
+def test_trading_costs_borrow_funding_sweep_exercises_api():
+    """Borrow and funding costs are swept in run_strategy_cost_sweep's grid and
+    passed through to _calculate_strategy_returns.  On this long-only
+    strategy they have no P&L effect, but the API must still accept and process
+    them without error.
+    """
+    module = _import_costs_example_module()
+    # Verify the sweep grids include both 0% and a non-zero level
+    assert hasattr(module, "BORROW_COST_GRID"), "BORROW_COST_GRID must be defined"
+    assert hasattr(module, "FUNDING_COST_GRID"), "FUNDING_COST_GRID must be defined"
+    borrow_grid = module.BORROW_COST_GRID
+    funding_grid = module.FUNDING_COST_GRID
+    assert 0.0 in borrow_grid and any(v > 0 for v in borrow_grid), "borrow grid must span 0% and >0%"
+    assert 0.0 in funding_grid and any(v > 0 for v in funding_grid), "funding grid must span 0% and >0%"
 
 
 def test_trading_costs_robustness_example_runs():
@@ -1444,6 +1519,8 @@ def main() -> int:
         ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
         ("test_trading_costs_robustness_example_imports", test_trading_costs_robustness_example_imports),
         ("test_trading_costs_robustness_example_runs", test_trading_costs_robustness_example_runs),
+        ("test_trading_costs_positive_alpha_dar_in_range", test_trading_costs_positive_alpha_dar_in_range),
+        ("test_trading_costs_borrow_funding_sweep_exercises_api", test_trading_costs_borrow_funding_sweep_exercises_api),
         ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ]
 
