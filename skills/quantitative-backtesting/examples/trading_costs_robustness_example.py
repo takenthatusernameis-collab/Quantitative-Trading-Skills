@@ -268,7 +268,44 @@ def run_strategy_cost_sweep(data_df):
         f"Return={sf['total_return']:.2%} (Δ vs base: {sf['total_return'] - bm['total_return']:+.2%})"
     )
     print()
-    return results, baseline_returns
+
+    # Leveraged strategy variant: demonstrate funding costs
+    # Scale long-only signals to 2x leverage (positions ∈ {0, 2}); gross
+    # exposure = 2 so funding_cost applies to the 1x excess leverage.
+    # Borrow costs also apply to the short leg (if any short positions arise
+    # from the leveraged signal), and the 2x amplification magnifies the
+    # effect of all costs — commission and slippage are also applied to the
+    # larger position changes.
+    signals_levered = signals * 2
+
+    print("   Leveraged strategy variant (2x long-only leverage):")
+    baseline_lev = _calculate_strategy_returns(
+        data_df, signals_levered, commission=0.0, slippage=0.0,
+        borrow_cost=0.0, funding_cost=0.0,
+    )
+    blm = _metrics_from_returns(baseline_lev)
+    print(
+        f"   Baseline (0% borrow/funding):  Sharpe={blm['sharpe_ratio']:.3f}  "
+        f"Return={blm['total_return']:.2%}"
+    )
+    lev_high_f = _calculate_strategy_returns(
+        data_df, signals_levered, commission=0.0, slippage=0.0,
+        borrow_cost=0.0, funding_cost=0.02,
+    )
+    lfm = _metrics_from_returns(lev_high_f)
+    print(
+        f"   With funding_cost=2%:          Sharpe={lfm['sharpe_ratio']:.3f}  "
+        f"Return={lfm['total_return']:.2%} (Δ vs base: {lfm['total_return'] - blm['total_return']:+.2%})"
+    )
+    print()
+
+    return results, baseline_returns, {
+        "short": {"baseline_sharpe": bm["sharpe_ratio"], "baseline_return": bm["total_return"],
+                  "borrow_sharpe": sb["sharpe_ratio"], "borrow_return": sb["total_return"],
+                  "funding_sharpe": sf["sharpe_ratio"], "funding_return": sf["total_return"]},
+        "levered": {"baseline_sharpe": blm["sharpe_ratio"], "baseline_return": blm["total_return"],
+                    "funding_sharpe": lfm["sharpe_ratio"], "funding_return": lfm["total_return"]},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -544,7 +581,7 @@ def main():
         factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
 
         # --- Section 1: Strategy cost sensitivity ---
-        cost_sweep, baseline_returns = run_strategy_cost_sweep(strategy_df)
+        cost_sweep, baseline_returns, cost_extras = run_strategy_cost_sweep(strategy_df)
 
         # --- Section 2: Benchmark cost-model sensitivity ---
         bench_sweep = run_benchmark_cost_sweep(baseline_returns, benchmark_dfs, strategy_df)
@@ -569,6 +606,7 @@ def main():
                 },
             },
             "strategy_cost_sweep": cost_sweep,
+            "strategy_exposure_demonstrations": cost_extras,
             "benchmark_cost_sweep": bench_sweep,
             "cpcv_robustness": cpcv_results,
         }
@@ -600,6 +638,15 @@ def main():
                       f"in statistical inference when skill is present.")
         print(f"  3. CPCV OOS Sharpe: low-cost={cpcv_results['low_cost']['oos_sharpe']:.3f} "
               f"vs high-cost={cpcv_results['high_cost']['oos_sharpe']:.3f}.")
+        short_res = cost_extras["short"]
+        lev_res = cost_extras["levered"]
+        short_delta = short_res["borrow_return"] - short_res["baseline_return"]
+        lev_delta = lev_res["funding_return"] - lev_res["baseline_return"]
+        print(f"  3b. Short-capable variant: borrow_cost=3% reduces return by "
+              f"{short_delta:+.2%} (Sharpe {short_res['baseline_sharpe']:.3f}→{short_res['borrow_sharpe']:.3f}); "
+              f"funding_cost=2% has no effect (no leverage).")
+        print(f"  3c. Leveraged variant (2x): funding_cost=2% reduces return by "
+              f"{lev_delta:+.2%} (Sharpe {lev_res['baseline_sharpe']:.3f}→{lev_res['funding_sharpe']:.3f}).")
         print()
         print("  Conclusion: Transaction costs materially affect both performance")
         print("  metrics and statistical inference (deflated alpha). Sensitivity")

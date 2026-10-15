@@ -1520,6 +1520,34 @@ def test_trading_costs_short_strategy_borrow_cost_effect():
     )
 
 
+def test_trading_costs_levered_strategy_funding_cost_effect():
+    """Funding costs should reduce returns when the strategy uses leverage.
+
+    The long-only SMA-crossover strategy has positions ∈ {0, 1} (gross exposure
+    = 1), so funding_cost has no effect.  By scaling signals to 2× leverage
+    (positions ∈ {0, 2}), the excess leverage of 1× is subject to funding_cost,
+    which should reduce cumulative returns.
+    """
+    module = _import_costs_example_module()
+    strategy_df, _, _ = module._make_universe()
+    signals = module._strategy_signals(strategy_df)
+    signals_levered = signals * 2  # 2x leverage, positions ∈ {0, 2}
+    # Baseline: no costs
+    returns_base = module._calculate_strategy_returns(
+        strategy_df, signals_levered, commission=0.0, slippage=0.0,
+        borrow_cost=0.0, funding_cost=0.0,
+    )
+    # With funding cost (3% annual on the 1x excess leverage)
+    returns_high_f = module._calculate_strategy_returns(
+        strategy_df, signals_levered, commission=0.0, slippage=0.0,
+        borrow_cost=0.0, funding_cost=0.03,
+    )
+    # Gross exposure exceeds 1x, so funding costs must apply
+    assert returns_high_f.sum() < returns_base.sum(), (
+        f"funding costs should reduce returns for leveraged strategy: "
+        f"{returns_high_f.sum():.6f} vs {returns_base.sum():.6f}"
+    )
+
 
 def main() -> int:
     tests = [
@@ -1549,6 +1577,7 @@ def main() -> int:
         ("test_trading_costs_positive_alpha_dar_in_range", test_trading_costs_positive_alpha_dar_in_range),
         ("test_trading_costs_borrow_funding_sweep_exercises_api", test_trading_costs_borrow_funding_sweep_exercises_api),
         ("test_trading_costs_short_strategy_borrow_cost_effect", test_trading_costs_short_strategy_borrow_cost_effect),
+        ("test_trading_costs_levered_strategy_funding_cost_effect", test_trading_costs_levered_strategy_funding_cost_effect),
         ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ]
 
