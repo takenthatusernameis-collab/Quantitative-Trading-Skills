@@ -1721,9 +1721,11 @@ def out_of_sample_validation(
         data = data.sort_index()
 
     # Split data chronologically
+    print(f"DEBUG: About to split data")
     train_data, val_data, test_data = _split_train_val_test(
-        data, train_frac=train_frac, val_frac=val_frac, test_frac=test_frac
+        data, train_frac, val_frac, test_frac
     )
+    print(f"DEBUG: Data split complete - train: {len(train_data) if train_data is not None else 'None'}, val: {len(val_data) if val_data is not None else 'None'}, test: {len(test_data) if test_data is not None else 'None'}")
 
     # Record split boundaries
     split_info = {
@@ -1749,7 +1751,9 @@ def out_of_sample_validation(
     split_info["separation_check"] = separation_check
 
     # Phase 1: VALIDATION - Run walk-forward or CPCV on training data
+    print(f"DEBUG: About to start training phase with validation_method={validation_method}")
     if validation_method == "walk_forward":
+        print(f"DEBUG: Calling walk_forward_analysis")
         validation_results = walk_forward_analysis(
             data=train_data,
             strategy_factory=strategy_factory,
@@ -1771,7 +1775,9 @@ def out_of_sample_validation(
             benchmark_slippage=benchmark_slippage,
             benchmark_expense_ratio=benchmark_expense_ratio,
         )
+        print(f"DEBUG: walk_forward_analysis completed")
     elif validation_method == "cpcv":
+        print(f"DEBUG: Calling cpcv_analysis")
         validation_results = cpcv_analysis(
             data=train_data,
             strategy_factory=strategy_factory,
@@ -1788,23 +1794,22 @@ def out_of_sample_validation(
             borrow_cost=borrow_cost,
             funding_cost=funding_cost,
             apply_deflation=apply_deflation,
-            benchmark=benchmark,
-            total_return_benchmark=total_return_benchmark,
-            benchmark_commission=benchmark_commission,
-            benchmark_slippage=benchmark_slippage,
-            benchmark_expense_ratio=benchmark_expense_ratio,
         )
+        print(f"DEBUG: cpcv_analysis completed")
     else:
         raise ValueError(f"Unknown validation_method: {validation_method}. Use 'walk_forward' or 'cpcv'.")
-
+    print(f"DEBUG: Training phase completed")
     # Phase 2: SELECTION - Select best parameters based on criterion
+    print(f"DEBUG: About to start selection phase")
     selected_params = _select_parameters(
         validation_results=validation_results,
         validation_method=validation_method,
         criterion=selection_criterion,
     )
+    print(f"DEBUG: Selection phase completed - selected_params: {selected_params}")
 
     if selected_params is None:
+        print(f"DEBUG: No valid parameters found, returning early")
         return {
             "train_val_test_split": split_info,
             "validation_results": validation_results,
@@ -1817,6 +1822,7 @@ def out_of_sample_validation(
                 "train_val_test_split": split_info,
             },
         }
+    print(f"DEBUG: Continuing after selected_params check")
 
     # Phase 3: CONFIRMATION - Evaluate selected params on validation data
     strategy = strategy_factory(selected_params)
@@ -1848,104 +1854,34 @@ def out_of_sample_validation(
 
     ann_factor_test = _annualization_factor(test_returns.index)
     excess_test = test_returns - 0.02 / ann_factor_test
+
     test_sharpe = float(excess_test.mean() / excess_test.std() * np.sqrt(ann_factor_test)) if len(test_returns) > 1 and test_returns.std() > 0 else 0.0
     test_total_return = float((1 + test_returns).prod() - 1) if len(test_returns) > 0 else 0.0
 
     test_performance = {
-        "test_total_return": test_total_return,
-        "test_sharpe": test_sharpe,
-        "test_volatility": float(test_returns.std() * np.sqrt(ann_factor_test)) if len(test_returns) > 1 else 0.0,
-        "test_n_periods": len(test_returns),
-        "test_returns": test_returns,
-    }
+     "test_total_return": test_total_return,
+         "test_sharpe": test_sharpe,
+         "test_volatility": float(test_returns.std() * np.sqrt(ann_factor_test)) if len(test_returns) > 1 else 0.0,
+         "test_n_periods": len(test_returns),
+         "test_returns": test_returns,
+     }
 
     # Benchmark comparison on test set
     test_benchmark = None
     if benchmark is not None and len(test_returns) > 0:
-        # Handle multiple benchmarks for multiple-testing correction
         if isinstance(benchmark, list):
-            # Process each benchmark
-            benchmark_results = []
-            p_values = []
-            for i, bench in enumerate(benchmark):
-                benchmark_returns = _compute_benchmark_returns(bench, test_returns, total_return_benchmark)
-                if benchmark_returns is not None:
-                    if benchmark_cost_is_periodic and "splits" in bench.columns:
-                        bench_stats = _benchmark_stats_with_splits(
-                            test_returns, benchmark_returns, ann_factor_test,
-                            total_return_benchmark=total_return_benchmark,
-                            benchmark_commission=benchmark_commission,
-                            benchmark_slippage=benchmark_slippage,
-                            benchmark_expense_ratio=benchmark_expense_ratio,
-                            benchmark_cost_is_periodic=benchmark_cost_is_periodic,
-                            benchmark_data=bench,
-                        )
-                    else:
-                        bench_stats = _benchmark_stats(
-                            test_returns, benchmark_returns, ann_factor_test,
-                            total_return_benchmark=total_return_benchmark,
-                            benchmark_commission=benchmark_commission,
-                            benchmark_slippage=benchmark_slippage,
-                            benchmark_expense_ratio=benchmark_expense_ratio,
-                            benchmark_cost_is_periodic=benchmark_cost_is_periodic,
-                        )
-                    benchmark_results.append(bench_stats)
-                    if 'alpha_pvalue' in bench_stats and bench_stats['alpha_pvalue'] is not None:
-                        p_values.append(bench_stats['alpha_pvalue'])
-                    else:
-                        p_values.append(1.0)  # If no p-value, treat as non-significant
-                else:
-                    benchmark_results.append(None)
-                    p_values.append(1.0)
-
-            # Apply multiple-testing correction to alpha p-values using Deflated Alpha analogue
-            if p_values and len(p_values) > 1:
-                # Collect trial alphas for Deflated Alpha calculation
-                trial_alphas = []
-                for bench_result in benchmark_results:
-                    if bench_result is not None and 'alpha' in bench_result:
-                        trial_alphas.append(bench_result['alpha'])
-
-                # Apply Deflated Alpha correction to each benchmark result
-                for i, bench_result in enumerate(benchmark_results):
-                    if bench_result is not None and 'alpha' in bench_result and len(trial_alphas) >= 2:
-                        # Use the benchmark returns for this specific benchmark to calculate volatility
-                        bench_idx = i if isinstance(benchmark, list) else 0
-                        if isinstance(benchmark, list) and bench_idx < len(benchmark):
-                            bench_returns = _compute_benchmark_returns(
-                                benchmark[bench_idx], test_returns, total_return_benchmark
-                            )
-                            if bench_returns is not None:
-                                dar_result = deflated_alpha_ratio(
-                                    alpha=bench_result['alpha'],
-                                    returns=test_returns,
-                                    benchmark_returns=bench_returns,
-                                    n_benchmarks=len(p_values),
-                                    trial_alphas=trial_alphas
-                                )
-                                # Store both original and corrected p-values
-                                bench_result['alpha_pvalue_original'] = p_values[i]
-                                bench_result['alpha_pvalue'] = dar_result['p_value']
-                                # Also store the deflated alpha for transparency
-                                bench_result['deflated_alpha'] = dar_result['deflated_alpha_ratio']
-                                bench_result['expected_max_alpha'] = dar_result['expected_max_alpha']
-                            else:
-                                # Fallback to Bonferroni if benchmark returns computation fails
-                                corrected_p = min(p_values[i] * len(p_values), 1.0)
-                                bench_result['alpha_pvalue_original'] = p_values[i]
-                                bench_result['alpha_pvalue'] = corrected_p
-                        else:
-                            # Fallback to Bonferroni
-                            corrected_p = min(p_values[i] * len(p_values), 1.0)
-                            bench_result['alpha_pvalue_original'] = p_values[i]
-                            bench_result['alpha_pvalue'] = corrected_p
-                    elif bench_result is not None:
-                        # Fallback to Bonferroni if we don't have enough trial alphas
-                        corrected_p = min(p_values[i] * len(p_values), 1.0)
-                        bench_result['alpha_pvalue_original'] = p_values[i]
-                        bench_result['alpha_pvalue'] = corrected_p
-
-            test_benchmark = benchmark_results
+            # Use the shared helper for multiple-testing correction
+            correction_result = _benchmark_list_alpha_correction(
+                test_returns, benchmark,
+                total_return_benchmark=total_return_benchmark,
+                benchmark_commission=benchmark_commission,
+                benchmark_slippage=benchmark_slippage,
+                benchmark_expense_ratio=benchmark_expense_ratio,
+                benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+            )
+            test_benchmark = correction_result["per_benchmark"]
+            # Preserve backward compatibility: keep the list of deflated alphas
+            # and also provide the canonical single deflated_alpha for the primary benchmark
         else:
             # Single benchmark (backward compatibility)
             benchmark_returns = _compute_benchmark_returns(benchmark, test_returns, total_return_benchmark)
@@ -1970,8 +1906,8 @@ def out_of_sample_validation(
                         benchmark_cost_is_periodic=benchmark_cost_is_periodic,
                     )
                 test_performance.update(test_benchmark)
-
-    # Aggregate summary
+    else:
+        print(f"DEBUG: Skipping benchmark processing - benchmark is None or test_returns empty")
     summary = {
         "train_val_test_split": split_info,
         "validation_method": validation_method,
@@ -2012,6 +1948,20 @@ def out_of_sample_validation(
             summary["deflated_alphas"] = deflated_alphas
         if expected_max_alphas:
             summary["expected_max_alphas"] = expected_max_alphas
+
+        # Additionally, provide the canonical single deflated_alpha for the primary benchmark
+        # (first benchmark in the list) for consistency with CPCV and walk_forward pipelines
+        if test_benchmark and len(test_benchmark) > 0 and test_benchmark[0] is not None:
+            primary_bench = test_benchmark[0]
+            if 'deflated_alpha' in primary_bench and primary_bench['deflated_alpha'] is not None:
+                summary["deflated_alpha"] = primary_bench['deflated_alpha']
+                # Also copy related fields for completeness
+                if 'alpha_pvalue' in primary_bench:
+                    summary["alpha_pvalue"] = primary_bench['alpha_pvalue']
+                if 'alpha_pvalue_original' in primary_bench:
+                    summary["alpha_pvalue_original"] = primary_bench['alpha_pvalue_original']
+                if 'expected_max_alpha' in primary_bench:
+                    summary["expected_max_alpha"] = primary_bench['expected_max_alpha']
 
     # Add Deflated Sharpe Ratio on test returns if requested
     # n_trials = total configurations evaluated in validation phase
@@ -2723,8 +2673,17 @@ def run_walk_forward(args) -> int:
     bench_slippage = getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage
     bench_expense_ratio = getattr(args, "benchmark_expense_ratio", None) if getattr(args, "benchmark_expense_ratio", None) is not None else 0.0
     if getattr(args, "benchmark", None):
-        print(f"Loading benchmark data from {args.benchmark}...")
-        benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
+        benchmark_paths = args.benchmark if isinstance(args.benchmark, list) else [args.benchmark]
+        print(f"Loading benchmark data from {', '.join(benchmark_paths)}...")
+        if len(benchmark_paths) == 1:
+            benchmark, benchmark_provenance = _load_benchmark(benchmark_paths[0], total_return_benchmark)
+        else:
+            benchmark = []
+            benchmark_provenance = []
+            for bench_file in benchmark_paths:
+                b, prov = _load_benchmark(bench_file, total_return_benchmark)
+                benchmark.append(b)
+                benchmark_provenance.append(prov)
 
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
@@ -2893,8 +2852,17 @@ def run_parameter_optimization(args) -> int:
     bench_slippage = getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage
     bench_expense_ratio = getattr(args, "benchmark_expense_ratio", None) if getattr(args, "benchmark_expense_ratio", None) is not None else 0.0
     if getattr(args, "benchmark", None):
-        print(f"Loading benchmark data from {args.benchmark}...")
-        benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
+        benchmark_paths = args.benchmark if isinstance(args.benchmark, list) else [args.benchmark]
+        print(f"Loading benchmark data from {', '.join(benchmark_paths)}...")
+        if len(benchmark_paths) == 1:
+            benchmark, benchmark_provenance = _load_benchmark(benchmark_paths[0], total_return_benchmark)
+        else:
+            benchmark = []
+            benchmark_provenance = []
+            for bench_file in benchmark_paths:
+                b, prov = _load_benchmark(bench_file, total_return_benchmark)
+                benchmark.append(b)
+                benchmark_provenance.append(prov)
 
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)

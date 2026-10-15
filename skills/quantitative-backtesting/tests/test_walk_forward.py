@@ -586,13 +586,76 @@ def test_out_of_sample_validation_with_splits():
         benchmark_expense_ratio=0.0,
         benchmark_cost_is_periodic=True,
     )
-
     assert results is not None
     assert "test_benchmark" in results
     assert "summary" in results
     test_bench = results["test_benchmark"]
     if isinstance(test_bench, dict):
         assert test_bench.get("benchmark_cost_is_periodic") is True
+
+
+def test_out_of_sample_validation_multiple_benchmarks_deflated_alpha():
+    """out_of_sample_validation with multiple benchmarks surfaces Deflated Alpha
+    in the summary and preserves backward compatibility with deflated_alphas list.
+    """
+    data = _make_ohlcv_data(periods=500, seed=42)
+    bench1 = _make_benchmark_data(periods=500, seed=99)
+    bench2 = _make_benchmark_data(periods=500, seed=7)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
+
+    results = out_of_sample_validation(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        benchmark=[bench1, bench2],
+        benchmark_commission=0.001,
+        benchmark_slippage=0.001,
+        benchmark_cost_is_periodic=True,
+    )
+
+    # Verify the basic structure
+    assert results is not None
+    assert "summary" in results
+    assert "test_benchmark" in results
+    assert "selected_params" in results
+
+    # Verify multiple benchmark handling
+    test_bench = results["test_benchmark"]
+    assert isinstance(test_bench, list), "test_benchmark should be a list for multiple benchmarks"
+    assert len(test_bench) == 2, "Should have results for both benchmarks"
+
+    # Verify summary contains both the new canonical deflated_alpha and the backward-compatible deflated_alphas list
+    summary = results["summary"]
+    assert "deflated_alpha" in summary, "summary should contain deflated_alpha (canonical single dict)"
+    assert "deflated_alphas" in summary, "summary should contain deflated_alphas (backward compatibility list)"
+
+    # Verify the canonical deflated_alpha has the expected structure
+    da = summary["deflated_alpha"]
+    assert isinstance(da, dict), "deflated_alpha should be a dict"
+    assert da["n_benchmarks"] == 2, f"Expected n_benchmarks=2, got {da['n_benchmarks']}"
+    assert 0.0 <= da["deflated_alpha_ratio"] <= 1.0, "deflated_alpha_ratio should be in [0,1]"
+    assert 0.0 <= da["p_value"] <= 1.0, "p_value should be in [0,1]"
+
+    # Verify backward compatibility: deflated_alphas list should have entries for each benchmark
+    deflated_alphas = summary["deflated_alphas"]
+    assert isinstance(deflated_alphas, list), "deflated_alphas should be a list"
+    assert len(deflated_alphas) == 2, f"Expected 2 entries in deflated_alphas list, got {len(deflated_alphas)}"
+
+    # Verify each entry in deflated_alphas has the expected fields
+    for i, bench_da in enumerate(deflated_alphas):
+        if bench_da is not None:  # Skip if benchmark had no aligned returns
+            assert "deflated_alpha" in bench_da, f"Benchmark {i} deflated_alphas entry missing deflated_alpha"
+            assert "alpha_pvalue" in bench_da, f"Benchmark {i} deflated_alphas entry missing alpha_pvalue"
+            assert "alpha_pvalue_original" in bench_da, f"Benchmark {i} deflated_alphas entry missing alpha_pvalue_original"
+            assert "expected_max_alpha" in bench_da, f"Benchmark {i} deflated_alphas entry missing expected_max_alpha"
 
 
 def test_calculate_metrics_deflated_alpha_with_benchmark_list():
@@ -926,6 +989,56 @@ def test_cli_cpcv_multiple_benchmarks():
         assert len(summary["benchmark_metrics"]) == 2
 
 
+def test_cli_walk_forward_multiple_benchmarks():
+    """CLI walk_forward subcommand accepts multiple --benchmark files, does not crash
+    in the post-call benchmark block, and writes a walk_forward_summary.json whose
+    summary contains a cross-benchmark deflated_alpha correction plus
+    per-benchmark metrics.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        bench1_path = os.path.join(tmpdir, "bench1.csv")
+        bench2_path = os.path.join(tmpdir, "bench2.csv")
+        _write_ohlcv_csv(csv_path, periods=800)
+        _write_benchmark_csv(bench1_path, periods=800, seed=99)
+        _write_benchmark_csv(bench2_path, periods=800, seed=7)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "walk_forward",
+            "--data", csv_path,
+            "--benchmark", bench1_path, bench2_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--benchmark-commission", "0.001",
+            "--benchmark-slippage", "0.001",
+            "--benchmark-cost-is-periodic",
+            "--train-months", "12",
+            "--test-months", "3",
+            "--step-months", "2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI walk_forward with multiple benchmarks should exit 0, got {rc}"
+        summary_path = os.path.join(out_dir, "walk_forward_summary.json")
+        assert os.path.exists(summary_path), "walk_forward_summary.json not written"
+        with open(summary_path) as f:
+            payload = json.load(f)
+
+        assert "summary" in payload, "summary missing from walk_forward_summary.json"
+        summary = payload["summary"]
+        assert "deflated_alpha" in summary, (
+            f"deflated_alpha missing from CLI walk_forward summary. Keys: {sorted(summary.keys())}"
+        )
+        da = summary["deflated_alpha"]
+        assert da["n_benchmarks"] == 2
+        assert 0.0 <= da["deflated_alpha_ratio"] <= 1.0
+        assert isinstance(summary.get("benchmark_metrics"), list)
+        assert len(summary["benchmark_metrics"]) == 2
+
+
 # Need to import patch for mocking
 from unittest.mock import patch
 
@@ -948,6 +1061,8 @@ def main() -> int:
         ("test_cpcv_analysis_multiple_benchmarks_deflated_alpha", test_cpcv_analysis_multiple_benchmarks_deflated_alpha),
         ("test_walk_forward_analysis_multiple_benchmarks_deflated_alpha", test_walk_forward_analysis_multiple_benchmarks_deflated_alpha),
         ("test_cli_cpcv_multiple_benchmarks", test_cli_cpcv_multiple_benchmarks),
+        ("test_out_of_sample_validation_multiple_benchmarks_deflated_alpha", test_out_of_sample_validation_multiple_benchmarks_deflated_alpha),
+        ("test_cli_walk_forward_multiple_benchmarks", test_cli_walk_forward_multiple_benchmarks),
     ]
 
     failures = 0
