@@ -41,9 +41,12 @@ def parse_args():
     parser.add_argument("--commission", type=float, default=0.0002, help="Commission per trade (as decimal)")
     parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (as decimal)")
     parser.add_argument("--impact-coefficient", type=float, default=0.0, help="Market impact coefficient (position_notional/ADV * coefficient). 0 to disable.")
+    parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="List of market impact coefficients to sweep (overrides --impact-coefficient).")
     parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
     parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3%% per year)")
+    parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="List of annual borrow costs to sweep (overrides --borrow-cost).")
     parser.add_argument("--funding-cost", type=float, default=0.0, help="Annual funding cost rate for leveraged positions (as decimal, e.g., 0.02 = 2%% per year)")
+    parser.add_argument("--funding-costs", type=float, nargs="+", default=None, help="List of annual funding costs to sweep (overrides --funding-cost).")
     parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     parser.add_argument("--output", type=str, default="results", help="Output directory")
     parser.add_argument("--params", type=str, help="Strategy parameters as JSON string")
@@ -436,6 +439,45 @@ def signals_active(signals: pd.Series) -> bool:
     return bool((signals.notna() & (signals != 0)).any())
 
 
+
+def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
+                                   impact_coefficient, borrow_cost=None,
+                                   funding_cost=None):
+    """Run backtest for a single cost coefficient.
+
+    No file I/O or stdout; returns per-coefficient metrics dict.
+    """
+    if borrow_cost is None:
+        borrow_cost = args.borrow_cost
+    if funding_cost is None:
+        funding_cost = args.funding_cost
+
+    class SweepArgs:
+        def __init__(self, base):
+            for k, v in base.__dict__.items():
+                setattr(self, k, v)
+            self.impact_coefficient = impact_coefficient
+            self.borrow_cost = borrow_cost
+            self.funding_cost = funding_cost
+
+    sweep_args = SweepArgs(args)
+    results = run_backtest(data, strategy, sweep_args,
+                           data_provenance=provenance, benchmark=benchmark)
+
+    rfr = getattr(args, "risk_free_rate", None)
+    metrics = calculate_metrics(results) if rfr is None else calculate_metrics(results, risk_free_rate=rfr)
+
+    return {
+        "impact_coefficient": impact_coefficient,
+        "borrow_cost": borrow_cost,
+        "funding_cost": funding_cost,
+        "total_return": metrics.get("total_return", 0.0),
+        "annualized_return": metrics.get("annualized_return", 0.0),
+        "sharpe_ratio": metrics.get("sharpe_ratio", 0.0),
+        "max_drawdown": metrics.get("max_drawdown", 0.0),
+    }
+
+
 def main():
     args = parse_args()
 
@@ -519,6 +561,69 @@ def main():
     print(f"Building strategy: {args.strategy}...")
     strategy = build_strategy(args.strategy, args.params)
 
+
+    # Cost sweeps: when a list of coefficients/costs is provided, run once per
+    # value, write a sweep artifact, and return. Single-float behavior unchanged.
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if getattr(args, "impact_coefficients", None) is not None and len(args.impact_coefficients) > 1:
+        sweep_results = []
+        for coeff in args.impact_coefficients:
+            sweep_results.append(
+                _run_backtest_sweep_coefficient(
+                    args, data, strategy, provenance, benchmark, coeff
+                )
+            )
+        sweep_path = output_dir / "run_backtest_impact_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump({"impact_coefficients": args.impact_coefficients, "results": sweep_results}, f, indent=2)
+        print(f"Sweep results saved to: {sweep_path}")
+        # Print degradation table
+        if sweep_results:
+            print("\nImpact coefficient sweep:")
+            print("coeff\treturn\tann_ret\tSharpe\tmaxDD")
+            for r in sweep_results:
+                print(f"{r['impact_coefficient']:.4f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
+        return 0
+
+    if getattr(args, "borrow_costs", None) is not None and len(args.borrow_costs) > 1:
+        sweep_results = []
+        for cost in args.borrow_costs:
+            sweep_results.append(
+                _run_backtest_sweep_coefficient(
+                    args, data, strategy, provenance, benchmark, args.impact_coefficient, borrow_cost=cost
+                )
+            )
+        sweep_path = output_dir / "run_backtest_borrow_cost_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump({"borrow_costs": args.borrow_costs, "results": sweep_results}, f, indent=2)
+        print(f"Sweep results saved to: {sweep_path}")
+        if sweep_results:
+            print("\nBorrow cost sweep:")
+            print("cost\treturn\tann_ret\tSharpe\tmaxDD")
+            for r in sweep_results:
+                print(f"{r['borrow_cost']:.4f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
+        return 0
+
+    if getattr(args, "funding_costs", None) is not None and len(args.funding_costs) > 1:
+        sweep_results = []
+        for cost in args.funding_costs:
+            sweep_results.append(
+                _run_backtest_sweep_coefficient(
+                    args, data, strategy, provenance, benchmark, args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost
+                )
+            )
+        sweep_path = output_dir / "run_backtest_funding_cost_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump({"funding_costs": args.funding_costs, "results": sweep_results}, f, indent=2)
+        print(f"Sweep results saved to: {sweep_path}")
+        if sweep_results:
+            print("\nFunding cost sweep:")
+            print("cost\treturn\tann_ret\tSharpe\tmaxDD")
+            for r in sweep_results:
+                print(f"{r['funding_cost']:.4f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
+        return 0
     print("Running backtest...")
     results = run_backtest(data, strategy, args, data_provenance=provenance, benchmark=benchmark)
 

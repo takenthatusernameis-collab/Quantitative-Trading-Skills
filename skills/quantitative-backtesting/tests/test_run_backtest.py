@@ -1,3 +1,4 @@
+from unittest.mock import patch
 #!/usr/bin/env python3
 """
 Unit tests for run_backtest.py: the CLI entry point and its flat-strategy guard.
@@ -1454,5 +1455,253 @@ def test_cli_total_return_benchmark_alpha_differs():
         assert metrics_price["benchmark_total_return_type"] == "price"
 
 
+def test_cli_run_backtest_impact_sweep():
+    """CLI run_backtest --impact-coefficients writes a sweep artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 5, "slow_period": 20}',
+            "--output", out_dir,
+            "--impact-coefficients", "0", "0.5", "1.0",
+        ]
+        with patch.object(sys, "argv", argv),                 redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0, f"CLI run_backtest impact sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "run_backtest_impact_sweep.json")
+        assert os.path.exists(sweep_path), "run_backtest_impact_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["impact_coefficients"] == [0.0, 0.5, 1.0]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        assert returns[2] <= returns[0]
+
+
+def test_cli_run_backtest_borrow_sweep():
+    """CLI run_backtest --borrow-costs writes a sweep artifact (MACD shorts)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest",
+            "--data", csv_path,
+            "--strategy", "macd",
+            "--params", '{"fast_period": 8, "slow_period": 21, "signal_period": 5}',
+            "--output", out_dir,
+            "--borrow-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv),                 redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0, f"CLI run_backtest borrow sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "run_backtest_borrow_cost_sweep.json")
+        assert os.path.exists(sweep_path), "run_backtest_borrow_cost_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["borrow_costs"] == [0.0, 0.03, 0.10]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        assert returns[2] <= returns[0]
+
+
+def test_cli_run_backtest_funding_sweep():
+    """CLI run_backtest --funding-costs writes a sweep artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 5, "slow_period": 20}',
+            "--output", out_dir,
+            "--funding-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv),                 redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0, f"CLI run_backtest funding sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "run_backtest_funding_cost_sweep.json")
+        assert os.path.exists(sweep_path), "run_backtest_funding_cost_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["funding_costs"] == [0.0, 0.03, 0.10]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        assert returns[2] <= returns[0]
+
+
 if __name__ == "__main__":
     sys.exit(main())
+
+def test_cli_run_backtest_impact_sweep():
+    """CLI run_backtest --impact-coefficients writes a sweep artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 5, "slow_period": 20}',
+            "--output", out_dir,
+            "--impact-coefficients", "0", "0.5", "1.0",
+        ]
+        with patch.object(sys, "argv", argv),                 redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0, f"CLI run_backtest impact sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "run_backtest_impact_sweep.json")
+        assert os.path.exists(sweep_path), "run_backtest_impact_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["impact_coefficients"] == [0.0, 0.5, 1.0]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        assert returns[2] <= returns[0]
+
+
+def test_cli_run_backtest_borrow_sweep():
+    """CLI run_backtest --borrow-costs writes a sweep artifact (MACD shorts)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest",
+            "--data", csv_path,
+            "--strategy", "macd",
+            "--params", '{"fast_period": 8, "slow_period": 21, "signal_period": 5}',
+            "--output", out_dir,
+            "--borrow-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv),                 redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0, f"CLI run_backtest borrow sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "run_backtest_borrow_cost_sweep.json")
+        assert os.path.exists(sweep_path), "run_backtest_borrow_cost_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["borrow_costs"] == [0.0, 0.03, 0.10]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        assert returns[2] <= returns[0]
+
+
+def test_cli_run_backtest_funding_sweep():
+    """CLI run_backtest --funding-costs writes a sweep artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 5, "slow_period": 20}',
+            "--output", out_dir,
+            "--funding-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv),                 redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0, f"CLI run_backtest funding sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "run_backtest_funding_cost_sweep.json")
+        assert os.path.exists(sweep_path), "run_backtest_funding_cost_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["funding_costs"] == [0.0, 0.03, 0.10]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        assert returns[2] <= returns[0]
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+def test_cli_run_backtest_impact_sweep():
+    """CLI run_backtest --impact-coefficients writes a sweep artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 5, "slow_period": 20}',
+            "--output", out_dir,
+            "--impact-coefficients", "0", "0.5", "1.0",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0, f"CLI run_backtest impact sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "run_backtest_impact_sweep.json")
+        assert os.path.exists(sweep_path), "run_backtest_impact_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["impact_coefficients"] == [0.0, 0.5, 1.0]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        assert returns[2] <= returns[0]
+
+
+def test_cli_run_backtest_borrow_sweep():
+    """CLI run_backtest --borrow-costs writes a sweep artifact (MACD shorts)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest",
+            "--data", csv_path,
+            "--strategy", "macd",
+            "--params", '{"fast_period": 8, "slow_period": 21, "signal_period": 5}',
+            "--output", out_dir,
+            "--borrow-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0, f"CLI run_backtest borrow sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "run_backtest_borrow_cost_sweep.json")
+        assert os.path.exists(sweep_path), "run_backtest_borrow_cost_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["borrow_costs"] == [0.0, 0.03, 0.10]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        assert returns[2] <= returns[0]
+
+
+def test_cli_run_backtest_funding_sweep():
+    """CLI run_backtest --funding-costs writes a sweep artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 5, "slow_period": 20}',
+            "--output", out_dir,
+            "--funding-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0, f"CLI run_backtest funding sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "run_backtest_funding_cost_sweep.json")
+        assert os.path.exists(sweep_path), "run_backtest_funding_cost_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["funding_costs"] == [0.0, 0.03, 0.10]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        assert returns[2] <= returns[0]
