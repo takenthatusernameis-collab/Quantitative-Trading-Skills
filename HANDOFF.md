@@ -612,3 +612,47 @@ Evidence and constraints:
 - The `generate_sample_data.py` script (in `scripts/`) can produce realistic multi-asset OHLCV data with known ground truth.
 - The `deflated_alpha_example.py` already demonstrates the `calculate_metrics` deflated-alpha path; a real-data example would extend it with the `walk_forward` CLI pipeline (CPCV or walk-forward validation) and benchmark lists.
 - Verify with `python3 skills/quantitative-backtesting/tests/test_walk_forward.py` and `python3 verify_end_to_end.py`.
+
+---
+
+## Session work (this agent — 2026-10-15)
+
+Executed HANDOFF item 1 of the assigned "Next agent task": **Tear sheet `benchmark_list` coverage for `run_monte_carlo`**.
+
+### Work completed
+
+Verified (not assumed) that the full chain `run_monte_carlo` -> `calculate_metrics(results["benchmark_list"])` -> `generate_tear_sheet` actually renders the multi-benchmark Deflated Alpha block when two `--benchmark` files are passed. Reproduction confirmed the generated `tear_sheet.html` contains `Multiple-Testing Correction (Deflated Alpha)`, `Per-Benchmark Comparison`, and `Benchmark 0`, and that `summary` carries a canonical `deflated_alpha` dict (`n_benchmarks == 2`).
+
+With that verified, the gap was purely missing test coverage. Strengthened
+`test_cli_monte_carlo_multiple_benchmarks` (`tests/test_walk_forward.py`) to assert, after the existing `benchmark_metrics`/provenance/config checks:
+- `tear_sheet.html` is written and contains `Multiple-Testing Correction (Deflated Alpha)` and `Per-Benchmark Comparison`;
+- `summary["deflated_alpha"]` is a dict with `deflated_alpha_ratio` in `[0,1]` and `n_benchmarks == 2`, matching the CPCV/walk-forward/out-of-sample multiple-benchmark shape.
+
+### Verification status (this agent)
+
+Reproduced the end-to-end rendering before editing; after the edit:
+- `test_walk_forward.py`: 19/19 passed (strengthened `test_cli_monte_carlo_multiple_benchmarks`)
+- `test_data_loader.py`: 29/29; `test_performance.py`: 26/26; `test_reporting.py`: 42/42 (unittest, exit 0); `test_run_backtest.py`: 41/41; `test_strategy_builder.py`: 27/27; `test_cpcv.py`: 16/16; `test_monte_carlo.py`: 7/7; `test_generate_sample_data.py`: 1/1
+- `verify_end_to_end.py`: PASSED
+- Full quant suite: 207/207 (no production code changed; this edit is test-only, 26 lines added)
+
+### What changed (git diff)
+
+- `skills/quantitative-backtesting/tests/test_walk_forward.py` — added tear-sheet `deflated_alpha` regression assertions to `test_cli_monte_carlo_multiple_benchmarks`. No production code modified.
+
+### What remains unresolved
+
+- **HANDOFF item 2 (real-data integration example) is still open.** `examples/real_data_pipeline_example.py` was created in the prior commit as a 2-line stub (`#!/usr/bin/env python3` + `print("ok")`) and remains a stub. It does not use `generate_sample_data.py` or demonstrate the deflated-alpha workflow end-to-end.
+
+### Next agent task
+
+**Implement the real-data integration example, replacing the `real_data_pipeline_example.py` stub.**
+
+The quantitative research objective (point-in-time correctness, survivorship/look-ahead controls, deflated-alpha across multiple benchmarks, reproducible out-of-sample evaluation) is best served by a concrete, runnable worked example. The prior session already verified the plumbing (`run_monte_carlo`/`cpcv`/`out-of-sample` accept multiple `--benchmark` files and surface `deflated_alpha`, and the tear sheet renders it); what is missing is a reproducible example that exercises that plumbing end-to-end on synthetic real-world-like data.
+
+Evidence and constraints:
+- `scripts/generate_sample_data.py` produces multi-asset OHLCV data with known ground truth and is the intended no-network data source.
+- `examples/deflated_alpha_example.py` already shows the `calculate_metrics` deflated-alpha path; the new example should extend it with the `walk_forward` CLI pipeline (CPCV or walk-forward validation) and a benchmark list, then assert the `deflated_alpha`/`benchmark_metrics` fields land on the summary and the `tear_sheet.html` renders them — mirroring `test_cli_monte_carlo_multiple_benchmarks` but as a documented example script.
+- Keep the example self-contained: generate data with `generate_sample_data.py`, write CSVs to a temp dir, run `walk_forward cpcv` (or `monte-carlo`) with 2 `--benchmark` files, and print/inspect the resulting `cpcv_metrics.json`/`monte_carlo_results.json` summary.
+- Verify with `python3 examples/real_data_pipeline_example.py` (exit 0) plus the existing `python3 tests/test_walk_forward.py` and `python3 verify_end_to_end.py`.
+- Do NOT delete or rehost inherited marketplace content; keep the change scoped to the `quantitative-backtesting` skill (`examples/`, optionally `scripts/`).

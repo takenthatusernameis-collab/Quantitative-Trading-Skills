@@ -1165,6 +1165,32 @@ def test_cli_monte_carlo_multiple_benchmarks():
         # Config should record the periodic flag
         assert payload["config"]["benchmark_cost_is_periodic"] is True
 
+        # Tear sheet coverage: the Monte Carlo tear sheet must render the
+        # multiple-benchmark Deflated Alpha section end-to-end, confirming the
+        # run_monte_carlo -> calculate_metrics(benchmark_list) -> generate_tear_sheet
+        # integration actually surfaces deflated-alpha in the HTML output.
+        ts_path = os.path.join(out_dir, "tear_sheet.html")
+        assert os.path.exists(ts_path), "tear_sheet.html not written"
+        with open(ts_path) as f:
+            html = f.read()
+        assert "Multiple-Testing Correction (Deflated Alpha)" in html, (
+            "tear sheet should render the Deflated Alpha section"
+        )
+        assert "Per-Benchmark Comparison" in html, (
+            "tear sheet should render the per-benchmark comparison"
+        )
+
+        # Canonical deflated_alpha dict must be present on the summary, matching
+        # the CPCV/walk-forward/out-of-sample multiple-benchmark shape.
+        assert isinstance(summary.get("deflated_alpha"), dict), (
+            "summary should carry the canonical deflated_alpha dict"
+        )
+        da = summary["deflated_alpha"]
+        assert 0.0 <= da["deflated_alpha_ratio"] <= 1.0, (
+            f"deflated_alpha_ratio out of [0,1]: {da.get('deflated_alpha_ratio')}"
+        )
+        assert da["n_benchmarks"] == 2
+
 
 # Need to import patch for mocking
 from unittest.mock import patch
