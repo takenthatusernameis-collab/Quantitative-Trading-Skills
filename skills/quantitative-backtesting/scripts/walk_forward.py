@@ -3101,8 +3101,17 @@ def run_monte_carlo(args) -> int:
     bench_slippage = getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage
     bench_expense_ratio = getattr(args, "benchmark_expense_ratio", None) if getattr(args, "benchmark_expense_ratio", None) is not None else 0.0
     if getattr(args, "benchmark", None):
-        print(f"Loading benchmark data from {args.benchmark}...")
-        benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
+        benchmark_paths = args.benchmark if isinstance(args.benchmark, list) else [args.benchmark]
+        print(f"Loading benchmark data from {', '.join(benchmark_paths)}...")
+        if len(benchmark_paths) == 1:
+            benchmark, benchmark_provenance = _load_benchmark(benchmark_paths[0], total_return_benchmark)
+        else:
+            benchmark = []
+            benchmark_provenance = []
+            for bench_file in benchmark_paths:
+                b, prov = _load_benchmark(bench_file, total_return_benchmark)
+                benchmark.append(b)
+                benchmark_provenance.append(prov)
 
     # First run a backtest to get base returns
     param_grid = _parse_param_grid(args.param_grid)
@@ -3127,6 +3136,7 @@ def run_monte_carlo(args) -> int:
             benchmark_commission=bench_commission,
             benchmark_slippage=bench_slippage,
             benchmark_expense_ratio=bench_expense_ratio,
+            benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         )
         if opt_results:
             best_params = opt_results[0]["params"]
@@ -3198,27 +3208,66 @@ def run_monte_carlo(args) -> int:
 
     # Compute benchmark comparison metrics if benchmark provided
     benchmark_returns = None
+    benchmark_returns_list = None
     if benchmark is not None and len(returns) > 0:
-        benchmark_returns = _compute_benchmark_returns(benchmark, returns, total_return_benchmark)
-        if benchmark_returns is not None:
-            bstats = _benchmark_stats(
-                returns, benchmark_returns, _annualization_factor(returns.index),
-                total_return_benchmark=total_return_benchmark,
-                benchmark_commission=bench_commission,
-                benchmark_slippage=bench_slippage,
-                benchmark_expense_ratio=bench_expense_ratio,
-            )
-            print(
-                f"Benchmark Correlation: {bstats.get('correlation_with_benchmark', 0):.4f}"
-            )
-            pval = bstats.get("alpha_pvalue")
-            print(
-                f"Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
-            )
-            rs = bstats.get("r_squared")
-            print(
-                f"R-squared: {rs if rs is None else f'{rs:.4f}'}"
-            )
+        if isinstance(benchmark, list):
+            benchmark_returns_list = []
+            for b in benchmark:
+                br = _compute_benchmark_returns(b, returns, total_return_benchmark)
+                if br is not None:
+                    benchmark_returns_list.append(br)
+            if benchmark_returns_list:
+                bm_stats = _benchmark_list_alpha_correction(
+                    returns, benchmark,
+                    total_return_benchmark=total_return_benchmark,
+                    benchmark_commission=bench_commission,
+                    benchmark_slippage=bench_slippage,
+                    benchmark_expense_ratio=bench_expense_ratio,
+                    benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+                )
+                correction = bm_stats
+                if correction["deflated_alpha"] is not None:
+                    da = correction["deflated_alpha"]
+                    print(
+                        f"  Deflated Alpha Ratio: {da['deflated_alpha_ratio']:.4f} "
+                        f"(p-value {da['p_value']:.4f}, "
+                        f"{da['n_benchmarks']} benchmarks)"
+                    )
+                for i, bench_metric in enumerate(correction["per_benchmark"]):
+                    if bench_metric is not None:
+                        print(f"  Benchmark {i+1}:")
+                        print(
+                            f"    Correlation: {bench_metric.get('correlation_with_benchmark', 'N/A'):.4f}"
+                        )
+                        pval = bench_metric.get("alpha_pvalue")
+                        print(
+                            f"    Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
+                        )
+                        rs = bench_metric.get("r_squared")
+                        print(
+                            f"    R-squared: {rs if rs is None else f'{rs:.4f}'}"
+                        )
+        else:
+            benchmark_returns = _compute_benchmark_returns(benchmark, returns, total_return_benchmark)
+            if benchmark_returns is not None:
+                bstats = _benchmark_stats(
+                    returns, benchmark_returns, _annualization_factor(returns.index),
+                    total_return_benchmark=total_return_benchmark,
+                    benchmark_commission=bench_commission,
+                    benchmark_slippage=bench_slippage,
+                    benchmark_expense_ratio=bench_expense_ratio,
+                )
+                print(
+                    f"Benchmark Correlation: {bstats.get('correlation_with_benchmark', 0):.4f}"
+                )
+                pval = bstats.get("alpha_pvalue")
+                print(
+                    f"Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
+                )
+                rs = bstats.get("r_squared")
+                print(
+                    f"R-squared: {rs if rs is None else f'{rs:.4f}'}"
+                )
 
     print(f"Running Monte Carlo simulation with {args.n_simulations} simulations...")
     mc_results = monte_carlo_simulation(
@@ -3272,6 +3321,7 @@ def run_monte_carlo(args) -> int:
             "benchmark_commission": bench_commission,
             "benchmark_slippage": bench_slippage,
             "benchmark_expense_ratio": bench_expense_ratio,
+            "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
         },
     }
     if pit_results is not None:
@@ -3280,7 +3330,10 @@ def run_monte_carlo(args) -> int:
         mc_save["deflated_sharpe"] = dsr
         mc_save["config"]["n_trials"] = effective_n_trials
     if benchmark_provenance is not None:
-        mc_save["benchmark_provenance"] = benchmark_provenance.to_dict()
+        if isinstance(benchmark_provenance, list):
+            mc_save["benchmark_provenance"] = [bp.to_dict() for bp in benchmark_provenance if bp is not None]
+        else:
+            mc_save["benchmark_provenance"] = benchmark_provenance.to_dict()
     if benchmark_returns is not None:
         mc_save["summary"] = _add_benchmark_to_summary(
             mc_save["summary"], returns, benchmark_returns,
@@ -3289,6 +3342,18 @@ def run_monte_carlo(args) -> int:
             benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
             benchmark_data=benchmark,
         )
+    elif benchmark_returns_list:
+        correction = _benchmark_list_alpha_correction(
+            returns, benchmark,
+            total_return_benchmark=total_return_benchmark,
+            benchmark_commission=bench_commission,
+            benchmark_slippage=bench_slippage,
+            benchmark_expense_ratio=bench_expense_ratio,
+            benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+        )
+        mc_save["summary"]["benchmark_metrics"] = correction["per_benchmark"]
+        if correction["deflated_alpha"] is not None:
+            mc_save["summary"]["deflated_alpha"] = correction["deflated_alpha"]
     with open(mc_path, "w") as f:
         json.dump(mc_save, f, indent=2, default=str)
     print(f"\nMonte Carlo results saved to: {mc_path}")
@@ -3312,6 +3377,8 @@ def run_monte_carlo(args) -> int:
         }
     if benchmark_returns is not None:
         mc_base_results["benchmark"] = benchmark_returns
+    elif benchmark_returns_list:
+        mc_base_results["benchmark_list"] = benchmark_returns_list
     mc_base_metrics = calculate_metrics(mc_base_results)
     if dsr is not None:
         mc_base_metrics["deflated_sharpe"] = dsr

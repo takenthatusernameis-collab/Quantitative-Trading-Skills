@@ -540,40 +540,75 @@ All quant tests pass (207/207). No regressions introduced.
 ### What remains unresolved
 
 - `run_monte_carlo` (line 3103–3105) still loads a single benchmark via `_load_benchmark(args.benchmark, ...)`. The shared `--benchmark` argparse uses `nargs="+"` (returns a list), so passing two `--benchmark` files to `walk_forward monte-carlo` raises `TypeError: argument should be a str ... not 'list'`. Reproduced deterministically. This is the same pattern already fixed for `run_cpcv`, `run_walk_forward`, and `run_out_of_sample_validation`; `run_monte_carlo` was not yet updated. The downstream `parameter_optimization` call (which `run_monte_carlo` invokes at line 3115) now handles list benchmarks, and `run_monte_carlo`'s own benchmark-printing block (lines 2992–3086) already branches on `isinstance(best.get("benchmark_metrics"), list)`, so only the load-side fix + provenance serialization are needed.
-- `out_of_sample_validation` still uses an inline `if isinstance(benchmark, list):` branch (line 1890) instead of delegating to a single `_benchmark_list_alpha_correction` call at the top level. After the refactor above, the block is simpler and derives everything from `correction_result`, but the two code paths (list vs single benchmark) remain separate. A future consolidation could route the single-benchmark case through the same helper for uniformity — left intact to preserve the single-DataFrame return shape.
+    - `out_of_sample_validation` still uses an inline `if isinstance(benchmark, list):` branch (line 1890) instead of delegating to a single `_benchmark_list_alpha_correction` call at the top level. After the refactor above, the block is simpler and derives everything from `correction_result`, but the two code paths (list vs single benchmark) remain separate. A future consolidation could route the single-benchmark case through the same helper for uniformity — left intact to preserve the single-DataFrame return shape.
+
+---
+
+## Session work (this agent — 2026-10-15)
+
+The previous agent's "Next agent task" was: **make `run_monte_carlo` accept multiple `--benchmark` files, mirroring `run_cpcv`/`run_walk_forward`.** (`run_monte_carlo` was the last CLI entry point that still crashed on multiple `--benchmark` files — reproduced as `TypeError: argument should be a str ... not 'list'` at the `_load_benchmark` call, and the `parameter_optimization` call omitted `benchmark_cost_is_periodic`.)
+
+### What changed (all in `skills/quantitative-backtesting/scripts/walk_forward.py` unless noted)
+
+1. **Fixed `run_monte_carlo` benchmark loading to be list-aware** (mirroring `run_cpcv`'s pattern): replaced the single `_load_benchmark(args.benchmark, ...)` call (which raised `TypeError` when `args.benchmark` was a list from `nargs="+"`) with the same `isinstance(args.benchmark, list)` guard used by `run_cpcv`/`run_walk_forward`. Single-file path unchanged (backward compatible); multi-file path loads each benchmark into a list and builds `benchmark_provenance` as a list.
+
+2. **Propagated `benchmark_cost_is_periodic` into `parameter_optimization`** (the call at line ~3115 previously omitted it, so Monte Carlo optimization with periodic benchmark costs silently dropped the flag). Now passes `benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False)`.
+
+3. **Made the benchmark comparison block in `run_monte_carlo` list-aware** (mirroring `run_cpcv`'s block at lines 2184–2236): when `isinstance(benchmark, list)`, computes `benchmark_returns_list` per benchmark, calls `_benchmark_list_alpha_correction` to surface a deflated-alpha ratio and per-benchmark stats (correlation, alpha p-value, R²), and prints them. Single-benchmark path (via `_benchmark_stats`) is unchanged.
+
+4. **Added `benchmark_cost_is_periodic` to `mc_save` config** for the `monte_carlo_results.json` output, for parity with `cpcv_summary.json` and `walk_forward_summary.json`.
+
+5. **Made benchmark provenance serialization list-aware** in the `mc_save` block: list path writes `[bp.to_dict() for bp in benchmark_provenance if bp is not None]`, single path writes `benchmark_provenance.to_dict()` — matching `run_cpcv`/`run_walk_forward`.
+
+6. **Made the `mc_save["summary"]` benchmark block list-aware**: `if benchmark_returns is not None:` calls `_add_benchmark_to_summary` (single, backward compat); `elif benchmark_returns_list:` calls `_benchmark_list_alpha_correction` and surfaces `benchmark_metrics` (per-benchmark) and `deflated_alpha` (aggregate) on the summary.
+
+7. **Fixed the tear sheet `mc_base_results` to pass `benchmark_list`** when multiple benchmarks are available (mirroring `run_cpcv`'s report path: `mc_base_results["benchmark_list"] = benchmark_returns_list`), so `calculate_metrics` can surface the canonical `deflated_alpha` dict through its `benchmark_list` path.
+
+### Tests added (in `tests/test_walk_forward.py`)
+
+- `test_cli_monte_carlo_multiple_benchmarks` — end-to-end `walk_forward monte-carlo` CLI with two `--benchmark` paths, `--benchmark-cost-is-periodic`, and `--n-simulations 50`: asserts exit 0, `monte_carlo_results.json` written, `summary.benchmark_metrics` is a list of length 2, `benchmark_provenance` is a list of length 2, and `config.benchmark_cost_is_periodic` is `True`.
+
+### Verification status (this agent)
+
+- `test_data_loader.py`: 29/29 passed
+- `test_performance.py`: 26/26 passed
+- `test_reporting.py`: 42/42 passed (unittest OK)
+- `test_run_backtest.py`: 41/41 passed
+- `test_strategy_builder.py`: 27/27 passed
+- `test_walk_forward.py`: 19/19 passed (18 prior + 1 new)
+- `test_cpcv.py`: 16/16 passed
+- `test_monte_carlo.py`: 7/7 passed
+- `test_generate_sample_data.py`: 1/1 passed
+- `verify_end_to_end.py`: passes
+- `examples/deflated_alpha_example.py`, `examples/multiple_benchmarks_example.py`, `examples/full_pipeline_example.py`: all run end-to-end, exit 0
+
+All quant tests pass (208/208). No regressions introduced.
+
+### What was changed (git diff)
+
+- `skills/quantitative-backtesting/scripts/walk_forward.py` — `run_monte_carlo` now list-aware for benchmark loading, comparison, provenance serialization, summary, config, and tear sheet; `parameter_optimization` call now passes `benchmark_cost_is_periodic`.
+- `skills/quantitative-backtesting/tests/test_walk_forward.py` — added `test_cli_monte_carlo_multiple_benchmarks` and registered it in `main()`.
+
+### What remains unresolved
+
+- `run_monte_carlo`'s `mc_base_results["config"]` does not include `benchmark_cost_is_periodic` (mirroring `run_cpcv`'s report config which also omits it). The `mc_save["config"]` does include it; the tear-sheet config is cosmetic only. Left as-is for parity with `run_cpcv`.
+- No remaining CLI entry point crashes on multiple `--benchmark` files. All four subcommands (`walk-forward`, `optimize`, `cpcv`, `out-of-sample`, `monte-carlo`) now handle lists correctly.
+
+### Completion: this agent (2026-10-15) — DONE
+
+The task ("make `run_monte_carlo` accept multiple `--benchmark` files") is implemented and verified. See the session summary above (lines 497+).
 
 ### Next agent task
 
-**Make `run_monte_carlo` accept multiple `--benchmark` files, mirroring `run_cpcv`/`run_walk_forward`.**
+**Validate `run_monte_carlo` multiple-benchmark deflated-alpha surfacing through the tear sheet and explore real-data integration examples.**
 
-This is a bounded, high-value, verifiable task:
+The `run_monte_carlo` function now accepts multiple `--benchmark` files in all CLI entry points. The remaining gaps are:
 
-1. In `run_monte_carlo` (`scripts/walk_forward.py:3103`), replace the single-benchmark load:
-   ```python
-   benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
-   ```
-   with the list-aware pattern already used by `run_cpcv` (`walk_forward.py:2819`):
-   ```python
-   benchmark_paths = args.benchmark if isinstance(args.benchmark, list) else [args.benchmark]
-   print(f"Loading benchmark data from {', '.join(benchmark_paths)}...")
-   if len(benchmark_paths) == 1:
-       benchmark, benchmark_provenance = _load_benchmark(benchmark_paths[0], total_return_benchmark)
-   else:
-       benchmark = []
-       benchmark_provenance = []
-       for bench_file in benchmark_paths:
-           b, prov = _load_benchmark(bench_file, total_return_benchmark)
-           benchmark.append(b)
-           benchmark_provenance.append(prov)
-   ```
-   and propagate `benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False)` into the `parameter_optimization` call (line 3115–3130 currently omits it).
+1. **Tear sheet `benchmark_list` coverage**: `run_monte_carlo` now passes `mc_base_results["benchmark_list"]` to `generate_tear_sheet` when multiple benchmarks are provided, but there is no test asserting the tear sheet actually renders multi-benchmark deflated alpha. Add an assertion in `test_cli_monte_carlo_multiple_benchmarks` (or a new test) that the generated `tear_sheet.html` contains benchmark_metrics or deflated_alpha output for the multi-benchmark case.
 
-2. Make the post-call provenance serialization (the `benchmark_provenance.json` write in `run_monte_carlo`) list-aware, mirroring `run_cpcv`/`run_walk_forward` (which serialize `[bp.to_dict() for bp in benchmark_provenance if bp is not None]` for lists).
-
-3. Add a CLI test `test_cli_monte_carlo_multiple_benchmarks` to `tests/test_walk_forward.py`: run `walk_forward monte-carlo` with two `--benchmark` paths, assert exit 0, `monte_carlo_summary.json` written, and the printed best-result block shows per-benchmark stats (i.e. the `benchmark_metrics` list path executes). Mirror the existing `test_cli_cpcv_multiple_benchmarks` pattern.
+2. **Real-data integration examples**: The `skills/quantitative-backtesting/examples/` directory has `real_data_workflow.md` and `deflated_alpha_example.py`, but no concrete data-fetching script that demonstrates the full pipeline with real market data (data provenance, PIT validation, survivorship bias detection, benchmark comparison). This is a documentation/spec task requiring no network access in this environment — create a reproducible example using the existing `generate_sample_data.py` script to simulate a realistic multi-asset scenario and demonstrate the full deflated-alpha workflow end-to-end.
 
 Evidence and constraints:
-- `_load_benchmark(benchmark_path: str, ...)` (`walk_forward.py:2385`) takes a single string; the crash is the `TypeError` reproduced above.
-- The `--benchmark` common arg is `nargs="+"` (`walk_forward.py:3630`); `run_cpcv`/`run_walk_forward`/`run_out_of_sample_validation` already implement the exact list-aware load pattern to copy.
-- `parameter_optimization` already handles list `benchmark` (per the prior session's fix #6 at `parameter_optimization`), and `run_monte_carlo`'s printing block already branches on `isinstance(best.get("benchmark_metrics"), list)` — so only the load side and provenance serialization plus the `benchmark_cost_is_periodic` plumbing are new.
-- Verify with `python3 skills/quantitative-backtesting/tests/test_walk_forward.py` plus the full suite; ensure all walk_forward tests stay green.
+- The `generate_sample_data.py` script (in `scripts/`) can produce realistic multi-asset OHLCV data with known ground truth.
+- The `deflated_alpha_example.py` already demonstrates the `calculate_metrics` deflated-alpha path; a real-data example would extend it with the `walk_forward` CLI pipeline (CPCV or walk-forward validation) and benchmark lists.
+- Verify with `python3 skills/quantitative-backtesting/tests/test_walk_forward.py` and `python3 verify_end_to_end.py`.

@@ -1115,6 +1115,57 @@ def test_cli_optimize_multiple_benchmarks():
         assert len(bm) == 2
 
 
+def test_cli_monte_carlo_multiple_benchmarks():
+    """CLI monte_carlo subcommand accepts multiple --benchmark files, does not crash
+    in the post-call benchmark block, and writes a monte_carlo_results.json whose
+    summary contains a cross-benchmark benchmark_metrics list.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        bench1_path = os.path.join(tmpdir, "bench1.csv")
+        bench2_path = os.path.join(tmpdir, "bench2.csv")
+        _write_ohlcv_csv(csv_path, periods=800)
+        _write_benchmark_csv(bench1_path, periods=800, seed=99)
+        _write_benchmark_csv(bench2_path, periods=800, seed=7)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "monte-carlo",
+            "--data", csv_path,
+            "--benchmark", bench1_path, bench2_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--benchmark-commission", "0.001",
+            "--benchmark-slippage", "0.001",
+            "--benchmark-cost-is-periodic",
+            "--n-simulations", "50",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI monte_carlo with multiple benchmarks should exit 0, got {rc}"
+        results_path = os.path.join(out_dir, "monte_carlo_results.json")
+        assert os.path.exists(results_path), "monte_carlo_results.json not written"
+        with open(results_path) as f:
+            payload = json.load(f)
+
+        assert "summary" in payload, "summary missing from monte_carlo_results.json"
+        summary = payload["summary"]
+        assert isinstance(summary.get("benchmark_metrics"), list), (
+            f"benchmark_metrics missing or not a list. Keys: {sorted(summary.keys())}"
+        )
+        assert len(summary["benchmark_metrics"]) == 2
+
+        # Provenance should be a list for multiple benchmarks
+        prov = payload.get("benchmark_provenance")
+        assert isinstance(prov, list), f"benchmark_provenance should be a list, got {type(prov)}"
+        assert len(prov) == 2
+
+        # Config should record the periodic flag
+        assert payload["config"]["benchmark_cost_is_periodic"] is True
+
+
 # Need to import patch for mocking
 from unittest.mock import patch
 
@@ -1140,6 +1191,7 @@ def main() -> int:
         ("test_out_of_sample_validation_multiple_benchmarks_deflated_alpha", test_out_of_sample_validation_multiple_benchmarks_deflated_alpha),
         ("test_cli_walk_forward_multiple_benchmarks", test_cli_walk_forward_multiple_benchmarks),
         ("test_cli_optimize_multiple_benchmarks", test_cli_optimize_multiple_benchmarks),
+        ("test_cli_monte_carlo_multiple_benchmarks", test_cli_monte_carlo_multiple_benchmarks),
     ]
 
     failures = 0
