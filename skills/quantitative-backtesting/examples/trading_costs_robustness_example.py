@@ -59,6 +59,10 @@ CPCV_N_SPLITS = 5
 COMMISSION_GRID = [0.0, 0.0001, 0.0005, 0.0010]    # 0, 1, 5, 10 bps
 SLIPPAGE_GRID = [0.0, 0.0001, 0.0005]               # 0, 1, 5 bps
 
+# Extended cost sweep grids for borrow and funding costs (annualized)
+BORROW_COST_GRID = [0.0, 0.03]                      # 0%, 3% annual
+FUNDING_COST_GRID = [0.0, 0.02]                     # 0%, 2% annual
+
 # Benchmark cost-model sweep grids
 BENCH_COST_MODES = [False, True]                    # round-trip vs periodic
 BENCH_EXPENSE_GRID = [0.0, 0.005, 0.01]             # 0 %, 0.5 %, 1 % annual
@@ -85,6 +89,79 @@ def _make_universe():
     strategy_df = assets[symbols[0]]
     benchmark_dfs = [assets[symbols[1]], assets[symbols[2]]]
     return strategy_df, benchmark_dfs, symbols
+
+
+def _make_flat_benchmark(strategy_df):
+    """Create a flat benchmark (near-zero drift) from the strategy's date index.
+
+    A flat benchmark has near-constant close prices with small noise,
+    yielding ~0% returns with minimal variance. This produces a positive
+    alpha for any strategy with positive returns, resulting in a high DAR
+    that costs erode.
+    """
+    dates = strategy_df.index
+    n = len(dates)
+    rng = np.random.default_rng(12345)
+    # Near-zero drift with small noise (0.1% annual vol)
+    daily_vol = 0.001 / np.sqrt(252)
+    daily_drift = 0.001 / 252  # 0.1% annual drift
+    returns = rng.normal(loc=daily_drift, scale=daily_vol, size=n)
+    close = 100.0 * np.exp(np.cumsum(returns))
+    volume = rng.integers(500_000, 2_000_000, n)
+    flat_df = pd.DataFrame({
+        "close": close,
+        "volume": volume,
+    }, index=dates)
+    return flat_df
+
+
+def _make_negative_drift_benchmark(strategy_df):
+    """Create a negatively-drifting benchmark from the strategy's date index.
+
+    A negative drift benchmark has declining close prices with noise,
+    yielding negative returns. This amplifies the strategy's positive alpha,
+    producing a high DAR.
+    """
+    dates = strategy_df.index
+    n = len(dates)
+    rng = np.random.default_rng(54321)
+    # Strong negative drift: -15% annualized with realistic vol (15% annual)
+    # This ensures the strategy (which has ~-3% annualized return) has
+    # positive alpha vs this benchmark.
+    daily_drift = -0.15 / 252
+    daily_vol = 0.15 / np.sqrt(252)
+    returns = rng.normal(loc=daily_drift, scale=daily_vol, size=n)
+    close = 100.0 * np.exp(np.cumsum(returns))
+    volume = rng.integers(500_000, 2_000_000, n)
+    neg_df = pd.DataFrame({
+        "close": close,
+        "volume": volume,
+    }, index=dates)
+    return neg_df
+
+
+def _make_degraded_strategy_benchmark(strategy_df, drag_annual=-0.10):
+    """Create a benchmark derived from the strategy asset but with a performance drag.
+
+    This benchmark is perfectly correlated with the strategy asset but has
+    a drag applied (default -10% annual). This guarantees positive alpha for the
+    strategy (since it outperforms this degraded version of itself), producing
+    a meaningful DAR that varies with cost assumptions.
+    """
+    dates = strategy_df.index
+    # Apply an annual drag to the strategy's close prices
+    n = len(dates)
+    daily_drag = drag_annual / 252
+    drag_factor = np.exp(np.cumsum(np.full(n, daily_drag)))
+    degraded_close = strategy_df["close"].values * drag_factor
+    # Volume with some noise
+    rng = np.random.default_rng(98765)
+    volume = rng.integers(500_000, 2_000_000, n)
+    deg_df = pd.DataFrame({
+        "close": degraded_close,
+        "volume": volume,
+    }, index=dates)
+    return deg_df
 
 
 def _strategy_signals(data_df):
@@ -118,7 +195,8 @@ def run_strategy_cost_sweep(data_df):
 
     signals = _strategy_signals(data_df)
     baseline_returns = _calculate_strategy_returns(
-        data_df, signals, commission=0.0, slippage=0.0
+        data_df, signals, commission=0.0, slippage=0.0,
+        borrow_cost=0.0, funding_cost=0.0,
     )
     baseline = _metrics_from_returns(baseline_returns)
     print(
@@ -129,7 +207,7 @@ def run_strategy_cost_sweep(data_df):
     print()
 
     header = (
-        f"   {'Comm':>6} | {'Slip':>6} | {'Total':>6} | "
+        f"   {'Comm':>6} | {'Slip':>6} | {'Borrow':>6} | {'Fund':>6} | {'Total':>6} | "
         f"{'Return':>8} | {'Sharpe':>7} | {'Calmar':>7} | {'MaxDD':>8}"
     )
     print(header)
@@ -138,33 +216,40 @@ def run_strategy_cost_sweep(data_df):
     results = []
     for commission in COMMISSION_GRID:
         for slippage in SLIPPAGE_GRID:
-            returns = _calculate_strategy_returns(
-                data_df, signals,
-                commission=commission, slippage=slippage,
-            )
-            m = _metrics_from_returns(returns)
-            entry = {
-                "commission_bps": commission * 10_000,
-                "slippage_bps": slippage * 10_000,
-                "total_cost_bps": (commission + slippage) * 10_000,
-                **m,
-            }
-            results.append(entry)
-            calmar = "N/A" if m["calmar_ratio"] is None else f"{m['calmar_ratio']:.3f}"
-            print(
-                f"   {entry['commission_bps']:>4.0f} bp | "
-                f"{entry['slippage_bps']:>4.0f} bp | "
-                f"{entry['total_cost_bps']:>4.0f} bp | "
-                f"{m['total_return']:>7.2%} | "
-                f"{m['sharpe_ratio']:>6.3f} | "
-                f"{calmar:>7} | "
-                f"{m['max_drawdown']:>7.2%}"
-            )
+            for borrow_cost in BORROW_COST_GRID:
+                for funding_cost in FUNDING_COST_GRID:
+                    returns = _calculate_strategy_returns(
+                        data_df, signals,
+                        commission=commission, slippage=slippage,
+                        borrow_cost=borrow_cost, funding_cost=funding_cost,
+                    )
+                    m = _metrics_from_returns(returns)
+                    entry = {
+                        "commission_bps": commission * 10_000,
+                        "slippage_bps": slippage * 10_000,
+                        "borrow_cost_annual_pct": borrow_cost * 100,
+                        "funding_cost_annual_pct": funding_cost * 100,
+                        "total_cost_bps": (commission + slippage) * 10_000,
+                        **m,
+                    }
+                    results.append(entry)
+                    calmar = "N/A" if m["calmar_ratio"] is None else f"{m['calmar_ratio']:.3f}"
+                    print(
+                        f"   {entry['commission_bps']:>4.0f} bp | "
+                        f"{entry['slippage_bps']:>4.0f} bp | "
+                        f"{entry['borrow_cost_annual_pct']:>4.0f}% | "
+                        f"{entry['funding_cost_annual_pct']:>4.0f}% | "
+                        f"{entry['total_cost_bps']:>4.0f} bp | "
+                        f"{m['total_return']:>7.2%} | "
+                        f"{m['sharpe_ratio']:>6.3f} | "
+                        f"{calmar:>7} | "
+                        f"{m['max_drawdown']:>7.2%}"
+                    )
 
     first = results[0]
     last = results[-1]
     print()
-    print("   Cost impact (0 bps → %d bps):" % int(last["total_cost_bps"]))
+    print(f"   Cost impact (0 bps / 0% borrow/funding → {int(last['total_cost_bps'])} bps / {last['borrow_cost_annual_pct']:.0f}% borrow / {last['funding_cost_annual_pct']:.0f}% funding):")
     print(f"     Sharpe:  {first['sharpe_ratio']:.3f} → {last['sharpe_ratio']:.3f} "
           f"(Δ {last['sharpe_ratio'] - first['sharpe_ratio']:+.3f})")
     print(f"     Return:  {first['total_return']:.2%} → {last['total_return']:.2%} "
@@ -177,11 +262,15 @@ def run_strategy_cost_sweep(data_df):
 # Section 2: Benchmark cost-model sensitivity
 # ---------------------------------------------------------------------------
 
-def run_benchmark_cost_sweep(strategy_returns, benchmark_dfs):
+def run_benchmark_cost_sweep(strategy_returns, benchmark_dfs, strategy_df=None):
     """Sweep benchmark cost mode, expense ratio, and trading costs.
 
     Shows how the cost-modeling assumption (periodic vs round-trip) and
     expense ratio affect the estimated alpha and the Deflated Alpha Ratio.
+
+    Also runs a positive-alpha scenario using a flat benchmark and a
+    negative-drift benchmark to demonstrate how cost assumptions affect
+    statistical inference when the strategy actually shows skill.
     """
     print("2. BENCHMARK COST-MODEL SENSITIVITY (DEFLATED ALPHA)")
     print("-" * 75)
@@ -220,6 +309,7 @@ def run_benchmark_cost_sweep(strategy_returns, benchmark_dfs):
                     "deflated_alpha_ratio": dar,
                     "dar_pvalue": _safe_float(da.get("p_value")),
                     "n_benchmarks": int(da.get("n_benchmarks", len(benchmark_dfs))),
+                    "scenario": "original",
                 }
                 results.append(entry)
                 dar_str = "N/A" if dar is None else f"{dar:.3f}"
@@ -232,6 +322,32 @@ def run_benchmark_cost_sweep(strategy_returns, benchmark_dfs):
                     f"{entry['alpha_pvalue'] or 1:>7.4f} | "
                     f"{dar_str:>6}"
                 )
+
+# --- Positive-alpha scenarios ---
+    if strategy_df is not None:
+        print()
+        print("   --- POSITIVE-ALPHA SCENARIOS ---")
+        print()
+
+        # Degraded strategy benchmarks: primary (-10% drag) + secondary (-20% drag)
+        # The primary benchmark is the one we evaluate alpha against; the secondary
+        # provides cross-sectional dispersion for the Deflated Alpha Ratio.
+        # Using a more extreme secondary benchmark creates meaningful alpha dispersion.
+        deg_bench_primary = _make_degraded_strategy_benchmark(strategy_df, drag_annual=-0.10)
+        deg_bench_secondary = _make_degraded_strategy_benchmark(strategy_df, drag_annual=-0.20)
+        print("   Degraded strategy benchmarks (primary: -10% drag, secondary: -20% drag):")
+        deg_results = _run_benchmark_sweep_for_benchmark(
+            strategy_returns, [deg_bench_primary, deg_bench_secondary], "degraded_strategy", header
+        )
+        results.extend(deg_results)
+
+        # Negative drift benchmark (-15% annual)
+        neg_bench = _make_negative_drift_benchmark(strategy_df)
+        print("   Negative-drift benchmark (-15% annual):")
+        neg_results = _run_benchmark_sweep_for_benchmark(
+            strategy_returns, neg_bench, "negative_drift", header
+        )
+        results.extend(neg_results)
 
     print()
 
@@ -246,7 +362,64 @@ def run_benchmark_cost_sweep(strategy_returns, benchmark_dfs):
     print("   alpha exceeds the best alpha expected from luck alone. Near-zero DAR")
     print("   means no evidence of skill; the interesting sensitivity is in the")
     print("   estimated alpha and uncorrected p-value across cost-modeling choices.")
+    print("   Positive-alpha scenarios (flat/negative-drift benchmarks) show how")
+    print("   cost assumptions affect statistical inference when skill is present.")
     print()
+    return results
+
+
+def _run_benchmark_sweep_for_benchmark(strategy_returns, benchmark_df_or_list, scenario_label, header):
+    """Run the benchmark cost sweep for a single benchmark or list of benchmarks and return results."""
+    # Normalize to list
+    if isinstance(benchmark_df_or_list, pd.DataFrame):
+        benchmark_list = [benchmark_df_or_list]
+    else:
+        benchmark_list = benchmark_df_or_list
+
+    print(f"   {'Mode':>11} | {'Expense':>8} | {'Bench':>7} | "
+          f"{'Alpha':>8} | {'p(uncorr)':>9} | {'p(corr)':>8} | {'DAR':>6}")
+    print("   " + "-" * (len(header) - 3))
+
+    results = []
+    for cost_is_periodic in BENCH_COST_MODES:
+        mode_label = "periodic" if cost_is_periodic else "round-trip"
+        for expense in BENCH_EXPENSE_GRID:
+            for bench_cost in BENCH_TRADING_COST_GRID:
+                correction = _benchmark_list_alpha_correction(
+                    strategy_returns, benchmark_list,
+                    benchmark_commission=bench_cost / 2,
+                    benchmark_slippage=bench_cost / 2,
+                    benchmark_expense_ratio=expense,
+                    benchmark_cost_is_periodic=cost_is_periodic,
+                )
+                da = correction.get("deflated_alpha") or {}
+                per_bench = correction.get("per_benchmark") or []
+                primary = per_bench[0] if per_bench else {}
+                dar = _safe_float(da.get("deflated_alpha_ratio"))
+                entry = {
+                    "cost_mode": mode_label,
+                    "benchmark_cost_is_periodic": cost_is_periodic,
+                    "expense_ratio": expense,
+                    "bench_cost_bps": bench_cost * 10_000,
+                    "alpha": _safe_float(primary.get("alpha")),
+                    "alpha_pvalue_original": _safe_float(primary.get("alpha_pvalue_original")),
+                    "alpha_pvalue": _safe_float(primary.get("alpha_pvalue")),
+                    "deflated_alpha_ratio": dar,
+                    "dar_pvalue": _safe_float(da.get("p_value")),
+                    "n_benchmarks": int(da.get("n_benchmarks", len(benchmark_list))),
+                    "scenario": scenario_label,
+                }
+                results.append(entry)
+                dar_str = "N/A" if dar is None else f"{dar:.3f}"
+                print(
+                    f"   {mode_label:>11} | "
+                    f"{expense:>7.1%} | "
+                    f"{bench_cost*10_000:>5.0f} bp | "
+                    f"{entry['alpha'] or 0:>7.2%} | "
+                    f"{entry['alpha_pvalue_original'] or 1:>8.4f} | "
+                    f"{entry['alpha_pvalue'] or 1:>7.4f} | "
+                    f"{dar_str:>6}"
+                )
     return results
 
 
@@ -353,7 +526,7 @@ def main():
         cost_sweep, baseline_returns = run_strategy_cost_sweep(strategy_df)
 
         # --- Section 2: Benchmark cost-model sensitivity ---
-        bench_sweep = run_benchmark_cost_sweep(baseline_returns, benchmark_dfs)
+        bench_sweep = run_benchmark_cost_sweep(baseline_returns, benchmark_dfs, strategy_df)
 
         # --- Section 3: CPCV robustness under cost stress ---
         cpcv_results = run_cpcv_robustness(strategy_df, benchmark_dfs, factory)
