@@ -231,3 +231,98 @@ Evidence and constraints:
 - The deflated-alpha machinery in `calculate_metrics` (lines 389-449 in `performance.py`) is only triggered when `benchmark_list` is provided; single `benchmark` falls through to the backward-compatibility path which still computes deflated alpha with `n_benchmarks=1`.
 - To enable this, the validation pipelines would need to: (a) accept `benchmark_list` parameter, (b) compute aligned returns for each benchmark in the list, (c) call `calculate_metrics` with `benchmark_list` for the final OOS returns, and (d) surface the `deflated_alpha` in the summary.
 - Run: `python3 skills/quantitative-backtesting/tests/test_walk_forward.py` after adding tests.
+
+### Completion: this agent (2026-10-15) — DONE
+
+The assigned next-task (deflated-alpha surfacing in the CPCV and walk-forward
+pipelines) is implemented and verified.
+
+**What changed (all in `skills/quantitative-backtesting/scripts/walk_forward.py` unless noted):**
+- Added shared helper `_benchmark_list_alpha_correction(...)` (walk_forward.py:2553).
+  Takes strategy returns + a list of benchmark DataFrames and returns
+  `per_benchmark` stats (each carrying corrected `alpha_pvalue`,
+  `alpha_pvalue_original`, `deflated_alpha`, `expected_max_alpha` when >= 2
+  benchmarks have finite alpha) plus an aggregate `deflated_alpha` dict. It
+  mirrors the multiple-benchmark deflation already in `out_of_sample_validation`
+  (walk_forward.py:1866–1926) so the correction is applied uniformly; it
+  defensively `dropna`s inputs (idempotent on `_calculate_strategy_returns`
+  output) and falls back to Bonferroni when trial alphas are insufficient.
+- `cpcv_analysis` (walk_forward.py:1204): replaced the `pass` multi-benchmark
+  placeholder in the aggregate comparison with the helper, surfacing
+  `summary["benchmark_metrics"]` and `summary["deflated_alpha"]`. Fixed the
+  per-fold `fold_benchmark_stats` reset bug (it was re-zeroed each fold so only
+  the last fold's stats survived) and added per-fold `fold["benchmark_stats"]` +
+  `fold["deflated_alpha"]`. Single-benchmark path unchanged (backward compat).
+- `walk_forward_analysis` (walk_forward.py:247): identical fix — replaced the
+  `pass` aggregate placeholder; fixed the per-`period_benchmark_stats` reset bug;
+  added per-period `period["benchmark_stats"]` + `period["deflated_alpha"]`.
+- `run_cpcv` (walk_forward.py:2132): fixed the CLI crash on multiple
+  `--benchmark` files (previously `_compute_benchmark_returns(list)` /
+  `_add_benchmark_to_summary(benchmark_data=list)` raised `TypeError` because
+  the CPCV aggregation was a `pass` placeholder). Multi-benchmark results now
+  flow `benchmark_list` to `calculate_metrics` for the report path.
+
+**Tests added (in `tests/test_walk_forward.py`):**
+- `test_benchmark_list_alpha_correction_deflated_alpha` — direct unit test of the
+  helper (n_benchmarks=2, DAR in [0,1], per-benchmark + aggregate fields; N=1
+  yields no deflation).
+- `test_cpcv_analysis_multiple_benchmarks_deflated_alpha` — `cpcv_analysis` with
+  2 benchmarks: asserts aggregate `summary["deflated_alpha"]` (+ 9 fields,
+  n_benchmarks=2) and `summary["benchmark_metrics"]` (list of 2), plus per-fold
+  `deflated_alpha`; asserts single-benchmark backward compat (no aggregate
+  deflated_alpha, but raw `alpha` present).
+- `test_walk_forward_analysis_multiple_benchmarks_deflated_alpha` — mirror for
+  walk-forward (per-period + aggregate deflated_alpha).
+- `test_cli_cpcv_multiple_benchmarks` — end-to-end `cpcv` CLI with two
+  `--benchmark` files: exit 0 and `cpcv_summary.json` summary contains
+  `deflated_alpha` (n_benchmarks=2) + `benchmark_metrics` (len 2).
+
+**What was actually verified:**
+- `tests/test_walk_forward.py`: 15/15 passed (11 prior + 4 new).
+- `tests/test_performance.py` 26/26, `test_cpcv.py` 16/16, `test_data_loader.py`
+  29/29, `test_run_backtest.py` 41/41, `test_strategy_builder.py` 27/27,
+  `test_monte_carlo.py` 7/7, `test_generate_sample_data.py` 1/1,
+  `test_reporting.py` (unittest OK) — all green.
+- `examples/multiple_benchmarks_example.py` and `examples/deflated_alpha_example.py`:
+  run end-to-end, exit 0.
+- No regressions: the single-benchmark CPCV/WF CLI tests
+  (`test_cli_cpcv_benchmark_cost_is_periodic`, etc.) are unchanged and pass.
+
+**What remains unresolved (approach already failed / not attempted):**
+- `out_of_sample_validation` still computes its multiple-benchmark deflation
+  inline (duplicated logic) rather than reusing `_benchmark_list_alpha_correction`,
+  and still exposes `summary["deflated_alphas"]` (a list) instead of a single
+  `summary["deflated_alpha"]` dict. Left intact to avoid perturbing 11 passing
+  OOS tests; de-duplication is deferred (see next task).
+- `run_walk_forward` / `run_parameter_optimization` still call
+  `_load_benchmark(args.benchmark, ...)` directly, so the `walk-forward` and
+  `optimize` CLI subcommands still crash on multiple `--benchmark` files
+  (pre-existing; not in this task's scope, no test covers it).
+
+### Next agent task
+
+Unify the multiple-benchmark deflated-alpha logic in `out_of_sample_validation`
+and make the multi-benchmark CLI path consistent with CPCV, with tests.
+
+1. **Refactor `out_of_sample_validation` (walk_forward.py:1866–1926).** Replace
+   its inline per-benchmark deflated-alpha block with a call to
+   `_benchmark_list_alpha_correction` (walk_forward.py:2553), so the
+   multiple-testing correction lives in one place and stays consistent with CPCV
+   and walk-forward. Preserve backward compatibility: keep emitting
+   `summary["deflated_alphas"]` (list) AND additionally populate
+   `summary["deflated_alpha"]` (single aggregate dict) for a single canonical key.
+   Add a direct test `test_out_of_sample_validation_multiple_benchmarks_deflated_alpha`
+   asserting `out_of_sample_validation(..., benchmark=[b1, b2])` surfaces
+   `summary["deflated_alpha"]` (n_benchmarks=2) and `summary["deflated_alphas"]`.
+
+2. **Fix `run_walk_forward` (walk_forward.py:2709) and `run_parameter_optimization`
+   to accept multiple `--benchmark` files** the way `run_cpcv`/`run_out_of_sample_validation`
+   already do (list-aware `_load_benchmark` + list-aware post-call benchmark
+   aggregation + `benchmark_list` fed to `calculate_metrics`). Add a CLI test
+   for `walk_forward` with two `--benchmark` paths.
+
+Evidence and constraints:
+- The shared helper signature is `_benchmark_list_alpha_correction(strategy_returns, benchmark_list, total_return_benchmark=False, benchmark_commission=0.0, benchmark_slippage=0.0, benchmark_expense_ratio=0.0, benchmark_cost_is_periodic=False)`.
+- `out_of_sample_validation` already typehints `benchmark: Optional[List[pd.DataFrame]]` (walk_forward.py:1627); `run_out_of_sample_validation` already loads `--benchmark nargs="+"` as a list. So multi-benchmark OOS is mostly wired end-to-end — only the run_walk_forward/run_parameter_optimization loaders and the OOS deflation dedup remain.
+- Verify with `python3 skills/quantitative-backtesting/tests/test_walk_forward.py` plus the full suite; ensure the new refactor keeps all 11 prior OOS tests green (they assert `benchmark_cost_is_periodic`, `test_benchmark`, `summary`).
+- Do NOT change the single-benchmark return shape (`test_performance`/summary keys) for the single-DataFrame `benchmark` case.

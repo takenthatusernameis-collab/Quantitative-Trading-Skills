@@ -43,6 +43,7 @@ from walk_forward import (  # noqa: E402
     _verify_split_separation,
     _benchmark_stats_with_splits,
     _add_benchmark_to_summary,
+    _benchmark_list_alpha_correction,
     main as walk_forward_main,
 )
 from strategy_builder import build_strategy  # noqa: E402
@@ -719,6 +720,217 @@ def test_cli_cpcv_benchmark_cost_is_periodic():
 from unittest.mock import patch
 
 
+def test_benchmark_list_alpha_correction_deflated_alpha():
+    """_benchmark_list_alpha_correction applies the Deflated Alpha Ratio across
+    >= 2 benchmarks and returns per-benchmark stats plus an aggregate dict.
+
+    This is the shared correction used by the CPCV and walk-forward pipelines,
+    so it is worth covering directly (fast, deterministic, no strategy needed).
+    """
+    periods = 252
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    bench1 = _make_benchmark_data(periods=periods, seed=99)
+    bench2 = _make_benchmark_data(periods=periods, seed=7)
+    strategy_returns = pd.Series(
+        np.random.default_rng(123).normal(0.0005, 0.012, periods), index=dates
+    )
+
+    result = _benchmark_list_alpha_correction(
+        strategy_returns, [bench1, bench2],
+        benchmark_commission=0.001, benchmark_slippage=0.001,
+        benchmark_cost_is_periodic=True,
+    )
+    assert result["n_benchmarks"] == 2
+    assert isinstance(result["per_benchmark"], list)
+    assert len(result["per_benchmark"]) == 2
+    for stats in result["per_benchmark"]:
+        assert stats is not None, "Expected non-None benchmark stats"
+        assert "alpha" in stats, "Expected 'alpha' in per-benchmark stats"
+        assert "deflated_alpha" in stats, "Per-benchmark deflated_alpha not surfaced"
+        assert "alpha_pvalue_original" in stats, "Expected corrected p-value metadata"
+
+    assert result["deflated_alpha"] is not None, "Expected aggregate deflated_alpha dict"
+    da = result["deflated_alpha"]
+    for key in ("deflated_alpha_ratio", "p_value", "alpha", "expected_max_alpha",
+                "n_benchmarks", "n_observations", "skewness", "kurtosis", "z_score"):
+        assert key in da, f"missing key {key} in deflated_alpha"
+    assert da["n_benchmarks"] == 2, f"Expected n_benchmarks=2, got {da['n_benchmarks']}"
+    assert 0.0 <= da["deflated_alpha_ratio"] <= 1.0, f"DAR out of range: {da['deflated_alpha_ratio']}"
+    assert 0.0 <= da["p_value"] <= 1.0, f"p-value out of range: {da['p_value']}"
+
+    # Single benchmark -> no cross-benchmark deflation is applied.
+    result_single = _benchmark_list_alpha_correction(strategy_returns, [bench1])
+    assert result_single["n_benchmarks"] == 1
+    assert result_single["deflated_alpha"] is None, "Single benchmark must not get a deflated_alpha"
+
+
+def test_cpcv_analysis_multiple_benchmarks_deflated_alpha():
+    """cpcv_analysis with multiple benchmarks surfaces Deflated Alpha at the
+    fold level and in the aggregate summary, and leaves single-benchmark
+    behaviour unchanged (backward compatibility).
+    """
+    data = _make_ohlcv_data(periods=500, seed=42)
+    bench1 = _make_benchmark_data(periods=500, seed=99)
+    bench2 = _make_benchmark_data(periods=500, seed=7)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
+
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        n_splits=5,
+        test_size=0.2,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        benchmark=[bench1, bench2],
+        benchmark_commission=0.001,
+        benchmark_slippage=0.001,
+        benchmark_cost_is_periodic=True,
+    )
+
+    summary = results["summary"]
+    # Aggregate deflated alpha must be surfaced for multiple benchmarks.
+    assert "deflated_alpha" in summary, (
+        f"deflated_alpha missing from CPCV summary. Keys: {sorted(summary.keys())}"
+    )
+    da = summary["deflated_alpha"]
+    for key in ("deflated_alpha_ratio", "p_value", "alpha", "expected_max_alpha",
+                "n_benchmarks", "n_observations", "skewness", "kurtosis", "z_score"):
+        assert key in da, f"missing key {key} in deflated_alpha"
+    assert da["n_benchmarks"] == 2, f"Expected n_benchmarks=2, got {da['n_benchmarks']}"
+    assert 0.0 <= da["deflated_alpha_ratio"] <= 1.0
+    assert 0.0 <= da["p_value"] <= 1.0
+
+    # One benchmark metrics dict per benchmark at the aggregate level.
+    assert isinstance(summary.get("benchmark_metrics"), list), "benchmark_metrics should be a list"
+    assert len(summary["benchmark_metrics"]) == 2
+    assert "deflated_alpha" in summary["benchmark_metrics"][0]
+
+    # Per-fold deflated alpha present on folds that produced OOS returns.
+    folds = results["folds"]
+    folds_with_da = [fold for fold in folds if fold.get("deflated_alpha") is not None]
+    assert folds_with_da, "Expected at least one CPCV fold to carry a deflated_alpha"
+    for fold in folds_with_da:
+        stats = fold.get("benchmark_stats")
+        assert isinstance(stats, list) and len(stats) == 2, "Expected per-fold list of 2 benchmark stats"
+        assert "deflated_alpha" in stats[0], "Expected per-fold benchmark stats to carry deflated_alpha"
+
+    # Backward-compat: single benchmark (DataFrame) must NOT produce an
+    # aggregate deflated_alpha dict, but must still surface raw alpha.
+    results_single = cpcv_analysis(
+        data=data, strategy_factory=factory, param_grid=param_grid,
+        n_splits=5, test_size=0.2, benchmark=bench1,
+        benchmark_commission=0.001, benchmark_slippage=0.001,
+        benchmark_cost_is_periodic=True,
+    )
+    assert "deflated_alpha" not in results_single["summary"], "Single benchmark should not get aggregate deflated_alpha"
+    assert "alpha" in results_single["summary"], "Single benchmark should still get alpha (backward compat)"
+
+
+def test_walk_forward_analysis_multiple_benchmarks_deflated_alpha():
+    """walk_forward_analysis with multiple benchmarks surfaces Deflated Alpha at
+    the per-period level and in the aggregate summary.
+    """
+    data = _make_ohlcv_data(periods=500, seed=42)
+    bench1 = _make_benchmark_data(periods=500, seed=99)
+    bench2 = _make_benchmark_data(periods=500, seed=7)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
+
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=12,
+        test_months=3,
+        step_months=2,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        benchmark=[bench1, bench2],
+        benchmark_commission=0.001,
+        benchmark_slippage=0.001,
+        benchmark_cost_is_periodic=True,
+    )
+
+    summary = results["summary"]
+    assert "deflated_alpha" in summary, (
+        f"deflated_alpha missing from walk-forward summary. Keys: {sorted(summary.keys())}"
+    )
+    da = summary["deflated_alpha"]
+    assert da["n_benchmarks"] == 2
+    assert 0.0 <= da["deflated_alpha_ratio"] <= 1.0
+    assert 0.0 <= da["p_value"] <= 1.0
+
+    assert isinstance(summary.get("benchmark_metrics"), list)
+    assert len(summary["benchmark_metrics"]) == 2
+
+    # Per-period deflated alpha on periods that produced OOS returns.
+    periods = results["periods"]
+    periods_with_da = [p for p in periods if p.get("deflated_alpha") is not None]
+    assert periods_with_da, "Expected at least one walk-forward period to carry a deflated_alpha"
+    for p in periods_with_da:
+        stats = p.get("benchmark_stats")
+        assert isinstance(stats, list) and len(stats) == 2
+        assert "deflated_alpha" in stats[0]
+
+
+def test_cli_cpcv_multiple_benchmarks():
+    """CLI cpcv subcommand accepts multiple --benchmark files, does not crash
+    in the post-call benchmark block, and writes a cpcv_summary.json whose
+    summary contains a cross-benchmark deflated_alpha correction plus
+    per-benchmark metrics.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        bench1_path = os.path.join(tmpdir, "bench1.csv")
+        bench2_path = os.path.join(tmpdir, "bench2.csv")
+        _write_ohlcv_csv(csv_path, periods=800)
+        _write_benchmark_csv(bench1_path, periods=800, seed=99)
+        _write_benchmark_csv(bench2_path, periods=800, seed=7)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "cpcv",
+            "--data", csv_path,
+            "--benchmark", bench1_path, bench2_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--benchmark-commission", "0.001",
+            "--benchmark-slippage", "0.001",
+            "--benchmark-cost-is-periodic",
+            "--n-splits", "5",
+            "--test-size", "0.2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI cpcv with multiple benchmarks should exit 0, got {rc}"
+        summary_path = os.path.join(out_dir, "cpcv_summary.json")
+        assert os.path.exists(summary_path), "cpcv_summary.json not written"
+        with open(summary_path) as f:
+            payload = json.load(f)
+
+        assert "summary" in payload, "summary missing from cpcv_summary.json"
+        summary = payload["summary"]
+        assert "deflated_alpha" in summary, (
+            f"deflated_alpha missing from CLI cpcv summary. Keys: {sorted(summary.keys())}"
+        )
+        da = summary["deflated_alpha"]
+        assert da["n_benchmarks"] == 2
+        assert 0.0 <= da["deflated_alpha_ratio"] <= 1.0
+        assert isinstance(summary.get("benchmark_metrics"), list)
+        assert len(summary["benchmark_metrics"]) == 2
+
+
+# Need to import patch for mocking
+from unittest.mock import patch
+
+
+
 def main() -> int:
     tests = [
         ("test_out_of_sample_validation_benchmark_cost_is_periodic", test_out_of_sample_validation_benchmark_cost_is_periodic),
@@ -732,6 +944,10 @@ def main() -> int:
         ("test_out_of_sample_validation_with_splits", test_out_of_sample_validation_with_splits),
         ("test_calculate_metrics_deflated_alpha_with_benchmark_list", test_calculate_metrics_deflated_alpha_with_benchmark_list),
         ("test_cli_cpcv_benchmark_cost_is_periodic", test_cli_cpcv_benchmark_cost_is_periodic),
+        ("test_benchmark_list_alpha_correction_deflated_alpha", test_benchmark_list_alpha_correction_deflated_alpha),
+        ("test_cpcv_analysis_multiple_benchmarks_deflated_alpha", test_cpcv_analysis_multiple_benchmarks_deflated_alpha),
+        ("test_walk_forward_analysis_multiple_benchmarks_deflated_alpha", test_walk_forward_analysis_multiple_benchmarks_deflated_alpha),
+        ("test_cli_cpcv_multiple_benchmarks", test_cli_cpcv_multiple_benchmarks),
     ]
 
     failures = 0

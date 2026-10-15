@@ -431,31 +431,31 @@ def walk_forward_analysis(
             period["test_returns"] = best_test_returns
             # Compute benchmark stats for this period
             if benchmark is not None:
-                # Handle multiple benchmarks
-                if isinstance(benchmark, list):
-                    period_benchmark_stats = []
-                    for bench in benchmark:
-                        benchmark_returns = _compute_benchmark_returns(bench, best_test_returns, total_return_benchmark)
-                        if benchmark_returns is not None:
-                            ann_factor = _annualization_factor(best_test_returns.index)
-                            bench_stats = _benchmark_stats(
-                                best_test_returns, benchmark_returns, ann_factor,
-                                total_return_benchmark=total_return_benchmark,
-                                benchmark_commission=benchmark_commission,
-                                benchmark_slippage=benchmark_slippage,
-                                benchmark_expense_ratio=benchmark_expense_ratio,
-                                benchmark_cost_is_periodic=benchmark_cost_is_periodic,
-                            )
-                            period_benchmark_stats.append(bench_stats)
-                        else:
-                            period_benchmark_stats.append(None)
+                if isinstance(benchmark, list) and len(benchmark) > 1:
+                    # Multiple benchmarks: surface a per-period Deflated Alpha
+                    # correction (multiple-testing control across the benchmark
+                    # set).  Uses the shared helper so the correction is applied
+                    # identically to the aggregate path.
+                    correction = _benchmark_list_alpha_correction(
+                        best_test_returns, benchmark,
+                        total_return_benchmark=total_return_benchmark,
+                        benchmark_commission=benchmark_commission,
+                        benchmark_slippage=benchmark_slippage,
+                        benchmark_expense_ratio=benchmark_expense_ratio,
+                        benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+                    )
+                    period["benchmark_stats"] = correction["per_benchmark"]
+                    period["deflated_alpha"] = correction["deflated_alpha"]
+                    period_benchmark_stats.append(correction["per_benchmark"])
                 else:
-                    # Single benchmark (backward compatibility)
-                    benchmark_returns = _compute_benchmark_returns(benchmark, best_test_returns, total_return_benchmark)
+                    # Single benchmark (DataFrame or single-element list):
+                    # backward-compatible path (no cross-benchmark deflation).
+                    bench = benchmark[0] if isinstance(benchmark, list) else benchmark
+                    benchmark_returns = _compute_benchmark_returns(bench, best_test_returns, total_return_benchmark)
                     if benchmark_returns is not None:
-                        ann_factor = _annualization_factor(best_test_returns.index)
+                        period_ann_factor = _annualization_factor(best_test_returns.index)
                         bench_stats = _benchmark_stats(
-                            best_test_returns, benchmark_returns, ann_factor,
+                            best_test_returns, benchmark_returns, period_ann_factor,
                             total_return_benchmark=total_return_benchmark,
                             benchmark_commission=benchmark_commission,
                             benchmark_slippage=benchmark_slippage,
@@ -492,21 +492,32 @@ def walk_forward_analysis(
 
     # Benchmark comparison on combined OOS returns
     if benchmark is not None and len(oos_returns) > 0:
-        # Handle multiple benchmarks
-        if isinstance(benchmark, list):
-            # For multiple benchmarks, we don't combine them into a single summary update
-            # Instead, we'll handle this in the summary building phase if needed
-            pass  # Placeholder - detailed handling would go in summary building
+        if isinstance(benchmark, list) and len(benchmark) > 1:
+            # Multiple benchmarks: surface a cross-benchmark Deflated Alpha
+            # correction on the aggregate out-of-sample record, mirroring the
+            # calculate_metrics / benchmark_list path.
+            correction = _benchmark_list_alpha_correction(
+                oos_returns, benchmark,
+                total_return_benchmark=total_return_benchmark,
+                benchmark_commission=benchmark_commission,
+                benchmark_slippage=benchmark_slippage,
+                benchmark_expense_ratio=benchmark_expense_ratio,
+                benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+            )
+            summary["benchmark_metrics"] = correction["per_benchmark"]
+            if correction["deflated_alpha"] is not None:
+                summary["deflated_alpha"] = correction["deflated_alpha"]
         else:
-            # Single benchmark (backward compatibility)
-            benchmark_returns = _compute_benchmark_returns(benchmark, oos_returns, total_return_benchmark)
+            # Single benchmark (DataFrame or single-element list): backward compat
+            bench = benchmark[0] if isinstance(benchmark, list) else benchmark
+            benchmark_returns = _compute_benchmark_returns(bench, oos_returns, total_return_benchmark)
             if benchmark_returns is not None:
                 summary = _add_benchmark_to_summary(
                     summary, oos_returns, benchmark_returns,
                     commission=benchmark_commission, slippage=benchmark_slippage,
                     benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark,
                     benchmark_cost_is_periodic=benchmark_cost_is_periodic,
-                    benchmark_data=benchmark,
+                    benchmark_data=bench,
                 )
 
     # Add per-period benchmark metrics to summary
@@ -1425,31 +1436,31 @@ def cpcv_analysis(
             fold["test_returns"] = best_test_returns
             # Compute benchmark stats for this fold
             if benchmark is not None:
-                # Handle multiple benchmarks
-                if isinstance(benchmark, list):
-                    fold_benchmark_stats = []
-                    for bench in benchmark:
-                        benchmark_returns = _compute_benchmark_returns(bench, best_test_returns, total_return_benchmark)
-                        if benchmark_returns is not None:
-                            ann_factor = _annualization_factor(best_test_returns.index)
-                            bench_stats = _benchmark_stats(
-                                best_test_returns, benchmark_returns, ann_factor,
-                                total_return_benchmark=total_return_benchmark,
-                                benchmark_commission=benchmark_commission,
-                                benchmark_slippage=benchmark_slippage,
-                                benchmark_expense_ratio=benchmark_expense_ratio,
-                                benchmark_cost_is_periodic=benchmark_cost_is_periodic,
-                            )
-                            fold_benchmark_stats.append(bench_stats)
-                        else:
-                            fold_benchmark_stats.append(None)
+                if isinstance(benchmark, list) and len(benchmark) > 1:
+                    # Multiple benchmarks: surface a per-fold Deflated Alpha
+                    # correction (multiple-testing control across the benchmark
+                    # set).  Uses the shared helper so the correction is applied
+                    # identically to the aggregate path.
+                    correction = _benchmark_list_alpha_correction(
+                        best_test_returns, benchmark,
+                        total_return_benchmark=total_return_benchmark,
+                        benchmark_commission=benchmark_commission,
+                        benchmark_slippage=benchmark_slippage,
+                        benchmark_expense_ratio=benchmark_expense_ratio,
+                        benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+                    )
+                    fold["benchmark_stats"] = correction["per_benchmark"]
+                    fold["deflated_alpha"] = correction["deflated_alpha"]
+                    fold_benchmark_stats.append(correction["per_benchmark"])
                 else:
-                    # Single benchmark (backward compatibility)
-                    benchmark_returns = _compute_benchmark_returns(benchmark, best_test_returns, total_return_benchmark)
+                    # Single benchmark (DataFrame or single-element list):
+                    # backward-compatible path (no cross-benchmark deflation).
+                    bench = benchmark[0] if isinstance(benchmark, list) else benchmark
+                    benchmark_returns = _compute_benchmark_returns(bench, best_test_returns, total_return_benchmark)
                     if benchmark_returns is not None:
-                        ann_factor = _annualization_factor(best_test_returns.index)
+                        fold_ann_factor = _annualization_factor(best_test_returns.index)
                         bench_stats = _benchmark_stats(
-                            best_test_returns, benchmark_returns, ann_factor,
+                            best_test_returns, benchmark_returns, fold_ann_factor,
                             total_return_benchmark=total_return_benchmark,
                             benchmark_commission=benchmark_commission,
                             benchmark_slippage=benchmark_slippage,
@@ -1528,21 +1539,32 @@ def cpcv_analysis(
 
     # Benchmark comparison on combined OOS returns
     if benchmark is not None and len(oos_returns) > 0:
-        # Handle multiple benchmarks
-        if isinstance(benchmark, list):
-            # For multiple benchmarks, we don't combine them into a single summary update
-            # Instead, we'll handle this in the summary building phase if needed
-            pass  # Placeholder - detailed handling would go in summary building
+        if isinstance(benchmark, list) and len(benchmark) > 1:
+            # Multiple benchmarks: surface a cross-benchmark Deflated Alpha
+            # correction on the aggregate out-of-sample record, mirroring the
+            # calculate_metrics / benchmark_list path.
+            correction = _benchmark_list_alpha_correction(
+                oos_returns, benchmark,
+                total_return_benchmark=total_return_benchmark,
+                benchmark_commission=benchmark_commission,
+                benchmark_slippage=benchmark_slippage,
+                benchmark_expense_ratio=benchmark_expense_ratio,
+                benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+            )
+            summary["benchmark_metrics"] = correction["per_benchmark"]
+            if correction["deflated_alpha"] is not None:
+                summary["deflated_alpha"] = correction["deflated_alpha"]
         else:
-            # Single benchmark (backward compatibility)
-            benchmark_returns = _compute_benchmark_returns(benchmark, oos_returns, total_return_benchmark)
+            # Single benchmark (DataFrame or single-element list): backward compat
+            bench = benchmark[0] if isinstance(benchmark, list) else benchmark
+            benchmark_returns = _compute_benchmark_returns(bench, oos_returns, total_return_benchmark)
             if benchmark_returns is not None:
                 summary = _add_benchmark_to_summary(
                     summary, oos_returns, benchmark_returns,
                     commission=benchmark_commission, slippage=benchmark_slippage,
                     benchmark_expense_ratio=benchmark_expense_ratio, total_return_benchmark=total_return_benchmark,
                     benchmark_cost_is_periodic=benchmark_cost_is_periodic,
-                    benchmark_data=benchmark,
+                    benchmark_data=bench,
                 )
 
     # Add per-fold benchmark metrics to summary
@@ -2167,34 +2189,60 @@ def run_cpcv(args) -> int:
 
     # Compute benchmark comparison metrics if benchmark provided
     benchmark_returns = None
+    benchmark_returns_list = None
     if benchmark is not None and len(results["oos_returns"]) > 0:
-        benchmark_returns = _compute_benchmark_returns(benchmark, results["oos_returns"], total_return_benchmark)
-        if benchmark_returns is not None:
-            # Add benchmark metrics to summary
-            results["summary"] = _add_benchmark_to_summary(
-                results["summary"], results["oos_returns"], benchmark_returns,
-                commission=bench_commission, slippage=bench_slippage,
-                benchmark_expense_ratio=bench_expense_ratio, total_return_benchmark=total_return_benchmark,
-                benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
-                benchmark_data=benchmark,
-            )
-            print(
-                f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
-            )
-            print(
-                f"Alpha (annualized): {results['summary'].get('alpha', 'N/A'):.2%}"
-            )
-            print(
-                f"Beta: {results['summary'].get('beta', 'N/A'):.4f}"
-            )
-            pval = results["summary"].get("alpha_pvalue")
-            print(
-                f"Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
-            )
-            rs = results["summary"].get("r_squared")
-            print(
-                f"R-squared: {rs if rs is None else f'{rs:.4f}'}"
-            )
+        if isinstance(benchmark, list):
+            # Multiple benchmarks: the aggregate Deflated Alpha comparison is
+            # already computed inside cpcv_analysis; expose the aligned
+            # benchmark returns to calculate_metrics (which surfaces the
+            # canonical deflated_alpha via its benchmark_list path).
+            benchmark_returns_list = []
+            for b in benchmark:
+                br = _compute_benchmark_returns(b, results["oos_returns"], total_return_benchmark)
+                if br is not None:
+                    benchmark_returns_list.append(br)
+            if benchmark_returns_list and results["summary"].get("deflated_alpha") is None:
+                # Defensive: ensure a deflated_alpha surfaces even if cpcv_analysis
+                # did not compute one (e.g. degenerate returns).
+                correction = _benchmark_list_alpha_correction(
+                    results["oos_returns"], benchmark,
+                    total_return_benchmark=total_return_benchmark,
+                    benchmark_commission=bench_commission,
+                    benchmark_slippage=bench_slippage,
+                    benchmark_expense_ratio=bench_expense_ratio,
+                    benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+                )
+                if correction["deflated_alpha"] is not None:
+                    results["summary"]["deflated_alpha"] = correction["deflated_alpha"]
+                results["summary"]["benchmark_metrics"] = correction["per_benchmark"]
+        else:
+            benchmark_returns = _compute_benchmark_returns(benchmark, results["oos_returns"], total_return_benchmark)
+            if benchmark_returns is not None:
+                # Single benchmark: backward-compatible summary update
+                results["summary"] = _add_benchmark_to_summary(
+                    results["summary"], results["oos_returns"], benchmark_returns,
+                    commission=bench_commission, slippage=bench_slippage,
+                    benchmark_expense_ratio=bench_expense_ratio, total_return_benchmark=total_return_benchmark,
+                    benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+                    benchmark_data=benchmark,
+                )
+                print(
+                    f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
+                )
+                print(
+                    f"Alpha (annualized): {results['summary'].get('alpha', 'N/A'):.2%}"
+                )
+                print(
+                    f"Beta: {results['summary'].get('beta', 'N/A'):.4f}"
+                )
+                pval = results["summary"].get("alpha_pvalue")
+                print(
+                    f"Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
+                )
+                rs = results["summary"].get("r_squared")
+                print(
+                    f"R-squared: {rs if rs is None else f'{rs:.4f}'}"
+                )
 
     print(f"Number of CPCV folds: {results['summary']['n_folds']}")
     print(f"Total OOS Return: {results['summary']['total_oos_return']:.2%}")
@@ -2275,6 +2323,8 @@ def run_cpcv(args) -> int:
         }
         if benchmark_returns is not None:
             report_results["benchmark"] = benchmark_returns
+        elif benchmark_returns_list:
+            report_results["benchmark_list"] = benchmark_returns_list
         if pit_results is not None:
             report_results["point_in_time_validation"] = pit_results
         metrics = calculate_metrics(report_results)
@@ -2498,6 +2548,149 @@ def _benchmark_stats_with_splits(
         benchmark_expense_ratio=benchmark_expense_ratio,
         benchmark_cost_is_periodic=benchmark_cost_is_periodic,
     )
+
+
+def _benchmark_list_alpha_correction(
+    strategy_returns: pd.Series,
+    benchmark_list: List[pd.DataFrame],
+    total_return_benchmark: bool = False,
+    benchmark_commission: float = 0.0,
+    benchmark_slippage: float = 0.0,
+    benchmark_expense_ratio: float = 0.0,
+    benchmark_cost_is_periodic: bool = False,
+) -> Dict[str, Any]:
+    """Compute per-benchmark comparison stats and a cross-benchmark Deflated Alpha correction.
+
+    Testing a strategy against multiple benchmarks is a multiple-testing problem:
+    with enough benchmarks, luck alone yields an attractive alpha.  This helper
+    computes the OLS alpha/beta/correlation/p-value for each benchmark
+    (split-aware when ``benchmark_cost_is_periodic`` requests it and the
+    benchmark data carries a ``splits`` column) and then applies the Deflated
+    Alpha Ratio across the benchmark set, mirroring the correction already
+    performed by ``out_of_sample_validation`` so the validation, CPCV, and
+    walk-forward pipelines apply it uniformly at the per-fold/per-period and
+    aggregate levels.
+
+    Returns a dict with:
+        - 'per_benchmark': list of per-benchmark stats dicts (None where a
+          benchmark had no aligned returns).  When >= 2 benchmarks produced
+          finite alphas each dict also carries the corrected ``alpha_pvalue``,
+          ``alpha_pvalue_original``, ``deflated_alpha`` and
+          ``expected_max_alpha``.
+        - 'deflated_alpha': aggregate Deflated Alpha Ratio dict for the primary
+          (first) benchmark when >= 2 benchmarks produced finite alphas, else
+          None (same shape as ``deflated_alpha_ratio`` output).
+        - 'n_benchmarks': number of benchmarks tested
+    """
+    per_benchmark: List[Optional[Dict[str, Any]]] = []
+    p_values: List[float] = []
+    benchmark_returns_list: List[Optional[pd.Series]] = []
+
+    # Drop NaN from the strategy returns once; downstream OLS and the Deflated
+    # Alpha Ratio assume a common-date aligned, NaN-free series.  This is
+    # idempotent on returns already produced by _calculate_strategy_returns
+    # (which dropna's), but makes the helper robust to leading-NaN pct_change
+    # artifacts when callers pass arbitrary return series.
+    strategy_returns = strategy_returns.dropna()
+
+    for bench in benchmark_list:
+        benchmark_returns = _compute_benchmark_returns(
+            bench, strategy_returns, total_return_benchmark
+        )
+        if benchmark_returns is not None:
+            benchmark_returns = benchmark_returns.dropna()
+        benchmark_returns_list.append(benchmark_returns)
+        if benchmark_returns is not None and len(benchmark_returns) > 0:
+            if benchmark_cost_is_periodic and isinstance(bench, pd.DataFrame) and "splits" in bench.columns:
+                bench_stats = _benchmark_stats_with_splits(
+                    strategy_returns, benchmark_returns, _annualization_factor(strategy_returns.index),
+                    total_return_benchmark=total_return_benchmark,
+                    benchmark_commission=benchmark_commission,
+                    benchmark_slippage=benchmark_slippage,
+                    benchmark_expense_ratio=benchmark_expense_ratio,
+                    benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+                    benchmark_data=bench,
+                )
+            else:
+                bench_stats = _benchmark_stats(
+                    strategy_returns, benchmark_returns, _annualization_factor(strategy_returns.index),
+                    total_return_benchmark=total_return_benchmark,
+                    benchmark_commission=benchmark_commission,
+                    benchmark_slippage=benchmark_slippage,
+                    benchmark_expense_ratio=benchmark_expense_ratio,
+                    benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+                )
+            per_benchmark.append(bench_stats)
+            p_values.append(bench_stats.get("alpha_pvalue", 1.0) if bench_stats.get("alpha_pvalue") is not None else 1.0)
+        else:
+            per_benchmark.append(None)
+            p_values.append(1.0)
+
+    deflated_alpha: Optional[Dict[str, Any]] = None
+    n_benchmarks = len(p_values)
+
+    if p_values and n_benchmarks > 1:
+        # Collect trial alphas from benchmarks with finite alpha (cross-sectional
+        # dispersion estimator for alpha*, when enough are available).
+        trial_alphas = [
+            r["alpha"] for r in per_benchmark
+            if r is not None and "alpha" in r and np.isfinite(r["alpha"])
+        ]
+
+        for i, bench_result in enumerate(per_benchmark):
+            if bench_result is None or "alpha" not in bench_result:
+                continue
+            if np.isfinite(bench_result["alpha"]) and len(trial_alphas) >= 2:
+                bench_returns = benchmark_returns_list[i]
+                if bench_returns is not None:
+                    try:
+                        dar = deflated_alpha_ratio(
+                            alpha=bench_result["alpha"],
+                            returns=strategy_returns,
+                            benchmark_returns=bench_returns,
+                            n_benchmarks=n_benchmarks,
+                            trial_alphas=trial_alphas,
+                        )
+                        bench_result["alpha_pvalue_original"] = p_values[i]
+                        bench_result["alpha_pvalue"] = dar["p_value"]
+                        bench_result["deflated_alpha"] = dar["deflated_alpha_ratio"]
+                        bench_result["expected_max_alpha"] = dar["expected_max_alpha"]
+                    except Exception:
+                        corrected_p = min(p_values[i] * n_benchmarks, 1.0)
+                        bench_result["alpha_pvalue_original"] = p_values[i]
+                        bench_result["alpha_pvalue"] = corrected_p
+                else:
+                    corrected_p = min(p_values[i] * n_benchmarks, 1.0)
+                    bench_result["alpha_pvalue_original"] = p_values[i]
+                    bench_result["alpha_pvalue"] = corrected_p
+            elif bench_result is not None:
+                # Fallback (Bonferroni) when too few trial alphas for the
+                # cross-sectional estimator.
+                corrected_p = min(p_values[i] * n_benchmarks, 1.0)
+                bench_result["alpha_pvalue_original"] = p_values[i]
+                bench_result["alpha_pvalue"] = corrected_p
+
+        # Aggregate Deflated Alpha for the primary (first) benchmark.
+        primary = per_benchmark[0] if per_benchmark and per_benchmark[0] is not None else None
+        if primary is not None and "alpha" in primary and np.isfinite(primary["alpha"]):
+            first_returns = benchmark_returns_list[0]
+            if first_returns is not None:
+                try:
+                    deflated_alpha = deflated_alpha_ratio(
+                        alpha=primary["alpha"],
+                        returns=strategy_returns,
+                        benchmark_returns=first_returns,
+                        n_benchmarks=n_benchmarks,
+                        trial_alphas=trial_alphas if len(trial_alphas) >= 2 else None,
+                    )
+                except Exception:
+                    deflated_alpha = None
+
+    return {
+        "per_benchmark": per_benchmark,
+        "deflated_alpha": deflated_alpha,
+        "n_benchmarks": n_benchmarks,
+    }
 
 
 def _parse_param_grid(param_grid_str: str) -> Dict[str, List[Any]]:
