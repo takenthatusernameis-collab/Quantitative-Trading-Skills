@@ -1264,6 +1264,152 @@ def test_cli_cpcv_impact_sweep():
         )
 
 
+def test_cli_monte_carlo_borrow_sweep():
+    """CLI monte-carlo --borrow-costs writes a sweep artifact whose returns
+    degrade as the short-position borrow cost rises (MACD goes short)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "monte-carlo",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+            "--output", out_dir,
+            "--n-simulations", "100",
+            "--borrow-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI monte_carlo borrow sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "monte_carlo_borrow_sweep.json")
+        assert os.path.exists(sweep_path), "monte_carlo_borrow_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["borrow_costs"] == [0.0, 0.03, 0.1]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        # Higher borrow cost degrades the net return (endpoints).
+        assert returns[2] < returns[0], (
+            f"expected return degradation with borrow cost, got {returns}"
+        )
+
+
+def test_cli_cpcv_borrow_sweep():
+    """CLI cpcv --borrow-costs writes a sweep artifact whose OOS returns
+    degrade as the short-position borrow cost rises (MACD goes short)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "cpcv",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+            "--output", out_dir,
+            "--n-splits", "5",
+            "--test-size", "0.2",
+            "--borrow-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI cpcv borrow sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "cpcv_borrow_sweep.json")
+        assert os.path.exists(sweep_path), "cpcv_borrow_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["borrow_costs"] == [0.0, 0.03, 0.1]
+        assert len(payload["results"]) == 3
+        returns = [r["total_oos_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected OOS return degradation with borrow cost, got {returns}"
+        )
+
+
+def test_cli_monte_carlo_funding_sweep():
+    """CLI monte-carlo --funding-costs writes a sweep artifact whose returns
+    degrade as the leveraged-position funding cost rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "monte-carlo",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+            "--output", out_dir,
+            "--n-simulations", "100",
+            "--funding-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI monte_carlo funding sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "monte_carlo_funding_sweep.json")
+        assert os.path.exists(sweep_path), "monte_carlo_funding_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["funding_costs"] == [0.0, 0.03, 0.1]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        # Funding costs never increase net return: for an unlevered strategy
+        # (MACD positions ∈ {-1, 0, 1}, gross exposure ≤ 1) funding is a no-op
+        # and returns are equal; for a levered strategy they degrade. Either
+        # way the endpoint must not exceed the zero-cost baseline.
+        assert returns[2] <= returns[0], (
+            f"expected non-increasing return with funding cost, got {returns}"
+        )
+        # The per-row funding_cost field must be recorded.
+        assert [r["funding_cost"] for r in payload["results"]] == [0.0, 0.03, 0.1]
+
+
+def test_cli_cpcv_funding_sweep():
+    """CLI cpcv --funding-costs writes a sweep artifact whose OOS returns
+    never increase as the leveraged-position funding cost rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "cpcv",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+            "--output", out_dir,
+            "--n-splits", "5",
+            "--test-size", "0.2",
+            "--funding-costs", "0", "0.03", "0.10",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI cpcv funding sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "cpcv_funding_sweep.json")
+        assert os.path.exists(sweep_path), "cpcv_funding_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["funding_costs"] == [0.0, 0.03, 0.1]
+        assert len(payload["results"]) == 3
+        returns = [r["total_oos_return"] for r in payload["results"]]
+        assert returns[2] <= returns[0], (
+            f"expected non-increasing OOS return with funding cost, got {returns}"
+        )
+        assert [r["funding_cost"] for r in payload["results"]] == [0.0, 0.03, 0.1]
+
+
 _EXAMPLE_PATH = (
     Path(__file__).resolve().parent.parent
     / "examples" / "real_data_pipeline_example.py"
@@ -1771,6 +1917,10 @@ def main() -> int:
         ("test_cli_monte_carlo_multiple_benchmarks", test_cli_monte_carlo_multiple_benchmarks),
         ("test_cli_monte_carlo_impact_sweep", test_cli_monte_carlo_impact_sweep),
         ("test_cli_cpcv_impact_sweep", test_cli_cpcv_impact_sweep),
+        ("test_cli_monte_carlo_borrow_sweep", test_cli_monte_carlo_borrow_sweep),
+        ("test_cli_cpcv_borrow_sweep", test_cli_cpcv_borrow_sweep),
+        ("test_cli_monte_carlo_funding_sweep", test_cli_monte_carlo_funding_sweep),
+        ("test_cli_cpcv_funding_sweep", test_cli_cpcv_funding_sweep),
         ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
         ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
         ("test_trading_costs_robustness_example_imports", test_trading_costs_robustness_example_imports),

@@ -2159,13 +2159,22 @@ def _select_parameters(
 
 def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                             bench_commission, bench_slippage, bench_expense_ratio,
-                            impact_coefficient):
-    """Run CPCV for a single impact coefficient (sweep helper).
+                            impact_coefficient, borrow_cost=None, funding_cost=None):
+    """Run CPCV for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
     sweep table and JSON artifact. Mirrors the single-run body of run_cpcv
     for one coefficient value.
+
+    `borrow_cost` / `funding_cost` default to the CLI args when None, so the
+    same helper serves the market-impact sweep (which varies only
+    `impact_coefficient`) and the borrow/funding sweeps (which vary one of
+    those while leaving impact at its single-run value).
     """
+    if borrow_cost is None:
+        borrow_cost = args.borrow_cost
+    if funding_cost is None:
+        funding_cost = args.funding_cost
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -2181,8 +2190,8 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         slippage=args.slippage,
         impact_coefficient=impact_coefficient,
         adv_window=args.adv_window,
-        borrow_cost=args.borrow_cost,
-        funding_cost=args.funding_cost,
+        borrow_cost=borrow_cost,
+        funding_cost=funding_cost,
         apply_deflation=args.deflate,
         benchmark=benchmark,
         total_return_benchmark=total_return_benchmark,
@@ -2195,6 +2204,8 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
     dsr = summary.get("deflated_sharpe")
     return {
         "impact_coefficient": float(impact_coefficient),
+        "borrow_cost": float(borrow_cost),
+        "funding_cost": float(funding_cost),
         "total_oos_return": float(summary.get("total_oos_return", 0.0)),
         "oos_sharpe": (
             float(summary["oos_sharpe"]) if summary.get("oos_sharpe") is not None else None
@@ -2268,6 +2279,79 @@ def run_cpcv(args) -> int:
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['impact_coefficient']:>17} | {row['total_oos_return']:>16.4f} | "
+                f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
+                f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
+            )
+        return 0
+
+    borrow_costs = [float(c) for c in (args.borrow_costs or [args.borrow_cost])]
+    funding_costs = [float(c) for c in (args.funding_costs or [args.funding_cost])]
+
+    # Borrow-cost sensitivity sweep for CPCV: re-run the CPCV pipeline for
+    # each borrow cost and record degradation in a single artifact. Mirrors
+    # the market-impact sweep but varies short-position borrow cost.
+    if len(borrow_costs) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in borrow_costs:
+            row = _cpcv_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=cost, funding_cost=args.funding_cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "cpcv_borrow_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"borrow_costs": borrow_costs, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nBorrow-cost sweep ({len(borrow_costs)} costs) saved to: {sweep_path}")
+        print("Borrow Cost | Total OOS Return | OOS Sharpe | Avg Param Stability | Overfitting Risk | Deflated Sharpe | N Folds")
+        print("-" * 112)
+        for row in sweep_rows:
+            oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['borrow_cost']:>13.4f} | {row['total_oos_return']:>16.4f} | "
+                f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
+                f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
+            )
+        return 0
+
+    # Funding-cost sensitivity sweep for CPCV: re-run the CPCV pipeline for
+    # each funding cost and record degradation in a single artifact. Varies
+    # leveraged-position funding cost while leaving borrow cost at its value.
+    if len(funding_costs) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in funding_costs:
+            row = _cpcv_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "cpcv_funding_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"funding_costs": funding_costs, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nFunding-cost sweep ({len(funding_costs)} costs) saved to: {sweep_path}")
+        print("Funding Cost | Total OOS Return | OOS Sharpe | Avg Param Stability | Overfitting Risk | Deflated Sharpe | N Folds")
+        print("-" * 112)
+        for row in sweep_rows:
+            oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['funding_cost']:>13.4f} | {row['total_oos_return']:>16.4f} | "
                 f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
                 f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
@@ -3209,15 +3293,24 @@ def run_parameter_optimization(args) -> int:
 
 
 def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark,
-                                   bench_commission, bench_slippage, bench_expense_ratio,
-                                   impact_coefficient):
-    """Run the Monte Carlo pipeline for a single impact coefficient (sweep helper).
+                                    bench_commission, bench_slippage, bench_expense_ratio,
+                                    impact_coefficient, borrow_cost=None, funding_cost=None):
+    """Run the Monte Carlo pipeline for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
     sweep table and JSON artifact. Mirrors the single-run body of
-    run_monte_carlo (parameter selection, impact-cost backtest, Deflated
+    run_monte_carlo (parameter selection, cost backtest, Deflated
     Sharpe correction, Monte Carlo simulation) for one coefficient value.
+
+    `borrow_cost` / `funding_cost` default to the CLI args when None, so the
+    same helper serves the market-impact sweep (which varies only
+    `impact_coefficient`) and the borrow/funding sweeps (which vary one of
+    those while leaving impact at its single-run value).
     """
+    if borrow_cost is None:
+        borrow_cost = args.borrow_cost
+    if funding_cost is None:
+        funding_cost = args.funding_cost
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -3231,8 +3324,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
             slippage=args.slippage,
             impact_coefficient=impact_coefficient,
             adv_window=args.adv_window,
-            borrow_cost=args.borrow_cost,
-            funding_cost=args.funding_cost,
+            borrow_cost=borrow_cost,
+            funding_cost=funding_cost,
             benchmark=benchmark,
             total_return_benchmark=total_return_benchmark,
             benchmark_commission=bench_commission,
@@ -3254,7 +3347,7 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     signals = strategy.generate_signals(data)
     returns = _calculate_strategy_returns(data, signals, args.commission, args.slippage,
                                           impact_coefficient, args.adv_window,
-                                          args.borrow_cost, args.funding_cost,
+                                          borrow_cost, funding_cost,
                                           initial_capital=args.initial_capital)
 
     dsr = None
@@ -3291,6 +3384,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     sm = mc_results["summary"]
     return {
         "impact_coefficient": float(impact_coefficient),
+        "borrow_cost": float(borrow_cost),
+        "funding_cost": float(funding_cost),
         "total_return": float(sm.get("total_return", {}).get("mean", 0.0)),
         "sharpe_ratio": float(sm.get("sharpe_ratio", {}).get("mean", 0.0)),
         "max_drawdown": float(sm.get("max_drawdown", {}).get("mean", 0.0)),
@@ -3359,6 +3454,75 @@ def run_monte_carlo(args) -> int:
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['impact_coefficient']:>17} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | "
+                f"{row['max_drawdown']:>12.4f} | {row['probability_of_ruin']:>13.2%} | {dsr_txt:>15}"
+            )
+        return 0
+
+    borrow_costs = [float(c) for c in (args.borrow_costs or [args.borrow_cost])]
+    funding_costs = [float(c) for c in (args.funding_costs or [args.funding_cost])]
+
+    # Borrow-cost sensitivity sweep: re-run the pipeline for each borrow cost
+    # and record degradation in a single artifact. Varies short-position
+    # borrow cost while leaving impact and funding at their single-run values.
+    if len(borrow_costs) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in borrow_costs:
+            row = _monte_carlo_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=cost, funding_cost=args.funding_cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "monte_carlo_borrow_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"borrow_costs": borrow_costs, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nBorrow-cost sweep ({len(borrow_costs)} costs) saved to: {sweep_path}")
+        print("Borrow Cost | Total Return | Sharpe Ratio | Max Drawdown | Prob. of Ruin | Deflated Sharpe")
+        print("-" * 96)
+        for row in sweep_rows:
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['borrow_cost']:>13.4f} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | "
+                f"{row['max_drawdown']:>12.4f} | {row['probability_of_ruin']:>13.2%} | {dsr_txt:>15}"
+            )
+        return 0
+
+    # Funding-cost sensitivity sweep: re-run the pipeline for each funding cost
+    # and record degradation in a single artifact. Varies leveraged-position
+    # funding cost while leaving impact and borrow at their single-run values.
+    if len(funding_costs) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in funding_costs:
+            row = _monte_carlo_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "monte_carlo_funding_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"funding_costs": funding_costs, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nFunding-cost sweep ({len(funding_costs)} costs) saved to: {sweep_path}")
+        print("Funding Cost | Total Return | Sharpe Ratio | Max Drawdown | Prob. of Ruin | Deflated Sharpe")
+        print("-" * 96)
+        for row in sweep_rows:
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['funding_cost']:>13.4f} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | "
                 f"{row['max_drawdown']:>12.4f} | {row['probability_of_ruin']:>13.2%} | {dsr_txt:>15}"
             )
         return 0
@@ -3977,6 +4141,8 @@ def main():
     mc_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     mc_parser.add_argument("--n-trials", type=int, default=None, help="Number of development trials (parameter configurations) tested; when set, report the Deflated Sharpe Ratio (multiple-testing correction) for the base backtest Sharpe. When a --param-grid is searched, the effective count is max(n_trials, number of grid combinations evaluated) so the internal search is never understated")
     mc_parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="Sweep over multiple market impact coefficients for capacity/impact sensitivity; overrides --impact-coefficient when given (e.g. --impact-coefficients 0 1 2 5).")
+    mc_parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual borrow costs for short positions; overrides --borrow-cost when given (e.g. --borrow-costs 0 0.01 0.03).")
+    mc_parser.add_argument("--funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual funding costs for leveraged positions; overrides --funding-cost when given (e.g. --funding-costs 0 0.01 0.02).")
     mc_parser.set_defaults(func=run_monte_carlo)
 
     # CPCV analysis
@@ -3988,6 +4154,8 @@ def main():
     cpcv_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     cpcv_parser.add_argument("--deflate", action="store_true", help="Compute Deflated Sharpe Ratio (multiple-testing correction) on the fold searches and OOS results")
     cpcv_parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="Sweep over multiple market impact coefficients for capacity/impact sensitivity; overrides --impact-coefficient when given (e.g. --impact-coefficients 0 1 2 5).")
+    cpcv_parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual borrow costs for short positions; overrides --borrow-cost when given (e.g. --borrow-costs 0 0.01 0.03).")
+    cpcv_parser.add_argument("--funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual funding costs for leveraged positions; overrides --funding-cost when given (e.g. --funding-costs 0 0.01 0.02).")
     cpcv_parser.set_defaults(func=run_cpcv)
 
     # Out-of-sample validation
