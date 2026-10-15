@@ -1942,49 +1942,67 @@ def out_of_sample_validation(
     if isinstance(test_benchmark, list):
         summary["multiple_benchmarks"] = True
         summary["benchmark_count"] = len(test_benchmark)
-        # Surface per-benchmark metrics consistently with CPCV/walk_forward
+        # Reuse correction_result directly rather than re-iterating test_benchmark
+        # to rebuild the same fields: correction_result already holds the
+        # per-benchmark stats and the aggregate Deflated Alpha (it is the same
+        # object as test_benchmark in this branch), so the backward-compatible
+        # summary keys are derived from it in one place. This mirrors the
+        # cpcv_analysis / walk_forward_analysis aggregate path, which never
+        # re-looped.
+        per_benchmark = (
+            correction_result["per_benchmark"]
+            if correction_result is not None
+            else test_benchmark
+        )
+        summary["benchmark_metrics"] = per_benchmark
         if correction_result is not None:
-            summary["benchmark_metrics"] = correction_result["per_benchmark"]
-        # Collect alpha p-values (both original and corrected if available)
-        alpha_pvalues = []
-        alpha_pvalues_original = []
-        deflated_alphas = []
-        expected_max_alphas = []
-        for bench_result in test_benchmark:
-            if bench_result is not None:
-                if 'alpha_pvalue_original' in bench_result:
-                    alpha_pvalues_original.append(bench_result['alpha_pvalue_original'])
-                    alpha_pvalues.append(bench_result['alpha_pvalue'])  # corrected
-                    deflated_alphas.append(bench_result)
-                    if 'expected_max_alpha' in bench_result:
-                        expected_max_alphas.append(bench_result['expected_max_alpha'])
-                elif 'alpha_pvalue' in bench_result:
-                    alpha_pvalues.append(bench_result['alpha_pvalue'])
-        if alpha_pvalues:
-            summary["alpha_pvalues"] = alpha_pvalues
-            if alpha_pvalues_original:
-                summary["alpha_pvalues_original"] = alpha_pvalues_original
-        if deflated_alphas:
-            summary["deflated_alphas"] = deflated_alphas
-        if expected_max_alphas:
-            summary["expected_max_alphas"] = expected_max_alphas
+            alpha_pvalues = [
+                b["alpha_pvalue"]
+                for b in per_benchmark
+                if b is not None and "alpha_pvalue" in b
+            ]
+            alpha_pvalues_original = [
+                b["alpha_pvalue_original"]
+                for b in per_benchmark
+                if b is not None and "alpha_pvalue_original" in b
+            ]
+            # deflated_alphas preserves the backward-compatible list of full
+            # per-benchmark dicts (each carried through the correction).
+            deflated_alphas = [
+                b
+                for b in per_benchmark
+                if b is not None and "alpha_pvalue_original" in b
+            ]
+            expected_max_alphas = [
+                b["expected_max_alpha"]
+                for b in per_benchmark
+                if b is not None and "expected_max_alpha" in b
+            ]
+            if alpha_pvalues:
+                summary["alpha_pvalues"] = alpha_pvalues
+                if alpha_pvalues_original:
+                    summary["alpha_pvalues_original"] = alpha_pvalues_original
+            if deflated_alphas:
+                summary["deflated_alphas"] = deflated_alphas
+            if expected_max_alphas:
+                summary["expected_max_alphas"] = expected_max_alphas
 
-        # Additionally, provide the canonical aggregate deflated_alpha dict
-        # (with n_benchmarks, DAR, p_value, etc.) for consistency with CPCV
-        # and walk_forward pipelines, which surfaced the correction_result's
-        # aggregate deflated_alpha.
-        primary_bench = test_benchmark[0] if test_benchmark and len(test_benchmark) > 0 and test_benchmark[0] is not None else None
-        if correction_result is not None and primary_bench is not None:
+            # Canonical aggregate Deflated Alpha (n_benchmarks, DAR, p_value,
+            # ...), consistent with the CPCV / walk-forward pipelines, sourced
+            # directly from correction_result instead of a manual re-derivation.
             aggregate_da = correction_result["deflated_alpha"]
             if aggregate_da is not None:
                 summary["deflated_alpha"] = aggregate_da
-                # Also copy related per-benchmark fields for completeness
-                if 'alpha_pvalue' in primary_bench:
-                    summary["alpha_pvalue"] = primary_bench['alpha_pvalue']
-                if 'alpha_pvalue_original' in primary_bench:
-                    summary["alpha_pvalue_original"] = primary_bench['alpha_pvalue_original']
-                if 'expected_max_alpha' in primary_bench:
-                    summary["expected_max_alpha"] = primary_bench['expected_max_alpha']
+                primary_bench = (
+                    per_benchmark[0]
+                    if per_benchmark and per_benchmark[0] is not None
+                    else None
+                )
+                if primary_bench is not None:
+                    for key in ("alpha_pvalue", "alpha_pvalue_original",
+                                "expected_max_alpha"):
+                        if key in primary_bench:
+                            summary[key] = primary_bench[key]
 
     # Add Deflated Sharpe Ratio on test returns if requested
     # n_trials = total configurations evaluated in validation phase

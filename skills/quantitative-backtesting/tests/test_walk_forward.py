@@ -662,6 +662,29 @@ def test_out_of_sample_validation_multiple_benchmarks_deflated_alpha():
             assert "alpha_pvalue_original" in bench_da, f"Benchmark {i} deflated_alphas entry missing alpha_pvalue_original"
             assert "expected_max_alpha" in bench_da, f"Benchmark {i} deflated_alphas entry missing expected_max_alpha"
 
+    # Verify the consolidated backward-compatible lists were derived correctly
+    # from correction_result (regression guard: they must match the per-benchmark
+    # entries surfaced above, not be empty or stale).
+    n_valid = sum(1 for b in test_bench if b is not None and "alpha_pvalue" in b)
+    assert "alpha_pvalues" in summary, "summary should contain alpha_pvalues"
+    assert len(summary["alpha_pvalues"]) == n_valid, (
+        f"alpha_pvalues length {len(summary['alpha_pvalues'])} != {n_valid}"
+    )
+    assert "alpha_pvalues_original" in summary, "summary should contain alpha_pvalues_original"
+    assert len(summary["alpha_pvalues_original"]) == n_valid
+    assert "expected_max_alphas" in summary, "summary should contain expected_max_alphas"
+    assert len(summary["expected_max_alphas"]) == n_valid
+    # Each deflated_alphas entry (full dict) is the same object as the
+    # corresponding benchmark_metrics entry, confirming the refactor sources
+    # both from the single correction_result rather than duplicating work.
+    assert summary["deflated_alphas"] == summary["benchmark_metrics"]
+
+    # Verify the canonical aggregate deflated_alpha is consistent with the
+    # helper's aggregate result, and primary-benchmark convenience fields
+    # match the first entry.
+    assert summary["alpha_pvalue"] == summary["benchmark_metrics"][0]["alpha_pvalue"]
+    assert summary["alpha_pvalue_original"] == summary["benchmark_metrics"][0]["alpha_pvalue_original"]
+
 
 def test_calculate_metrics_deflated_alpha_with_benchmark_list():
     """calculate_metrics with benchmark_list produces deflated_alpha via walk_forward.deflated_alpha_ratio.

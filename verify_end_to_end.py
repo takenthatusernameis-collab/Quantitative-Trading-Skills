@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-SKILLS_DIR = Path(__file__).resolve().parent.parent
+SKILLS_DIR = Path(__file__).resolve().parent / "skills" / "quantitative-backtesting"
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
 from strategy_builder import build_strategy
