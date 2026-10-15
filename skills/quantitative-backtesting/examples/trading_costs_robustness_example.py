@@ -231,6 +231,43 @@ def run_strategy_cost_sweep(data_df):
     print(f"     Return:  {first['total_return']:.2%} → {last['total_return']:.2%} "
           f"(Δ {last['total_return'] - first['total_return']:+.2%})")
     print()
+
+    # Short-capable strategy variant: demonstrate borrow/funding costs
+    # Invert positions when fast MA <= slow MA (go short instead of flat)
+    signals_short = signals.copy()
+    signals_short[signals_short == 0] = -1
+
+    print("   Short-capable strategy variant (signals inverted when flat):")
+    baseline_short = _calculate_strategy_returns(
+        data_df, signals_short, commission=0.0, slippage=0.0,
+        borrow_cost=0.0, funding_cost=0.0,
+    )
+    bm = _metrics_from_returns(baseline_short)
+    print(
+        f"   Baseline (0% borrow/funding):  Sharpe={bm['sharpe_ratio']:.3f}  "
+        f"Return={bm['total_return']:.2%}"
+    )
+    # Test borrow cost effect
+    short_high_b = _calculate_strategy_returns(
+        data_df, signals_short, commission=0.0, slippage=0.0,
+        borrow_cost=0.03, funding_cost=0.0,
+    )
+    sb = _metrics_from_returns(short_high_b)
+    # Test funding cost effect
+    short_high_f = _calculate_strategy_returns(
+        data_df, signals_short, commission=0.0, slippage=0.0,
+        borrow_cost=0.0, funding_cost=0.02,
+    )
+    sf = _metrics_from_returns(short_high_f)
+    print(
+        f"   With borrow_cost=3%:           Sharpe={sb['sharpe_ratio']:.3f}  "
+        f"Return={sb['total_return']:.2%} (Δ vs base: {sb['total_return'] - bm['total_return']:+.2%})"
+    )
+    print(
+        f"   With funding_cost=2%:          Sharpe={sf['sharpe_ratio']:.3f}  "
+        f"Return={sf['total_return']:.2%} (Δ vs base: {sf['total_return'] - bm['total_return']:+.2%})"
+    )
+    print()
     return results, baseline_returns
 
 

@@ -1494,6 +1494,33 @@ from unittest.mock import patch
 
 
 
+
+def test_trading_costs_short_strategy_borrow_cost_effect():
+    """Borrow costs should reduce returns when the strategy carries short exposure."""
+    module = _import_costs_example_module()
+    strategy_df, _, _ = module._make_universe()
+    signals = module._strategy_signals(strategy_df)
+    # Create short-capable variant
+    signals_short = signals.copy()
+    signals_short[signals_short == 0] = -1
+    # Returns with no borrow costs
+    returns_base = module._calculate_strategy_returns(
+        strategy_df, signals_short, commission=0.0, slippage=0.0,
+        borrow_cost=0.0, funding_cost=0.0,
+    )
+    # Returns with borrow costs
+    returns_high_b = module._calculate_strategy_returns(
+        strategy_df, signals_short, commission=0.0, slippage=0.0,
+        borrow_cost=0.03, funding_cost=0.0,
+    )
+    # Borrow costs should have a negative effect (reduce cumulative returns)
+    assert returns_high_b.sum() < returns_base.sum(), (
+        f"borrow costs should reduce returns for short strategy: "
+        f"{returns_high_b.sum():.6f} vs {returns_base.sum():.6f}"
+    )
+
+
+
 def main() -> int:
     tests = [
         ("test_out_of_sample_validation_benchmark_cost_is_periodic", test_out_of_sample_validation_benchmark_cost_is_periodic),
