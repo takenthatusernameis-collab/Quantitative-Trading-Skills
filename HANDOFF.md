@@ -725,3 +725,74 @@ Alternative: If no further tasks are assigned, the repository is in a complete s
 - CLI support for multiple `--benchmark` files on all subcommands
 - Tear sheet rendering of cross-benchmark deflated alpha
 - End-to-end worked example demonstrating the full research workflow
+
+## Session work (this agent — 2026-10-15)
+
+Completed the previous "Next agent task": **added regression coverage for
+`examples/real_data_pipeline_example.py`**, which was previously only
+manually verified (it had been a 2-line stub before the prior session and now
+runs end-to-end in ~4.5s).
+
+### Work completed
+
+1. **Import-regression test** (`tests/test_walk_forward.py`):
+   `test_real_data_pipeline_example_imports` loads the example module via
+   `importlib` (so `main()` is *not* executed) and asserts all documented
+   callables exist and are callable: `main`, `generate_synthetic_universe`,
+   `run_pit_validation`, `run_survivorship_detection`, `run_cpcv_validation`,
+   `run_cli_cpcv_validation`, `run_cli_monte_carlo`,
+   `demonstrate_deflated_alpha_directly`. Catches drift where a referenced
+   helper is removed/renamed or a module-level import dangles.
+
+2. **End-to-end regression test** (`tests/test_walk_forward.py`):
+   `test_real_data_pipeline_example_runs` invokes the example as a subprocess
+   (mirroring real usage), asserts exit code 0 and the
+   `PIPELINE COMPLETE - SUMMARY` banner. This guards the full pipeline —
+   synthetic multi-asset generation, PIT validation, survivorship-bias
+   detection, CPCV validation, production-pattern CLI CPCV + Monte-Carlo
+   subprocess calls, and direct deflated-alpha math — in isolation from the
+   test process.
+
+3. Registered both tests in the file's `main()` runner.
+
+No production code was modified (test-only change).
+
+### Verification status (this agent)
+
+- `test_data_loader.py`: 29/29
+- `test_performance.py`: 26/26
+- `test_reporting.py`: 42/42 (unittest OK)
+- `test_run_backtest.py`: 41/41
+- `test_strategy_builder.py`: 27/27
+- `test_walk_forward.py`: 21/21 (19 prior + 2 new)
+- `test_cpcv.py`: 16/16
+- `test_monte_carlo.py`: 7/7
+- `test_generate_sample_data.py`: 1/1
+- `verify_end_to_end.py`: PASSED
+- `examples/real_data_pipeline_example.py`: runs end-to-end, exit 0
+
+All quant tests pass (209/209). No regressions.
+
+### What changed (git diff)
+
+- `skills/quantitative-backtesting/tests/test_walk_forward.py` — added
+  `import subprocess`, the `_EXAMPLE_PATH` constant, the
+  `_import_example_module()` helper, the two new tests, and registered them in
+  `main()`. (72 insertions, no production-code changes.)
+
+### What remains unresolved
+
+- None blocking. The two previously-open example/CLI gaps are resolved and now
+  permanently guarded by tests.
+
+### Next agent task
+
+No further work is required for the multiple-benchmark / deflated-alpha
+research objective itself — the quantitative backtesting skill is in a
+complete, verified state (see the "complete state" list above).
+
+The only remaining discretionary item, if desired, is to migrate the
+`tests/` directory from the hand-rolled `main()` runner to `pytest` so the
+example end-to-end test runs automatically in CI alongside the rest. This is
+optional (the current runner already covers it) and not a methodological
+requirement.

@@ -8,6 +8,7 @@ No third-party test framework is required; uses only the standard library.
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -1192,6 +1193,75 @@ def test_cli_monte_carlo_multiple_benchmarks():
         assert da["n_benchmarks"] == 2
 
 
+_EXAMPLE_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "examples" / "real_data_pipeline_example.py"
+)
+
+
+def _import_example_module():
+    """Import real_data_pipeline_example.py from its file path.
+
+    Loading via importlib (rather than `import`) keeps this test isolated:
+    it exercises the example's module-level imports without executing
+    `main()` (guarded by ``if __name__ == "__main__"``).
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "real_data_pipeline_example", str(_EXAMPLE_PATH)
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_real_data_pipeline_example_imports():
+    """The real-data integration example must import cleanly and expose its
+    documented callables.
+
+    Guards against regressions where a referenced helper was removed, renamed,
+    or where the example's module-level imports reference an API that no longer
+    exists (which would otherwise fail only at runtime)."""
+    module = _import_example_module()
+    for name in (
+        "main",
+        "generate_synthetic_universe",
+        "run_pit_validation",
+        "run_survivorship_detection",
+        "run_cpcv_validation",
+        "run_cli_cpcv_validation",
+        "run_cli_monte_carlo",
+        "demonstrate_deflated_alpha_directly",
+    ):
+        assert hasattr(module, name), f"example module missing callable: {name}"
+        assert callable(getattr(module, name)), f"{name} should be callable"
+
+
+def test_real_data_pipeline_example_runs():
+    """The real-data integration example must run end-to-end (exit 0) and print
+    its completion banner.
+
+    This is the primary regression guard for the full pipeline: synthetic
+    multi-asset generation, PIT validation, survivorship-bias detection, CPCV
+    validation, the production-pattern CLI CPCV + Monte-Carlo subprocess calls,
+    and the direct deflated-alpha computation. Running it as a subprocess
+    mirrors how a user invokes it and isolates failures from the test process."""
+    result = subprocess.run(
+        [sys.executable, str(_EXAMPLE_PATH)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert result.returncode == 0, (
+        f"example exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-3000:]}\n"
+        f"stderr:\n{result.stderr[-3000:]}"
+    )
+    assert "PIPELINE COMPLETE - SUMMARY" in result.stdout, (
+        "completion banner missing from example stdout"
+    )
+
+
 # Need to import patch for mocking
 from unittest.mock import patch
 
@@ -1218,6 +1288,8 @@ def main() -> int:
         ("test_cli_walk_forward_multiple_benchmarks", test_cli_walk_forward_multiple_benchmarks),
         ("test_cli_optimize_multiple_benchmarks", test_cli_optimize_multiple_benchmarks),
         ("test_cli_monte_carlo_multiple_benchmarks", test_cli_monte_carlo_multiple_benchmarks),
+        ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
+        ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
     ]
 
     failures = 0
