@@ -1350,6 +1350,70 @@ def test_real_data_pipeline_example_runs():
     )
 
 
+_COSTS_EXAMPLE_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "examples" / "trading_costs_robustness_example.py"
+)
+
+
+def _import_costs_example_module():
+    """Import trading_costs_robustness_example.py from its file path.
+
+    Loading via importlib (rather than ``import``) keeps this test isolated:
+    it exercises the example's module-level imports without executing
+    ``main()`` (guarded by ``if __name__ == "__main__"``).
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "trading_costs_robustness_example", str(_COSTS_EXAMPLE_PATH)
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_trading_costs_robustness_example_imports():
+    """The trading-cost sensitivity example must import cleanly and expose its
+    documented callables."""
+    module = _import_costs_example_module()
+    for name in (
+        "main",
+        "run_strategy_cost_sweep",
+        "run_benchmark_cost_sweep",
+        "run_cpcv_robustness",
+        "_make_universe",
+        "_metrics_from_returns",
+    ):
+        assert hasattr(module, name), f"example module missing callable: {name}"
+        assert callable(getattr(module, name)), f"{name} should be callable"
+
+
+def test_trading_costs_robustness_example_runs():
+    """The trading-cost sensitivity example must run end-to-end (exit 0) and print
+    its completion banner.
+
+    Verifies the three-section pipeline: cost sweep, benchmark cost-model
+    sweep, and CPCV robustness under cost stress — all on synthetic data with
+    no network access."""
+    result = subprocess.run(
+        [sys.executable, str(_COSTS_EXAMPLE_PATH)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert result.returncode == 0, (
+        f"example exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-3000:]}\n"
+        f"stderr:\n{result.stderr[-3000:]}"
+    )
+    assert "TRADING COSTS SENSITIVITY ANALYSIS COMPLETE" in result.stdout, (
+        "completion banner missing from example stdout"
+    )
+    assert "STRUCTURED RESULTS SAVED" in result.stdout.upper(), (
+        "JSON summary output message missing from example stdout"
+    )
+
+
 # Need to import patch for mocking
 from unittest.mock import patch
 
@@ -1378,6 +1442,8 @@ def main() -> int:
         ("test_cli_monte_carlo_multiple_benchmarks", test_cli_monte_carlo_multiple_benchmarks),
         ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
         ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
+        ("test_trading_costs_robustness_example_imports", test_trading_costs_robustness_example_imports),
+        ("test_trading_costs_robustness_example_runs", test_trading_costs_robustness_example_runs),
         ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ]
 

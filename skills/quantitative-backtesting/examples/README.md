@@ -54,6 +54,7 @@ All examples use the included synthetic sample data: `../assets/example_data/sam
 - **Survivorship bias detection** for robust universe construction
 - **Realistic cost modeling** (commissions, slippage, benchmark costs)
 - **Benchmark comparison with statistical tests** (alpha, beta, correlation, t-stats)
+- **Multiple-testing correction** with Deflated Alpha Ratio
 - **Out-of-sample thinking** and rigorous validation practices
 
 ### `deflated_alpha_example.py`
@@ -104,6 +105,21 @@ python3 skills/quantitative-backtesting/examples/real_data_pipeline_example.py
 ```
 
 Self-contained: uses temporary directories, no persistent artifacts.
+
+### `trading_costs_robustness_example.py`
+
+Systematic sensitivity analysis of trading costs and cost-modeling assumptions:
+
+1. **Strategy cost sensitivity** - Sweeps commission (0–10 bps) × slippage (0–5 bps) on the strategy side, measuring how Sharpe, Calmar, and max drawdown degrade.
+2. **Benchmark cost-model sensitivity** - Sweeps benchmark commission, expense ratio (0–1% annual), and periodic-vs-round-trip costing, showing the impact on estimated alpha and the Deflated Alpha Ratio (DAR).
+3. **CPCV robustness under cost stress** - Compares out-of-sample Sharpe, return, and DAR between low-cost and high-cost regimes (including market impact, borrow cost, and funding cost).
+
+Run with:
+```bash
+python3 skills/quantitative-backtesting/examples/trading_costs_robustness_example.py
+```
+
+Self-contained: uses temporary directories, no persistent artifacts. Produces a structured JSON summary and a key-findings banner.
 
 ### `real_data_workflow.md`
 
