@@ -1596,6 +1596,88 @@ def test_trading_costs_market_neutral_borrow_and_funding_effect():
         f"{returns_both.sum():.6f} vs {returns_base.sum():.6f}"
     )
 
+
+def test_market_impact_cost_reduces_returns_single_asset():
+    """Market impact must degrade returns monotonically on single-asset data.
+
+    Regression guard for the bug where `position_notional` was scaled by the raw
+    asset price (~$100) instead of the portfolio equity (~$100k), making the
+    ratio position_notional/ADV ~1e-7 and rendering `--impact-coefficient` a
+    silent no-op even at coefficient 5.0.  With the fix, impact_coefficient
+    0.1 -> 5.0 must progressively reduce total return.
+    """
+    module = _import_costs_example_module()
+    strategy_df, _, _ = module._make_universe()
+    signals = module._strategy_signals(strategy_df)
+
+    returns_by_coeff = {}
+    for coeff in (0.0, 0.1, 0.5, 1.0, 2.0, 5.0):
+        r = _calculate_strategy_returns(
+            strategy_df, signals,
+            commission=0.0, slippage=0.0,
+            impact_coefficient=coeff,
+        )
+        returns_by_coeff[coeff] = float(r.sum())
+
+    # Zero coefficient must equal the no-cost baseline (no impact applied).
+    assert returns_by_coeff[0.0] == max(returns_by_coeff.values()), (
+        "impact_coefficient=0 must be the least-cost regime"
+    )
+    # Higher coefficients must degrade cumulative returns monotonically.
+    coeffs = sorted(returns_by_coeff)
+    for a, b in zip(coeffs, coeffs[1:]):
+        assert returns_by_coeff[b] < returns_by_coeff[a], (
+            f"impact_coefficient {b} should reduce returns below {a}: "
+            f"{returns_by_coeff[b]:.6f} vs {returns_by_coeff[a]:.6f}"
+        )
+    # The sweep must be non-trivial: 5.0 must meaningfully exceed 0.1.
+    assert returns_by_coeff[0.0] - returns_by_coeff[5.0] > 0.001, (
+        "impact sweep must be non-trivial, got "
+        f"{returns_by_coeff[0.0]:.6f} vs {returns_by_coeff[5.0]:.6f}"
+    )
+
+
+def test_market_impact_cost_reduces_returns_dict_panel():
+    """Market impact must work on dict/panel data without raising UnboundLocalError.
+
+    The dict/panel branch of `_calculate_strategy_returns` did not define `close`,
+    so any non-zero `impact_coefficient` raised `UnboundLocalError`.  This test
+    exercises the market-neutral pairs path (long A, short B, 2x gross exposure)
+    and asserts impact degrades returns monotonically.
+    """
+    module = _import_costs_example_module()
+    raw = module.generate_multi_asset_data(
+        n_assets=module.N_ASSETS,
+        periods=module.N_PERIODS,
+        seed=42,
+    )
+    assets = {sym: df.set_index("date") for sym, df in raw.items()}
+    syms = sorted(assets.keys())
+    a, b = assets[syms[3]], assets[syms[4]]
+    common = a.index.intersection(b.index)
+    sig_a = module._strategy_signals(a).reindex(common).fillna(0)
+    sig_b = module._strategy_signals(b).reindex(common).fillna(0)
+    positions = (sig_a - sig_b) * 2  # market neutral, 2x gross exposure
+    data_mn = {"A": a.reindex(common), "B": b.reindex(common)}
+
+    returns_by_coeff = {}
+    for coeff in (0.0, 1.0, 5.0):
+        r = _calculate_strategy_returns(
+            data_mn, positions,
+            commission=0.0, slippage=0.0,
+            impact_coefficient=coeff,
+        )
+        returns_by_coeff[coeff] = float(r.sum())
+
+    assert returns_by_coeff[0.0] == max(returns_by_coeff.values()), (
+        "impact_coefficient=0 must be the least-cost regime on dict data"
+    )
+    assert returns_by_coeff[5.0] < returns_by_coeff[1.0] < returns_by_coeff[0.0], (
+        "impact must degrade returns monotonically on dict data: "
+        f"{returns_by_coeff}"
+    )
+
+
 def main() -> int:
     tests = [
         ("test_out_of_sample_validation_benchmark_cost_is_periodic", test_out_of_sample_validation_benchmark_cost_is_periodic),
@@ -1626,6 +1708,8 @@ def main() -> int:
         ("test_trading_costs_short_strategy_borrow_cost_effect", test_trading_costs_short_strategy_borrow_cost_effect),
         ("test_trading_costs_levered_strategy_funding_cost_effect", test_trading_costs_levered_strategy_funding_cost_effect),
         ("test_trading_costs_market_neutral_borrow_and_funding_effect", test_trading_costs_market_neutral_borrow_and_funding_effect),
+        ("test_market_impact_cost_reduces_returns_single_asset", test_market_impact_cost_reduces_returns_single_asset),
+        ("test_market_impact_cost_reduces_returns_dict_panel", test_market_impact_cost_reduces_returns_dict_panel),
         ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ]
 

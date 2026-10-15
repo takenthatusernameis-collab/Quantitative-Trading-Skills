@@ -333,6 +333,32 @@ def run_strategy_cost_sweep(data_df):
     )
     print()
 
+    # Market-impact sensitivity: sweep the impact_coefficient on the
+    # market-neutral pairs portfolio.  The original implementation scaled
+    # position_notional by the raw asset price (~$100) instead of portfolio
+    # equity (~$100k), so impact_coefficient was a silent no-op even at 5.0.
+    # With the fix the sweep degrades returns monotonically.
+    print("   Market-impact sensitivity (market-neutral pairs, 2x gross exposure):")
+    impact_rows = []
+    for coeff in (0.0, 0.1, 0.5, 1.0, 2.0, 5.0):
+        r = _calculate_strategy_returns(
+            data_mn, positions_mn, commission=0.0, slippage=0.0,
+            impact_coefficient=coeff,
+        )
+        m = _metrics_from_returns(r)
+        impact_rows.append((coeff, m["total_return"], m["sharpe_ratio"]))
+        print(
+            f"     impact_coeff={coeff:>3}:  Return={m['total_return']:>8.2%}  "
+            f"Sharpe={m['sharpe_ratio']:>6.3f}"
+        )
+    base_impact = impact_rows[0][1]
+    high_impact = impact_rows[-1][1]
+    print(
+        f"     Δ (0 → 5.0): {base_impact:.2%} → {high_impact:.2%} "
+        f"({high_impact - base_impact:+.2%})"
+    )
+    print()
+
     return results, baseline_returns, {
         "short": {"baseline_sharpe": bm["sharpe_ratio"], "baseline_return": bm["total_return"],
                   "borrow_sharpe": sb["sharpe_ratio"], "borrow_return": sb["total_return"],
@@ -341,6 +367,10 @@ def run_strategy_cost_sweep(data_df):
                     "funding_sharpe": lfm["sharpe_ratio"], "funding_return": lfm["total_return"]},
         "market_neutral": {"baseline_sharpe": bmn["sharpe_ratio"], "baseline_return": bmn["total_return"],
                            "both_sharpe": mb["sharpe_ratio"], "both_return": mb["total_return"]},
+        "market_impact": {"baseline_return": impact_rows[0][1],
+                          "high_coeff_return": impact_rows[-1][1],
+                          "rows": [{"coeff": c, "return": ret, "sharpe": sr}
+                                   for c, ret, sr in impact_rows]},
     }
 
 
@@ -687,6 +717,15 @@ def main():
         mn_delta = mn_res["both_return"] - mn_res["baseline_return"]
         print(f"  3d. Market-neutral leveraged variant (long A, short B, 2x gross exposure): combined borrow=3% + funding=2% reduces return by "
               f"{mn_delta:+.2%} (Sharpe {mn_res['baseline_sharpe']:.3f}→{mn_res['both_sharpe']:.3f}).")
+        impact_res = cost_extras.get("market_impact")
+        if impact_res:
+            imp_base = impact_res["baseline_return"]
+            imp_high = impact_res["high_coeff_return"]
+            print(f"  3e. Market-impact sensitivity (market-neutral pairs, 2x gross exposure): "
+                  f"impact_coefficient 0→5.0 reduces return by {imp_high - imp_base:+.2%} "
+                  f"({imp_base:.2%}→{imp_high:.2%}).  The original implementation scaled "
+                  f"position_notional by the raw asset price instead of portfolio equity, "
+                  f"making impact_coefficient a silent no-op; this sweep confirms the fix.")
         print()
         print("  Conclusion: Transaction costs materially affect both performance")
         print("  metrics and statistical inference (deflated alpha). Sensitivity")

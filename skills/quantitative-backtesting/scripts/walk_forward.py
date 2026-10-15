@@ -392,13 +392,15 @@ def walk_forward_analysis(
                 # Calculate returns for this parameter set
                 test_returns = _calculate_strategy_returns(
                     test_data, test_signals, commission, slippage,
-                    impact_coefficient, adv_window, borrow_cost, funding_cost
+                    impact_coefficient, adv_window, borrow_cost, funding_cost,
+                    initial_capital=initial_capital,
                 )
 
                 # Evaluate on training set
                 train_returns = _calculate_strategy_returns(
                     train_data, train_signals, commission, slippage,
-                    impact_coefficient, adv_window, borrow_cost, funding_cost
+                    impact_coefficient, adv_window, borrow_cost, funding_cost,
+                    initial_capital=initial_capital,
                 )
 
                 if len(train_returns) > 1 and train_returns.std() > 0:
@@ -661,7 +663,8 @@ def parameter_optimization(
 
             returns = _calculate_strategy_returns(
                 data, signals, commission, slippage,
-                impact_coefficient, adv_window, borrow_cost, funding_cost
+                impact_coefficient, adv_window, borrow_cost, funding_cost,
+                initial_capital=initial_capital,
             )
 
             if len(returns) > 1:
@@ -1087,6 +1090,7 @@ def _calculate_strategy_returns(
     adv_window: int = 20,
     borrow_cost: float = 0.0,
     funding_cost: float = 0.0,
+    initial_capital: float = 100000.0,
 ) -> pd.Series:
     """Calculate strategy returns from signals and market data.
 
@@ -1109,6 +1113,10 @@ def _calculate_strategy_returns(
             decimal, e.g., 0.02 = 2% per year). Applied per period on gross
             exposure exceeding 1x; the per-period rate is funding_cost
             divided by the periods per year inferred from the data's index.
+        initial_capital: Starting portfolio value used to scale the position
+            notional for market-impact calculation. The notional at risk is
+            |position_change| * equity, where equity is approximated by
+            initial_capital * cumprod(1 + raw_returns). Default 100000.
     """
     if isinstance(data, dict):
         # For dict of dataframes, compute equal-weighted portfolio returns
@@ -1128,6 +1136,7 @@ def _calculate_strategy_returns(
             vols.append(aligned["volume"])
         raw_returns = pd.concat(rets, axis=1).mean(axis=1)
         volume = pd.concat(vols, axis=1).mean(axis=1)
+        close = data[list(data.keys())[0]].reindex(common_index)["close"]
     elif isinstance(data.columns, pd.MultiIndex):
         # For panel data, compute equal-weighted portfolio returns
         close = data["close"]
@@ -1145,17 +1154,23 @@ def _calculate_strategy_returns(
     costs = position_changes * (commission + slippage)
 
     # Market impact model: impact = (position_notional / ADV) * impact_coefficient
-    # Position notional = |position| * price (equity value of the position)
+    # Position notional = |position| * equity, where equity is the current
+    # portfolio value.  Since this function only sees returns (not equity),
+    # equity is approximated by initial_capital * cumprod(1 + raw_returns),
+    # i.e. the value of a fully-invested buy-and-hold position in the asset
+    # at the current price.  This is the correct scaling: the original
+    # implementation multiplied by the raw asset price (~$100), understating
+    # the notional by ~1000x and making impact_coefficient a silent no-op.
     # ADV = rolling average of daily volume (in shares) * price
     if impact_coefficient > 0 and volume is not None:
         # Average Daily Volume in shares (rolling)
         adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
         # Average Daily Volume in notional (shares * price)
         adv_notional = adv_shares * close
-        # Position notional = |position| * equity (we approximate with close price * initial_capital)
-        # Since we don't have equity at this level, we use position * close as a proxy
-        # The cost is applied as a fraction of notional on position changes
-        position_notional = position_changes * close
+        # Equity value of the position at risk, scaled by initial_capital
+        # so that a 100% position change on a $100k account is ~$100k notional
+        equity = initial_capital * (1 + raw_returns).cumprod()
+        position_notional = position_changes * equity
         # Market impact as fraction of notional traded
         market_impact = (position_notional / adv_notional.replace(0, np.nan)) * impact_coefficient
         market_impact = market_impact.fillna(0)
@@ -1432,13 +1447,15 @@ def cpcv_analysis(
                 # Calculate returns for this parameter set
                 test_returns = _calculate_strategy_returns(
                     test_data, test_signals, commission, slippage,
-                    impact_coefficient, adv_window, borrow_cost, funding_cost
+                    impact_coefficient, adv_window, borrow_cost, funding_cost,
+                    initial_capital=initial_capital,
                 )
 
                 # Evaluate on training set
                 train_returns = _calculate_strategy_returns(
                     train_data, train_signals, commission, slippage,
-                    impact_coefficient, adv_window, borrow_cost, funding_cost
+                    impact_coefficient, adv_window, borrow_cost, funding_cost,
+                    initial_capital=initial_capital,
                 )
 
                 if len(train_returns) > 1 and train_returns.std() > 0:
@@ -1864,7 +1881,8 @@ def out_of_sample_validation(
     val_signals = strategy.generate_signals(val_data)
     val_returns = _calculate_strategy_returns(
         val_data, val_signals, commission, slippage,
-        impact_coefficient, adv_window, borrow_cost, funding_cost
+        impact_coefficient, adv_window, borrow_cost, funding_cost,
+        initial_capital=initial_capital,
     )
 
     ann_factor = _annualization_factor(val_returns.index)
@@ -1883,9 +1901,10 @@ def out_of_sample_validation(
     # Phase 4: FINAL TEST - Evaluate on held-out test data
     test_signals = strategy.generate_signals(test_data)
     test_returns = _calculate_strategy_returns(
-        test_data, test_signals, commission, slippage,
-        impact_coefficient, adv_window, borrow_cost, funding_cost
-    )
+                    test_data, test_signals, commission, slippage,
+                    impact_coefficient, adv_window, borrow_cost, funding_cost,
+                    initial_capital=initial_capital,
+                )
 
     ann_factor_test = _annualization_factor(test_returns.index)
     excess_test = test_returns - 0.02 / ann_factor_test
@@ -3173,8 +3192,9 @@ def run_monte_carlo(args) -> int:
     strategy = strategy_factory(best_params)
     signals = strategy.generate_signals(data)
     returns = _calculate_strategy_returns(data, signals, args.commission, args.slippage,
-                                         args.impact_coefficient, args.adv_window,
-                                         args.borrow_cost, args.funding_cost)
+                                          args.impact_coefficient, args.adv_window,
+                                          args.borrow_cost, args.funding_cost,
+                                          initial_capital=args.initial_capital)
 
     # Multiple-testing correction: the base backtest's Sharpe was
     # produced by the parameter search above (or by development

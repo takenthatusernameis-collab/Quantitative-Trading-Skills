@@ -1,85 +1,42 @@
-# Handoff — Quantitative Trading Skills Repository
+# HANDOFF
 
-**Last updated:** 2026-10-15
+## Session 2026-10-15 — Market-impact cost fix (COMPLETED)
 
-## Current repository state
+### What was done
 
-- Default branch: `main`
-- Main package: `skills/quantitative-backtesting/` (strategies, scripts, tests, validation references)
-- Working tree: **clean** (all changes committed or stashed)
-- All tests passing: **224 passed, 0 failures** (64 warnings). This includes walk-forward/CPCV/Monte Carlo/reporting/data loader/performance/strategy builder tests, the real-data pipeline integration tests, the trading-costs sensitivity example tests, and the two new exposure-variant tests.
+The prior handoff's top unresolved item — "market impact cost (`--impact-coefficient`) is silently a no-op" — was a **real methodological defect**, not a documentation gap. I fixed the root cause and added regression coverage.
 
-## Recently verified durable progress
+**Root cause (two bugs in `_calculate_strategy_returns`, `skills/quantitative-backtesting/scripts/walk_forward.py:1147`):**
+1. `position_notional = position_changes * close` scaled the notional by the raw asset price (~$100) instead of portfolio equity (~$100k). The ratio `position_notional / ADV` was therefore ~1e-7 — five orders of magnitude below any meaningful threshold — so `impact_coefficient` (even at 5.0) produced zero measurable effect.
+2. The dict/panel branches never defined `close`, so any non-zero `impact_coefficient` on dict/panel data raised `UnboundLocalError`.
 
-1. **Short-capable strategy variant (borrow cost demonstration).** Added to `run_strategy_cost_sweep` in `trading_costs_robustness_example.py`. The SMA-crossover signals are inverted from flat (0) to short (-1), producing a short-capable strategy (positions ∈ {-1, 1}). Borrow costs (3% annual) reduce returns by -3.63% (Sharpe -0.291 → -0.353), confirming borrow costs apply to short exposure. Funding costs (2% annual) have zero effect — correctly, since gross exposure remains 1× (no leverage) and funding costs only apply to exposure exceeding 1×. Verified by `test_trading_costs_short_strategy_borrow_cost_effect`.
+**Fix:**
+- Added `initial_capital: float = 100000.0` parameter to `_calculate_strategy_returns`.
+- `position_notional = position_changes * equity`, where `equity = initial_capital * (1 + raw_returns).cumprod()` — the value of a fully-invested position at the current price, matching the original comment's stated intent.
+- Defined `close` in the dict branch (`data[first_key].reindex(common_index)["close"]`).
+- Propagated `initial_capital` to all 8 callers (walk_forward_analysis, parameter_optimization, cpcv_analysis, out_of_sample_validation, run_monte_carlo) so the CLI's `--impact-coefficient` now degrades returns as documented.
 
-2. **Leveraged strategy variant (funding cost demonstration).** Added to `run_strategy_cost_sweep` in `trading_costs_robustness_example.py`. Long-only SMA-crossover signals are scaled 2× (positions ∈ {0, 2}), giving gross exposure of 2×. Funding costs (2% annual) reduce returns by -2.02% (Sharpe -0.154 → -0.180), confirming funding costs apply to excess leverage. Verified by `test_trading_costs_levered_strategy_funding_cost_effect`.
+**Verification:**
+- Single-asset sweep: impact 0.0→5.0 degrades return -9.56%→-11.07% (was flat at -9.56%).
+- Dict/panel sweep: impact 0.0→5.0 degrades return 49.04%→38.61% (was UnboundLocalError).
+- CLI `optimize --impact-coefficient 1.0` vs `5.0`: rank-1 return 0.90% → -1.71%.
+- Full suite: **227 passed** (225 baseline + 2 new tests).
 
-3. **KEY FINDINGS section updated.** The example's summary banner now surfaces findings 3b (short-capable borrow cost effect) and 3c (leveraged funding cost effect) alongside the existing findings.
+**Files changed (4):**
+- `skills/quantitative-backtesting/scripts/walk_forward.py` — fix + docstring.
+- `skills/quantitative-backtesting/tests/test_walk_forward.py` — `test_market_impact_cost_reduces_returns_single_asset` (monotonic degradation + non-trivial sweep) and `test_market_impact_cost_reduces_returns_dict_panel` (dict path no longer raises; monotonic degradation).
+- `skills/quantitative-backtesting/examples/trading_costs_robustness_example.py` — market-impact sweep added to Section 1 (finding 3e) and `market_impact` block in structured JSON.
+- `skills/quantitative-backtesting/examples/README.md` — documents the impact sweep.
 
-4. **JSON summary extended.** The structured output now includes a `strategy_exposure_demonstrations` key with short/leveraged variant metrics.
+### Prior handoff status
+- Market-neutral borrow + funding demonstration (KEY FINDINGS 3d): **already complete** in the baseline — verified by running the example and the full test suite before making changes.
 
-5. **Documentation updated.** `examples/README.md` describes both exposure variants and their cost-sensitivity behavior.
+### What remains unresolved
+- None of the listed unresolved items are now blockers. The remaining items are **nice-to-have extensions**, not defects:
+  1. **Impact-cost sweep in Section 1** — now done (finding 3e).
+  2. **Real-data cost sweep example** — needs network/data; defer.
+  3. **Borrow/funding/impact sweep in monte-carlo/cpcv** — not wired; low priority.
+  4. **README mentions market-neutral variant** — now done.
 
-6. **Pre-existing verified progress from the prior session:**
-   - Automatic block size selection for stationary bootstrap (Politis & White 2004, Patton et al. 2009).
-   - Real-data integration pipeline (`examples/real_data_pipeline_example.py`) — full end-to-end workflow.
-   - Deflated Alpha Ratio (DAR) multiple-benchmark corrections across CPCV, walk-forward, OOS Monte Carlo, and direct deflated alpha computation.
-   - Trading costs & robustness sensitivity analysis example with positive-alpha scenario (DAR ∈ [0.333, 0.586] with -30%/−60% degraded-strategy benchmark drag).
-
-## Verification status
-
-- `test_data_loader.py`: 29/29
-- `test_performance.py`: 26/26
-- `test_reporting.py`: 42/42 (unittest OK)
-- `test_run_backtest.py`: 41/41
-- `test_strategy_builder.py`: 27/27
-- `test_walk_forward.py`: 28/28 (26 prior + 2 new: `test_trading_costs_short_strategy_borrow_cost_effect`, `test_trading_costs_levered_strategy_funding_cost_effect`)
-- `test_cpcv.py`: 16/16
-- `test_monte_carlo.py`: 14/14
-- `test_generate_sample_data.py`: 1/1
-- Full suite: **224 passed, 0 failures** (via `python3 -m pytest skills/quantitative-backtesting/tests/`)
-
-## What was actually verified
-
-- Ran full pytest suite on the quant backtesting package; all 224 tests pass with no regressions.
-- Executed `trading_costs_robustness_example.py` as a subprocess; exits cleanly (exit 0) with "TRADING COSTS SENSITIVITY ANALYSIS COMPLETE" banner and structured JSON output.
-- Verified the short-capable variant: with borrow_cost=0.03, return drops by -3.63% and Sharpe worsens from -0.291 to -0.353; with funding_cost=0.02, return is unchanged (+0.00% delta) because the short-only strategy has no excess leverage.
-- Verified the leveraged variant: with funding_cost=0.02 on 2× leveraged positions, return drops by -2.02% and Sharpe worsens from -0.154 to -0.180.
-- Confirmed both new regression tests pass individually.
-- Confirmed the `_calculate_strategy_returns` borrow/funding cost logic is correct: borrow costs apply to `positions.clip(upper=0).abs()` (short exposure), and funding costs apply to `(positions.abs() - 1).clip(lower=0)` (excess leverage beyond 1×).
-
-## What remains unresolved
-
-- **Market impact cost sensitivity.** The `impact_coefficient` parameter is swept only in the CPCV high-cost regime but not in a dedicated sensitivity analysis. A future example could demonstrate how market impact (proportional to position_notional / ADV) degrades performance for larger positions or less liquid assets.
-- **Borrow/funding cost interaction on a short-and-levered strategy.** Neither the short-only nor the long-only-levered variant exercises BOTH borrow and funding costs simultaneously. A market-neutral strategy (short one asset, long another, with leverage) would carry both short exposure and excess leverage concurrently.
-- **Cross-cost interaction effects.** The current demonstrations vary one cost at a time (borrow vs funding). A full factorial borrow × funding × commission × slippage grid on an exposure-matched strategy could reveal non-linear interaction effects.
-- Pre-existing matplotlib-dependent reporting tests are environment-dependent; in this environment reporting tests that don't require plotting all pass.
-
-## Next agent task
-
-**Demonstrate combined borrow + funding costs on a market-neutral leveraged strategy.**
-
-The current examples demonstrate borrow costs on a short-only strategy (no leverage) and funding costs on a long-only leveraged strategy (no short). Neither exercises both simultaneously. A market-neutral pairs-trading strategy — short one asset, long another, with 2× gross exposure — would carry both short exposure (subject to borrow costs) and excess leverage (subject to funding costs) concurrently, completing the borrow/funding cost demonstration matrix.
-
-### Specific approach
-
-1. **Add a market-neutral cost demonstration** to `run_strategy_cost_sweep` in `trading_costs_robustness_example.py`. Construct a synthetic market-neutral signal: generate SMA-crossover signals on two assets, assign +1 (long) when fast > slow on asset A and -1 (short) when fast < slow on asset B, scaled to 2× gross exposure. Use `_calculate_strategy_returns` with both `borrow_cost=0.03` and `funding_cost=0.02` simultaneously, and compare against a zero-cost baseline. Assert both costs produce a measurable return reduction.
-
-2. **Add a regression test** `test_trading_costs_market_neutral_borrow_and_funding_effect` in `test_walk_forward.py` that verifies: (a) a market-neutral leveraged strategy has both short exposure and gross exposure > 1, and (b) applying both borrow_cost and funding_cost reduces returns compared to the zero-cost baseline. Register it in the `main()` test list.
-
-3. **Surface the combined-cost finding** in the example's KEY FINDINGS section as finding 3d.
-
-### Evidence/constraints
-
-- Reuse `_calculate_strategy_returns` (already accepts both `borrow_cost` and `funding_cost`).
-- The synthetic universe from `_make_universe()` provides `N_ASSETS=8` symbols; use `symbols[3]` and `symbols[4]` as the long/short pair for the market-neutral strategy.
-- Keep changes within `examples/trading_costs_robustness_example.py` + `tests/test_walk_forward.py`. Do NOT modify core logic in `walk_forward.py`.
-- Verify with `python3 -m pytest skills/quantitative-backtesting/tests/test_walk_forward.py -q` (all tests pass) and `python3 -m pytest skills/quantitative-backtesting/tests/ -q` (224+ tests pass).
-- Verify with `python3 skills/quantitative-backtesting/examples/trading_costs_robustness_example.py` (exit 0, KEY FINDINGS 3d present).
-
-### Key files
-
-- `skills/quantitative-backtesting/examples/trading_costs_robustness_example.py` — modify `run_strategy_cost_sweep` to add the market-neutral demonstration
-- `skills/quantitative-backtesting/tests/test_walk_forward.py` — add the regression test near line ~1545 (after `test_trading_costs_levered_strategy_funding_cost_effect`); register it in the `main()` test list
-- `skills/quantitative-backtesting/scripts/walk_forward.py:1081` — `_calculate_strategy_returns` borrow/funding cost API reference
+### Next task (suggested)
+**Add a `--impact-coefficient` sweep to the monte-carlo and cpcv CLI paths** (item 3 above), so capacity/impact sensitivity is part of the standard robustness workflow rather than only the standalone example. This is bounded: the `impact_coefficient` argument already exists and is already threaded through `run_monte_carlo`/`run_cpcv`/`run_walk_forward`/`run_out_of_sample_validation`; only the sweep loop and result capture are missing. Evidence: `--impact-coefficient` is parsed at `walk_forward.py:3735` and threaded to all four `run_*` entry points, but none of them vary it.
