@@ -2124,8 +2124,17 @@ def run_cpcv(args) -> int:
     bench_slippage = getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage
     bench_expense_ratio = getattr(args, "benchmark_expense_ratio", None) if getattr(args, "benchmark_expense_ratio", None) is not None else 0.0
     if getattr(args, "benchmark", None):
-        print(f"Loading benchmark data from {args.benchmark}...")
-        benchmark, benchmark_provenance = _load_benchmark(args.benchmark, total_return_benchmark)
+        benchmark_paths = args.benchmark if isinstance(args.benchmark, list) else [args.benchmark]
+        print(f"Loading benchmark data from {', '.join(benchmark_paths)}...")
+        if len(benchmark_paths) == 1:
+            benchmark, benchmark_provenance = _load_benchmark(benchmark_paths[0], total_return_benchmark)
+        else:
+            benchmark = []
+            benchmark_provenance = []
+            for bench_file in benchmark_paths:
+                b, prov = _load_benchmark(bench_file, total_return_benchmark)
+                benchmark.append(b)
+                benchmark_provenance.append(prov)
 
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
@@ -2232,13 +2241,17 @@ def run_cpcv(args) -> int:
             "benchmark_commission": bench_commission,
             "benchmark_slippage": bench_slippage,
             "benchmark_expense_ratio": bench_expense_ratio,
+            "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
         },
     }
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
         summary_data["point_in_time_validation"] = pit_results
     if benchmark_provenance is not None:
-        summary_data["benchmark_provenance"] = benchmark_provenance.to_dict()
+        if isinstance(benchmark_provenance, list):
+            summary_data["benchmark_provenance"] = [prov.to_dict() for prov in benchmark_provenance]
+        else:
+            summary_data["benchmark_provenance"] = benchmark_provenance.to_dict()
     with open(summary_path, "w") as f:
         json.dump(summary_data, f, indent=2, default=str)
     print(f"CPCV summary saved to: {summary_path}")

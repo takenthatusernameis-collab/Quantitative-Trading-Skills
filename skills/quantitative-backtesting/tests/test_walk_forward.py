@@ -594,6 +594,127 @@ def test_out_of_sample_validation_with_splits():
         assert test_bench.get("benchmark_cost_is_periodic") is True
 
 
+def test_calculate_metrics_deflated_alpha_with_benchmark_list():
+    """calculate_metrics with benchmark_list produces deflated_alpha via walk_forward.deflated_alpha_ratio.
+
+    This integration test verifies the deflated alpha path through calculate_metrics
+    when multiple benchmarks are provided via benchmark_list. The test generates
+    correlated return series, passes them to calculate_metrics, and asserts the
+    deflated_alpha dict has all expected fields with sensible values.
+    """
+    from performance import calculate_metrics
+
+    # Generate correlated returns for strategy and multiple benchmarks
+    np.random.seed(42)
+    periods = 252
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+
+    # Strategy returns with some skill
+    strategy_rets = pd.Series(
+        np.random.normal(0.0008, 0.015, periods),
+        index=dates
+    )
+
+    # Benchmark 1: correlated with strategy
+    bench1 = strategy_rets * 0.6 + pd.Series(np.random.normal(0.0003, 0.01, periods), index=dates)
+    bench1 = bench1.iloc[: len(strategy_rets)]
+
+    # Benchmark 2: different correlation structure
+    bench2 = strategy_rets * 0.4 + pd.Series(np.random.normal(0.0005, 0.012, periods), index=dates)
+    bench2 = bench2.iloc[: len(strategy_rets)]
+
+    metrics = calculate_metrics({
+        "returns": strategy_rets,
+        "benchmark_list": [bench1, bench2],
+        "config": {
+            "total_return_benchmark": False,
+            "benchmark_commission": 0.0,
+            "benchmark_slippage": 0.0,
+            "benchmark_expense_ratio": 0.0,
+        },
+    })
+
+    # Verify deflated_alpha is present with all expected fields
+    assert "deflated_alpha" in metrics, f"deflated_alpha missing from metrics. Keys: {list(metrics.keys())}"
+    da = metrics["deflated_alpha"]
+
+    required_keys = (
+        "deflated_alpha_ratio", "p_value", "alpha", "expected_max_alpha",
+        "n_benchmarks", "n_observations", "skewness", "kurtosis", "z_score"
+    )
+    for key in required_keys:
+        assert key in da, f"missing key {key} in deflated_alpha"
+
+    # Verify values are sensible
+    assert da["n_benchmarks"] == 2, f"Expected n_benchmarks=2, got {da['n_benchmarks']}"
+    assert 0.0 <= da["deflated_alpha_ratio"] <= 1.0, f"DAR out of range: {da['deflated_alpha_ratio']}"
+    assert 0.0 <= da["p_value"] <= 1.0, f"p-value out of range: {da['p_value']}"
+    assert np.isfinite(da["skewness"]), f"skewness not finite: {da['skewness']}"
+    assert np.isfinite(da["kurtosis"]), f"kurtosis not finite: {da['kurtosis']}"
+    assert np.isfinite(da["alpha"]), f"alpha not finite: {da['alpha']}"
+    assert da["n_observations"] == periods, f"Expected n_observations={periods}, got {da['n_observations']}"
+
+    # Verify individual benchmark metrics are also present
+    assert "benchmark_0_benchmark_total_return" in metrics
+    assert "benchmark_1_benchmark_total_return" in metrics
+    assert "benchmark_0_alpha" in metrics
+    assert "benchmark_1_alpha" in metrics
+
+
+def test_cli_cpcv_benchmark_cost_is_periodic():
+    """CLI end-to-end test for CPCV subcommand with --benchmark-cost-is-periodic flag.
+
+    Verifies that the flag is correctly parsed and propagated through the
+    CPCV pipeline, and that the benchmark_cost_is_periodic field is recorded
+    in the output summary.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        bench_path = os.path.join(tmpdir, "benchmark.csv")
+        _write_ohlcv_csv(csv_path, periods=800)
+        _write_benchmark_csv(bench_path, periods=800)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "cpcv",
+            "--data", csv_path,
+            "--benchmark", bench_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--benchmark-commission", "0.001",
+            "--benchmark-slippage", "0.001",
+            "--benchmark-cost-is-periodic",
+            "--n-splits", "5",
+            "--test-size", "0.2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, "CLI cpcv with --benchmark-cost-is-periodic should exit 0"
+
+        # Check that the summary JSON contains the benchmark_cost_is_periodic flag
+        summary_path = os.path.join(out_dir, "cpcv_summary.json")
+        assert os.path.exists(summary_path), "cpcv_summary.json not written"
+        with open(summary_path) as f:
+            summary = json.load(f)
+
+        # The flag should be in the summary (added by _add_benchmark_to_summary)
+        assert "summary" in summary, "summary missing from cpcv_summary.json"
+        cpcv_summary = summary["summary"]
+        assert "benchmark_cost_is_periodic" in cpcv_summary, \
+            f"benchmark_cost_is_periodic missing from summary. Keys: {list(cpcv_summary.keys())}"
+        assert cpcv_summary["benchmark_cost_is_periodic"] is True, \
+            f"Expected benchmark_cost_is_periodic=True, got {cpcv_summary['benchmark_cost_is_periodic']}"
+
+        # Also verify it's in the config
+        assert "config" in summary, "config missing from summary"
+        assert "benchmark_cost_is_periodic" in summary["config"], \
+            f"benchmark_cost_is_periodic missing from config. Keys: {list(summary['config'].keys())}"
+        assert summary["config"]["benchmark_cost_is_periodic"] is True, \
+            f"Expected benchmark_cost_is_periodic=True in config, got {summary['config']['benchmark_cost_is_periodic']}"
+
+
 # Need to import patch for mocking
 from unittest.mock import patch
 
@@ -609,6 +730,8 @@ def main() -> int:
         ("test_benchmark_stats_with_splits_uses_adjusted_returns", test_benchmark_stats_with_splits_uses_adjusted_returns),
         ("test_add_benchmark_to_summary_splits_path", test_add_benchmark_to_summary_splits_path),
         ("test_out_of_sample_validation_with_splits", test_out_of_sample_validation_with_splits),
+        ("test_calculate_metrics_deflated_alpha_with_benchmark_list", test_calculate_metrics_deflated_alpha_with_benchmark_list),
+        ("test_cli_cpcv_benchmark_cost_is_periodic", test_cli_cpcv_benchmark_cost_is_periodic),
     ]
 
     failures = 0
