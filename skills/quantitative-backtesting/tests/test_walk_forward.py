@@ -598,9 +598,9 @@ def test_out_of_sample_validation_multiple_benchmarks_deflated_alpha():
     """out_of_sample_validation with multiple benchmarks surfaces Deflated Alpha
     in the summary and preserves backward compatibility with deflated_alphas list.
     """
-    data = _make_ohlcv_data(periods=500, seed=42)
-    bench1 = _make_benchmark_data(periods=500, seed=99)
-    bench2 = _make_benchmark_data(periods=500, seed=7)
+    data = _make_ohlcv_data(periods=1000, seed=42)
+    bench1 = _make_benchmark_data(periods=1000, seed=99)
+    bench2 = _make_benchmark_data(periods=1000, seed=7)
     factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
     param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
 
@@ -1004,7 +1004,7 @@ def test_cli_walk_forward_multiple_benchmarks():
         _write_benchmark_csv(bench2_path, periods=800, seed=7)
         out_dir = os.path.join(tmpdir, "out")
         argv = [
-            "walk_forward", "walk_forward",
+            "walk_forward", "walk-forward",
             "--data", csv_path,
             "--benchmark", bench1_path, bench2_path,
             "--strategy", "sma_crossover",
@@ -1039,6 +1039,54 @@ def test_cli_walk_forward_multiple_benchmarks():
         assert len(summary["benchmark_metrics"]) == 2
 
 
+def test_cli_optimize_multiple_benchmarks():
+    """CLI optimize subcommand accepts multiple --benchmark files, does not crash
+    in the per-combo benchmark block or provenance save, and writes a
+    parameter_optimization.json whose best result includes a cross-benchmark
+    deflated_alpha correction plus per-benchmark metrics.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        bench1_path = os.path.join(tmpdir, "bench1.csv")
+        bench2_path = os.path.join(tmpdir, "bench2.csv")
+        _write_ohlcv_csv(csv_path, periods=800)
+        _write_benchmark_csv(bench1_path, periods=800, seed=99)
+        _write_benchmark_csv(bench2_path, periods=800, seed=7)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "optimize",
+            "--data", csv_path,
+            "--benchmark", bench1_path, bench2_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--benchmark-commission", "0.001",
+            "--benchmark-slippage", "0.001",
+            "--benchmark-cost-is-periodic",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI optimize with multiple benchmarks should exit 0, got {rc}"
+        results_path = os.path.join(out_dir, "parameter_optimization.json")
+        assert os.path.exists(results_path), "parameter_optimization.json not written"
+        with open(results_path) as f:
+            payload = json.load(f)
+
+        best = payload[0]
+        assert "deflated_alpha" in best, "best result should have deflated_alpha"
+        da = best["deflated_alpha"]
+        assert da["n_benchmarks"] == 2
+        assert 0.0 <= da["deflated_alpha_ratio"] <= 1.0
+        assert 0.0 <= da["p_value"] <= 1.0
+
+        assert "benchmark_metrics" in best, "best result should have benchmark_metrics"
+        bm = best["benchmark_metrics"]
+        assert isinstance(bm, list)
+        assert len(bm) == 2
+
+
 # Need to import patch for mocking
 from unittest.mock import patch
 
@@ -1063,6 +1111,7 @@ def main() -> int:
         ("test_cli_cpcv_multiple_benchmarks", test_cli_cpcv_multiple_benchmarks),
         ("test_out_of_sample_validation_multiple_benchmarks_deflated_alpha", test_out_of_sample_validation_multiple_benchmarks_deflated_alpha),
         ("test_cli_walk_forward_multiple_benchmarks", test_cli_walk_forward_multiple_benchmarks),
+        ("test_cli_optimize_multiple_benchmarks", test_cli_optimize_multiple_benchmarks),
     ]
 
     failures = 0

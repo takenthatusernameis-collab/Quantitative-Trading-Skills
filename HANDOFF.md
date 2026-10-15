@@ -326,3 +326,121 @@ Evidence and constraints:
 - `out_of_sample_validation` already typehints `benchmark: Optional[List[pd.DataFrame]]` (walk_forward.py:1627); `run_out_of_sample_validation` already loads `--benchmark nargs="+"` as a list. So multi-benchmark OOS is mostly wired end-to-end — only the run_walk_forward/run_parameter_optimization loaders and the OOS deflation dedup remain.
 - Verify with `python3 skills/quantitative-backtesting/tests/test_walk_forward.py` plus the full suite; ensure the new refactor keeps all 11 prior OOS tests green (they assert `benchmark_cost_is_periodic`, `test_benchmark`, `summary`).
 - Do NOT change the single-benchmark return shape (`test_performance`/summary keys) for the single-DataFrame `benchmark` case.
+
+---
+
+## Session work (this agent — 2026-10-15, continuation)
+
+The previous "Next agent task" (unify multi-benchmark deflated-alpha logic and
+make the CLI path consistent with CPCV) is implemented and verified.  Two tests
+were already present in the repo but failing: `test_out_of_sample_validation_multiple_benchmarks_deflated_alpha`
+(failed: data too short — 500 periods with train_frac=0.6 yields 300 training bars,
+insufficient for the default 12/3/3 month walk-forward windows, so `selected_params`
+was `None` and the function hit an early return with `test_benchmark=None`) and
+`test_cli_walk_forward_multiple_benchmarks` (used the wrong subcommand `walk_forward`
+instead of `walk-forward`, and `run_walk_forward`'s post-call benchmark block
+crashed on list benchmarks).
+
+### What changed (all in `skills/quantitative-backtesting/scripts/walk_forward.py` unless noted)
+
+1. **Fixed `test_out_of_sample_validation_multiple_benchmarks_deflated_alpha`** (test file):
+   increased data and benchmark `periods` from 500 to 1000 so the 600-bar training
+   set accommodates multiple 12/3/3-month walk-forward windows and `selected_params`
+   is no longer `None`.
+
+2. **Fixed `test_cli_walk_forward_multiple_benchmarks`** (test file): corrected the
+   subcommand from `"walk_forward"` (underscore) to `"walk-forward"` (hyphen),
+   matching the CLI's argparse choices.
+
+3. **Fixed `run_walk_forward` post-call benchmark block**: mirrored `run_cpcv`'s
+   list-aware pattern — when `benchmark` is a list, iterate benchmarks to compute
+   aligned returns and defensively call `_benchmark_list_alpha_correction` if
+   `walk_forward_analysis` did not already surface `summary["deflated_alpha"]`;
+   single-benchmark path unchanged (backward compatible).
+
+4. **Fixed `run_walk_forward` provenance serialization**: handle list
+   `benchmark_provenance` (list of DataFrames) alongside the single-DataFrame case,
+   mirroring `run_cpcv`.
+
+5. **Added `benchmark_cost_is_periodic` to `run_walk_forward` config**: both in the
+   summary JSON config and the report config passed to `calculate_metrics`,
+   matching `run_cpcv`.
+
+6. **Fixed `parameter_optimization`** to handle list benchmarks: pre-compute section
+   skips list benchmarks (delegated to per-combo `_benchmark_list_alpha_correction`);
+   per-combo section branches on `isinstance(benchmark, list)` with
+   `_benchmark_list_alpha_correction` for multiple benchmarks and the original
+   `_benchmark_stats` path for single benchmarks.
+
+7. **Fixed `run_parameter_optimization` post-call benchmark block**: mirrors
+   `run_walk_forward`/`run_out_of_sample_validation` multi-benchmark printing —
+   detects `benchmark_metrics` list in the best result and prints per-benchmark
+   stats (original vs. corrected p-values) plus an aggregate `deflated_alpha` line.
+
+8. **Fixed `run_parameter_optimization` provenance serialization**: list-aware
+   `benchmark_provenance` handling for the benchmark_provenance.json artifact.
+
+9. **Fixed `out_of_sample_validation` summary `deflated_alpha`**: previously set
+   `summary["deflated_alpha"]` to `primary_bench['deflated_alpha']` (a float — the
+   DAR ratio value); now uses `correction_result["deflated_alpha"]` (the full dict
+   with `n_benchmarks`, `deflated_alpha_ratio`, `p_value`, `expected_max_alpha`,
+   `skewness`, `kurtosis`, `z_score`, `n_observations`).  Also changed
+   `summary["deflated_alphas"]` to store full per-benchmark dicts (not just the
+   DAR float) so backward-compatible entries carry all correction fields.
+
+10. **Added Bonferroni fallback defaults in `_benchmark_list_alpha_correction`**:
+    the fallback path (too-few-trial-alphas) and the except branch both now
+    set `deflated_alpha` and `expected_max_alpha` to `None` via `setdefault`,
+    so per-benchmark dicts are consistently shaped.
+
+### Tests added (all in `tests/test_walk_forward.py`)
+
+- `test_cli_optimize_multiple_benchmarks` — end-to-end `walk_forward optimize` CLI
+  with two `--benchmark` paths: exit 0, `parameter_optimization.json` written,
+  best result has `deflated_alpha` dict (n_benchmarks=2, DAR in [0,1], p-value in
+  [0,1]) and `benchmark_metrics` list (len 2).
+
+### Verification status (this agent)
+
+- `test_data_loader.py`: 29/29 passed
+- `test_performance.py`: 26/26 passed
+- `test_reporting.py`: 42/42 passed (unittest OK)
+- `test_run_backtest.py`: 41/41 passed
+- `test_strategy_builder.py`: 27/27 passed
+- `test_walk_forward.py`: 18/18 passed
+- `test_cpcv.py`: 16/16 passed
+- `test_monte_carlo.py`: 7/7 passed
+- `test_generate_sample_data.py`: 1/1 passed
+- `examples/deflated_alpha_example.py`, `examples/multiple_benchmarks_example.py`,
+  `examples/full_pipeline_example.py`: all run end-to-end, exit 0
+- `verify_end_to_end.py`: passes
+
+All quant tests pass (207/207). No regressions introduced.
+
+### What remains unresolved
+
+- `out_of_sample_validation` still computes its multiple-benchmark deflation
+  inline (lines 1940–1980) rather than reusing a single call to
+  `_benchmark_list_alpha_correction` for the summary-level correction.  The per-benchmark
+  stats are already computed inside the `if isinstance(benchmark, list):` block
+  (line 1891), but the summary-building block re-iterates `test_benchmark` to
+  collect `alpha_pvalues`, `deflated_alphas`, etc.  A future refactor could
+  surface `correction_result["deflated_alpha"]` and
+  `correction_result["per_benchmark"]` (as `benchmark_metrics`) directly on the
+  summary at line 1899, eliminating the inline collection loop.  Left intact to
+  preserve the backward-compatible `deflated_alphas` (list) key shape.
+- `run_monte_carlo` (line 2992) does not support multiple `--benchmark` files;
+  it loads a single benchmark only.  Not in this task's scope; no test covers it.
+- The `walk-forward` and `optimize` CLI subcommands' `--benchmark nargs="+"`
+  argument: `run_walk_forward` and `run_parameter_optimization` now correctly
+  handle list benchmarks, but `run_out_of_sample_validation` (line 3224) always
+  treats `args.benchmark` as a list (no `isinstance` check).  This is intentional
+  (OOS always expects multiple) but worth noting for consistency.
+
+### Next agent task
+
+Refactor `out_of_sample_validation` to surface `summary["benchmark_metrics"]`
+(consistent with CPCV/walk-forward) and optionally simplify the inline deflation
+collection at lines 1940–1980 to reuse `correction_result` directly.  Add an
+assertion for `summary["benchmark_metrics"]` (len == n_benchmarks) to
+`test_out_of_sample_validation_multiple_benchmarks_deflated_alpha`.

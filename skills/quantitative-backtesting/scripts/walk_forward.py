@@ -632,11 +632,12 @@ def parameter_optimization(
 
     # Pre-compute benchmark returns if benchmark provided
     benchmark_returns = None
-    if benchmark is not None:
+    if benchmark is not None and not (isinstance(benchmark, list) and len(benchmark) > 1):
+        bench = benchmark[0] if isinstance(benchmark, list) else benchmark
         if total_return_benchmark:
-            benchmark_returns = _compute_benchmark_total_return(benchmark)
+            benchmark_returns = _compute_benchmark_total_return(bench)
         else:
-            benchmark_returns = benchmark["close"].pct_change()
+            benchmark_returns = bench["close"].pct_change()
 
     param_names = list(param_grid.keys())
     param_values = list(param_grid.values())
@@ -677,16 +678,32 @@ def parameter_optimization(
                 }
 
                 # Add benchmark comparison metrics if benchmark provided
-                if benchmark_returns is not None and len(benchmark_returns) > 0:
-                    bench_stats = _benchmark_stats(
-                        returns, benchmark_returns, ann_factor,
-                        total_return_benchmark=total_return_benchmark,
-                        benchmark_commission=benchmark_commission,
-                        benchmark_slippage=benchmark_slippage,
-                        benchmark_expense_ratio=benchmark_expense_ratio,
-                        benchmark_cost_is_periodic=benchmark_cost_is_periodic,
-                    )
-                    result.update(bench_stats)
+                if benchmark is not None:
+                    if isinstance(benchmark, list) and len(benchmark) > 1:
+                        correction = _benchmark_list_alpha_correction(
+                            returns, benchmark,
+                            total_return_benchmark=total_return_benchmark,
+                            benchmark_commission=benchmark_commission,
+                            benchmark_slippage=benchmark_slippage,
+                            benchmark_expense_ratio=benchmark_expense_ratio,
+                            benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+                        )
+                        primary_stats = correction["per_benchmark"][0] if correction["per_benchmark"] else None
+                        if primary_stats is not None:
+                            result.update(primary_stats)
+                        result["benchmark_metrics"] = correction["per_benchmark"]
+                        if correction["deflated_alpha"] is not None:
+                            result["deflated_alpha"] = correction["deflated_alpha"]
+                    elif benchmark_returns is not None and len(benchmark_returns) > 0:
+                        bench_stats = _benchmark_stats(
+                            returns, benchmark_returns, ann_factor,
+                            total_return_benchmark=total_return_benchmark,
+                            benchmark_commission=benchmark_commission,
+                            benchmark_slippage=benchmark_slippage,
+                            benchmark_expense_ratio=benchmark_expense_ratio,
+                            benchmark_cost_is_periodic=benchmark_cost_is_periodic,
+                        )
+                        result.update(bench_stats)
 
                 results.append(result)
                 if apply_deflation:
@@ -1868,6 +1885,7 @@ def out_of_sample_validation(
 
     # Benchmark comparison on test set
     test_benchmark = None
+    correction_result = None
     if benchmark is not None and len(test_returns) > 0:
         if isinstance(benchmark, list):
             # Use the shared helper for multiple-testing correction
@@ -1934,8 +1952,7 @@ def out_of_sample_validation(
                 if 'alpha_pvalue_original' in bench_result:
                     alpha_pvalues_original.append(bench_result['alpha_pvalue_original'])
                     alpha_pvalues.append(bench_result['alpha_pvalue'])  # corrected
-                    if 'deflated_alpha' in bench_result:
-                        deflated_alphas.append(bench_result['deflated_alpha'])
+                    deflated_alphas.append(bench_result)
                     if 'expected_max_alpha' in bench_result:
                         expected_max_alphas.append(bench_result['expected_max_alpha'])
                 elif 'alpha_pvalue' in bench_result:
@@ -1949,13 +1966,16 @@ def out_of_sample_validation(
         if expected_max_alphas:
             summary["expected_max_alphas"] = expected_max_alphas
 
-        # Additionally, provide the canonical single deflated_alpha for the primary benchmark
-        # (first benchmark in the list) for consistency with CPCV and walk_forward pipelines
-        if test_benchmark and len(test_benchmark) > 0 and test_benchmark[0] is not None:
-            primary_bench = test_benchmark[0]
-            if 'deflated_alpha' in primary_bench and primary_bench['deflated_alpha'] is not None:
-                summary["deflated_alpha"] = primary_bench['deflated_alpha']
-                # Also copy related fields for completeness
+        # Additionally, provide the canonical aggregate deflated_alpha dict
+        # (with n_benchmarks, DAR, p_value, etc.) for consistency with CPCV
+        # and walk_forward pipelines, which surfaced the correction_result's
+        # aggregate deflated_alpha.
+        primary_bench = test_benchmark[0] if test_benchmark and len(test_benchmark) > 0 and test_benchmark[0] is not None else None
+        if correction_result is not None and primary_bench is not None:
+            aggregate_da = correction_result["deflated_alpha"]
+            if aggregate_da is not None:
+                summary["deflated_alpha"] = aggregate_da
+                # Also copy related per-benchmark fields for completeness
                 if 'alpha_pvalue' in primary_bench:
                     summary["alpha_pvalue"] = primary_bench['alpha_pvalue']
                 if 'alpha_pvalue_original' in primary_bench:
@@ -2609,16 +2629,22 @@ def _benchmark_list_alpha_correction(
                         corrected_p = min(p_values[i] * n_benchmarks, 1.0)
                         bench_result["alpha_pvalue_original"] = p_values[i]
                         bench_result["alpha_pvalue"] = corrected_p
-                else:
-                    corrected_p = min(p_values[i] * n_benchmarks, 1.0)
-                    bench_result["alpha_pvalue_original"] = p_values[i]
-                    bench_result["alpha_pvalue"] = corrected_p
+                        bench_result.setdefault("deflated_alpha", None)
+                        bench_result.setdefault("expected_max_alpha", None)
+                    else:
+                        corrected_p = min(p_values[i] * n_benchmarks, 1.0)
+                        bench_result["alpha_pvalue_original"] = p_values[i]
+                        bench_result["alpha_pvalue"] = corrected_p
+                        bench_result.setdefault("deflated_alpha", None)
+                        bench_result.setdefault("expected_max_alpha", None)
             elif bench_result is not None:
                 # Fallback (Bonferroni) when too few trial alphas for the
                 # cross-sectional estimator.
                 corrected_p = min(p_values[i] * n_benchmarks, 1.0)
                 bench_result["alpha_pvalue_original"] = p_values[i]
                 bench_result["alpha_pvalue"] = corrected_p
+                bench_result.setdefault("deflated_alpha", None)
+                bench_result.setdefault("expected_max_alpha", None)
 
         # Aggregate Deflated Alpha for the primary (first) benchmark.
         primary = per_benchmark[0] if per_benchmark and per_benchmark[0] is not None else None
@@ -2716,33 +2742,59 @@ def run_walk_forward(args) -> int:
     # Compute benchmark comparison metrics if benchmark provided
     benchmark_returns = None
     if benchmark is not None and len(results["oos_returns"]) > 0:
-        benchmark_returns = _compute_benchmark_returns(benchmark, results["oos_returns"], total_return_benchmark)
-        if benchmark_returns is not None:
-            # Add benchmark metrics to summary
-            results["summary"] = _add_benchmark_to_summary(
-                results["summary"], results["oos_returns"], benchmark_returns,
-                commission=bench_commission, slippage=bench_slippage,
-                benchmark_expense_ratio=bench_expense_ratio, total_return_benchmark=total_return_benchmark,
-                benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
-                benchmark_data=benchmark,
-            )
-            print(
-                f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
-            )
-            print(
-                f"Alpha (annualized): {results['summary'].get('alpha', 'N/A'):.2%}"
-            )
-            print(
-                f"Beta: {results['summary'].get('beta', 'N/A'):.4f}"
-            )
-            pval = results["summary"].get("alpha_pvalue")
-            print(
-                f"Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
-            )
-            rs = results["summary"].get("r_squared")
-            print(
-                f"R-squared: {rs if rs is None else f'{rs:.4f}'}"
-            )
+        if isinstance(benchmark, list):
+            # Multiple benchmarks: the aggregate Deflated Alpha comparison is
+            # already computed inside walk_forward_analysis; expose the aligned
+            # benchmark returns to calculate_metrics (which surfaces the
+            # canonical deflated_alpha via its benchmark_list path).
+            benchmark_returns_list = []
+            for b in benchmark:
+                br = _compute_benchmark_returns(b, results["oos_returns"], total_return_benchmark)
+                if br is not None:
+                    benchmark_returns_list.append(br)
+            if benchmark_returns_list and results["summary"].get("deflated_alpha") is None:
+                # Defensive: ensure a deflated_alpha surfaces even if
+                # walk_forward_analysis did not compute one (e.g. degenerate
+                # returns).
+                correction = _benchmark_list_alpha_correction(
+                    results["oos_returns"], benchmark,
+                    total_return_benchmark=total_return_benchmark,
+                    benchmark_commission=bench_commission,
+                    benchmark_slippage=bench_slippage,
+                    benchmark_expense_ratio=bench_expense_ratio,
+                    benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+                )
+                if correction["deflated_alpha"] is not None:
+                    results["summary"]["deflated_alpha"] = correction["deflated_alpha"]
+                results["summary"]["benchmark_metrics"] = correction["per_benchmark"]
+        else:
+            benchmark_returns = _compute_benchmark_returns(benchmark, results["oos_returns"], total_return_benchmark)
+            if benchmark_returns is not None:
+                # Add benchmark metrics to summary
+                results["summary"] = _add_benchmark_to_summary(
+                    results["summary"], results["oos_returns"], benchmark_returns,
+                    commission=bench_commission, slippage=bench_slippage,
+                    benchmark_expense_ratio=bench_expense_ratio, total_return_benchmark=total_return_benchmark,
+                    benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+                    benchmark_data=benchmark,
+                )
+                print(
+                    f"Benchmark Correlation: {results['summary'].get('correlation_with_benchmark', 'N/A'):.4f}"
+                )
+                print(
+                    f"Alpha (annualized): {results['summary'].get('alpha', 'N/A'):.2%}"
+                )
+                print(
+                    f"Beta: {results['summary'].get('beta', 'N/A'):.4f}"
+                )
+                pval = results["summary"].get("alpha_pvalue")
+                print(
+                    f"Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
+                )
+                rs = results["summary"].get("r_squared")
+                print(
+                    f"R-squared: {rs if rs is None else f'{rs:.4f}'}"
+                )
 
     print(f"Number of walk-forward periods: {results['summary']['n_periods']}")
     print(f"Total OOS Return: {results['summary']['total_oos_return']:.2%}")
@@ -2790,13 +2842,17 @@ def run_walk_forward(args) -> int:
             "benchmark_commission": bench_commission,
             "benchmark_slippage": bench_slippage,
             "benchmark_expense_ratio": bench_expense_ratio,
+            "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
         },
     }
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
         summary_data["point_in_time_validation"] = pit_results
     if benchmark_provenance is not None:
-        summary_data["benchmark_provenance"] = benchmark_provenance.to_dict()
+        if isinstance(benchmark_provenance, list):
+            summary_data["benchmark_provenance"] = [bp.to_dict() for bp in benchmark_provenance if bp is not None]
+        else:
+            summary_data["benchmark_provenance"] = benchmark_provenance.to_dict()
     with open(summary_path, "w") as f:
         json.dump(summary_data, f, indent=2, default=str)
     print(f"Walk-forward summary saved to: {summary_path}")
@@ -2816,6 +2872,7 @@ def run_walk_forward(args) -> int:
                 "total_return_benchmark": total_return_benchmark,
                 "benchmark_commission": bench_commission,
                 "benchmark_slippage": bench_slippage,
+                "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
             },
         }
         if benchmark_returns is not None:
@@ -2911,29 +2968,71 @@ def run_parameter_optimization(args) -> int:
     # Print benchmark comparison summary if benchmark provided
     if benchmark is not None and results and 'alpha' in results[0]:
         best = results[0]
+        bench_str = f"{len(benchmark)} benchmarks" if isinstance(benchmark, list) and len(benchmark) > 1 else "benchmark"
         print(
-            f"\nBenchmark Comparison (best params):"
+            f"\nBenchmark Comparison (best params, {bench_str}):"
         )
-        print(
-            f"  Correlation: {best.get('correlation_with_benchmark', 'N/A'):.4f}"
-        )
-        print(
-            f"  Alpha (annualized): {best.get('alpha', 'N/A'):.2%}"
-        )
-        print(
-            f"  Beta: {best.get('beta', 'N/A'):.4f}"
-        )
-        pval = best.get("alpha_pvalue")
-        print(
-            f"  Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
-        )
-        rs = best.get("r_squared")
-        print(
-            f"  R-squared: {rs if rs is None else f'{rs:.4f}'}"
-        )
-        ir = best.get("information_ratio")
-        if ir is not None and np.isfinite(ir):
-            print(f"  Information Ratio: {ir:.4f}")
+        if isinstance(best.get("benchmark_metrics"), list):
+            # Multiple benchmarks
+            for i, bench_result in enumerate(best["benchmark_metrics"]):
+                if bench_result is not None:
+                    print(
+                        f"  Benchmark {i+1}:"
+                    )
+                    print(
+                        f"    Correlation: {bench_result.get('correlation_with_benchmark', 'N/A'):.4f}"
+                    )
+                    print(
+                        f"    Alpha (annualized): {bench_result.get('alpha', 'N/A'):.2%}"
+                    )
+                    print(
+                        f"    Beta: {bench_result.get('beta', 'N/A'):.4f}"
+                    )
+                    if 'alpha_pvalue_original' in bench_result:
+                        print(
+                            f"    Alpha p-value (original): {bench_result['alpha_pvalue_original'] if bench_result['alpha_pvalue_original'] is None else f'{bench_result['alpha_pvalue_original']:.4f}'}"
+                        )
+                        print(
+                            f"    Alpha p-value (corrected): {bench_result['alpha_pvalue'] if bench_result['alpha_pvalue'] is None else f'{bench_result['alpha_pvalue']:.4f}'} "
+                        )
+                    else:
+                        pval = bench_result.get("alpha_pvalue")
+                        print(
+                            f"    Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
+                        )
+                    rs = bench_result.get("r_squared")
+                    print(
+                        f"    R-squared: {rs if rs is None else f'{rs:.4f}'}"
+                    )
+        else:
+            # Single benchmark (backward compatibility)
+            print(
+                f"  Correlation: {best.get('correlation_with_benchmark', 'N/A'):.4f}"
+            )
+            print(
+                f"  Alpha (annualized): {best.get('alpha', 'N/A'):.2%}"
+            )
+            print(
+                f"  Beta: {best.get('beta', 'N/A'):.4f}"
+            )
+            pval = best.get("alpha_pvalue")
+            print(
+                f"  Alpha p-value: {pval if pval is None else f'{pval:.4f}'}"
+            )
+            rs = best.get("r_squared")
+            print(
+                f"  R-squared: {rs if rs is None else f'{rs:.4f}'}"
+            )
+            ir = best.get("information_ratio")
+            if ir is not None and np.isfinite(ir):
+                print(f"  Information Ratio: {ir:.4f}")
+        if "deflated_alpha" in best and best["deflated_alpha"] is not None:
+            da = best["deflated_alpha"]
+            print(
+                f"  Deflated Alpha Ratio: {da.get('deflated_alpha_ratio', 'N/A'):.4f} "
+                f"(p-value {da.get('p_value', 'N/A'):.4f}, expected max alpha "
+                f"{da.get('expected_max_alpha', 'N/A'):.6f}, {da.get('n_benchmarks', 0)} benchmarks)"
+            )
 
     # Save results
     output_dir = Path(args.output)
@@ -2955,7 +3054,10 @@ def run_parameter_optimization(args) -> int:
     if benchmark_provenance is not None:
         bench_prov_path = output_dir / "benchmark_provenance.json"
         with open(bench_prov_path, "w") as f:
-            json.dump(benchmark_provenance.to_dict(), f, indent=2, default=str)
+            if isinstance(benchmark_provenance, list):
+                json.dump([bp.to_dict() for bp in benchmark_provenance if bp is not None], f, indent=2, default=str)
+            else:
+                json.dump(benchmark_provenance.to_dict(), f, indent=2, default=str)
         print(f"Benchmark provenance saved to: {bench_prov_path}")
 
     return 0
