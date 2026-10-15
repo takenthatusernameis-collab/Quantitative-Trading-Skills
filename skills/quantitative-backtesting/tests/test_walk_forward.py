@@ -1194,6 +1194,76 @@ def test_cli_monte_carlo_multiple_benchmarks():
         assert da["n_benchmarks"] == 2
 
 
+def test_cli_monte_carlo_impact_sweep():
+    """CLI monte-carlo --impact-coefficients writes a sweep artifact whose
+    returns degrade monotonically as the market-impact coefficient rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "monte-carlo",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--n-simulations", "100",
+            "--impact-coefficients", "0", "2", "5",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI monte_carlo impact sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "monte_carlo_impact_sweep.json")
+        assert os.path.exists(sweep_path), "monte_carlo_impact_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["impact_coefficients"] == [0.0, 2.0, 5.0]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        # Higher market-impact cost degrades the net return (endpoints).
+        assert returns[2] < returns[0], (
+            f"expected return degradation with impact, got {returns}"
+        )
+
+
+def test_cli_cpcv_impact_sweep():
+    """CLI cpcv --impact-coefficients writes a sweep artifact whose OOS
+    returns degrade monotonically as the market-impact coefficient rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "cpcv",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--n-splits", "5",
+            "--test-size", "0.2",
+            "--impact-coefficients", "0", "2", "5",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI cpcv impact sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "cpcv_impact_sweep.json")
+        assert os.path.exists(sweep_path), "cpcv_impact_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["impact_coefficients"] == [0.0, 2.0, 5.0]
+        assert len(payload["results"]) == 3
+        returns = [r["total_oos_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected OOS return degradation with impact, got {returns}"
+        )
+
+
 _EXAMPLE_PATH = (
     Path(__file__).resolve().parent.parent
     / "examples" / "real_data_pipeline_example.py"
@@ -1699,6 +1769,8 @@ def main() -> int:
         ("test_cli_walk_forward_multiple_benchmarks", test_cli_walk_forward_multiple_benchmarks),
         ("test_cli_optimize_multiple_benchmarks", test_cli_optimize_multiple_benchmarks),
         ("test_cli_monte_carlo_multiple_benchmarks", test_cli_monte_carlo_multiple_benchmarks),
+        ("test_cli_monte_carlo_impact_sweep", test_cli_monte_carlo_impact_sweep),
+        ("test_cli_cpcv_impact_sweep", test_cli_cpcv_impact_sweep),
         ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
         ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
         ("test_trading_costs_robustness_example_imports", test_trading_costs_robustness_example_imports),

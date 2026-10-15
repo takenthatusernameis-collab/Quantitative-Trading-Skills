@@ -2157,6 +2157,57 @@ def _select_parameters(
     return None
 
 
+def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
+                            bench_commission, bench_slippage, bench_expense_ratio,
+                            impact_coefficient):
+    """Run CPCV for a single impact coefficient (sweep helper).
+
+    No file I/O or stdout; returns the per-coefficient metrics used by the
+    sweep table and JSON artifact. Mirrors the single-run body of run_cpcv
+    for one coefficient value.
+    """
+    param_grid = _parse_param_grid(args.param_grid)
+    strategy_factory = _make_strategy_factory(args.strategy)
+
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=args.n_splits,
+        test_size=args.test_size,
+        purge_size=args.purge_size,
+        embargo_size=args.embargo_size,
+        commission=args.commission,
+        slippage=args.slippage,
+        impact_coefficient=impact_coefficient,
+        adv_window=args.adv_window,
+        borrow_cost=args.borrow_cost,
+        funding_cost=args.funding_cost,
+        apply_deflation=args.deflate,
+        benchmark=benchmark,
+        total_return_benchmark=total_return_benchmark,
+        benchmark_commission=bench_commission,
+        benchmark_slippage=bench_slippage,
+        benchmark_expense_ratio=bench_expense_ratio,
+        benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+    )
+    summary = results["summary"]
+    dsr = summary.get("deflated_sharpe")
+    return {
+        "impact_coefficient": float(impact_coefficient),
+        "total_oos_return": float(summary.get("total_oos_return", 0.0)),
+        "oos_sharpe": (
+            float(summary["oos_sharpe"]) if summary.get("oos_sharpe") is not None else None
+        ),
+        "avg_param_stability": float(summary.get("avg_param_stability", 0.0)),
+        "overfitting_risk": summary.get("overfitting_risk"),
+        "deflated_sharpe": (
+            float(dsr["deflated_sharpe_ratio"]) if dsr is not None else None
+        ),
+        "n_folds": int(summary.get("n_folds", 0)),
+    }
+
+
 def run_cpcv(args) -> int:
     """Run CPCV analysis from CLI args."""
     print(f"Loading data from {args.data}...")
@@ -2185,6 +2236,42 @@ def run_cpcv(args) -> int:
                 b, prov = _load_benchmark(bench_file, total_return_benchmark)
                 benchmark.append(b)
                 benchmark_provenance.append(prov)
+
+    impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
+
+    # Capacity / market-impact sensitivity sweep for CPCV: re-run the CPCV
+    # pipeline for each coefficient and record degradation in a single
+    # artifact so capacity/impact sensitivity is part of the robustness flow.
+    if len(impact_coefficients) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for coeff in impact_coefficients:
+            row = _cpcv_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio, coeff,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "cpcv_impact_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"impact_coefficients": impact_coefficients, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nMarket impact sweep ({len(impact_coefficients)} coefficients) saved to: {sweep_path}")
+        print("Impact coefficient | Total OOS Return | OOS Sharpe | Avg Param Stability | Overfitting Risk | Deflated Sharpe | N Folds")
+        print("-" * 112)
+        for row in sweep_rows:
+            oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['impact_coefficient']:>17} | {row['total_oos_return']:>16.4f} | "
+                f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
+                f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
+            )
+        return 0
 
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
@@ -3121,6 +3208,98 @@ def run_parameter_optimization(args) -> int:
     return 0
 
 
+def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark,
+                                   bench_commission, bench_slippage, bench_expense_ratio,
+                                   impact_coefficient):
+    """Run the Monte Carlo pipeline for a single impact coefficient (sweep helper).
+
+    No file I/O or stdout; returns the per-coefficient metrics used by the
+    sweep table and JSON artifact. Mirrors the single-run body of
+    run_monte_carlo (parameter selection, impact-cost backtest, Deflated
+    Sharpe correction, Monte Carlo simulation) for one coefficient value.
+    """
+    param_grid = _parse_param_grid(args.param_grid)
+    strategy_factory = _make_strategy_factory(args.strategy)
+
+    opt_results = None
+    if param_grid:
+        opt_results = parameter_optimization(
+            data=data,
+            strategy_factory=strategy_factory,
+            param_grid=param_grid,
+            commission=args.commission,
+            slippage=args.slippage,
+            impact_coefficient=impact_coefficient,
+            adv_window=args.adv_window,
+            borrow_cost=args.borrow_cost,
+            funding_cost=args.funding_cost,
+            benchmark=benchmark,
+            total_return_benchmark=total_return_benchmark,
+            benchmark_commission=bench_commission,
+            benchmark_slippage=bench_slippage,
+            benchmark_expense_ratio=bench_expense_ratio,
+            benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+        )
+        if opt_results:
+            best_params = opt_results[0]["params"]
+        else:
+            param_names = list(param_grid.keys())
+            param_values = list(param_grid.values())
+            first_combo = next(product(*param_values))
+            best_params = dict(zip(param_names, first_combo))
+    else:
+        best_params = {}
+
+    strategy = strategy_factory(best_params)
+    signals = strategy.generate_signals(data)
+    returns = _calculate_strategy_returns(data, signals, args.commission, args.slippage,
+                                          impact_coefficient, args.adv_window,
+                                          args.borrow_cost, args.funding_cost,
+                                          initial_capital=args.initial_capital)
+
+    dsr = None
+    n_trials = getattr(args, "n_trials", None)
+    if n_trials is not None and int(n_trials) >= 1 and len(returns.dropna()) >= 2:
+        effective_n_trials = int(n_trials)
+        if opt_results:
+            effective_n_trials = max(effective_n_trials, len(opt_results))
+        base_results = {
+            "equity_curve": (1 + returns).cumprod() * args.initial_capital,
+            "returns": returns,
+            "config": {
+                "initial_capital": args.initial_capital,
+                "commission": args.commission,
+                "slippage": args.slippage,
+                "strategy": args.strategy,
+                "symbol": args.symbol,
+                "n_trials": effective_n_trials,
+            },
+        }
+        if opt_results:
+            base_results["config"]["trial_sharpes"] = [
+                r["sharpe_ratio"] for r in opt_results
+            ]
+        dsr = calculate_metrics(base_results).get("deflated_sharpe")
+
+    mc_results = monte_carlo_simulation(
+        base_returns=returns,
+        n_simulations=args.n_simulations,
+        confidence_levels=args.confidence_levels,
+        block_size=args.block_size,
+    )
+
+    sm = mc_results["summary"]
+    return {
+        "impact_coefficient": float(impact_coefficient),
+        "total_return": float(sm.get("total_return", {}).get("mean", 0.0)),
+        "sharpe_ratio": float(sm.get("sharpe_ratio", {}).get("mean", 0.0)),
+        "max_drawdown": float(sm.get("max_drawdown", {}).get("mean", 0.0)),
+        "probability_of_ruin": float(mc_results["probability_of_ruin"]),
+        "deflated_sharpe": (float(dsr["deflated_sharpe_ratio"]) if dsr is not None else None),
+        "n_simulations": int(mc_results["n_simulations"]),
+    }
+
+
 def run_monte_carlo(args) -> int:
     """Run Monte Carlo simulation from CLI args."""
     print(f"Loading data from {args.data}...")
@@ -3149,6 +3328,40 @@ def run_monte_carlo(args) -> int:
                 b, prov = _load_benchmark(bench_file, total_return_benchmark)
                 benchmark.append(b)
                 benchmark_provenance.append(prov)
+
+    impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
+
+    # Capacity / market-impact sensitivity sweep: re-run the pipeline for
+    # each coefficient and record degradation in a single artifact so the
+    # sweep is part of the standard robustness workflow.
+    if len(impact_coefficients) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for coeff in impact_coefficients:
+            row = _monte_carlo_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio, coeff,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "monte_carlo_impact_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"impact_coefficients": impact_coefficients, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nMarket impact sweep ({len(impact_coefficients)} coefficients) saved to: {sweep_path}")
+        print("Impact coefficient | Total Return | Sharpe Ratio | Max Drawdown | Prob. of Ruin | Deflated Sharpe")
+        print("-" * 96)
+        for row in sweep_rows:
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['impact_coefficient']:>17} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | "
+                f"{row['max_drawdown']:>12.4f} | {row['probability_of_ruin']:>13.2%} | {dsr_txt:>15}"
+            )
+        return 0
 
     # First run a backtest to get base returns
     param_grid = _parse_param_grid(args.param_grid)
@@ -3763,6 +3976,7 @@ def main():
     mc_parser.add_argument("--block-size", type=lambda x: x if x == "auto" else int(x), help="Block size for block bootstrap (int or 'auto' for automatic selection)")
     mc_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     mc_parser.add_argument("--n-trials", type=int, default=None, help="Number of development trials (parameter configurations) tested; when set, report the Deflated Sharpe Ratio (multiple-testing correction) for the base backtest Sharpe. When a --param-grid is searched, the effective count is max(n_trials, number of grid combinations evaluated) so the internal search is never understated")
+    mc_parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="Sweep over multiple market impact coefficients for capacity/impact sensitivity; overrides --impact-coefficient when given (e.g. --impact-coefficients 0 1 2 5).")
     mc_parser.set_defaults(func=run_monte_carlo)
 
     # CPCV analysis
@@ -3773,6 +3987,7 @@ def main():
     cpcv_parser.add_argument("--embargo-size", type=float, default=0.0, help="Fraction of observations to embargo after test set")
     cpcv_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     cpcv_parser.add_argument("--deflate", action="store_true", help="Compute Deflated Sharpe Ratio (multiple-testing correction) on the fold searches and OOS results")
+    cpcv_parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="Sweep over multiple market impact coefficients for capacity/impact sensitivity; overrides --impact-coefficient when given (e.g. --impact-coefficients 0 1 2 5).")
     cpcv_parser.set_defaults(func=run_cpcv)
 
     # Out-of-sample validation
