@@ -2225,19 +2225,29 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
 
 def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                                 bench_commission, bench_slippage, bench_expense_ratio,
-                                impact_coefficient, borrow_cost=None, funding_cost=None):
+                                impact_coefficient, borrow_cost=None, funding_cost=None,
+                                commission=None, slippage=None):
     """Run parameter optimization for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
     sweep table and JSON artifact. Mirrors the single-run body of
     run_parameter_optimization for one coefficient value.
 
-    `borrow_cost` / `funding_cost` default to the CLI args when None.
+    `borrow_cost` / `funding_cost` / `commission` / `slippage` default to the
+    CLI args when None, so the same helper serves the market-impact sweep
+    (which varies only `impact_coefficient`), the borrow/funding sweeps
+    (which vary one of those while leaving the others at their single-run
+    values), and the commission/slippage sweeps (which vary one of those
+    while leaving impact/borrow/funding at their single-run values).
     """
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
     if funding_cost is None:
         funding_cost = args.funding_cost
+    if commission is None:
+        commission = args.commission
+    if slippage is None:
+        slippage = args.slippage
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -2245,8 +2255,8 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         data=data,
         strategy_factory=strategy_factory,
         param_grid=param_grid,
-        commission=args.commission,
-        slippage=args.slippage,
+        commission=commission,
+        slippage=slippage,
         impact_coefficient=impact_coefficient,
         adv_window=args.adv_window,
         borrow_cost=borrow_cost,
@@ -2264,6 +2274,8 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         "impact_coefficient": float(impact_coefficient),
         "borrow_cost": float(borrow_cost),
         "funding_cost": float(funding_cost),
+        "commission": float(commission),
+        "slippage": float(slippage),
         "top_sharpe": (float(top["sharpe_ratio"]) if top is not None else None),
         "top_total_return": (float(top["total_return"]) if top is not None else None),
         "n_combos": int(len(results)),
@@ -2272,19 +2284,29 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
 
 def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                            bench_commission, bench_slippage, bench_expense_ratio,
-                           impact_coefficient, borrow_cost=None, funding_cost=None):
+                           impact_coefficient, borrow_cost=None, funding_cost=None,
+                           commission=None, slippage=None):
     """Run out-of-sample validation for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
     sweep table and JSON artifact. Mirrors the single-run body of
     run_out_of_sample_validation for one coefficient value.
 
-    `borrow_cost` / `funding_cost` default to the CLI args when None.
+    `borrow_cost` / `funding_cost` / `commission` / `slippage` default to the
+    CLI args when None, so the same helper serves the market-impact sweep
+    (which varies only `impact_coefficient`), the borrow/funding sweeps
+    (which vary one of those while leaving the others at their single-run
+    values), and the commission/slippage sweeps (which vary one of those
+    while leaving impact/borrow/funding at their single-run values).
     """
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
     if funding_cost is None:
         funding_cost = args.funding_cost
+    if commission is None:
+        commission = args.commission
+    if slippage is None:
+        slippage = args.slippage
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -2305,8 +2327,8 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         cpcv_embargo_size=args.cpcv_embargo_size,
         selection_criterion=args.selection_criterion,
         initial_capital=args.initial_capital,
-        commission=args.commission,
-        slippage=args.slippage,
+        commission=commission,
+        slippage=slippage,
         impact_coefficient=impact_coefficient,
         adv_window=args.adv_window,
         borrow_cost=borrow_cost,
@@ -2326,6 +2348,8 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         "impact_coefficient": float(impact_coefficient),
         "borrow_cost": float(borrow_cost),
         "funding_cost": float(funding_cost),
+        "commission": float(commission),
+        "slippage": float(slippage),
         "test_total_return": float(test_perf.get("test_total_return", 0.0)),
         "test_sharpe": (
             float(test_perf["test_sharpe"]) if test_perf.get("test_sharpe") is not None else None
@@ -2338,22 +2362,29 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
 
 def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                             bench_commission, bench_slippage, bench_expense_ratio,
-                            impact_coefficient, borrow_cost=None, funding_cost=None):
+                            impact_coefficient, borrow_cost=None, funding_cost=None,
+                            commission=None, slippage=None):
     """Run CPCV for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
     sweep table and JSON artifact. Mirrors the single-run body of run_cpcv
     for one coefficient value.
 
-    `borrow_cost` / `funding_cost` default to the CLI args when None, so the
-    same helper serves the market-impact sweep (which varies only
-    `impact_coefficient`) and the borrow/funding sweeps (which vary one of
-    those while leaving impact at its single-run value).
+    `borrow_cost` / `funding_cost` / `commission` / `slippage` default to the
+    CLI args when None, so the same helper serves the market-impact sweep
+    (which varies only `impact_coefficient`), the borrow/funding sweeps
+    (which vary one of those while leaving impact at its single-run value),
+    and the commission/slippage sweeps (which vary one of those while leaving
+    impact/borrow/funding at their single-run values).
     """
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
     if funding_cost is None:
         funding_cost = args.funding_cost
+    if commission is None:
+        commission = args.commission
+    if slippage is None:
+        slippage = args.slippage
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -2365,8 +2396,8 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         test_size=args.test_size,
         purge_size=args.purge_size,
         embargo_size=args.embargo_size,
-        commission=args.commission,
-        slippage=args.slippage,
+        commission=commission,
+        slippage=slippage,
         impact_coefficient=impact_coefficient,
         adv_window=args.adv_window,
         borrow_cost=borrow_cost,
@@ -2385,6 +2416,8 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         "impact_coefficient": float(impact_coefficient),
         "borrow_cost": float(borrow_cost),
         "funding_cost": float(funding_cost),
+        "commission": float(commission),
+        "slippage": float(slippage),
         "total_oos_return": float(summary.get("total_oos_return", 0.0)),
         "oos_sharpe": (
             float(summary["oos_sharpe"]) if summary.get("oos_sharpe") is not None else None
@@ -2531,6 +2564,83 @@ def run_cpcv(args) -> int:
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['funding_cost']:>13.4f} | {row['total_oos_return']:>16.4f} | "
+                f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
+                f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
+            )
+        return 0
+
+    commissions = [float(c) for c in (args.commissions or [args.commission])]
+    slippages = [float(s) for s in (args.slippages or [args.slippage])]
+
+    # Commission sensitivity sweep for CPCV: re-run the CPCV pipeline for each
+    # commission rate and record degradation in a single artifact. Varies
+    # commission while leaving impact/borrow/funding/slippage at their
+    # single-run values.
+    if len(commissions) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in commissions:
+            row = _cpcv_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=args.borrow_cost,
+                funding_cost=args.funding_cost, commission=cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "cpcv_commission_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"commissions": commissions, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nCommission sweep ({len(commissions)} rates) saved to: {sweep_path}")
+        print("Commission | Total OOS Return | OOS Sharpe | Avg Param Stability | Overfitting Risk | Deflated Sharpe | N Folds")
+        print("-" * 112)
+        for row in sweep_rows:
+            oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['commission']:>13.6f} | {row['total_oos_return']:>16.4f} | "
+                f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
+                f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
+            )
+        return 0
+
+    # Slippage sensitivity sweep for CPCV: re-run the CPCV pipeline for each
+    # slippage rate and record degradation in a single artifact. Varies
+    # slippage while leaving impact/borrow/funding/commission at their
+    # single-run values.
+    if len(slippages) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in slippages:
+            row = _cpcv_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=args.borrow_cost,
+                funding_cost=args.funding_cost, slippage=cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "cpcv_slippage_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"slippages": slippages, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nSlippage sweep ({len(slippages)} rates) saved to: {sweep_path}")
+        print("Slippage | Total OOS Return | OOS Sharpe | Avg Param Stability | Overfitting Risk | Deflated Sharpe | N Folds")
+        print("-" * 112)
+        for row in sweep_rows:
+            oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['slippage']:>13.6f} | {row['total_oos_return']:>16.4f} | "
                 f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
                 f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
@@ -3222,6 +3332,81 @@ def run_walk_forward(args) -> int:
             )
         return 0
 
+    commissions = [float(c) for c in (args.commissions or [args.commission])]
+    slippages = [float(s) for s in (args.slippages or [args.slippage])]
+
+    # Commission sensitivity sweep for walk-forward: re-run the walk-forward
+    # pipeline for each commission rate and record degradation in a single
+    # artifact. Varies commission while leaving impact/borrow/funding/slippage
+    # at their single-run values.
+    if len(commissions) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in commissions:
+            row = _walk_forward_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=args.borrow_cost,
+                funding_cost=args.funding_cost, commission=cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "walk_forward_commission_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"commissions": commissions, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nCommission sweep ({len(commissions)} rates) saved to: {sweep_path}")
+        print("Commission | Total OOS Return | OOS Sharpe | Deflated Sharpe | N Periods")
+        print("-" * 90)
+        for row in sweep_rows:
+            oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['commission']:>13.6f} | {row['total_oos_return']:>16.4f} | "
+                f"{oos_sharpe_txt:>10} | {dsr_txt:>15} | {row['n_periods']:>9}"
+            )
+        return 0
+
+    # Slippage sensitivity sweep for walk-forward: re-run the walk-forward
+    # pipeline for each slippage rate and record degradation in a single
+    # artifact. Varies slippage while leaving impact/borrow/funding/commission
+    # at their single-run values.
+    if len(slippages) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in slippages:
+            row = _walk_forward_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=args.borrow_cost,
+                funding_cost=args.funding_cost, slippage=cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "walk_forward_slippage_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"slippages": slippages, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nSlippage sweep ({len(slippages)} rates) saved to: {sweep_path}")
+        print("Slippage | Total OOS Return | OOS Sharpe | Deflated Sharpe | N Periods")
+        print("-" * 90)
+        for row in sweep_rows:
+            oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['slippage']:>13.6f} | {row['total_oos_return']:>16.4f} | "
+                f"{oos_sharpe_txt:>10} | {dsr_txt:>15} | {row['n_periods']:>9}"
+            )
+        return 0
+
     results = walk_forward_analysis(
         data=data,
         strategy_factory=strategy_factory,
@@ -3524,6 +3709,79 @@ def run_parameter_optimization(args) -> int:
             )
         return 0
 
+    commissions = [float(c) for c in (args.commissions or [args.commission])]
+    slippages = [float(s) for s in (args.slippages or [args.slippage])]
+
+    # Commission sensitivity sweep for parameter optimization: re-run the
+    # optimization pipeline for each commission rate and record degradation
+    # in a single artifact. Varies commission while leaving impact/borrow/
+    # funding/slippage at their single-run values.
+    if len(commissions) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in commissions:
+            row = _optimize_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=args.borrow_cost,
+                funding_cost=args.funding_cost, commission=cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "parameter_optimization_commission_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"commissions": commissions, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nCommission sweep ({len(commissions)} rates) saved to: {sweep_path}")
+        print("Commission | Top Sharpe | Top Total Return | N Combos")
+        print("-" * 70)
+        for row in sweep_rows:
+            sharpe_txt = "N/A" if row["top_sharpe"] is None else f"{row['top_sharpe']:.4f}"
+            print(
+                f"{row['commission']:>13.6f} | {sharpe_txt:>10} | "
+                f"{row['top_total_return']:>16.4f} | {row['n_combos']:>7}"
+            )
+        return 0
+
+    # Slippage sensitivity sweep for parameter optimization: re-run the
+    # optimization pipeline for each slippage rate and record degradation in
+    # a single artifact. Varies slippage while leaving impact/borrow/funding/
+    # commission at their single-run values.
+    if len(slippages) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in slippages:
+            row = _optimize_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=args.borrow_cost,
+                funding_cost=args.funding_cost, slippage=cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "parameter_optimization_slippage_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"slippages": slippages, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nSlippage sweep ({len(slippages)} rates) saved to: {sweep_path}")
+        print("Slippage | Top Sharpe | Top Total Return | N Combos")
+        print("-" * 70)
+        for row in sweep_rows:
+            sharpe_txt = "N/A" if row["top_sharpe"] is None else f"{row['top_sharpe']:.4f}"
+            print(
+                f"{row['slippage']:>13.6f} | {sharpe_txt:>10} | "
+                f"{row['top_total_return']:>16.4f} | {row['n_combos']:>7}"
+            )
+        return 0
+
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -3668,7 +3926,8 @@ def run_parameter_optimization(args) -> int:
 
 def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                                     bench_commission, bench_slippage, bench_expense_ratio,
-                                    impact_coefficient, borrow_cost=None, funding_cost=None):
+                                    impact_coefficient, borrow_cost=None, funding_cost=None,
+                                    commission=None, slippage=None):
     """Run the Monte Carlo pipeline for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -3676,15 +3935,21 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     run_monte_carlo (parameter selection, cost backtest, Deflated
     Sharpe correction, Monte Carlo simulation) for one coefficient value.
 
-    `borrow_cost` / `funding_cost` default to the CLI args when None, so the
-    same helper serves the market-impact sweep (which varies only
-    `impact_coefficient`) and the borrow/funding sweeps (which vary one of
-    those while leaving impact at its single-run value).
+    `borrow_cost` / `funding_cost` / `commission` / `slippage` default to the
+    CLI args when None, so the same helper serves the market-impact sweep
+    (which varies only `impact_coefficient`), the borrow/funding sweeps
+    (which vary one of those while leaving impact at its single-run value),
+    and the commission/slippage sweeps (which vary one of those while leaving
+    impact/borrow/funding at their single-run values).
     """
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
     if funding_cost is None:
         funding_cost = args.funding_cost
+    if commission is None:
+        commission = args.commission
+    if slippage is None:
+        slippage = args.slippage
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -3694,8 +3959,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
             data=data,
             strategy_factory=strategy_factory,
             param_grid=param_grid,
-            commission=args.commission,
-            slippage=args.slippage,
+            commission=commission,
+            slippage=slippage,
             impact_coefficient=impact_coefficient,
             adv_window=args.adv_window,
             borrow_cost=borrow_cost,
@@ -3719,7 +3984,7 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
 
     strategy = strategy_factory(best_params)
     signals = strategy.generate_signals(data)
-    returns = _calculate_strategy_returns(data, signals, args.commission, args.slippage,
+    returns = _calculate_strategy_returns(data, signals, commission, slippage,
                                           impact_coefficient, args.adv_window,
                                           borrow_cost, funding_cost,
                                           initial_capital=args.initial_capital)
@@ -3735,8 +4000,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
             "returns": returns,
             "config": {
                 "initial_capital": args.initial_capital,
-                "commission": args.commission,
-                "slippage": args.slippage,
+                "commission": commission,
+                "slippage": slippage,
                 "strategy": args.strategy,
                 "symbol": args.symbol,
                 "n_trials": effective_n_trials,
@@ -3760,6 +4025,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         "impact_coefficient": float(impact_coefficient),
         "borrow_cost": float(borrow_cost),
         "funding_cost": float(funding_cost),
+        "commission": float(commission),
+        "slippage": float(slippage),
         "total_return": float(sm.get("total_return", {}).get("mean", 0.0)),
         "sharpe_ratio": float(sm.get("sharpe_ratio", {}).get("mean", 0.0)),
         "max_drawdown": float(sm.get("max_drawdown", {}).get("mean", 0.0)),
@@ -3897,6 +4164,77 @@ def run_monte_carlo(args) -> int:
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['funding_cost']:>13.4f} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | "
+                f"{row['max_drawdown']:>12.4f} | {row['probability_of_ruin']:>13.2%} | {dsr_txt:>15}"
+            )
+        return 0
+
+    commissions = [float(c) for c in (args.commissions or [args.commission])]
+    slippages = [float(s) for s in (args.slippages or [args.slippage])]
+
+    # Commission sensitivity sweep: re-run the pipeline for each commission
+    # rate and record degradation in a single artifact. Varies commission
+    # while leaving impact/borrow/funding/slippage at their single-run values.
+    if len(commissions) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in commissions:
+            row = _monte_carlo_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=args.borrow_cost,
+                funding_cost=args.funding_cost, commission=cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "monte_carlo_commission_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"commissions": commissions, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nCommission sweep ({len(commissions)} rates) saved to: {sweep_path}")
+        print("Commission | Total Return | Sharpe Ratio | Max Drawdown | Prob. of Ruin | Deflated Sharpe")
+        print("-" * 96)
+        for row in sweep_rows:
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['commission']:>13.6f} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | "
+                f"{row['max_drawdown']:>12.4f} | {row['probability_of_ruin']:>13.2%} | {dsr_txt:>15}"
+            )
+        return 0
+
+    # Slippage sensitivity sweep: re-run the pipeline for each slippage rate
+    # and record degradation in a single artifact. Varies slippage while
+    # leaving impact/borrow/funding/commission at their single-run values.
+    if len(slippages) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in slippages:
+            row = _monte_carlo_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=args.borrow_cost,
+                funding_cost=args.funding_cost, slippage=cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "monte_carlo_slippage_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"slippages": slippages, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nSlippage sweep ({len(slippages)} rates) saved to: {sweep_path}")
+        print("Slippage | Total Return | Sharpe Ratio | Max Drawdown | Prob. of Ruin | Deflated Sharpe")
+        print("-" * 96)
+        for row in sweep_rows:
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['slippage']:>13.6f} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | "
                 f"{row['max_drawdown']:>12.4f} | {row['probability_of_ruin']:>13.2%} | {dsr_txt:>15}"
             )
         return 0
@@ -4305,6 +4643,81 @@ def run_out_of_sample_validation(args) -> int:
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['funding_cost']:>13.4f} | {row['test_total_return']:>16.4f} | "
+                f"{sharpe_txt:>11} | {dsr_txt:>15}"
+            )
+        return 0
+
+    commissions = [float(c) for c in (args.commissions or [args.commission])]
+    slippages = [float(s) for s in (args.slippages or [args.slippage])]
+
+    # Commission sensitivity sweep for out-of-sample validation: re-run the
+    # validation pipeline for each commission rate and record degradation in
+    # a single artifact. Varies commission while leaving impact/borrow/
+    # funding/slippage at their single-run values.
+    if len(commissions) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in commissions:
+            row = _oos_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=args.borrow_cost,
+                funding_cost=args.funding_cost, commission=cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "out_of_sample_commission_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"commissions": commissions, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nCommission sweep ({len(commissions)} rates) saved to: {sweep_path}")
+        print("Commission | Test Total Return | Test Sharpe | Deflated Sharpe")
+        print("-" * 74)
+        for row in sweep_rows:
+            sharpe_txt = "N/A" if row["test_sharpe"] is None else f"{row['test_sharpe']:.4f}"
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['commission']:>13.6f} | {row['test_total_return']:>16.4f} | "
+                f"{sharpe_txt:>11} | {dsr_txt:>15}"
+            )
+        return 0
+
+    # Slippage sensitivity sweep for out-of-sample validation: re-run the
+    # validation pipeline for each slippage rate and record degradation in a
+    # single artifact. Varies slippage while leaving impact/borrow/funding/
+    # commission at their single-run values.
+    if len(slippages) > 1:
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        sweep_rows = []
+        for cost in slippages:
+            row = _oos_sweep_coefficient(
+                args, data, benchmark, total_return_benchmark,
+                bench_commission, bench_slippage, bench_expense_ratio,
+                args.impact_coefficient, borrow_cost=args.borrow_cost,
+                funding_cost=args.funding_cost, slippage=cost,
+            )
+            sweep_rows.append(row)
+        sweep_path = output_dir / "out_of_sample_slippage_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"slippages": slippages, "results": sweep_rows},
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"\nSlippage sweep ({len(slippages)} rates) saved to: {sweep_path}")
+        print("Slippage | Test Total Return | Test Sharpe | Deflated Sharpe")
+        print("-" * 74)
+        for row in sweep_rows:
+            sharpe_txt = "N/A" if row["test_sharpe"] is None else f"{row['test_sharpe']:.4f}"
+            dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
+            print(
+                f"{row['slippage']:>13.6f} | {row['test_total_return']:>16.4f} | "
                 f"{sharpe_txt:>11} | {dsr_txt:>15}"
             )
         return 0
