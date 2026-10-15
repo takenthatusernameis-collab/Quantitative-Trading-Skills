@@ -2159,7 +2159,8 @@ def _select_parameters(
 
 def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                                     bench_commission, bench_slippage, bench_expense_ratio,
-                                    impact_coefficient, borrow_cost=None, funding_cost=None):
+                                    impact_coefficient, borrow_cost=None, funding_cost=None,
+                                    commission=None, slippage=None):
     """Run walk-forward for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -2174,6 +2175,10 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         borrow_cost = args.borrow_cost
     if funding_cost is None:
         funding_cost = args.funding_cost
+    if commission is None:
+        commission = args.commission
+    if slippage is None:
+        slippage = args.slippage
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -2185,8 +2190,8 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         test_months=args.test_months,
         step_months=args.step_months,
         initial_capital=args.initial_capital,
-        commission=args.commission,
-        slippage=args.slippage,
+        commission=commission,
+        slippage=slippage,
         impact_coefficient=impact_coefficient,
         adv_window=args.adv_window,
         borrow_cost=borrow_cost,
@@ -2205,6 +2210,8 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         "impact_coefficient": float(impact_coefficient),
         "borrow_cost": float(borrow_cost),
         "funding_cost": float(funding_cost),
+        "commission": float(commission),
+        "slippage": float(slippage),
         "total_oos_return": float(summary.get("total_oos_return", 0.0)),
         "oos_sharpe": (
             float(summary["oos_sharpe"]) if summary.get("oos_sharpe") is not None else None
@@ -4567,7 +4574,9 @@ def main():
     common_parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
     common_parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
     common_parser.add_argument("--commission", type=float, default=0.0002, help="Commission per trade (as decimal)")
+    common_parser.add_argument("--commissions", type=float, nargs="+", default=None, help="List of commissions to sweep (overrides --commission)")
     common_parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (as decimal)")
+    common_parser.add_argument("--slippages", type=float, nargs="+", default=None, help="List of slippages to sweep (overrides --slippage)")
     common_parser.add_argument("--impact-coefficient", type=float, default=0.0, help="Market impact coefficient (position_notional/ADV * coefficient). 0 to disable.")
     common_parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
     common_parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3%% per year)")
