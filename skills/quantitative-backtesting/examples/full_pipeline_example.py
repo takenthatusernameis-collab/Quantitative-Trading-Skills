@@ -154,7 +154,7 @@ def run_full_pipeline():
     print("6. BENCHMARK COMPARISON (BUY-AND-HOLD)")
     print("-" * 50)
     bench_type = _detect_benchmark_total_return_type(df)
-    bench_rets = _compute_benchmark_total_return(df)
+    bench_rets = _compute_benchmark_total_return(df).dropna()
     print(f"✓ Benchmark computed (return type: {bench_type})")
     print(f"  Uses dividends/adj_close if available; falls back to price returns")
     print(f"  Benchmark costs modeled (entry+exit round-trip by default)")
@@ -196,17 +196,22 @@ def run_full_pipeline():
     equity_curve = (1 + strategy_returns_net).cumprod() * 100000  # hypothetical capital
     try:
         tear_sheet_path = out_dir / "tear_sheet.html"
-        generate_tear_sheet(
-            returns=strategy_returns_net,
-            benchmark_returns=bench_rets,
-            strategy_name="SMA Crossover (20/50)",
+        ts_results = {
+            "equity_curve": equity_curve,
+            "returns": strategy_returns_net,
+            "data": df,
+            "config": {"initial_capital": 100000},
+        }
+        ts_html = generate_tear_sheet(
+            ts_results,
+            metrics,
+            tear_sheet_path.parent,
             symbol="SPY",
-            output_path=str(tear_sheet_path),
-            initial_capital=100000,
+            strategy_name="SMA Crossover (20/50)",
         )
-        print(f"✓ Tear sheet saved to: {tear_sheet_path}")
+        print(f"✓ Tear sheet saved to: {ts_html}")
     except Exception as e:
-        print(f"⚠ Tear sheet generation skipped (plotting deps?): {e}")
+        print(f"⚠ Tear sheet generation skipped: {e}")
     print()
 
     # Save metrics

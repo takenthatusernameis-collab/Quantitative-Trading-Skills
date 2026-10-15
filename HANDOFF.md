@@ -123,6 +123,59 @@ All non-reporting tests pass (153/153 core quant tests).
 - The "Benchmark cost model refinement" note in the earlier unresolved items was stale relative to the current implementation (the split adjustment direction is now correctly implemented per Yahoo Finance convention with tests passing). Consider updating or replacing this with more specific refinement needs if they arise.
 - Further expansion of real data example workflows with concrete data-fetching scripts could be added (if desired), though the current guide is complete and requires no external network access.
 
+## Session work (this agent)
+
+The HANDOFF's "Next agent task" was: run/verify the deflated-alpha examples end-to-end and add an integration test. Upon inspection, **none of the three examples ran successfully** — each had distinct bugs:
+
+### Bugs found and fixed
+
+**1. `examples/multiple_benchmarks_example.py` — produced zero output, silently.**
+- **Missing `if __name__ == "__main__":` guard** (file ended at the function body with no entry-point call) → the script defined its function and exited immediately, producing 0 bytes. Added the guard.
+- **`build_strategy("sma_crossover", params={...})`** — `build_strategy` accepts `params_json` (a JSON string), not a `params` dict. Fixed to `params_json=json.dumps({...})` and corrected parameter names (`fast_period`/`slow_period`, not `short_window`/`long_window`).
+- **`strategy.backtest(...)`** and **`strategy.trade_log`** do not exist on `StrategyBase` (which only has `generate_signals`). Replaced with the manual backtest pattern used in `full_pipeline_example.py` (positions, price returns, costs).
+- **`"benchmark": [bench1["close"], bench2["close"]]`** passed raw close prices under the wrong key. `calculate_metrics` looks for `benchmark_list` (a list of return Series). Fixed to `"benchmark_list": [bench1_rets, bench2_rets]` with `pct_change().dropna()`.
+- **Broken `_benchmark_stats` call** in "section 5" (passed `None`, used an unreachable `if False` ternary). Replaced with a proper loop collecting trial alphas from each benchmark via `_benchmark_stats`.
+- **Fragile JSON serialization** (`pd.notna(v) or isinstance(v, dict)` fails on dict values). Replaced with `json.dump(metrics, f, indent=2, default=str)`.
+
+**2. `examples/full_pipeline_example.py` — tear sheet API mismatch and `Alpha: nan%`.**
+- `generate_tear_sheet` was called with non-existent kwargs (`returns=`, `benchmark_returns=`, `output_path=`, `initial_capital=`). The actual signature is `generate_tear_sheet(results, metrics, output_dir, symbol, strategy_name, save_plots, analysis_results)`. Fixed to pass a proper `results` dict with `equity_curve`/`returns`/`data` and the `metrics` already computed. Tear sheet now generates successfully.
+- **Alpha was `nan`** because `_compute_benchmark_total_return(df)` returns a Series with a `NaN` at the first row (from `pct_change`), which poisoned the OLS regression in `_benchmark_stats`. Fixed by appending `.dropna()`. Alpha now correctly reports `-6.22%`.
+
+### Tests added
+
+Three integration tests in `tests/test_performance.py` covering the deflated-alpha path through `calculate_metrics`:
+- `test_calculate_metrics_deflated_alpha_multiple_benchmarks` — verifies `deflated_alpha` dict is produced with 2 benchmarks, has all 9 diagnostic keys, DAR/p-value in [0,1].
+- `test_calculate_metrics_no_deflated_alpha_without_benchmark` — verifies the key is absent when no benchmark is given.
+- `test_calculate_metrics_deflated_alpha_single_benchmark` — verifies single-benchmark computation (n_benchmarks=1, DAR in [0,1]).
+
+## Verification status (this agent)
+
+- `test_data_loader.py`: 29/29 passed
+- `test_performance.py`: 26/26 passed (23 prior + 3 new deflated-alpha integration tests)
+- `test_reporting.py`: passes (unittest OK) — matplotlib 3.11.2 is installed in this environment, so the 9 pre-existing failures cited in earlier handoffs are resolved.
+- `test_run_backtest.py`: 41/41 passed
+- `test_strategy_builder.py`: 27/27 passed
+- `test_walk_forward.py`: 9/9 passed
+- `test_cpcv.py`: 16/16 passed
+- `test_monte_carlo.py`: 7/7 passed
+- `test_generate_sample_data.py`: 1/1 passed
+- `examples/deflated_alpha_example.py`: runs end-to-end, exit 0
+- `examples/multiple_benchmarks_example.py`: runs end-to-end, exit 0 (was: 0-byte output)
+- `examples/full_pipeline_example.py`: runs end-to-end, exit 0 (was: alpha=nan, tear sheet failed)
+
+All quant tests pass (156/156). No regressions introduced.
+
+## What remains unresolved
+
+- The `full_pipeline_example.py` computes the SMA-crossover backtest manually rather than via `run_backtest.py`. A future enhancement could route it through the CLI for parity, but the manual path is correct and pedagogically clearer.
+- `example_output/metrics.json` still emits literal `NaN` for some fields (e.g. perfect-fit degenerate cases) because Python's `json` module writes `NaN` by default rather than `null`. This is a pre-existing serialization concern, not introduced here.
+
 ## Next agent task
 
-Implement and run the deflated alpha example end-to-end with the actual pipeline (e.g., extend `full_pipeline_example.py` to optionally demonstrate multiple benchmarks with deflated alpha) and add a small integration test for deflated alpha in the performance/walk-forward test suite if coverage is still desired. Alternatively, run the examples to generate outputs and verify they execute without errors - both are bounded, verifiable tasks that improve the quant research methodology documentation and usability.
+**Add a deflated-alpha integration test to the walk-forward test suite (`tests/test_walk_forward.py`) that exercises `deflated_alpha_ratio` directly via `calculate_metrics` with a realistic benchmark_list, and add CLI-level coverage for the `--benchmark-cost-is-periodic` flag in the walk-forward `out-of-sample` subcommand.**
+
+Evidence and constraints:
+- `deflated_alpha_ratio(alpha, returns, benchmark_returns, n_benchmarks, trial_alphas=None)` is in `scripts/walk_forward.py:909`; `calculate_metrics` surfaces it as `metrics["deflated_alpha"]` when `results["benchmark_list"]` has 2+ entries (see `scripts/performance.py:389-449`).
+- `test_walk_forward.py` already has split-aware benchmark tests (`test_benchmark_stats_with_splits_*`) and CPCV/periodic-cost tests. The new test should mirror the pattern: generate correlated return series, call `calculate_metrics` with `benchmark_list`, and assert the DAR/p-value/fields are sensible.
+- The `--benchmark-cost-is-periodic` CLI flag exists in `run_backtest.py` and `walk_forward.py` but the walk-forward CPCV subcommand path (`run_cpcv`) should be verified end-to-end with the CLI test runner pattern already used in `test_walk_forward.py` (e.g. `test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv`).
+- Run: `python3 skills/quantitative-backtesting/tests/test_walk_forward.py` after adding tests.

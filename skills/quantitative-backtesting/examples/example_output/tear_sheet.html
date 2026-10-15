@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Backtest Tear Sheet</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+        h2 { color: #2980b9; margin-top: 30px; }
+        table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+        th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+        th { background: #3498db; color: white; }
+        tr:nth-child(even) { background: #f9f9f9; }
+        .metric { font-family: monospace; }
+        .positive { color: #27ae60; }
+        .negative { color: #e74c3c; }
+        .chart { margin: 20px 0; text-align: center; }
+        .chart img { max-width: 100%; border-radius: 4px; }
+    </style>
+</head>
+<body>
+<div class="container">
+<h1>Backtest Tear Sheet</h1>
+<p><strong>Symbol:</strong> SPY</p>
+<p><strong>Strategy:</strong> SMA Crossover (20/50)</p>
+<p><strong>Periods:</strong> 504</p>
+
+<h2>Summary Metrics</h2>
+<table><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Total Return</td><td class='metric positive'>7.43%</td></tr>
+<tr><td>Annualized Return</td><td class='metric positive'>3.65%</td></tr>
+<tr><td>Annualized Volatility</td><td class='metric '>18.22%</td></tr>
+<tr><td>Sharpe Ratio</td><td class='metric '>0.18</td></tr>
+<tr><td>Sortino Ratio</td><td class='metric '>0.26</td></tr>
+<tr><td>Calmar Ratio</td><td class='metric '>0.00</td></tr>
+<tr><td>Max Drawdown</td><td class='metric positive'>0.00%</td></tr>
+<tr><td>Omega Ratio</td><td class='metric '>1.64</td></tr>
+<tr><td>Skewness</td><td class='metric '>0.38</td></tr>
+<tr><td>Kurtosis</td><td class='metric '>2.78</td></tr>
+<tr><td>VaR (95%)</td><td class='metric '>-2.00%</td></tr>
+<tr><td>CVaR (95%)</td><td class='metric '>-2.47%</td></tr>
+</table>
+<h2>Benchmark Comparison</h2>
+<table><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Benchmark Total Return</td><td class='metric'>38.45%</td></tr>
+<tr><td>Benchmark Annualized Return</td><td class='metric'>17.70%</td></tr>
+<tr><td>Benchmark Return Type</td><td class='metric'>price</td></tr>
+<tr><td>Benchmark Commission</td><td class='metric'>0.0000</td></tr>
+<tr><td>Benchmark Slippage</td><td class='metric'>0.0000</td></tr>
+<tr><td>Correlation</td><td class='metric'>0.78</td></tr>
+<tr><td>Alpha</td><td class='metric'>-6.22%</td></tr>
+<tr><td>Beta</td><td class='metric'>0.60</td></tr>
+<tr><td>Alpha t-statistic</td><td class='metric'>-0.76</td></tr>
+<tr><td>Alpha p-value</td><td class='metric'>0.45</td></tr>
+<tr><td>R-squared</td><td class='metric'>0.60</td></tr>
+</table>
+<div class='chart'><img src='equity_curve.png' alt='equity_curve'></div>
+<div class='chart'><img src='returns_distribution.png' alt='returns_distribution'></div>
+
+</div>
+</body>
+</html>

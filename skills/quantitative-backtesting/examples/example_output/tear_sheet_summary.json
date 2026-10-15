@@ -1,0 +1,40 @@
+{
+  "symbol": "SPY",
+  "strategy": "SMA Crossover (20/50)",
+  "metrics": {
+    "total_return": 0.07425644326398784,
+    "annualized_return": 0.03646343074128189,
+    "annualized_volatility": 0.18218513087005855,
+    "sharpe_ratio": 0.17748122284083778,
+    "sortino_ratio": 0.2594276346866846,
+    "max_drawdown": 0.0,
+    "avg_drawdown": 0.0,
+    "calmar_ratio": 0.0,
+    "var_95": -0.019993475400703786,
+    "cvar_95": -0.024686456700957756,
+    "skewness": 0.37607753853392667,
+    "kurtosis": 2.7804734476723976,
+    "benchmark_total_return": 0.3844932453925103,
+    "benchmark_annualized_return": 0.1770254917246341,
+    "benchmark_total_return_type": "price",
+    "benchmark_commission": 0.0,
+    "benchmark_slippage": 0.0,
+    "benchmark_expense_ratio": 0.0,
+    "benchmark_cost_is_periodic": false,
+    "correlation_with_benchmark": 0.7753871000398787,
+    "alpha": -0.06219599731764373,
+    "beta": 0.6016509561052814,
+    "tracking_error": 0.14841675203401686,
+    "information_ratio": -0.41906318838852175,
+    "alpha_tstat": -0.7612681530778472,
+    "alpha_pvalue": 0.4468550881983212,
+    "r_squared": 0.6012251549082526,
+    "omega_ratio": 1.6369513106963334,
+    "tail_ratio": 1.0010085645732216,
+    "initial_capital": null
+  },
+  "plot_files": [
+    "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/examples/example_output/equity_curve.png",
+    "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/examples/example_output/returns_distribution.png"
+  ]
+}

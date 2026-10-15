@@ -364,6 +364,69 @@ def test_benchmark_stats_applies_periodic_benchmark_costs():
     assert stats_periodic["benchmark_total_return"] != stats_none["benchmark_total_return"]
     assert stats_roundtrip["benchmark_total_return"] != stats_none["benchmark_total_return"]
 
+
+def test_calculate_metrics_deflated_alpha_multiple_benchmarks():
+    """calculate_metrics surfaces deflated_alpha when given a benchmark_list of 2+ series.
+
+    Integration test for the multiple-testing-corrected benchmark alpha: with
+    multiple benchmarks the Deflated Alpha Ratio is computed via
+    deflated_alpha_ratio and stored under metrics["deflated_alpha"].  The DAR
+    must lie in [0, 1] and carry the expected diagnostic fields (alpha, expected
+    max alpha, n_benchmarks, n_observations, return moments, z-score).
+    """
+    returns = _make_returns(252, seed=11)
+    bench1 = _make_returns(252, seed=22) * 0.8 + returns * 0.3
+    bench2 = _make_returns(252, seed=33) * 0.7 + returns * 0.4
+    bench1 = bench1.iloc[: len(returns)]
+    bench2 = bench2.iloc[: len(returns)]
+    metrics = calculate_metrics({
+        "returns": returns,
+        "benchmark_list": [bench1, bench2],
+        "config": {
+            "total_return_benchmark": False,
+            "benchmark_commission": 0.0,
+            "benchmark_slippage": 0.0,
+        },
+    })
+    assert "deflated_alpha" in metrics
+    da = metrics["deflated_alpha"]
+    for key in (
+        "deflated_alpha_ratio", "p_value", "alpha", "expected_max_alpha",
+        "n_benchmarks", "n_observations", "skewness", "kurtosis", "z_score",
+    ):
+        assert key in da, f"missing key {key}"
+    assert da["n_benchmarks"] == 2
+    assert 0.0 <= da["deflated_alpha_ratio"] <= 1.0
+    assert 0.0 <= da["p_value"] <= 1.0
+    assert np.isfinite(da["skewness"])
+    assert np.isfinite(da["kurtosis"])
+
+
+def test_calculate_metrics_no_deflated_alpha_without_benchmark():
+    """Without any benchmark, no deflated_alpha key is emitted."""
+    returns = _make_returns(30)
+    metrics = calculate_metrics({"returns": returns})
+    assert "deflated_alpha" not in metrics
+
+
+def test_calculate_metrics_deflated_alpha_single_benchmark():
+    """With a single benchmark, deflated_alpha is still computed (n_benchmarks=1).
+
+    With N=1 there is no multiple-testing correction, so the deflated alpha
+    approaches the regular alpha; the DAR must still be a valid probability in
+    [0, 1].
+    """
+    returns = _make_returns(60, seed=11)
+    bench = returns.rolling(5).mean().bfill() * 1.1 + _make_returns(60, seed=22) * 0.2
+    bench = bench.iloc[: len(returns)]
+    metrics = calculate_metrics({"returns": returns, "benchmark": bench})
+    assert "deflated_alpha" in metrics
+    da = metrics["deflated_alpha"]
+    assert da["n_benchmarks"] == 1
+    assert 0.0 <= da["deflated_alpha_ratio"] <= 1.0
+    assert np.isfinite(da["alpha"])
+
+
 def main() -> int:
     tests = [
         ("calculate_metrics_empty_returns_returns_error", test_calculate_metrics_empty_returns_returns_error),
@@ -389,6 +452,9 @@ def main() -> int:
         ("calculate_metrics_passes_benchmark_costs", test_calculate_metrics_passes_benchmark_costs),
         ("alpha_sign_flip_between_benchmark_modes", test_alpha_sign_flip_between_benchmark_modes),
         ("benchmark_stats_applies_periodic_benchmark_costs", test_benchmark_stats_applies_periodic_benchmark_costs),
+        ("calculate_metrics_deflated_alpha_multiple_benchmarks", test_calculate_metrics_deflated_alpha_multiple_benchmarks),
+        ("calculate_metrics_no_deflated_alpha_without_benchmark", test_calculate_metrics_no_deflated_alpha_without_benchmark),
+        ("calculate_metrics_deflated_alpha_single_benchmark", test_calculate_metrics_deflated_alpha_single_benchmark),
     ]
 
     failures = 0

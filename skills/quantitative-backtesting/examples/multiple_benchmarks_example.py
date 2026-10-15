@@ -24,8 +24,8 @@ sys.path.insert(0, str(scripts_dir))
 
 from data_loader import load_data
 from strategy_builder import build_strategy
-from performance import calculate_metrics, generate_report
-from walk_forward import deflated_alpha_ratio
+from performance import calculate_metrics, generate_report, _benchmark_stats
+from walk_forward import deflated_alpha_ratio, _annualization_factor
 
 
 def run_multiple_benchmarks_example():
@@ -48,10 +48,17 @@ def run_multiple_benchmarks_example():
     print(f"✓ Loaded strategy data: {len(df)} rows")
 
     # Build and run strategy
-    strategy = build_strategy("sma_crossover", params={"short_window": 20, "long_window": 50})
+    strategy = build_strategy("sma_crossover", json.dumps({"fast_period": 20, "slow_period": 50}))
     signals = strategy.generate_signals(df)
-    returns = strategy.backtest(df, signals, initial_capital=100000, commission=0.0002, slippage=0.0001)
-    print(f"✓ Strategy backtested: {len(returns)} periods, {len(strategy.trade_log)} trades")
+    positions = signals.shift(1).fillna(0)  # Enter next day (no look-ahead)
+    price_returns = df["close"].pct_change().fillna(0)
+    strategy_returns = positions * price_returns
+    # Apply costs: 2 bps commission + 1 bps slippage per trade
+    position_changes = positions.diff().abs().fillna(0)
+    costs = position_changes * (0.0002 + 0.0001)  # 3 bps
+    returns = strategy_returns - costs
+    n_trades = int((position_changes > 0).sum())
+    print(f"✓ Strategy backtested: {len(returns)} periods, {n_trades} trades")
     print()
 
     # Load multiple benchmarks
@@ -59,14 +66,16 @@ def run_multiple_benchmarks_example():
     print("-" * 50)
     bench1 = load_data(str(data_path), symbol="SPY")  # Same as strategy universe
     bench2 = load_data(str(bench_path), symbol="SPY")  # Synthetic alternative
-    print(f"✓ Loaded 2 benchmarks: bench1 and bench2")
+    bench1_rets = bench1["close"].pct_change().dropna()
+    bench2_rets = bench2["close"].pct_change().dropna()
+    print(f"✓ Loaded 2 benchmarks: bench1 ({len(bench1_rets)} returns), bench2 ({len(bench2_rets)} returns)")
 
     # Compute metrics with multiple benchmarks
     print("\n3. COMPUTING METRICS WITH MULTIPLE BENCHMARKS")
     print("-" * 50)
     metrics = calculate_metrics({
         "returns": returns,
-        "benchmark": [bench1["close"], bench2["close"]],  # Multiple benchmarks
+        "benchmark_list": [bench1_rets, bench2_rets],  # Multiple benchmark return Series
         "config": {
             "commission": 0.0002,
             "slippage": 0.0001,
@@ -100,26 +109,31 @@ def run_multiple_benchmarks_example():
     print()
 
     # Demonstrate direct function usage
-    print("5. DIRECT FUNCTION USAGE EXAMPLE")
+    print("5. DIRECT DEFLATED ALPHA FUNCTION USAGE")
     print("-" * 50)
-    try:
-        # Get trial alphas from both benchmarks
-        from performance import _benchmark_stats
-        ann_factor = 252  # approx for daily
-        # Compute alphas for each benchmark
-        b1_stats = _benchmark_stats(returns, bench1["close"].pct_change().dropna().align(returns, join='inner')[0] if False else None, 252)  # simplified
-        # Better approach: recompute properly
-        pass
-    except Exception:
-        pass
+    # Collect trial alphas from each benchmark for the cross-sectional estimator
+    bench_alphas = []
+    ann_factor = _annualization_factor(returns.index)
+    for i, bench_rets_i in enumerate([bench1_rets, bench2_rets]):
+        bench_stats = _benchmark_stats(returns, bench_rets_i, ann_factor)
+        if "alpha" in bench_stats:
+            bench_alphas.append(bench_stats["alpha"])
+            print(f"  Benchmark {i+1} alpha: {bench_stats['alpha']:.2%}")
+    print(f"  Trial alphas collected: {[f'{a:.2%}' for a in bench_alphas]}")
+    print(f"  These trial alphas feed the cross-sectional alpha* estimator")
+    print()
 
     # Save results
     metrics_path = out_dir / "multiple_benchmarks_metrics.json"
     with open(metrics_path, "w") as f:
-        json.dump({k: (v if pd.notna(v) or isinstance(v, dict) else None) for k, v in metrics.items()}, f, indent=2, default=str)
+        json.dump(metrics, f, indent=2, default=str)
     print(f"✓ Metrics saved to: {metrics_path}")
     print()
 
     print("=" * 80)
     print("MULTIPLE BENCHMARKS EXAMPLE COMPLETE")
     print("=" * 80)
+
+
+if __name__ == "__main__":
+    run_multiple_benchmarks_example()

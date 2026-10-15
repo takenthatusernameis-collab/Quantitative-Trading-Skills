@@ -24,22 +24,22 @@ Kurtosis:              2.78
 
 --- Benchmark Comparison ---
 Benchmark Total Return:      38.45%
-Benchmark Annualized Return: 17.66%
+Benchmark Annualized Return: 17.70%
 Benchmark Return Type:       price
 Benchmark Commission:        0.0000
 Benchmark Slippage:          0.0000
 Correlation:                 0.78
-Alpha:                       nan%
-Beta:                        nan
-Alpha t-stat:                N/A
-Alpha p-value:               N/A
-R-squared:                   nan
+Alpha:                       -6.22%
+Beta:                        0.60
+Alpha t-stat:                -0.7612681530778472
+Alpha p-value:               0.4468550881983212
+R-squared:                   0.6012251549082526
 
 --- Deflated Alpha Ratio (Multiple-Testing Correction) ---
-Deflated Alpha Ratio:        nan
-P-Value:                     nan
+Deflated Alpha Ratio:        0.4650
+P-Value:                     0.5350
 Expected Max Alpha:          0.0000
-Z-Score:                     N/A
+Z-Score:                     -0.0878056490070315
 Number of Benchmarks:        1
 Observations:                504
 
