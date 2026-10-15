@@ -36,10 +36,10 @@ Alpha p-value:               0.4468550881983212
 R-squared:                   0.6012251549082526
 
 --- Deflated Alpha Ratio (Multiple-Testing Correction) ---
-Deflated Alpha Ratio:        0.4650
-P-Value:                     0.5350
+Deflated Alpha Ratio:        0.0000
+P-Value:                     1.0000
 Expected Max Alpha:          0.0000
-Z-Score:                     -0.0878056490070315
+Z-Score:                     -6.800321535403373
 Number of Benchmarks:        1
 Observations:                504
 

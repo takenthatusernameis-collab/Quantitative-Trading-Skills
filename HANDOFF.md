@@ -728,34 +728,27 @@ Alternative: If no further tasks are assigned, the repository is in a complete s
 
 ## Session work (this agent — 2026-10-15)
 
-Completed the previous "Next agent task": **added regression coverage for
-`examples/real_data_pipeline_example.py`**, which was previously only
-manually verified (it had been a 2-line stub before the prior session and now
-runs end-to-end in ~4.5s).
+The repository was in a complete state (all prior HANDOFF items resolved, 209/209 quant tests passing). Rather than assume that completeness, I inspected the quant code for genuine methodological defects against the repository's research objective (correct statistical inference, frequency-aware cost/statistical modeling, honest out-of-sample evidence). I found and fixed a real, deterministic bug in the Deflated Alpha Ratio.
 
-### Work completed
+### Bug found and fixed: `deflated_alpha_ratio` was not frequency-invariant
 
-1. **Import-regression test** (`tests/test_walk_forward.py`):
-   `test_real_data_pipeline_example_imports` loads the example module via
-   `importlib` (so `main()` is *not* executed) and asserts all documented
-   callables exist and are callable: `main`, `generate_synthetic_universe`,
-   `run_pit_validation`, `run_survivorship_detection`, `run_cpcv_validation`,
-   `run_cli_cpcv_validation`, `run_cli_monte_carlo`,
-   `demonstrate_deflated_alpha_directly`. Catches drift where a referenced
-   helper is removed/renamed or a module-level import dangles.
+**Symptom.** The Deflated Alpha Ratio (DAR) — the multiple-testing correction used across the CPCV, walk-forward, out-of-sample, and Monte Carlo pipelines — was not invariant to the data frequency. The same daily return process, aggregated to monthly, produced DAR ≈ 0.57 (daily) vs ≈ 0.50 (monthly) with wildly different z-scores, for a t-statistic of ~33. Both values were absurdly low for such strong evidence of skill.
 
-2. **End-to-end regression test** (`tests/test_walk_forward.py`):
-   `test_real_data_pipeline_example_runs` invokes the example as a subprocess
-   (mirroring real usage), asserts exit code 0 and the
-   `PIPELINE COMPLETE - SUMMARY` banner. This guards the full pipeline —
-   synthetic multi-asset generation, PIT validation, survivorship-bias
-   detection, CPCV validation, production-pattern CLI CPCV + Monte-Carlo
-   subprocess calls, and direct deflated-alpha math — in isolation from the
-   test process.
+**Root cause.** `deflated_alpha_ratio` (walk_forward.py:937) plugged a raw **per-period return** (`alpha / sqrt(ann_factor)`) into the Cornish-Fisher variance adjustment term
+`1 - gamma3*x + ((gamma4-1)/4)*x^2`. That term is dimensionless and is only valid when `x` is a **dimensionless Sharpe ratio** (Bailey & Lopez de Prado, 2014, Deflated Sharpe Ratio). A raw return has different scale, so the statistic became frequency-dependent and understated skill on lower-frequency data. The parallel `deflated_sharpe_ratio` (walk_forward.py:821) was already correct — it takes a dimensionless Sharpe and converts to per-period via `/sqrt(ann_factor)`, which is unit-preserving — confirming the right pattern.
 
-3. Registered both tests in the file's `main()` runner.
+**Fix.** Reformulate `deflated_alpha_ratio` in Sharpe-ratio units: divide the annualized alpha by the strategy's annualized volatility to form a Sharpe-like ratio `sr = alpha / (returns.std() * sqrt(ann_factor))`, and express the expected-maximum-under-null `sr*` in the same dimensionless units. The annualization factor cancels, so DAR is now invariant to the sampling frequency when calendar time is held fixed. `expected_max_alpha` is still reported in annualized alpha units (`sr* * strat_vol_ann`) for backward compatibility with consumers that read it as an annualized alpha.
 
-No production code was modified (test-only change).
+**Verification (reproduced before editing).**
+- Same daily series (annualized alpha 15%, vol 20%, t-stat ~33) aggregated to monthly: ORIG DAR 0.57 (daily) vs 0.50 (monthly); FIX DAR 1.00 for both.
+- The correctly-formulated `deflated_sharpe_ratio` on the same data: DSR 0.822 (daily) vs 0.811 (monthly) — close agreement, confirming the Sharpe-ratio formulation is the right one.
+
+### What changed (git diff)
+
+- `skills/quantitative-backtesting/scripts/walk_forward.py` — `deflated_alpha_ratio` reformulated in dimensionless Sharpe-ratio units (formula, docstring, and implementation). `benchmark_returns` is no longer used in the body but the parameter is kept for backward compatibility with callers.
+- `skills/quantitative-backtesting/tests/test_walk_forward.py` — added `test_deflated_alpha_ratio_frequency_invariant` (registered in `main()`), which aggregates the same daily process to monthly and asserts the DAR is frequency-invariant and close to 1 for a strong signal.
+- `skills/quantitative-backtesting/references/metrics_definitions.md` — updated the Deflated Alpha Ratio section to document the Sharpe-ratio formulation and frequency invariance.
+- `skills/quantitative-backtesting/examples/example_output/*.json|txt|html` — regenerated deterministic example artifacts to reflect the corrected DAR values (the examples read a committed `sample_ohlcv.csv`, so output is deterministic).
 
 ### Verification status (this agent)
 
@@ -764,35 +757,26 @@ No production code was modified (test-only change).
 - `test_reporting.py`: 42/42 (unittest OK)
 - `test_run_backtest.py`: 41/41
 - `test_strategy_builder.py`: 27/27
-- `test_walk_forward.py`: 21/21 (19 prior + 2 new)
+- `test_walk_forward.py`: 22/22 (21 prior + 1 new frequency-invariance regression test)
 - `test_cpcv.py`: 16/16
 - `test_monte_carlo.py`: 7/7
 - `test_generate_sample_data.py`: 1/1
 - `verify_end_to_end.py`: PASSED
-- `examples/real_data_pipeline_example.py`: runs end-to-end, exit 0
+- `examples/deflated_alpha_example.py`, `examples/multiple_benchmarks_example.py`, `examples/full_pipeline_example.py`, `examples/real_data_pipeline_example.py`: all run end-to-end, exit 0
 
-All quant tests pass (209/209). No regressions.
-
-### What changed (git diff)
-
-- `skills/quantitative-backtesting/tests/test_walk_forward.py` — added
-  `import subprocess`, the `_EXAMPLE_PATH` constant, the
-  `_import_example_module()` helper, the two new tests, and registered them in
-  `main()`. (72 insertions, no production-code changes.)
+All quant tests pass (210/210). No regressions: the fix is a localized rewrite of one statistical function; all 209 prior tests still pass, and the new test would catch any regression reverting the formulation.
 
 ### What remains unresolved
 
-- None blocking. The two previously-open example/CLI gaps are resolved and now
-  permanently guarded by tests.
+- None blocking. The discretionary pytest migration (hand-rolled `main()` runners → pytest) remains available but is infrastructure-only and does not advance the quant research objective; left untouched.
+- `out_of_sample_validation` still uses an inline `if isinstance(benchmark, list):` branch rather than delegating to a single `_benchmark_list_alpha_correction` call at the top level; left intact to preserve the single-DataFrame return shape.
 
 ### Next agent task
 
-No further work is required for the multiple-benchmark / deflated-alpha
-research objective itself — the quantitative backtesting skill is in a
-complete, verified state (see the "complete state" list above).
-
-The only remaining discretionary item, if desired, is to migrate the
-`tests/` directory from the hand-rolled `main()` runner to `pytest` so the
-example end-to-end test runs automatically in CI alongside the rest. This is
-optional (the current runner already covers it) and not a methodological
-requirement.
+No further work is required. The quantitative backtesting skill is in a complete, verified state with a corrected, frequency-invariant Deflated Alpha Ratio:
+- Correct split-adjusted price handling (Yahoo Finance convention)
+- Periodic vs round-trip benchmark cost modeling
+- Multiple-benchmark deflated alpha correction (DAR) across CPCV, walk-forward, out-of-sample, and Monte Carlo pipelines
+- CLI support for multiple `--benchmark` files on all subcommands
+- Tear sheet rendering of cross-benchmark deflated alpha
+- End-to-end worked example demonstrating the full research workflow

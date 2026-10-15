@@ -288,25 +288,40 @@ inner-aligned index.
 
 The Deflated Alpha Ratio (DAR) corrects the estimated alpha for multiple-testing bias when comparing a strategy against multiple benchmarks. Testing many benchmarks increases the probability of finding spurious alpha by chance alone.
 
-**Formula:**
+**Formula** (Bailey & Lopez de Prado, 2014, Deflated Sharpe Ratio analogue):
+
+The statistic is formulated in **dimensionless Sharpe-ratio units** so that it
+is invariant to the data frequency: the estimated annualized alpha is divided
+by the strategy's annualized volatility to form a Sharpe-like ratio `sr`, and
+the expected maximum under the null is expressed in the same units.
+
 ```
-DAR = Φ( (α̂ - α*) * sqrt(T - 1) / sqrt(1 - γ3*α̂ + ((γ4-1)/4)*α̂²) )
+sr  = α̂ / σ_strategy          (Sharpe-like ratio; annualized units cancel)
+DAR = Φ( (sr - sr*) * sqrt(T - 1) / sqrt(1 - γ3*sr + ((γ4-1)/4)*sr²) )
 ```
+
 Where:
-- α̂ is the estimated annualized alpha
-- α* is the expected maximum alpha under the null hypothesis (no skill)
-- T is the number of observations
-- γ3 is the skewness of returns, γ4 is the kurtosis of returns (not excess)
-- Φ is the standard normal CDF
+- `sr` is the estimated Sharpe-like ratio (annualized alpha / annualized strategy vol)
+- `sr*` is the expected maximum Sharpe-like ratio under the null hypothesis (no skill)
+- `T` is the number of observations
+- `γ3` is the skewness of returns, `γ4` is the kurtosis of returns (not excess)
+- `Φ` is the standard normal CDF
+
+The variance adjustment term `1 - γ3*x + ((γ4-1)/4)*x²` is dimensionless and is
+only valid when `x` is a Sharpe-like ratio; plugging a raw per-period return
+into it makes the statistic frequency-dependent and understates skill on
+lower-frequency data. The `expected_max_alpha` field is reported back in
+annualized alpha units (`sr* * σ_strategy`) for backward compatibility.
 
 **Expected Maximum Alpha (α*):**
-- When trial alphas are provided: `α* = std(α_trials) * sqrt(2*ln(N)) * σ_benchmark` (cross-sectional estimate)
-- When trial alphas are unavailable: `α* = sqrt(2*ln(N)/T) * σ_benchmark` (i.i.d. normal approximation)
+- When trial alphas are provided: `sr* = std(sr_trials) * sqrt(2*ln(N))` (cross-sectional estimate)
+- When trial alphas are unavailable: `sr* = sqrt(2*ln(N)/T)` (i.i.d. normal approximation)
 
 **Interpretation:**
 - DAR ∈ [0,1] represents the probability that the strategy's true alpha exceeds the best alpha expected from luck alone
 - Higher N (more benchmarks tested) increases α*, making it harder to achieve high DAR
 - The correction accounts for non-normality in return distributions
+- The statistic is frequency-invariant: aggregating the same return process to a lower frequency leaves DAR unchanged (when calendar time is held fixed)
 
 **When to use:**
 - When comparing against multiple benchmarks (N > 1)

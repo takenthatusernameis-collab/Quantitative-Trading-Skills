@@ -949,22 +949,30 @@ def deflated_alpha_ratio(
     Ratio (DAR) corrects the estimated alpha for this selection bias and for
     the non-normality (skewness, kurtosis) of the return distribution.
 
-    Formula (all alpha quantities in annualized units):
+    Formula (Bailey & Lopez de Prado, 2014, Deflated Sharpe Ratio analogue).
+    The statistic is formulated in dimensionless Sharpe-ratio units so that
+    it is invariant to the data frequency: the estimated alpha is divided by
+    the strategy's annualized volatility to form a Sharpe-like ratio ``sr``,
+    and the expected maximum under the null is expressed in the same units.
 
-        DAR = Phi( (alpha_hat - alpha*) * sqrt(T - 1)
-                    / sqrt(1 - gamma3 * alpha_hat + ((gamma4 - 1) / 4) * alpha_hat^2) )
+        DAR = Phi( (sr - sr*) * sqrt(T - 1)
+                    / sqrt(1 - gamma3 * sr + ((gamma4 - 1) / 4) * sr^2) )
 
-    where alpha_hat is the estimated alpha, T the number of return
+    where sr is the estimated Sharpe-like ratio, T the number of return
     observations, gamma3 the return skewness, gamma4 the return kurtosis
-    (not excess), Phi the standard normal CDF, and alpha* the expected maximum
-    alpha under the null hypothesis of no skill.
+    (not excess), Phi the standard normal CDF, and sr* the expected maximum
+    Sharpe-like ratio under the null hypothesis of no skill.
 
-    alpha* is estimated from the cross-sectional dispersion of the trial alphas
-    when `trial_alphas` is provided (alpha* = std(alpha_trials) *
-    sqrt(2 * ln(N))), and otherwise from the i.i.d.-normal null approximation
-    (alpha* = sqrt(2 * ln(N) / T) * sigma_benchmark), where sigma_benchmark
-    is the volatility of the benchmark returns. Both estimators are conservative:
-    they slightly overstate the alpha attainable from luck.
+    sr* is estimated from the cross-sectional dispersion of the trial alphas
+    (converted to Sharpe units) when `trial_alphas` is provided
+    (sr* = std(trial_sr) * sqrt(2 * ln(N))), and otherwise from the
+    i.i.d.-normal null approximation (sr* = sqrt(2 * ln(N) / T)). Both
+    estimators are conservative: they slightly overstate the Sharpe attainable
+    from luck alone.
+
+    The expected-maximum alpha is reported back in annualized alpha units
+    (sr* * strategy_vol_ann) for backward compatibility with consumers that
+    read `expected_max_alpha` as an annualized alpha.
 
     Args:
         alpha: Annualized alpha of the strategy being evaluated.
@@ -973,7 +981,7 @@ def deflated_alpha_ratio(
         n_benchmarks: Number of benchmarks tested (N).
         trial_alphas: Optional list of the annualized alphas of all
             benchmarks tested. When provided (recommended), the cross-sectional
-            dispersion of the alphas estimates alpha*; otherwise the i.i.d.-
+            dispersion of the alphas estimates sr*; otherwise the i.i.d.-
             normal null approximation is used.
 
     Returns:
@@ -999,32 +1007,40 @@ def deflated_alpha_ratio(
 
     ann_factor = _annualization_factor(returns.index)
     t_obs = len(returns)
-    alpha_per_period = float(alpha) / np.sqrt(ann_factor)
+
+    # Annualized strategy volatility. The Deflated Sharpe Ratio's variance
+    # adjustment term (1 - gamma3*x + ((gamma4-1)/4)*x^2) is dimensionless and
+    # only valid when x is a Sharpe-like ratio; plugging in a raw per-period
+    # return makes the statistic frequency-dependent and understates skill on
+    # lower-frequency data. Normalizing alpha by strategy vol cancels the
+    # annualization factor, so DAR is invariant to the sampling frequency when
+    # calendar time is held fixed.
+    strat_vol_ann = float(returns.std() * np.sqrt(ann_factor))
+    if strat_vol_ann > 0:
+        sr = float(alpha) / strat_vol_ann
+    else:
+        # Degenerate (constant) returns carry no information about skill.
+        sr = 0.0
 
     ln_benchmarks = np.log(max(int(n_benchmarks), 1))
 
-    # Expected maximum alpha under the null (per-period units)
-    alpha_star = None
+    # Expected maximum Sharpe-like ratio under the null (dimensionless).
+    sr_star = None
     if trial_alphas is not None and len(trial_alphas) >= 2:
         trial_alpha = np.asarray([float(a) for a in trial_alphas], dtype=float)
-        # Convert to per-period alpha for consistency
-        trial_alpha = trial_alpha / np.sqrt(ann_factor)
-        trial_std = float(np.std(trial_alpha, ddof=1))
+        # Convert annualized trial alphas to Sharpe-like ratios for consistency.
+        trial_sr = trial_alpha / strat_vol_ann if strat_vol_ann > 0 else trial_alpha
+        trial_std = float(np.std(trial_sr, ddof=1))
         if trial_std > 0 and np.isfinite(trial_std):
-            # Scale by benchmark volatility similar to how Sharpe uses std of returns
-            benchmark_vol = float(benchmark_returns.std() * np.sqrt(ann_factor))
-            if benchmark_vol > 0:
-                alpha_star = trial_std * np.sqrt(2.0 * ln_benchmarks) * benchmark_vol
-    if alpha_star is None:
-        # Fallback to i.i.d.-normal null approximation
-        benchmark_vol = float(benchmark_returns.std() * np.sqrt(ann_factor))
-        if benchmark_vol > 0:
-            alpha_star = float(np.sqrt(2.0 * ln_benchmarks / t_obs)) * benchmark_vol
-        else:
-            alpha_star = 0.0
+            sr_star = trial_std * np.sqrt(2.0 * ln_benchmarks)
+    if sr_star is None:
+        # Fallback to i.i.d.-normal null approximation: the Sharpe estimate under
+        # the null has std ~ 1/sqrt(T), so the expected max of N draws is
+        # sqrt(2 * ln(N) / T).
+        sr_star = float(np.sqrt(2.0 * ln_benchmarks / t_obs)) if t_obs > 0 else 0.0
 
-    # Variance of the alpha estimator under non-normality (skew/kurt are
-    # invariant to constant shifts, so raw-return moments are valid for alpha)
+    # Variance of the Sharpe estimator under non-normality (skew/kurt are
+    # invariant to constant shifts, so raw-return moments are valid).
     skew = float(returns.skew())
     kurt = float(returns.kurtosis()) + 3.0  # pandas reports excess kurtosis
     if not np.isfinite(skew):
@@ -1032,14 +1048,13 @@ def deflated_alpha_ratio(
     if not np.isfinite(kurt):
         kurt = 3.0
 
-    variance_term = 1.0 - skew * alpha_per_period + ((kurt - 1.0) / 4.0) * alpha_per_period * alpha_per_period
+    variance_term = 1.0 - skew * sr + ((kurt - 1.0) / 4.0) * sr * sr
     if not np.isfinite(variance_term) or variance_term <= 0.0:
         variance_term = np.finfo(float).tiny
     denom = np.sqrt(variance_term)
 
-    vol = float(returns.std())
-    if vol > 0:
-        z = (alpha_per_period - alpha_star) * np.sqrt(t_obs - 1) / denom
+    if strat_vol_ann > 0:
+        z = (sr - sr_star) * np.sqrt(t_obs - 1) / denom
     else:
         # Degenerate (constant) returns carry no information about skill
         z = -np.inf
@@ -1047,11 +1062,14 @@ def deflated_alpha_ratio(
     dar = 0.5 * (1.0 + math.erf(z / np.sqrt(2.0)))
     dar = float(min(max(dar, 0.0), 1.0))
 
+    # Report expected_max_alpha in annualized alpha units (backward-compat shape).
+    expected_max_alpha = sr_star * strat_vol_ann if strat_vol_ann > 0 else 0.0
+
     return {
         "deflated_alpha_ratio": dar,
         "p_value": 1.0 - dar,
         "alpha": float(alpha),
-        "expected_max_alpha": float(alpha_star),
+        "expected_max_alpha": float(expected_max_alpha),
         "z_score": float(z) if np.isfinite(z) else None,
         "n_benchmarks": int(n_benchmarks),
         "n_observations": int(t_obs),

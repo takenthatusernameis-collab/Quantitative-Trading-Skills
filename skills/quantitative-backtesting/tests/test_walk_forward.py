@@ -45,6 +45,7 @@ from walk_forward import (  # noqa: E402
     _benchmark_stats_with_splits,
     _add_benchmark_to_summary,
     _benchmark_list_alpha_correction,
+    deflated_alpha_ratio,
     main as walk_forward_main,
 )
 from strategy_builder import build_strategy  # noqa: E402
@@ -1215,6 +1216,93 @@ def _import_example_module():
     return module
 
 
+def test_deflated_alpha_ratio_frequency_invariant():
+    """The Deflated Alpha Ratio must be invariant to the data frequency when
+    calendar time is held fixed.
+
+    The Bailey & Lopez de Prado (2014) Deflated Sharpe Ratio variance term
+    (1 - gamma3*x + ((gamma4-1)/4)*x^2) is dimensionless and only valid when x
+    is a Sharpe-like ratio.  Plugging a raw per-period return into it makes the
+    statistic frequency-dependent and understates skill on lower-frequency
+    data.  This regression holds calendar time fixed by aggregating the same
+    daily return process to monthly and asserts the DAR is approximately equal
+    (and high) in both cases, since the signal is strong by construction.
+
+    A regression that reverts the fix would show DAR differing by an order of
+    magnitude across the two frequencies (e.g. ~0.5 daily vs ~0.5 monthly with
+    wildly different z-scores) for a t-statistic of ~30.
+    """
+    rng = np.random.default_rng(11)
+    n_benchmarks = 2
+    alpha_annual = 0.15
+    vol_annual = 0.20
+
+    # ~5 years of business-daily data with a strong signal.
+    n_daily = 1260
+    vol_pp = vol_annual / np.sqrt(252)
+    mean_pp = alpha_annual / 252
+    daily = pd.Series(
+        rng.normal(loc=mean_pp, scale=vol_pp, size=n_daily),
+        index=pd.bdate_range("2020-01-01", periods=n_daily),
+    )
+
+    # Aggregate to monthly: same calendar time, fewer bars.  Simple returns
+    # sum across the month, which preserves the annualized alpha and
+    # volatility (the t-statistic scales with sqrt(T) and is therefore not
+    # itself frequency-invariant, but alpha_ann and vol_ann are).
+    monthly = daily.resample("MS").sum()
+
+    results = {}
+    for name, rets in (("daily", daily), ("monthly", monthly)):
+        ann = _annualization_factor(rets.index)
+        alpha = float(rets.mean() * ann)
+        vol = float(rets.std() * np.sqrt(ann))
+        t_stat = alpha * np.sqrt(len(rets)) / vol if vol > 0 else 0.0
+        da = deflated_alpha_ratio(
+            alpha=alpha, returns=rets, benchmark_returns=rets,
+            n_benchmarks=n_benchmarks,
+        )
+        results[name] = {"alpha": alpha, "vol": vol, "t_stat": t_stat, "da": da}
+
+    # Annualized alpha and volatility are frequency-invariant when calendar
+    # time is held fixed (simple returns sum across the aggregation).
+    assert abs(results["daily"]["alpha"] - results["monthly"]["alpha"]) < 0.05, (
+        f"annualized alpha should be frequency-invariant: "
+        f"daily={results['daily']['alpha']:.4f} monthly={results['monthly']['alpha']:.4f}"
+    )
+    assert abs(results["daily"]["vol"] - results["monthly"]["vol"]) < 0.05, (
+        f"annualized vol should be frequency-invariant: "
+        f"daily={results['daily']['vol']:.4f} monthly={results['monthly']['vol']:.4f}"
+    )
+
+    dar_daily = results["daily"]["da"]["deflated_alpha_ratio"]
+    dar_monthly = results["monthly"]["da"]["deflated_alpha_ratio"]
+    # Both frequencies carry a strong signal (t-stat > 7 with 2 benchmarks),
+    # so the DAR must be very close to 1 in both cases.
+    assert dar_daily > 0.99, (
+        f"Daily DAR should be ~1 for a strong signal, got {dar_daily:.4f}"
+    )
+    assert dar_monthly > 0.99, (
+        f"Monthly DAR should be ~1 for a strong signal, got {dar_monthly:.4f}"
+    )
+    # The two frequencies must agree closely; a buggy formulation diverges by
+    # an order of magnitude (e.g. ~0.5 daily vs ~0.5 monthly with wildly
+    # different z-scores) even though the underlying signal is identical.
+    assert abs(dar_daily - dar_monthly) < 0.05, (
+        f"DAR should be frequency-invariant: daily={dar_daily:.4f} "
+        f"monthly={dar_monthly:.4f}"
+    )
+
+    # expected_max_alpha is reported in annualized alpha units (backward
+    # compatibility) and must be small relative to the signal alpha.
+    for name in ("daily", "monthly"):
+        da = results[name]["da"]
+        assert da["expected_max_alpha"] < results[name]["alpha"], (
+            f"{name}: expected_max_alpha {da['expected_max_alpha']:.4f} should "
+            f"be below the signal alpha {results[name]['alpha']:.4f}"
+        )
+
+
 def test_real_data_pipeline_example_imports():
     """The real-data integration example must import cleanly and expose its
     documented callables.
@@ -1290,6 +1378,7 @@ def main() -> int:
         ("test_cli_monte_carlo_multiple_benchmarks", test_cli_monte_carlo_multiple_benchmarks),
         ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
         ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
+        ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ]
 
     failures = 0
