@@ -396,6 +396,77 @@ def generate_tear_sheet(
                 html_parts.append(f"<tr><td>{label}</td><td class='metric'>{fmt(metrics[key])}</td></tr>")
         html_parts.append("</table>")
 
+    # Multiple-testing correction across benchmarks: surfaced by
+    # ``calculate_metrics`` when ``results["benchmark_list"]`` has 2+ entries
+    # (the canonical Deflated Alpha Ratio). Distinct from the single-benchmark
+    # ``deflated_sharpe`` section above, which is trial-count based.
+    da = metrics.get("deflated_alpha")
+    if isinstance(da, dict):
+        html_parts.append("<h2>Multiple-Testing Correction (Deflated Alpha)</h2>")
+        html_parts.append("<table><tr><th>Metric</th><th>Value</th></tr>")
+        da_rows = [
+            ("Deflated Alpha Ratio", da.get("deflated_alpha_ratio"), lambda v: f"{v:.4f}"),
+            ("P-Value", da.get("p_value"), lambda v: f"{v:.4f}"),
+            ("Expected Max Alpha", da.get("expected_max_alpha"), lambda v: f"{v:.4f}"),
+            ("Z-Score", da.get("z_score"), lambda v: f"{v:.4f}"),
+            ("Number of Benchmarks", da.get("n_benchmarks"), lambda v: str(int(v))),
+            ("Observations", da.get("n_observations"), lambda v: str(int(v))),
+            ("Skewness", da.get("skewness"), lambda v: f"{v:.4f}"),
+            ("Kurtosis", da.get("kurtosis"), lambda v: f"{v:.4f}"),
+        ]
+        for label, val, fmt in da_rows:
+            display = fmt(val) if val is not None else "N/A"
+            html_parts.append(f"<tr><td>{label}</td><td class='metric'>{display}</td></tr>")
+        html_parts.append("</table>")
+
+        # Per-benchmark detail. Two sources are possible:
+        #   (a) ``benchmark_metrics`` — a list of per-benchmark stat dicts, surfaced
+        #       directly by the validation pipelines (CPCV/walk-forward/OOS/Monte Carlo)
+        #       on their summaries and passed through to the tear sheet.
+        #   (b) ``benchmark_N_*`` keys — produced by ``calculate_metrics`` when
+        #       ``results["benchmark_list"]`` has 2+ entries (e.g. the Monte Carlo
+        #       tear sheet built from ``mc_base_results``). Reconstruct rows from
+        #       those prefixed keys so the detail section renders either way.
+        bench_metrics_list = metrics.get("benchmark_metrics")
+        if not isinstance(bench_metrics_list, list) or not bench_metrics_list:
+            bench_metrics_list = []
+            i = 0
+            while f"benchmark_{i}_alpha" in metrics:
+                row = {
+                    k[len(f"benchmark_{i}_"):]: v
+                    for k, v in metrics.items()
+                    if k.startswith(f"benchmark_{i}_")
+                }
+                bench_metrics_list.append(row)
+                i += 1
+        if bench_metrics_list:
+            html_parts.append("<h3>Per-Benchmark Comparison</h3>")
+            html_parts.append(
+                "<table><tr><th>Benchmark</th><th>Alpha</th><th>Beta</th>"
+                "<th>Correlation</th><th>Alpha P-Value</th><th>Deflated Alpha</th>"
+                "<th>Expected Max Alpha</th></tr>"
+            )
+            for i, bm in enumerate(bench_metrics_list):
+                if not isinstance(bm, dict):
+                    continue
+                alpha = bm.get("alpha")
+                beta = bm.get("beta")
+                corr = bm.get("correlation_with_benchmark", bm.get("correlation"))
+                pval = bm.get("alpha_pvalue", bm.get("alpha_pvalue_original"))
+                da_val = bm.get("deflated_alpha")
+                ema = bm.get("expected_max_alpha")
+                html_parts.append(
+                    f"<tr><td>Benchmark {i}</td>"
+                    f"<td class='metric'>{fmt_pct(alpha) if isinstance(alpha, (int, float)) else 'N/A'}</td>"
+                    f"<td class='metric'>{fmt_num(beta) if isinstance(beta, (int, float)) else 'N/A'}</td>"
+                    f"<td class='metric'>{fmt_num(corr) if isinstance(corr, (int, float)) else 'N/A'}</td>"
+                    f"<td class='metric'>{fmt_num(pval) if isinstance(pval, (int, float)) else 'N/A'}</td>"
+                    f"<td class='metric'>{fmt_num(da_val) if isinstance(da_val, (int, float)) else 'N/A'}</td>"
+                    f"<td class='metric'>{fmt_num(ema) if isinstance(ema, (int, float)) else 'N/A'}</td>"
+                    "</tr>"
+                )
+            html_parts.append("</table>")
+
     # Analysis results: walk-forward, CPCV, Monte Carlo
     analysis = analysis_results or {}
 
