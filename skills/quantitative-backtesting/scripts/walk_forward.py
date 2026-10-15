@@ -1942,6 +1942,9 @@ def out_of_sample_validation(
     if isinstance(test_benchmark, list):
         summary["multiple_benchmarks"] = True
         summary["benchmark_count"] = len(test_benchmark)
+        # Surface per-benchmark metrics consistently with CPCV/walk_forward
+        if correction_result is not None:
+            summary["benchmark_metrics"] = correction_result["per_benchmark"]
         # Collect alpha p-values (both original and corrected if available)
         alpha_pvalues = []
         alpha_pvalues_original = []

@@ -637,6 +637,11 @@ def test_out_of_sample_validation_multiple_benchmarks_deflated_alpha():
     assert "deflated_alpha" in summary, "summary should contain deflated_alpha (canonical single dict)"
     assert "deflated_alphas" in summary, "summary should contain deflated_alphas (backward compatibility list)"
 
+    # Verify benchmark_metrics is surfaced consistently with CPCV/walk_forward
+    assert "benchmark_metrics" in summary, "summary should contain benchmark_metrics"
+    assert isinstance(summary["benchmark_metrics"], list), "benchmark_metrics should be a list"
+    assert len(summary["benchmark_metrics"]) == 2, f"Expected 2 benchmark_metrics entries, got {len(summary['benchmark_metrics'])}"
+
     # Verify the canonical deflated_alpha has the expected structure
     da = summary["deflated_alpha"]
     assert isinstance(da, dict), "deflated_alpha should be a dict"
