@@ -69,6 +69,42 @@ Run with:
 python3 skills/quantitative-backtesting/examples/deflated_alpha_example.py
 ```
 
+### `multiple_benchmarks_example.py`
+
+Demonstrates the full multiple-benchmark workflow with deflated alpha correction:
+
+1. **Strategy backtest** - SMA crossover on synthetic OHLCV data with transaction costs
+2. **Multiple benchmark loading** - Loads two benchmark return series
+3. **Metrics with benchmark_list** - Calls `calculate_metrics` with `benchmark_list` parameter to trigger multiple-testing correction
+4. **Deflated alpha output** - Displays DAR, p-value, expected max alpha, z-score, skewness/kurtosis
+5. **Direct function usage** - Shows how to collect trial alphas from each benchmark and pass to `deflated_alpha_ratio`
+
+Run with:
+```bash
+python3 skills/quantitative-backtesting/examples/multiple_benchmarks_example.py
+```
+
+Outputs metrics to `example_output/multiple_benchmarks_metrics.json`.
+
+### `real_data_pipeline_example.py`
+
+Complete end-to-end quantitative research pipeline simulating real-market workflows:
+
+1. **Synthetic universe generation** - Creates correlated multi-asset OHLCV data (8 assets, 3 years) using `generate_multi_asset_data()`
+2. **Point-in-time validation** - Validates all assets for look-ahead bias with SMA(20, 50) lookback windows
+3. **Survivorship bias detection** - Analyzes universe for survivor/entry/exit bias
+4. **CPCV validation (Python API)** - Runs `cpcv_analysis` with 2 benchmarks, surfacing `deflated_alpha` and `benchmark_metrics`
+5. **CPCV validation (CLI)** - Production-pattern `walk_forward cpcv` with multiple `--benchmark` files
+6. **Monte Carlo validation (CLI)** - Production-pattern `walk_forward monte-carlo` with multiple benchmarks, tear sheet rendering deflated alpha
+7. **Direct deflated alpha computation** - Demonstrates `_benchmark_list_alpha_correction` and `deflated_alpha_ratio` with trial alphas
+
+Run with:
+```bash
+python3 skills/quantitative-backtesting/examples/real_data_pipeline_example.py
+```
+
+Self-contained: uses temporary directories, no persistent artifacts.
+
 ### `real_data_workflow.md`
 
 Comprehensive guide for working with real market data including:

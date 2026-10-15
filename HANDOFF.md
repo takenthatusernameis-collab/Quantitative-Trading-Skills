@@ -656,3 +656,72 @@ Evidence and constraints:
 - Keep the example self-contained: generate data with `generate_sample_data.py`, write CSVs to a temp dir, run `walk_forward cpcv` (or `monte-carlo`) with 2 `--benchmark` files, and print/inspect the resulting `cpcv_metrics.json`/`monte_carlo_results.json` summary.
 - Verify with `python3 examples/real_data_pipeline_example.py` (exit 0) plus the existing `python3 tests/test_walk_forward.py` and `python3 verify_end_to_end.py`.
 - Do NOT delete or rehost inherited marketplace content; keep the change scoped to the `quantitative-backtesting` skill (`examples/`, optionally `scripts/`).
+
+---
+
+## Session work (this agent — 2026-10-15)
+
+The HANDOFF's "Next agent task" was: **implement the real-data integration example, replacing the `real_data_pipeline_example.py` stub.**
+
+### Work completed
+
+1. **Extended `generate_sample_data.py`** (`scripts/generate_sample_data.py`):
+   - Added `generate_multi_asset_data(n_assets, periods, seed)` function that generates a correlated multi-asset universe with a common market factor and asset-specific betas/idiosyncratic volatility.
+   - Refactored `generate_single_asset_data(periods, seed)` for the original single-asset generation.
+   - Maintained backward compatibility: running the script directly still produces `sample_ohlcv.csv`.
+
+2. **Implemented `real_data_pipeline_example.py`** (`examples/real_data_pipeline_example.py`):
+   - Complete end-to-end pipeline demonstrating quantitative research workflow:
+     - **Synthetic universe generation**: 8 assets, 756 periods (~3 years) with realistic cross-sectional correlation structure.
+     - **Point-in-time validation**: All 8 assets pass PIT checks with SMA(20, 50) lookback windows.
+     - **Survivorship bias detection**: Bias score 0.000 (all assets survive full period by construction).
+     - **CPCV validation via Python API**: Programmatic access to `cpcv_analysis` with 2 benchmarks, surfacing `deflated_alpha` (DAR ~0.49, p~0.51, n_benchmarks=2) and `benchmark_metrics` (per-benchmark alpha, p-value, DAR).
+     - **CPCV validation via CLI**: Production-pattern CLI call (`walk_forward cpcv --benchmark bench1.csv bench2.csv`), identical results to API path.
+     - **Monte Carlo validation via CLI**: Production-pattern CLI call (`walk_forward monte-carlo --benchmark bench1.csv bench2.csv --n-simulations 100`), DAR ~0.51, tear sheet renders "Multiple-Testing Correction (Deflated Alpha)" and "Per-Benchmark Comparison" sections.
+     - **Direct deflated alpha computation**: Demonstrates `_benchmark_list_alpha_correction` and `deflated_alpha_ratio` with trial alphas from each benchmark.
+   - Self-contained: uses `tempfile.TemporaryDirectory()`, no persistent artifacts left behind.
+   - Exit code 0 on success, prints comprehensive summary.
+
+3. **Updated `examples/README.md`** to document the new example.
+
+### Verification status (this agent)
+
+- `test_data_loader.py`: 29/29 passed
+- `test_performance.py`: 26/26 passed
+- `test_reporting.py`: 42/42 passed (unittest OK)
+- `test_run_backtest.py`: 41/41 passed
+- `test_strategy_builder.py`: 27/27 passed
+- `test_walk_forward.py`: 19/19 passed
+- `test_cpcv.py`: 16/16 passed
+- `test_monte_carlo.py`: 7/7 passed
+- `test_generate_sample_data.py`: 1/1 passed
+- `verify_end_to_end.py`: PASSED
+- `examples/deflated_alpha_example.py`: runs end-to-end, exit 0
+- `examples/multiple_benchmarks_example.py`: runs end-to-end, exit 0
+- `examples/full_pipeline_example.py`: runs end-to-end, exit 0
+- `examples/real_data_pipeline_example.py`: runs end-to-end, exit 0
+
+All quant tests pass (208/208). No regressions introduced.
+
+### What changed (git diff)
+
+- `skills/quantitative-backtesting/scripts/generate_sample_data.py` — added `generate_multi_asset_data()`, refactored `generate_single_asset_data()`.
+- `skills/quantitative-backtesting/examples/real_data_pipeline_example.py` — replaced 2-line stub with full pipeline implementation (~280 lines).
+- `skills/quantitative-backtesting/examples/README.md` — added documentation for the new example.
+
+### What remains unresolved
+
+- The example uses synthetic data by design (no network access in this environment). For production use with real market data, users would replace the `generate_multi_asset_data` call with their data ingestion pipeline (e.g., Yahoo Finance, Polygon, IBKR). The structure (PIT validation → survivorship detection → CPCV/monte-carlo with benchmark list → deflated alpha) remains identical.
+- `run_monte_carlo`'s `mc_base_results["config"]` does not include `benchmark_cost_is_periodic` (mirroring `run_cpcv`'s report config which also omits it). The `mc_save["config"]` does include it; the tear-sheet config is cosmetic only. Left as-is for parity with `run_cpcv`.
+
+### Next agent task
+
+**Consider adding a test that runs `real_data_pipeline_example.py` as part of the test suite** (or at least verifies it can be imported without errors) to prevent future regressions. Currently it is only manually verified.
+
+Alternative: If no further tasks are assigned, the repository is in a complete state with all HANDOFF items resolved. The quantitative backtesting skill now has:
+- Correct split-adjusted price handling (Yahoo Finance convention)
+- Periodic vs round-trip benchmark cost modeling
+- Multiple-benchmark deflated alpha correction (DAR) across CPCV, walk-forward, out-of-sample, and Monte Carlo pipelines
+- CLI support for multiple `--benchmark` files on all subcommands
+- Tear sheet rendering of cross-benchmark deflated alpha
+- End-to-end worked example demonstrating the full research workflow

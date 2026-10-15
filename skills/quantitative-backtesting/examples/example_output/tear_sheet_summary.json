@@ -21,7 +21,7 @@
     "benchmark_slippage": 0.0,
     "benchmark_expense_ratio": 0.0,
     "benchmark_cost_is_periodic": false,
-    "correlation_with_benchmark": 0.7753871000398787,
+    "correlation_with_benchmark": 0.7753871000398785,
     "alpha": -0.06219599731764373,
     "beta": 0.6016509561052814,
     "tracking_error": 0.14841675203401686,
