@@ -1549,6 +1549,53 @@ def test_trading_costs_levered_strategy_funding_cost_effect():
     )
 
 
+def test_trading_costs_market_neutral_borrow_and_funding_effect():
+    """Combined borrow and funding costs should reduce returns for a market-neutral leveraged strategy.
+
+    A market-neutral pairs strategy that is long one asset and short another with
+    2× gross exposure carries both short exposure (subject to borrow costs) and
+    excess leverage beyond 1× (subject to funding costs). Applying both should
+    reduce cumulative returns relative to the zero-cost baseline.
+    """
+    module = _import_costs_example_module()
+    import numpy as np
+    import pandas as pd
+
+    # Build market-neutral leveraged positions
+    raw = module.generate_multi_asset_data(
+        n_assets=module.N_ASSETS,
+        periods=module.N_PERIODS,
+        seed=42,
+    )
+    assets = {sym: df.set_index("date") for sym, df in raw.items()}
+    syms = sorted(assets.keys())
+    asset_a = assets[syms[3]]
+    asset_b = assets[syms[4]]
+    sig_a = module._strategy_signals(asset_a)
+    sig_b = module._strategy_signals(asset_b)
+    common = asset_a.index.intersection(asset_b.index)
+    pos_a = sig_a.reindex(common).fillna(0)
+    pos_b = -sig_b.reindex(common).fillna(0)
+    positions_mn = (pos_a + pos_b) * 2  # market neutral, 2x gross exposure
+    data_mn = {"A": asset_a.reindex(common), "B": asset_b.reindex(common)}
+
+    returns_base = module._calculate_strategy_returns(
+        data_mn, positions_mn, commission=0.0, slippage=0.0,
+        borrow_cost=0.0, funding_cost=0.0,
+    )
+    returns_both = module._calculate_strategy_returns(
+        data_mn, positions_mn, commission=0.0, slippage=0.0,
+        borrow_cost=0.03, funding_cost=0.02,
+    )
+
+    # Should have both short exposure and gross exposure > 1
+    assert positions_mn.abs().max() > 1.0
+    assert (positions_mn < 0).any()
+    assert returns_both.sum() < returns_base.sum(), (
+        f"combined borrow and funding costs should reduce returns: "
+        f"{returns_both.sum():.6f} vs {returns_base.sum():.6f}"
+    )
+
 def main() -> int:
     tests = [
         ("test_out_of_sample_validation_benchmark_cost_is_periodic", test_out_of_sample_validation_benchmark_cost_is_periodic),
@@ -1578,6 +1625,7 @@ def main() -> int:
         ("test_trading_costs_borrow_funding_sweep_exercises_api", test_trading_costs_borrow_funding_sweep_exercises_api),
         ("test_trading_costs_short_strategy_borrow_cost_effect", test_trading_costs_short_strategy_borrow_cost_effect),
         ("test_trading_costs_levered_strategy_funding_cost_effect", test_trading_costs_levered_strategy_funding_cost_effect),
+        ("test_trading_costs_market_neutral_borrow_and_funding_effect", test_trading_costs_market_neutral_borrow_and_funding_effect),
         ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ]
 

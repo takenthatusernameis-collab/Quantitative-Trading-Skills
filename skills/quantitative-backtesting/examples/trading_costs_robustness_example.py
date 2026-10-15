@@ -297,6 +297,40 @@ def run_strategy_cost_sweep(data_df):
         f"   With funding_cost=2%:          Sharpe={lfm['sharpe_ratio']:.3f}  "
         f"Return={lfm['total_return']:.2%} (Δ vs base: {lfm['total_return'] - blm['total_return']:+.2%})"
     )
+    # Market-neutral leveraged strategy variant: demonstrates combined borrow + funding costs
+    # Construct market-neutral positions using two assets: long when sig_a indicates, short when sig_b indicates
+    raw = generate_multi_asset_data(n_assets=N_ASSETS, periods=N_PERIODS, seed=42)
+    assets = {sym: df.set_index("date") for sym, df in raw.items()}
+    syms = sorted(assets.keys())
+    asset_a = assets[syms[3]]
+    asset_b = assets[syms[4]]
+    sig_a = _strategy_signals(asset_a)
+    sig_b = _strategy_signals(asset_b)
+    common = asset_a.index.intersection(asset_b.index)
+    pos_a = sig_a.reindex(common).fillna(0)
+    pos_b = -sig_b.reindex(common).fillna(0)
+    positions_mn = (pos_a + pos_b) * 2  # market neutral with 2x gross exposure
+    data_mn = {"A": asset_a.reindex(common), "B": asset_b.reindex(common)}
+
+    print("   Market-neutral leveraged variant (long A, short B, 2x gross exposure):")
+    baseline_mn = _calculate_strategy_returns(
+        data_mn, positions_mn, commission=0.0, slippage=0.0,
+        borrow_cost=0.0, funding_cost=0.0,
+    )
+    bmn = _metrics_from_returns(baseline_mn)
+    print(
+        f"   Baseline (0% borrow/funding):  Sharpe={bmn['sharpe_ratio']:.3f}  "
+        f"Return={bmn['total_return']:.2%}"
+    )
+    mn_both = _calculate_strategy_returns(
+        data_mn, positions_mn, commission=0.0, slippage=0.0,
+        borrow_cost=0.03, funding_cost=0.02,
+    )
+    mb = _metrics_from_returns(mn_both)
+    print(
+        f"   With borrow=3%, funding=2%:     Sharpe={mb['sharpe_ratio']:.3f}  "
+        f"Return={mb['total_return']:.2%} (Δ vs base: {mb['total_return'] - bmn['total_return']:+.2%})"
+    )
     print()
 
     return results, baseline_returns, {
@@ -305,6 +339,8 @@ def run_strategy_cost_sweep(data_df):
                   "funding_sharpe": sf["sharpe_ratio"], "funding_return": sf["total_return"]},
         "levered": {"baseline_sharpe": blm["sharpe_ratio"], "baseline_return": blm["total_return"],
                     "funding_sharpe": lfm["sharpe_ratio"], "funding_return": lfm["total_return"]},
+        "market_neutral": {"baseline_sharpe": bmn["sharpe_ratio"], "baseline_return": bmn["total_return"],
+                           "both_sharpe": mb["sharpe_ratio"], "both_return": mb["total_return"]},
     }
 
 
@@ -647,6 +683,10 @@ def main():
               f"funding_cost=2% has no effect (no leverage).")
         print(f"  3c. Leveraged variant (2x): funding_cost=2% reduces return by "
               f"{lev_delta:+.2%} (Sharpe {lev_res['baseline_sharpe']:.3f}→{lev_res['funding_sharpe']:.3f}).")
+        mn_res = cost_extras["market_neutral"]
+        mn_delta = mn_res["both_return"] - mn_res["baseline_return"]
+        print(f"  3d. Market-neutral leveraged variant (long A, short B, 2x gross exposure): combined borrow=3% + funding=2% reduces return by "
+              f"{mn_delta:+.2%} (Sharpe {mn_res['baseline_sharpe']:.3f}→{mn_res['both_sharpe']:.3f}).")
         print()
         print("  Conclusion: Transaction costs materially affect both performance")
         print("  metrics and statistical inference (deflated alpha). Sensitivity")
