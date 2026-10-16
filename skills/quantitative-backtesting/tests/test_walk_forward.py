@@ -2875,5 +2875,26 @@ def main() -> int:
     return 1 if failures else 0
 
 
+
+def test_benchmark_stats_with_splits_produces_finite_inference():
+    """Regression: split-bearing benchmarks produce finite alpha/beta/stats."""
+    dates = pd.date_range("2020-01-01", periods=60, freq="B")
+    rng = np.random.default_rng(123)
+    strategy_returns = pd.Series(rng.normal(0.001, 0.01, 60), index=dates)
+    benchmark_data = _make_benchmark_data_with_splits(periods=60, split_at=30, seed=123)
+    bench_rets = benchmark_data["close"].pct_change().dropna()
+    _, aligned = strategy_returns.align(bench_rets, join="inner")
+    aligned = aligned.dropna()
+    stats = _benchmark_stats_with_splits(
+        strategy_returns, aligned, 252,
+        benchmark_data=benchmark_data,
+    )
+    assert np.isfinite(stats["alpha"]), f"alpha must be finite, got {stats['alpha']}"
+    assert np.isfinite(stats["beta"]), f"beta must be finite, got {stats['beta']}"
+    assert np.isfinite(stats["alpha_pvalue"]), f"alpha_pvalue must be finite, got {stats['alpha_pvalue']}"
+    assert np.isfinite(stats["correlation_with_benchmark"])
+    assert np.isfinite(stats["benchmark_total_return"])
+
+
 if __name__ == "__main__":
     sys.exit(main())

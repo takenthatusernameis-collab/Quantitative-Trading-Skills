@@ -8,7 +8,7 @@
 ## Quantitative-backtesting skill status
 
 - `skills/quantitative-backtesting/` is the primary quant asset.
-- **Test suite: 261/261 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`).
+- **Test suite: 262/262 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`).
 - Standalone runner `tests/test_walk_forward.py`: **69/69** passed.
 - Root end-to-end script `verify_end_to_end.py`: **passes**.
 - `examples/trading_costs_robustness_example.py` runs to completion.
