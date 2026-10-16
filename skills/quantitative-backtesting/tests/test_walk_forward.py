@@ -2896,5 +2896,42 @@ def test_benchmark_stats_with_splits_produces_finite_inference():
     assert np.isfinite(stats["benchmark_total_return"])
 
 
+def test_benchmark_stats_with_splits_regression_pins_corrected_values():
+    """Regression test pinning corrected alpha/beta for a split-bearing benchmark.
+
+    After fixing the NaN from leading NaN in pct_change() with dropna(), the
+    split-adjusted path should produce finite, deterministic stats.
+    """
+    dates = pd.date_range("2020-01-01", periods=60, freq="B")
+    rng = np.random.default_rng(42)
+    strategy_returns = pd.Series(rng.normal(0.0005, 0.012, 60), index=dates)
+    split_at = 25
+    base = 100 + np.cumsum(rng.normal(0.0003, 0.008, 60))
+    splits = pd.Series([1.0] * 60, index=dates)
+    splits.iloc[split_at:] = 0.5
+    close = base.copy()
+    close[split_at:] = close[split_at:] / 2.0
+    benchmark_data = pd.DataFrame({
+        "close": close,
+        "splits": splits,
+    }, index=dates)
+
+    bench_rets = benchmark_data["close"].pct_change().dropna()
+    _, aligned = strategy_returns.align(bench_rets, join="inner")
+    aligned = aligned.dropna()
+    stats = _benchmark_stats_with_splits(
+        strategy_returns, aligned, 252,
+        benchmark_data=benchmark_data,
+    )
+    assert np.isfinite(stats["alpha"])
+    assert np.isfinite(stats["beta"])
+    assert np.isfinite(stats["alpha_pvalue"])
+    assert abs(stats["alpha"] - 0.011441039611221912) < 1e-10
+    assert abs(stats["beta"] - (-0.003953175078033304)) < 1e-10
+    assert abs(stats["alpha_pvalue"] - 0.9813727464) < 1e-8
+    assert np.isfinite(stats["correlation_with_benchmark"])
+    assert np.isfinite(stats["r_squared"])
+
+
 if __name__ == "__main__":
     sys.exit(main())
