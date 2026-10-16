@@ -53,6 +53,24 @@ Verified: full suite **273/273 passing**; `verify_end_to_end.py` **exit 0**.
 
 This session's task ("ensure `bias_controls_engaged` propagates into report artifacts") is **complete** (prior session). The `_optimize_sweep_coefficient` propagation gap is now **complete** (this session).
 
+## This session (n_trials accounting regression test)
+
+Confirmed the `out_of_sample_validation` n_trials reconciliation already holds in
+the committed code: for a 9-combo grid across 7 walk-forward periods,
+`out_of_sample_validation` aggregate `deflated_sharpe["n_trials"]` = 61 equals
+`walk_forward_analysis` on the same train slice (61) and the inner
+`validation_results` summary (61), i.e. the sum of actually-evaluated finite-
+Sharpe combinations, not the full grid size (9). The full-grid fallback
+(walk_forward.py:2125/2133) does not trigger when `trial_sharpes` is present.
+
+Added regression test:
+- `test_out_of_sample_validation_n_trials_matches_evaluated_combinations` in
+  `skills/quantitative-backtesting/tests/test_walk_forward.py`, registered in
+  `main()`.
+
+Verified: full suite **274/274 passing** (273 + new test);
+`verify_end_to_end.py` exit 0.
+
 ## Verified finding: `n_trials` accounting is NOT consistent across paths
 
 The handoff's audit ask was to verify that `deflated_sharpe_ratio` receives the same effective trial count in `walk_forward_analysis`, `cpcv_analysis`, `out_of_sample_validation`, and the `run_monte_carlo` `--n-trials` path. **They do not.** Evidence (all in `skills/quantitative-backtesting/scripts/walk_forward.py`):
@@ -68,9 +86,27 @@ So the multiple-testing correction uses three different effective trial counts a
 
 ## Next task (bounded, high-value)
 
-**Reconcile `n_trials` accounting in `out_of_sample_validation`** so the effective trial count passed to `deflated_sharpe_ratio` matches `walk_forward_analysis`/`cpcv_analysis` (finite-Sharpe configs evaluated) rather than the full grid size.
+`out_of_sample_validation` n_trials reconciliation is **complete** this session
+(code already reconciled; regression test added, suite 274/274,
+`verify_end_to_end.py` exit 0).
 
-- Relevant file: `skills/quantitative-backtesting/scripts/walk_forward.py`, `out_of_sample_validation`, `n_trials` computation at walk_forward.py:2114-2130.
-- The cleanest fix exposes the evaluated-trial count from `walk_forward_analysis`/`cpcv_analysis` (e.g. on the summary or validation result) and reuses it in `out_of_sample_validation` instead of recomputing `len(list(product(*param_grid.values())))`.
-- Add a regression test asserting `out_of_sample_validation`'s aggregate `deflated_sharpe["n_trials"]` equals the count of actually-evaluated combinations (not the full grid size), and that it is consistent with `walk_forward_analysis`/`cpcv_analysis` for the same grid.
-- Constraint: do not change `deflated_sharpe_ratio` itself; do not break the 273-test suite or `verify_end_to_end.py` (exit 0).
+The remaining `n_trials` accounting inconsistency from the prior audit:
+reconcile `run_monte_carlo --n-trials` effective trial count so Deflated Sharpe
+p-values are comparable across the `--n-trials` Monte Carlo path and the
+walk-forward/CPCV/out_of_sample_validation paths.
+
+- `run_monte_carlo --n-trials` (walk_forward.py:4111-4114) uses
+  `effective_n_trials = max(int(n_trials), len(opt_results))`, a third counting
+  basis distinct from `walk_forward_analysis`/`cpcv_analysis`
+  (finite-Sharpe configs evaluated) and `out_of_sample_validation` (now
+  reconciled).
+- Relevant file: `skills/quantitative-backtesting/scripts/walk_forward.py`,
+  `run_monte_carlo`, `effective_n_trials` at walk_forward.py:4111-4114.
+- The cleanest fix exposes the actually-evaluated trial count from
+  `parameter_optimization` (successfully-evaluated combos) and uses it
+  consistently, mirroring the `out_of_sample_validation` reconciliation.
+- Add a regression test asserting `run_monte_carlo --n-trials` deflated_sharpe
+  `n_trials` equals the actually-evaluated combo count and is consistent with
+  `walk_forward_analysis`/`cpcv_analysis` for the same grid.
+- Constraint: do not change `deflated_sharpe_ratio` itself; do not break the
+  test suite or `verify_end_to_end.py` (exit 0).

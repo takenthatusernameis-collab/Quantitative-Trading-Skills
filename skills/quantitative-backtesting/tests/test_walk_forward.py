@@ -851,6 +851,69 @@ def test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model():
     )
 
 
+def test_out_of_sample_validation_n_trials_matches_evaluated_combinations():
+    """out_of_sample_validation's aggregate deflated_sharpe n_trials must equal
+    the count of actually-evaluated (finite-Sharpe) combinations across
+    walk-forward periods -- not the full combinatorial grid size -- and must
+    match walk_forward_analysis on the same grid.
+
+    Guards the multiple-testing correction: Deflated Sharpe p-values are only
+    comparable across walk_forward, cpcv, and out_of_sample_validation when
+    they are all deflated by the same effective trial count.  The cpcv branch
+    of out_of_sample_validation reuses the same total_trials computation, so
+    this covers both validation methods.
+    """
+    data = _make_ohlcv_data(periods=1200, seed=11)
+    strategy_type = "sma_crossover"
+    param_grid = {"fast_period": [5, 10, 15], "slow_period": [20, 30, 40]}
+    full_grid_size = len(param_grid["fast_period"]) * len(param_grid["slow_period"])
+    factory = lambda params: build_strategy(strategy_type, json.dumps(params))
+
+    train_data, _val_data, _test_data = _split_train_val_test(data, 0.6, 0.2, 0.2)
+
+    # Independent recomputation on the same train slice / grid.
+    wf = walk_forward_analysis(
+        data=train_data, strategy_factory=factory, param_grid=param_grid,
+        train_months=12, test_months=3, step_months=3,
+        initial_capital=100000, commission=0.0002, slippage=0.0001,
+        apply_deflation=True,
+    )
+    wf_n = wf["summary"]["deflated_sharpe"]["n_trials"]
+    wf_evaluated = sum(
+        len(p.get("trial_sharpes") or [])
+        for p in wf.get("periods", []) if p.get("best_params") is not None
+    )
+    assert wf_n == max(wf_evaluated, 1), (wf_n, wf_evaluated)
+
+    oos = out_of_sample_validation(
+        data=data, strategy_factory=factory, param_grid=param_grid,
+        train_frac=0.6, val_frac=0.2, test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=12, walk_forward_test_months=3,
+        walk_forward_step_months=3,
+        initial_capital=100000, commission=0.0002, slippage=0.0001,
+        apply_deflation=True, validate_pit=False,
+    )
+    oos_n = oos["summary"]["deflated_sharpe"]["n_trials"]
+    inner_n = oos["validation_results"]["summary"]["deflated_sharpe"]["n_trials"]
+    oos_evaluated = sum(
+        len(p.get("trial_sharpes") or [])
+        for p in oos["validation_results"].get("periods", [])
+        if p.get("best_params") is not None
+    )
+
+    # Cross-path consistency: out_of_sample_validation matches
+    # walk_forward_analysis on the same grid.
+    assert oos_n == wf_n, (oos_n, wf_n)
+    # Equals the count of actually-evaluated combinations, not the full grid.
+    assert oos_n == oos_evaluated == max(oos_evaluated, 1), (oos_n, oos_evaluated)
+    # Regression guard: previously the full grid size was used per period, so
+    # with multiple periods the count must exceed a single grid traversal.
+    assert oos_n > full_grid_size, (oos_n, full_grid_size)
+    # Inner (validation_results) and outer (summary) agree.
+    assert oos_n == inner_n, (oos_n, inner_n)
+
+
 def test_out_of_sample_validation_multiple_benchmarks_deflated_alpha():
     """out_of_sample_validation with multiple benchmarks surfaces Deflated Alpha
     in the summary and preserves backward compatibility with deflated_alphas list.
@@ -3006,6 +3069,7 @@ def main() -> int:
         ("test_benchmark_list_alpha_correction_multiple_benchmarks_with_splits", test_benchmark_list_alpha_correction_multiple_benchmarks_with_splits),
         ("test_benchmark_list_alpha_correction_mixed_splits_backward_compat", test_benchmark_list_alpha_correction_mixed_splits_backward_compat),
         ("test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model", test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model),
+        ("test_out_of_sample_validation_n_trials_matches_evaluated_combinations", test_out_of_sample_validation_n_trials_matches_evaluated_combinations),
         ("test_benchmark_stats_with_splits_produces_finite_inference", test_benchmark_stats_with_splits_produces_finite_inference),
         ("test_benchmark_stats_with_splits_regression_pins_corrected_values", test_benchmark_stats_with_splits_regression_pins_corrected_values),
         ("test_cli_walk_forward_commission_sweep", test_cli_walk_forward_commission_sweep),
