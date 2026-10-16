@@ -1157,6 +1157,109 @@ def test_cost_sweep_dsr_parity_across_paths():
             assert nt == n_trials[0], (name, label, nt, n_trials[0])
 
 
+def test_non_impact_sweep_dsr_parity_across_paths():
+    """Non-impact cost sweeps must carry a coefficient-stable DSR basis.
+
+    Extends `test_cost_sweep_dsr_parity_across_paths` (which guarded only the
+    `--impact-coefficients` sweeps) to the remaining cost sweeps:
+    `--borrow-costs`, `--funding-costs`, `--commissions`, and `--slippages`.
+    Each of these re-runs one of the four analysis pipelines for a series of
+    cost values and records a per-cost `deflated_sharpe` /
+    `deflated_sharpe_n_trials` row. The grid is unchanged across costs, so
+    the multiple-testing correction basis (the number of configurations the
+    pipeline actually evaluated) must not drift between costs, and the DSR /
+    p_value must stay in [0, 1] for every row.
+
+    Before this session only the impact sweep was guarded, so a regression in
+    the per-cost trial counting (e.g. a borrow sweep evaluating a different
+    subset of the grid at a different cost) would have gone unnoticed while
+    the sweep still "ran" and the artifact still looked well-formed.
+    """
+    grid = '{"fast_period": [5, 10, 15], "slow_period": [20, 30, 40]}'
+
+    def run_sweep(subcmd, extra, sweep_flag, expect):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = os.path.join(tmpdir, "data.csv")
+            _write_ohlcv_csv(csv_path, periods=600, seed=11)
+            out_dir = os.path.join(tmpdir, "out")
+            argv = [
+                "walk_forward", subcmd,
+                "--data", csv_path,
+                "--symbol", "SPY",
+                "--strategy", "sma_crossover",
+                "--param-grid", grid,
+                "--output", out_dir,
+            ] + extra + [sweep_flag, "0", "2", "5"]
+            with patch.object(sys, "argv", argv), \
+                    redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                rc = walk_forward_main()
+            assert rc == 0, f"{subcmd} {sweep_flag} sweep should exit 0, got {rc}"
+            sweep_path = os.path.join(out_dir, expect)
+            assert os.path.exists(sweep_path), f"{expect} not written"
+            with open(sweep_path) as f:
+                return json.load(f)
+
+    # walk-forward / out-of-sample / cpcv sweeps gate the DSR on `--deflate`;
+    # monte-carlo gates it on `--n-trials` instead (no `--deflate` flag exists
+    # for the monte-carlo subcommand).
+    sweeps = {
+        "borrow": [
+            run_sweep("walk-forward", ["--deflate"], "--borrow-costs", "walk_forward_borrow_sweep.json"),
+            run_sweep("out-of-sample", ["--deflate"], "--borrow-costs", "out_of_sample_borrow_sweep.json"),
+            run_sweep("cpcv", ["--deflate", "--n-splits", "5", "--test-size", "0.2"],
+                      "--borrow-costs", "cpcv_borrow_sweep.json"),
+            run_sweep("monte-carlo", ["--n-simulations", "50", "--n-trials", "500"],
+                      "--borrow-costs", "monte_carlo_borrow_sweep.json"),
+        ],
+        "funding": [
+            run_sweep("walk-forward", ["--deflate"], "--funding-costs", "walk_forward_funding_sweep.json"),
+            run_sweep("out-of-sample", ["--deflate"], "--funding-costs", "out_of_sample_funding_sweep.json"),
+            run_sweep("cpcv", ["--deflate", "--n-splits", "5", "--test-size", "0.2"],
+                      "--funding-costs", "cpcv_funding_sweep.json"),
+            run_sweep("monte-carlo", ["--n-simulations", "50", "--n-trials", "500"],
+                      "--funding-costs", "monte_carlo_funding_sweep.json"),
+        ],
+        "commission": [
+            run_sweep("walk-forward", ["--deflate"], "--commissions", "walk_forward_commission_sweep.json"),
+            run_sweep("out-of-sample", ["--deflate"], "--commissions", "out_of_sample_commission_sweep.json"),
+            run_sweep("cpcv", ["--deflate", "--n-splits", "5", "--test-size", "0.2"],
+                      "--commissions", "cpcv_commission_sweep.json"),
+            run_sweep("monte-carlo", ["--n-simulations", "50", "--n-trials", "500"],
+                      "--commissions", "monte_carlo_commission_sweep.json"),
+        ],
+        "slippage": [
+            run_sweep("walk-forward", ["--deflate"], "--slippages", "walk_forward_slippage_sweep.json"),
+            run_sweep("out-of-sample", ["--deflate"], "--slippages", "out_of_sample_slippage_sweep.json"),
+            run_sweep("cpcv", ["--deflate", "--n-splits", "5", "--test-size", "0.2"],
+                      "--slippages", "cpcv_slippage_sweep.json"),
+            run_sweep("monte-carlo", ["--n-simulations", "50", "--n-trials", "500"],
+                      "--slippages", "monte_carlo_slippage_sweep.json"),
+        ],
+    }
+
+    for cost_kind, payloads in sweeps.items():
+        for payload in payloads:
+            rows = payload["results"]
+            assert len(rows) == 3, (cost_kind, "expected 3 sweep rows")
+
+            n_trials = [r.get("deflated_sharpe_n_trials") for r in rows]
+            # The grid is identical across costs, so the counting basis
+            # (the number of configurations the pipeline actually evaluated)
+            # must not drift between costs.
+            assert n_trials[0] is not None and n_trials[0] == n_trials[1] == n_trials[2], (
+                cost_kind, "sweep n_trials must be cost-stable", n_trials
+            )
+            assert n_trials[0] >= 1, (cost_kind, n_trials)
+
+            for i, r in enumerate(rows):
+                label = f"{cost_kind}[{i}]"
+                dsr = r.get("deflated_sharpe")
+                nt = r.get("deflated_sharpe_n_trials")
+                assert dsr is not None, (cost_kind, label, "missing deflated_sharpe")
+                assert 0.0 <= dsr <= 1.0, (cost_kind, label, dsr)
+                assert nt == n_trials[0], (cost_kind, label, nt, n_trials[0])
+
+
 def test_out_of_sample_validation_multiple_benchmarks_deflated_alpha():
     """out_of_sample_validation with multiple benchmarks surfaces Deflated Alpha
     in the summary and preserves backward compatibility with deflated_alphas list.
@@ -3353,6 +3456,7 @@ def main() -> int:
         ("test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star", test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star),
         ("test_deflated_sharpe_parity_across_all_four_analysis_paths", test_deflated_sharpe_parity_across_all_four_analysis_paths),
         ("test_cost_sweep_dsr_parity_across_paths", test_cost_sweep_dsr_parity_across_paths),
+        ("test_non_impact_sweep_dsr_parity_across_paths", test_non_impact_sweep_dsr_parity_across_paths),
         ("test_benchmark_stats_with_splits_produces_finite_inference", test_benchmark_stats_with_splits_produces_finite_inference),
         ("test_benchmark_stats_with_splits_regression_pins_corrected_values", test_benchmark_stats_with_splits_regression_pins_corrected_values),
         ("test_cli_walk_forward_commission_sweep", test_cli_walk_forward_commission_sweep),
