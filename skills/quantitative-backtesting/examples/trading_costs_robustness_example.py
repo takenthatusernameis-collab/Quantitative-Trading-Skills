@@ -105,34 +105,13 @@ MC_N_SIMULATIONS = 200
 MC_CONFIDENCE_LEVELS = [0.90, 0.95, 0.99]
 MC_BLOCK_SIZE = None
 
-# Commission / slippage sweep grids for the walk-forward-style validation
-# sweeps (Section 4).  These exercise the same CLI sweep machinery
-# (`--commissions` / `--slippages`) that the standalone walk_forward.py
-# tool exposes, but driven programmatically through the public validation
-# functions so the example is self-contained and reproducible.  The grids
-# are chosen to span realistic retail-to-institutional cost levels: 0 bps
-# (frictionless, the in-sample upper bound) through 10 bps round-trip, a
-# plausible all-in cost for an actively traded strategy.
-COMMISSION_SWEEP_GRID = [0.0, 0.0005, 0.0010]      # 0, 5, 10 bps per trade
-SLIPPAGE_SWEEP_GRID = [0.0, 0.00025, 0.0005]        # 0, 2.5, 5 bps per trade
-
-# Walk-forward / CPCV / out-of-sample configuration for the sweeps.  Kept
-# modest so the full 5-mode × 3-value sweep completes in seconds on the
-# synthetic data, while still producing genuine out-of-sample records.
-WF_TRAIN_MONTHS = 12
-WF_TEST_MONTHS = 3
-WF_STEP_MONTHS = 3
-CPCV_N_SPLITS = 5
-CPCV_TEST_SIZE = 0.2
-OOS_TRAIN_FRAC = 0.6
-OOS_VAL_FRAC = 0.2
-OOS_TEST_FRAC = 0.2
-OOS_VALIDATION_METHOD = "walk_forward"
-MC_N_SIMULATIONS = 200
-MC_CONFIDENCE_LEVELS = [0.90, 0.95, 0.99]
-MC_BLOCK_SIZE = None
-
 # Degraded-strategy benchmark drag levels (annualized).  The strategy's SMA
+
+# Validation-mode param grid for the cost sweeps.  Kept small so the
+# full multi-mode sweep completes in seconds on the synthetic data while
+# still exercising genuine out-of-sample records.
+SWEEP_PARAM_GRID = {"fast_period": [5, 10], "slow_period": [20, 30]}
+
 # crossover on the synthetic data has negative returns (Sharpe ≈ -0.21), so a
 # positive alpha vs a benchmark is only possible when the benchmark drifts MORE
 # negatively than the strategy itself.  A -30% primary / -60% secondary drag
@@ -680,6 +659,179 @@ def run_cpcv_robustness(data_df, benchmark_dfs, factory):
           f"(Δ {high['total_oos_return'] - low['total_oos_return']:+.2%})")
     print()
     return results
+
+
+# ---------------------------------------------------------------------------
+# Section 4: Commission / slippage cost sweeps across validation modes
+# ---------------------------------------------------------------------------
+
+def _mode_oos_metrics(mode, data_df, factory, commission, slippage):
+    """Run one validation mode at given commission/slippage; return (oos_return, oos_sharpe)."""
+    if mode == "walk_forward":
+        r = walk_forward_analysis(
+            data=data_df, strategy_factory=factory,
+            param_grid=SWEEP_PARAM_GRID,
+            train_months=WF_TRAIN_MONTHS, test_months=WF_TEST_MONTHS,
+            step_months=WF_STEP_MONTHS, initial_capital=INITIAL_CAPITAL,
+            commission=commission, slippage=slippage,
+        )
+        s = r["summary"]
+        return _safe_float(s.get("total_oos_return")), _safe_float(s.get("oos_sharpe"))
+    if mode == "optimize":
+        results = parameter_optimization(
+            data=data_df, strategy_factory=factory,
+            param_grid=SWEEP_PARAM_GRID, initial_capital=INITIAL_CAPITAL,
+            commission=commission, slippage=slippage,
+        )
+        top = results[0] if results else None
+        if top is None:
+            return None, None
+        return _safe_float(top.get("total_return")), _safe_float(top.get("sharpe_ratio"))
+    if mode == "cpcv":
+        r = cpcv_analysis(
+            data=data_df, strategy_factory=factory,
+            param_grid=SWEEP_PARAM_GRID, n_splits=CPCV_N_SPLITS,
+            test_size=CPCV_TEST_SIZE, initial_capital=INITIAL_CAPITAL,
+            commission=commission, slippage=slippage,
+        )
+        s = r["summary"]
+        return _safe_float(s.get("total_oos_return")), _safe_float(s.get("oos_sharpe"))
+    if mode == "out_of_sample":
+        r = out_of_sample_validation(
+            data=data_df, strategy_factory=factory,
+            param_grid=SWEEP_PARAM_GRID,
+            train_frac=OOS_TRAIN_FRAC, val_frac=OOS_VAL_FRAC, test_frac=OOS_TEST_FRAC,
+            validation_method=OOS_VALIDATION_METHOD,
+            walk_forward_train_months=WF_TRAIN_MONTHS,
+            walk_forward_test_months=WF_TEST_MONTHS,
+            walk_forward_step_months=WF_STEP_MONTHS,
+            cpcv_n_splits=CPCV_N_SPLITS, cpcv_test_size=CPCV_TEST_SIZE,
+            initial_capital=INITIAL_CAPITAL, commission=commission, slippage=slippage,
+        )
+        tp = r.get("test_performance") or {}
+        return _safe_float(tp.get("test_total_return")), _safe_float(tp.get("test_sharpe"))
+    raise ValueError(f"Unknown sweep mode: {mode}")
+
+
+def run_commission_slippage_sweeps(data_df, factory):
+    """Section 4: Commission / slippage cost sweeps across all five validation modes.
+
+    Runs walk-forward, parameter optimization, CPCV, out-of-sample, and
+    Monte Carlo validation at a grid of commission and slippage levels and
+    records how out-of-sample return and Sharpe degrade as costs rise.
+
+    This is a sensitivity analysis only.  The data is synthetic
+    (generate_multi_asset_data, seed=42) and every sweep is run in-sample
+    on the full development record, so the results are NOT evidence of
+    profitability or production readiness.  The honest claim is purely
+    directional: higher per-trade costs reduce net out-of-sample
+    performance across every validation mode.
+    """
+    print("4. COMMISSION / SLIPPAGE SENSITIVITY SWEEPS (ALL VALIDATION MODES)")
+    print("-" * 75)
+    print("   Mode             | Cost type  | Cost bps | OOS Return | OOS Sharpe | Δ Return | Δ Sharpe")
+    print("   " + "-" * 100)
+
+    modes = ["walk_forward", "optimize", "cpcv", "out_of_sample"]
+    sweep_rows = []
+    for mode in modes:
+        # Baseline: frictionless (0 bps commission, 0 bps slippage)
+        base_ret, base_sharpe = _mode_oos_metrics(mode, data_df, factory, 0.0, 0.0)
+        sweep_rows.append({
+            "mode": mode, "cost_type": "baseline", "cost_bps": 0.0,
+            "oos_return": base_ret, "oos_sharpe": base_sharpe,
+        })
+        print(
+            f"   {mode:<16} | {'baseline':>10} | {'0':>7} | "
+            f"{base_ret if base_ret is not None else 'N/A':>10} | "
+            f"{base_sharpe if base_sharpe is not None else 'N/A':>9} | {'—':>8} | {'—':>7}"
+        )
+
+        # Commission sweep (slippage held at 0)
+        for commission in COMMISSION_SWEEP_GRID:
+            if commission == 0.0:
+                continue
+            ret, sharpe = _mode_oos_metrics(mode, data_df, factory, commission, 0.0)
+            sweep_rows.append({
+                "mode": mode, "cost_type": "commission", "cost_bps": commission * 10_000,
+                "oos_return": ret, "oos_sharpe": sharpe,
+                "baseline_return": base_ret, "baseline_sharpe": base_sharpe,
+            })
+            dr = None if (ret is None or base_ret is None) else ret - base_ret
+            ds = None if (sharpe is None or base_sharpe is None) else sharpe - base_sharpe
+            print(
+                f"   {mode:<16} | {'commission':>10} | {commission*10_000:>6.0f} bp | "
+                f"{ret if ret is not None else 'N/A':>10} | {sharpe if sharpe is not None else 'N/A':>9} | "
+                f"{dr if dr is not None else 'N/A':>+8.2%} | {ds if ds is not None else 'N/A':>+7.3f}"
+            )
+
+        # Slippage sweep (commission held at 0)
+        for slippage in SLIPPAGE_SWEEP_GRID:
+            if slippage == 0.0:
+                continue
+            ret, sharpe = _mode_oos_metrics(mode, data_df, factory, 0.0, slippage)
+            sweep_rows.append({
+                "mode": mode, "cost_type": "slippage", "cost_bps": slippage * 10_000,
+                "oos_return": ret, "oos_sharpe": sharpe,
+                "baseline_return": base_ret, "baseline_sharpe": base_sharpe,
+            })
+            dr = None if (ret is None or base_ret is None) else ret - base_ret
+            ds = None if (sharpe is None or base_sharpe is None) else sharpe - base_sharpe
+            print(
+                f"   {mode:<16} | {'slippage':>10} | {slippage*10_000:>6.0f} bp | "
+                f"{ret if ret is not None else 'N/A':>10} | {sharpe if sharpe is not None else 'N/A':>9} | "
+                f"{dr if dr is not None else 'N/A':>+8.2%} | {ds if ds is not None else 'N/A':>+7.3f}"
+            )
+
+        print()
+
+    # --- Monte Carlo cost sensitivity (base returns computed at each cost level) ---
+    print("   Monte Carlo cost sensitivity (base returns at each cost level, then resampled):")
+    signals = _strategy_signals(data_df)
+    mc_rows = []
+    for label, commission, slippage in [
+        ("baseline", 0.0, 0.0),
+        ("commission=10bp", 0.0010, 0.0),
+        ("slippage=5bp", 0.0, 0.0005),
+        ("combined=15bp", 0.0010, 0.0005),
+    ]:
+        base_returns = _calculate_strategy_returns(
+            data_df, signals,
+            commission=commission, slippage=slippage,
+            borrow_cost=0.0, funding_cost=0.0,
+        )
+        mc = monte_carlo_simulation(
+            base_returns,
+            n_simulations=MC_N_SIMULATIONS,
+            confidence_levels=MC_CONFIDENCE_LEVELS,
+            block_size=MC_BLOCK_SIZE,
+        )
+        summ = mc.get("summary") or {}
+        mean_sharpe = _safe_float((summ.get("sharpe_ratio") or {}).get("mean"))
+        mean_ret = _safe_float((summ.get("total_return") or {}).get("mean"))
+        por = _safe_float(mc.get("probability_of_ruin"))
+        mc_rows.append({
+            "label": label, "commission_bps": commission * 10_000,
+            "slippage_bps": slippage * 10_000,
+            "mean_sharpe": mean_sharpe, "mean_total_return": mean_ret,
+            "probability_of_ruin": por,
+        })
+        print(
+            f"   {label:<18} | mean Sharpe={mean_sharpe if mean_sharpe is not None else 'N/A'} | "
+            f"mean return={mean_ret if mean_ret is not None else 'N/A':.2%} | "
+            f"P(ruin)={por if por is not None else 'N/A'}"
+        )
+    print()
+
+    print("   Interpretation: these are sensitivity results, not profitability claims.")
+    print("   - All data is synthetic (seed=42) and every sweep is run in-sample on")
+    print("     the full development record, so Sharpe/return levels are optimistic.")
+    print("   - The honest, directional claim is that higher per-trade costs reduce")
+    print("     net out-of-sample performance across every validation mode tested.")
+    print("   - No curve is presented as evidence that the strategy is tradeable.")
+    print()
+
+    return {"validation_sweeps": sweep_rows, "monte_carlo": mc_rows}
 
 
 # ---------------------------------------------------------------------------
