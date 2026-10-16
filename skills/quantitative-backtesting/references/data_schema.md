@@ -103,3 +103,26 @@ stays comparable across the split date (volume was recorded in pre-split share
 units). When an `adj_close` column is available, it may be used as ground
 truth: after adjustment, `close` should match `adj_close` and the split-date
 return should match the `adj_close` return.
+
+## When Split Adjustment Applies During Benchmark Comparison
+
+Strategy-vs-benchmark comparison (total return, annualized return, correlation,
+alpha, beta, alpha t-statistic and p-value, R^2) is **split-adjusted whenever
+the benchmark data carries a `splits` column**, in all three benchmark code
+paths:
+
+- single-benchmark comparison in `out_of_sample_validation`
+- `_add_benchmark_to_summary` (used by walk-forward, CPCV, and parameter optimization)
+- `_benchmark_list_alpha_correction` (multiple-benchmark Deflated Alpha correction)
+
+Benchmarks without a `splits` column use the standard stats path unchanged.
+
+Split adjustment is **orthogonal to the benchmark cost model**. The
+`benchmark_cost_is_periodic` flag controls only whether benchmark transaction
+costs are charged once (round-trip, default) or each period (periodic); it does
+not gate split adjustment. A corporate action injects an artificial price drop
+into benchmark returns under both cost models, so every split-bearing benchmark
+is split-adjusted before benchmark stats are computed, independent of whether
+costs are modeled as round-trip or periodic. `benchmark_cost_is_periodic` is
+forwarded unchanged to `_benchmark_stats`, so periodic or round-trip cost
+handling is preserved after split adjustment.
