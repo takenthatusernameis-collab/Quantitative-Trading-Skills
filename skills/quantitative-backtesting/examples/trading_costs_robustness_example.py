@@ -46,8 +46,12 @@ from walk_forward import (  # noqa: E402
     cpcv_analysis,
     _calculate_strategy_returns,
     _benchmark_list_alpha_correction,
+    walk_forward_analysis,
+    parameter_optimization,
+    out_of_sample_validation,
 )
 from performance import calculate_metrics  # noqa: E402
+from monte_carlo import monte_carlo_simulation  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +77,60 @@ SLIPPAGE_GRID = [0.0, 0.0001, 0.0005]               # 0, 1, 5 bps
 # a drop-in template for strategies that DO carry short/leverage exposure.
 BORROW_COST_GRID = [0.0, 0.03]                      # 0%, 3% annual
 FUNDING_COST_GRID = [0.0, 0.02]                     # 0%, 2% annual
+
+# Commission / slippage sweep grids for the walk-forward-style validation
+# sweeps (Section 4).  These exercise the same CLI sweep machinery
+# (`--commissions` / `--slippages`) that the standalone walk_forward.py
+# tool exposes, but driven programmatically through the public validation
+# functions so the example is self-contained and reproducible.  The grids
+# are chosen to span realistic retail-to-institutional cost levels: 0 bps
+# (frictionless, the in-sample upper bound) through 10 bps round-trip, a
+# plausible all-in cost for an actively traded strategy.
+COMMISSION_SWEEP_GRID = [0.0, 0.0005, 0.0010]      # 0, 5, 10 bps per trade
+SLIPPAGE_SWEEP_GRID = [0.0, 0.00025, 0.0005]        # 0, 2.5, 5 bps per trade
+
+# Walk-forward / CPCV / out-of-sample configuration for the sweeps.  Kept
+# modest so the full 5-mode × 3-value sweep completes in seconds on the
+# synthetic data, while still producing genuine out-of-sample records.
+WF_TRAIN_MONTHS = 12
+WF_TEST_MONTHS = 3
+WF_STEP_MONTHS = 3
+CPCV_N_SPLITS = 5
+CPCV_TEST_SIZE = 0.2
+OOS_TRAIN_FRAC = 0.6
+OOS_VAL_FRAC = 0.2
+OOS_TEST_FRAC = 0.2
+OOS_VALIDATION_METHOD = "walk_forward"
+MC_N_SIMULATIONS = 200
+MC_CONFIDENCE_LEVELS = [0.90, 0.95, 0.99]
+MC_BLOCK_SIZE = None
+
+# Commission / slippage sweep grids for the walk-forward-style validation
+# sweeps (Section 4).  These exercise the same CLI sweep machinery
+# (`--commissions` / `--slippages`) that the standalone walk_forward.py
+# tool exposes, but driven programmatically through the public validation
+# functions so the example is self-contained and reproducible.  The grids
+# are chosen to span realistic retail-to-institutional cost levels: 0 bps
+# (frictionless, the in-sample upper bound) through 10 bps round-trip, a
+# plausible all-in cost for an actively traded strategy.
+COMMISSION_SWEEP_GRID = [0.0, 0.0005, 0.0010]      # 0, 5, 10 bps per trade
+SLIPPAGE_SWEEP_GRID = [0.0, 0.00025, 0.0005]        # 0, 2.5, 5 bps per trade
+
+# Walk-forward / CPCV / out-of-sample configuration for the sweeps.  Kept
+# modest so the full 5-mode × 3-value sweep completes in seconds on the
+# synthetic data, while still producing genuine out-of-sample records.
+WF_TRAIN_MONTHS = 12
+WF_TEST_MONTHS = 3
+WF_STEP_MONTHS = 3
+CPCV_N_SPLITS = 5
+CPCV_TEST_SIZE = 0.2
+OOS_TRAIN_FRAC = 0.6
+OOS_VAL_FRAC = 0.2
+OOS_TEST_FRAC = 0.2
+OOS_VALIDATION_METHOD = "walk_forward"
+MC_N_SIMULATIONS = 200
+MC_CONFIDENCE_LEVELS = [0.90, 0.95, 0.99]
+MC_BLOCK_SIZE = None
 
 # Degraded-strategy benchmark drag levels (annualized).  The strategy's SMA
 # crossover on the synthetic data has negative returns (Sharpe ≈ -0.21), so a
