@@ -191,6 +191,15 @@ def test_out_of_sample_validation_benchmark_cost_is_periodic():
     print(f"Benchmark return (round-trip): {bench_return_false:.6f}")
     print(f"Benchmark return (periodic): {bench_return_true:.6f}")
 
+    # The two cost models must produce different benchmark returns — this is
+    # the behavioral effect the flag exists for. Without this assertion the
+    # test would only guard flag plumbing, not the cost-model divergence that
+    # the flag controls (see verify_end_to_end.py for the reference values).
+    assert bench_return_false != bench_return_true, (
+        f"Expected different benchmark returns for round-trip vs periodic costs, "
+        f"got false={bench_return_false:.8f} true={bench_return_true:.8f}"
+    )
+
     # Also verify that the flag appears in the summary
     assert "summary" in results_false, "'summary' should be in results_false"
     assert "summary" in results_true, "'summary' should be in results_true"
@@ -594,6 +603,101 @@ def test_out_of_sample_validation_with_splits():
     test_bench = results["test_benchmark"]
     if isinstance(test_bench, dict):
         assert test_bench.get("benchmark_cost_is_periodic") is True
+
+
+def test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model():
+    """A benchmark with a corporate action must be split-adjusted under BOTH
+    cost models.
+
+    Split adjustment is orthogonal to the cost model: a stock split injects an
+    artificial price drop into benchmark returns whether benchmark costs are
+    modeled as round-trip or periodic.  Gating the splits-aware path on
+    ``benchmark_cost_is_periodic`` therefore mispriced every split-bearing
+    benchmark under the default (round-trip) cost model — a 2-for-1 split in
+    the test window produced benchmark_total_return of ~-49% instead of the
+    split-adjusted ~+1.5%.
+
+    With zero benchmark costs the two cost models are equivalent, so the two
+    runs must now agree exactly (the only remaining difference is the cost
+    model, which is disabled).  This is the regression guard for that fix.
+    """
+    data = _make_ohlcv_data(periods=300, seed=42)
+    # split_at=260 lands inside the test window (indices 240-300 for
+    # 0.6/0.2/0.2), so the split affects the benchmark stats under test.
+    benchmark = _make_benchmark_data_with_splits(periods=300, split_at=260)
+
+    strategy_type = "sma_crossover"
+    param_grid = {"fast_period": [3, 5], "slow_period": [8, 10]}
+
+    # Zero benchmark costs: the only thing that should differ between the two
+    # calls is the cost model, which is now disabled.  Both must therefore
+    # produce the same split-adjusted benchmark total return.
+    results_false = out_of_sample_validation(
+        data=data,
+        strategy_factory=lambda params: build_strategy(strategy_type, json.dumps(params)),
+        param_grid=param_grid,
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+        initial_capital=100000,
+        commission=0.0,
+        slippage=0.0,
+        benchmark=benchmark,
+        total_return_benchmark=False,
+        benchmark_commission=0.0,
+        benchmark_slippage=0.0,
+        benchmark_expense_ratio=0.0,
+        benchmark_cost_is_periodic=False,
+    )
+
+    results_true = out_of_sample_validation(
+        data=data,
+        strategy_factory=lambda params: build_strategy(strategy_type, json.dumps(params)),
+        param_grid=param_grid,
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+        initial_capital=100000,
+        commission=0.0,
+        slippage=0.0,
+        benchmark=benchmark,
+        total_return_benchmark=False,
+        benchmark_commission=0.0,
+        benchmark_slippage=0.0,
+        benchmark_expense_ratio=0.0,
+        benchmark_cost_is_periodic=True,
+    )
+
+    bench_false = results_false["test_benchmark"]
+    bench_true = results_true["test_benchmark"]
+
+    # Both paths must be split-adjusted.  A 2-for-1 split in the test window
+    # halves prices on and after the split date; an unadjusted benchmark
+    # return would be ~-50%, far below any plausible split-adjusted value.
+    ret_false = bench_false["benchmark_total_return"]
+    ret_true = bench_true["benchmark_total_return"]
+    assert ret_false > -0.2, (
+        f"Round-trip path should be split-adjusted, got benchmark_total_return={ret_false:.4f} "
+        f"(an unadjusted split yields ~-50%)"
+    )
+    assert ret_true > -0.2, (
+        f"Periodic path should be split-adjusted, got benchmark_total_return={ret_true:.4f}"
+    )
+
+    # With zero benchmark costs the two cost models are equivalent, so the
+    # split-adjusted benchmark returns must agree exactly.
+    assert abs(ret_false - ret_true) < 1e-9, (
+        f"Split-adjusted benchmark returns should agree across cost models "
+        f"when costs are zero: false={ret_false:.8f} true={ret_true:.8f}"
+    )
 
 
 def test_out_of_sample_validation_multiple_benchmarks_deflated_alpha():

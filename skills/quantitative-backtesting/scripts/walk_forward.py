@@ -1941,7 +1941,7 @@ def out_of_sample_validation(
             # Single benchmark (backward compatibility)
             benchmark_returns = _compute_benchmark_returns(benchmark, test_returns, total_return_benchmark)
             if benchmark_returns is not None:
-                if benchmark_cost_is_periodic and "splits" in benchmark.columns:
+                if "splits" in benchmark.columns:
                     test_benchmark = _benchmark_stats_with_splits(
                         test_returns, benchmark_returns, ann_factor_test,
                         total_return_benchmark=total_return_benchmark,
@@ -2953,8 +2953,13 @@ def _add_benchmark_to_summary(
 
     ann_factor = _annualization_factor(strategy_returns.index)
 
-    # If we have benchmark data and periodic costs are requested, use split-aware cost calculation
-    if benchmark_cost_is_periodic and benchmark_data is not None and "splits" in benchmark_data.columns:
+    # If we have benchmark data with a splits column, use split-aware cost
+    # calculation.  Split adjustment is orthogonal to the cost model: a
+    # corporate action injects an artificial price drop into benchmark
+    # returns regardless of whether benchmark costs are modeled as round-trip
+    # or periodic, so gating it on benchmark_cost_is_periodic silently
+    # misprices every split-bearing benchmark under the default cost model.
+    if benchmark_data is not None and "splits" in benchmark_data.columns:
         # Align benchmark data with returns
         _, aligned_benchmark_data = strategy_returns.align(benchmark_data, join="inner")
         if len(aligned_benchmark_data) > 0:
@@ -3052,12 +3057,12 @@ def _benchmark_list_alpha_correction(
     Testing a strategy against multiple benchmarks is a multiple-testing problem:
     with enough benchmarks, luck alone yields an attractive alpha.  This helper
     computes the OLS alpha/beta/correlation/p-value for each benchmark
-    (split-aware when ``benchmark_cost_is_periodic`` requests it and the
-    benchmark data carries a ``splits`` column) and then applies the Deflated
-    Alpha Ratio across the benchmark set, mirroring the correction already
-    performed by ``out_of_sample_validation`` so the validation, CPCV, and
-    walk-forward pipelines apply it uniformly at the per-fold/per-period and
-    aggregate levels.
+    (split-aware whenever the benchmark data carries a ``splits`` column,
+    regardless of the cost model) and then applies the Deflated Alpha Ratio
+    across the benchmark set, mirroring the correction already performed by
+    ``out_of_sample_validation`` so the validation, CPCV, and walk-forward
+    pipelines apply it uniformly at the per-fold/per-period and aggregate
+    levels.
 
     Returns a dict with:
         - 'per_benchmark': list of per-benchmark stats dicts (None where a
@@ -3089,7 +3094,7 @@ def _benchmark_list_alpha_correction(
             benchmark_returns = benchmark_returns.dropna()
         benchmark_returns_list.append(benchmark_returns)
         if benchmark_returns is not None and len(benchmark_returns) > 0:
-            if benchmark_cost_is_periodic and isinstance(bench, pd.DataFrame) and "splits" in bench.columns:
+            if isinstance(bench, pd.DataFrame) and "splits" in bench.columns:
                 bench_stats = _benchmark_stats_with_splits(
                     strategy_returns, benchmark_returns, _annualization_factor(strategy_returns.index),
                     total_return_benchmark=total_return_benchmark,
