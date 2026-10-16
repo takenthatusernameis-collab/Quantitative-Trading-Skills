@@ -4144,9 +4144,13 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     dsr = None
     n_trials = getattr(args, "n_trials", None)
     if n_trials is not None and int(n_trials) >= 1 and len(returns.dropna()) >= 2:
-        effective_n_trials = int(n_trials)
+        # Reconcile with walk_forward_analysis/cpcv/out_of_sample_validation:
+        # use the actually-evaluated combo count when a grid was searched, so
+        # Deflated Sharpe p-values are comparable across paths.
         if opt_results:
-            effective_n_trials = max(effective_n_trials, len(opt_results))
+            effective_n_trials = len(opt_results)
+        else:
+            effective_n_trials = int(n_trials)
         base_results = {
             "equity_curve": (1 + returns).cumprod() * args.initial_capital,
             "returns": returns,
@@ -4464,9 +4468,10 @@ def run_monte_carlo(args) -> int:
     n_trials = getattr(args, "n_trials", None)
     effective_n_trials = None
     if n_trials is not None and int(n_trials) >= 1 and len(returns.dropna()) >= 2:
-        effective_n_trials = int(n_trials)
         if opt_results:
-            effective_n_trials = max(effective_n_trials, len(opt_results))
+            effective_n_trials = len(opt_results)
+        else:
+            effective_n_trials = int(n_trials)
         base_results = {
             "equity_curve": (1 + returns).cumprod() * args.initial_capital,
             "returns": returns,
