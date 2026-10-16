@@ -3029,7 +3029,13 @@ def _benchmark_stats_with_splits(
             adjusted_benchmark_returns, join="inner"
         )
         if len(aligned_bench) > 0:
-            benchmark_returns = aligned_bench
+            # pct_change() leaves a leading NaN on the first observation; the
+            # OLS alpha/beta/correlation/p-value in _benchmark_stats all
+            # propagate that NaN to NaN (a silent no-inference result), so
+            # drop it here.  This matches the non-splits path, where
+            # _compute_benchmark_returns already aligns and the caller is
+            # expected to dropna before passing to _benchmark_stats.
+            benchmark_returns = aligned_bench.dropna()
 
     return _benchmark_stats(
         strategy_returns,

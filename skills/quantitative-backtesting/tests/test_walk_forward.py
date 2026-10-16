@@ -2647,6 +2647,147 @@ def test_cli_out_of_sample_slippage_sweep():
         assert [r["slippage"] for r in payload["results"]] == [0.0001, 0.001, 0.002]
 
 
+def test_benchmark_list_alpha_correction_multiple_benchmarks_with_splits():
+    """_benchmark_list_alpha_correction applies split adjustment to every
+    benchmark carrying a ``splits`` column when multiple benchmarks are passed,
+    and the aggregate Deflated Alpha correction remains well-formed.
+
+    Regression guard: a benchmark list that mixes split-bearing and split-free
+    benchmarks must route each benchmark through the correct stats path
+    (split-aware vs plain) and still produce a single aggregate deflated_alpha
+    dict with n_benchmarks equal to the number of benchmarks tested.
+    """
+    np.random.seed(31)
+    periods = 252
+    strat_rets = pd.Series(
+        np.random.normal(0.0008, 0.015, periods),
+        index=pd.date_range("2020-01-01", periods=periods, freq="B"),
+    )
+
+    # Benchmark 1: carries a 2-for-1 split inside the sample.
+    bench_with_splits = _make_benchmark_data_with_splits(
+        periods=periods, split_at=100, seed=21
+    )
+    # Benchmark 2: no splits column at all.
+    bench_no_splits = _make_benchmark_data(periods=periods, seed=7)
+
+    result = _benchmark_list_alpha_correction(
+        strat_rets,
+        [bench_with_splits, bench_no_splits],
+        total_return_benchmark=False,
+        benchmark_commission=0.001,
+        benchmark_slippage=0.001,
+        benchmark_cost_is_periodic=False,
+    )
+
+    assert result["n_benchmarks"] == 2
+    assert isinstance(result["per_benchmark"], list)
+    assert len(result["per_benchmark"]) == 2
+
+    # Both per-benchmark stats must be present and well-formed.
+    for stats in result["per_benchmark"]:
+        assert stats is not None, "Expected non-None per-benchmark stats"
+        for k in ("alpha", "beta", "correlation_with_benchmark", "benchmark_total_return"):
+            assert k in stats, f"missing key {k} in per-benchmark stats"
+
+    # The split-bearing benchmark must have been adjusted: an unadjusted
+    # 2-for-1 split at index 100 would inject a ~-50% price drop into the
+    # benchmark total return; the split-aware path must recover a plausible
+    # (non-catastrophic) value.
+    split_stats = result["per_benchmark"][0]
+    assert split_stats["benchmark_total_return"] > -0.2, (
+        f"Split-bearing benchmark should be adjusted, got benchmark_total_return="
+        f"{split_stats['benchmark_total_return']:.4f}"
+    )
+
+    # Aggregate Deflated Alpha must be well-formed for >= 2 benchmarks.
+    da = result["deflated_alpha"]
+    assert da is not None, "Expected aggregate deflated_alpha for 2 benchmarks"
+    for key in ("deflated_alpha_ratio", "p_value", "alpha", "expected_max_alpha",
+                "n_benchmarks", "n_observations", "skewness", "kurtosis", "z_score"):
+        assert key in da, f"missing key {key} in aggregate deflated_alpha"
+    assert da["n_benchmarks"] == 2
+    assert 0.0 <= da["deflated_alpha_ratio"] <= 1.0
+    assert 0.0 <= da["p_value"] <= 1.0
+
+
+def test_benchmark_list_alpha_correction_mixed_splits_backward_compat():
+    """A single split-bearing benchmark in a multi-benchmark list still gets
+    per-benchmark deflated_alpha correction, and the aggregate uses the first
+    benchmark's alpha.  Single-benchmark list must NOT get an aggregate
+    deflated_alpha (backward compatibility).
+    """
+    np.random.seed(41)
+    periods = 252
+    strat_rets = pd.Series(
+        np.random.normal(0.0005, 0.012, periods),
+        index=pd.date_range("2020-01-01", periods=periods, freq="B"),
+    )
+    bench_splits = _make_benchmark_data_with_splits(
+        periods=periods, split_at=50, seed=13
+    )
+
+    # Two benchmarks, both split-bearing: per-benchmark correction applies.
+    result2 = _benchmark_list_alpha_correction(
+        strat_rets, [bench_splits, bench_splits],
+        benchmark_commission=0.0, benchmark_slippage=0.0,
+    )
+    assert result2["n_benchmarks"] == 2
+    assert result2["deflated_alpha"] is not None
+    for stats in result2["per_benchmark"]:
+        assert stats is not None
+        assert "deflated_alpha" in stats, "per-benchmark deflated_alpha missing"
+        assert "alpha_pvalue_original" in stats
+
+    # Single benchmark: no aggregate deflated_alpha (backward compat).
+    result1 = _benchmark_list_alpha_correction(
+        strat_rets, [bench_splits],
+        benchmark_commission=0.0, benchmark_slippage=0.0,
+    )
+    assert result1["n_benchmarks"] == 1
+    assert result1["deflated_alpha"] is None, (
+        "Single benchmark must not get an aggregate deflated_alpha"
+    )
+
+
+def test_benchmark_list_alpha_correction_handles_splits():
+    """_benchmark_list_alpha_correction uses split-aware stats when benchmarks have splits."""
+    # Build aligned strategy and benchmark returns
+    np.random.seed(7)
+    n = 60
+    strat_rets = pd.Series(np.random.normal(0.001, 0.02, n))
+    bench_rets = pd.Series(np.random.normal(0.0005, 0.015, n))
+    strat_rets.index = pd.date_range("2020-01-01", periods=n, freq="D")
+    bench_rets.index = pd.date_range("2020-01-01", periods=n, freq="D")
+    bench1 = pd.DataFrame({
+        "date": bench_rets.index,
+        "close": (1 + bench_rets).cumprod() * 100,
+        "open": (1 + bench_rets).cumprod() * 99,
+        "high": (1 + bench_rets).cumprod() * 101,
+        "low": (1 + bench_rets).cumprod() * 98,
+        "volume": 1000000,
+        "splits": np.ones(n),
+    })
+    bench1.iloc[10, bench1.columns.get_loc("splits")] = 2.0
+    # Recompute close with split adjustment conceptually; easier to just use adjusted logic by calling through
+    # Or recompute returns to match
+    bench1_adj = _make_benchmark_data_with_splits(periods=len(strat_rets), split_at=10, seed=21)
+    # align
+    common = strat_rets.index.intersection(bench1_adj.index)
+    result = _benchmark_list_alpha_correction(
+        strat_rets.loc[common],
+        [bench1_adj.loc[common]],
+        total_return_benchmark=False,
+    )
+    per_bench = result["per_benchmark"]
+    assert per_bench is not None
+    assert len(per_bench) == 1
+    stats = per_bench[0]
+    assert stats is not None
+    for k in ("alpha", "beta", "correlation_with_benchmark"):
+        assert k in stats
+
+
 def main() -> int:
     tests = [
         ("test_out_of_sample_validation_benchmark_cost_is_periodic", test_out_of_sample_validation_benchmark_cost_is_periodic),
@@ -2705,6 +2846,9 @@ def main() -> int:
         ("test_market_impact_cost_reduces_returns_single_asset", test_market_impact_cost_reduces_returns_single_asset),
         ("test_market_impact_cost_reduces_returns_dict_panel", test_market_impact_cost_reduces_returns_dict_panel),
         ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
+        ("test_benchmark_list_alpha_correction_handles_splits", test_benchmark_list_alpha_correction_handles_splits),
+        ("test_benchmark_list_alpha_correction_multiple_benchmarks_with_splits", test_benchmark_list_alpha_correction_multiple_benchmarks_with_splits),
+        ("test_benchmark_list_alpha_correction_mixed_splits_backward_compat", test_benchmark_list_alpha_correction_mixed_splits_backward_compat),
         ("test_cli_walk_forward_commission_sweep", test_cli_walk_forward_commission_sweep),
         ("test_cli_walk_forward_slippage_sweep", test_cli_walk_forward_slippage_sweep),
         ("test_cli_optimize_commission_sweep", test_cli_optimize_commission_sweep),
@@ -2733,40 +2877,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-def test_benchmark_list_alpha_correction_handles_splits():
-    """_benchmark_list_alpha_correction uses split-aware stats when benchmarks have splits."""
-    # Build aligned strategy and benchmark returns
-    np.random.seed(7)
-    n = 60
-    strat_rets = pd.Series(np.random.normal(0.001, 0.02, n))
-    bench_rets = pd.Series(np.random.normal(0.0005, 0.015, n))
-    strat_rets.index = pd.date_range("2020-01-01", periods=n, freq="D")
-    bench_rets.index = pd.date_range("2020-01-01", periods=n, freq="D")
-    bench1 = pd.DataFrame({
-        "date": bench_rets.index,
-        "close": (1 + bench_rets).cumprod() * 100,
-        "open": (1 + bench_rets).cumprod() * 99,
-        "high": (1 + bench_rets).cumprod() * 101,
-        "low": (1 + bench_rets).cumprod() * 98,
-        "volume": 1000000,
-        "splits": np.ones(n),
-    })
-    bench1.iloc[10, bench1.columns.get_loc("splits")] = 2.0
-    # Recompute close with split adjustment conceptually; easier to just use adjusted logic by calling through
-    # Or recompute returns to match
-    bench1_adj = _make_benchmark_data_with_splits(periods=len(strat_rets), split_at=10, seed=21)
-    # align
-    common = strat_rets.index.intersection(bench1_adj.index)
-    result = _benchmark_list_alpha_correction(
-        strat_rets.loc[common],
-        [bench1_adj.loc[common]],
-        total_return_benchmark=False,
-    )
-    per_bench = result["per_benchmark"]
-    assert per_bench is not None
-    assert len(per_bench) == 1
-    stats = per_bench[0]
-    assert stats is not None
-    for k in ("alpha", "beta", "correlation_with_benchmark"):
-        assert k in stats
