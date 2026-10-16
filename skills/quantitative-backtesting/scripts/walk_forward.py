@@ -457,6 +457,7 @@ def walk_forward_analysis(
             period["best_params"] = best_params
             period["best_sharpe"] = best_sharpe
             period["test_returns"] = best_test_returns
+            period["trial_sharpes"] = list(period_trial_sharpes)
             # Compute benchmark stats for this period
             if benchmark is not None:
                 if isinstance(benchmark, list) and len(benchmark) > 1:
@@ -1541,6 +1542,7 @@ def cpcv_analysis(
             fold["best_params"] = best_params
             fold["best_sharpe"] = best_sharpe
             fold["test_returns"] = best_test_returns
+            fold["trial_sharpes"] = list(fold_trial_sharpes)
             # Compute benchmark stats for this fold
             if benchmark is not None:
                 if isinstance(benchmark, list) and len(benchmark) > 1:
@@ -2116,12 +2118,19 @@ def out_of_sample_validation(
     if validation_method == "walk_forward":
         for period in validation_results.get("periods", []):
             if period.get("best_params") is not None:
-                # Count evaluated configs for this period
-                total_trials += len(list(product(*param_grid.values())))
+                sharps = period.get("trial_sharpes")
+                if sharps:
+                    total_trials += len(sharps)
+                else:
+                    total_trials += len(list(product(*param_grid.values())))
     elif validation_method == "cpcv":
         for fold in validation_results.get("folds", []):
             if fold.get("best_params") is not None:
-                total_trials += len(list(product(*param_grid.values())))
+                sharps = fold.get("trial_sharpes")
+                if sharps:
+                    total_trials += len(sharps)
+                else:
+                    total_trials += len(list(product(*param_grid.values())))
 
     if apply_deflation and len(test_returns) > 1 and total_trials > 0:
         summary["deflated_sharpe"] = deflated_sharpe_ratio(
