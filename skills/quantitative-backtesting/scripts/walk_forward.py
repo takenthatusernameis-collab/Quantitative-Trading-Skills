@@ -265,6 +265,7 @@ def walk_forward_analysis(
     benchmark_slippage: float = 0.0,
     benchmark_expense_ratio: float = 0.0,
     benchmark_cost_is_periodic: bool = False,
+    validate_pit: bool = False,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -299,6 +300,11 @@ def walk_forward_analysis(
         benchmark_commission: Commission per trade for benchmark (as decimal)
         benchmark_slippage: Slippage per trade for benchmark (as decimal)
         benchmark_expense_ratio: Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%)
+        validate_pit: When True, run point-in-time validation (look-ahead /
+            stale-data / temporal-ordering screening) on the input data and
+            record the result in `results["point_in_time_validation"]` and
+            `summary["bias_controls_engaged"]`. Default False on the programmatic
+            API (opt-in); the CLI path engages it via `_load_and_validate_data`.
 
     Returns:
         Dictionary with walk-forward results including:
@@ -325,6 +331,26 @@ def walk_forward_analysis(
         if not isinstance(data.index, pd.DatetimeIndex):
             raise ValueError("Data must be indexed by DatetimeIndex")
         data = data.sort_index()
+
+    # Point-in-time validation (look-ahead / stale-data / temporal-ordering
+    # screening). Opt-in on the programmatic API; the CLI engages it via
+    # _load_and_validate_data (validate_pit=True by default).
+    pit_results = None
+    if validate_pit:
+        pit_results = validate_point_in_time(data)
+        if pit_results["violations"]:
+            print("Point-in-time validation violations:")
+            for violation in pit_results["violations"]:
+                print(f"  - {violation}")
+        if pit_results["warnings"]:
+            print("Point-in-time validation warnings:")
+            for warning in pit_results["warnings"]:
+                print(f"  - {warning}")
+        if not pit_results["violations"] and not pit_results["warnings"]:
+            print("Point-in-time validation passed (no violations or warnings).")
+        elif not pit_results["violations"]:
+            print("Point-in-time validation passed (no violations).")
+
     start_date = data.index.min()
     end_date = data.index.max()
 
@@ -549,10 +575,13 @@ def walk_forward_analysis(
             trial_sharpes=all_trial_sharpes if all_trial_sharpes else None,
         )
 
+    summary["bias_controls_engaged"] = bool(pit_results is not None)
+
     return {
         "periods": periods,
         "best_params_per_period": best_params_per_period,
         "oos_returns": oos_returns,
+        "point_in_time_validation": pit_results,
         "summary": summary,
     }
 
@@ -1273,6 +1302,7 @@ def cpcv_analysis(
     benchmark_slippage: float = 0.0,
     benchmark_expense_ratio: float = 0.0,
     benchmark_cost_is_periodic: bool = False,
+    validate_pit: bool = False,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -1315,6 +1345,11 @@ def cpcv_analysis(
         benchmark_commission: Commission per trade for benchmark (as decimal)
         benchmark_slippage: Slippage per trade for benchmark (as decimal)
         benchmark_expense_ratio: Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%)
+        validate_pit: When True, run point-in-time validation (look-ahead /
+            stale-data / temporal-ordering screening) on the input data and
+            record the result in `results["point_in_time_validation"]` and
+            `summary["bias_controls_engaged"]`. Default False on the programmatic
+            API (opt-in); the CLI path engages it via `_load_and_validate_data`.
 
     Returns:
         Dictionary with CPCV results including:
@@ -1342,6 +1377,26 @@ def cpcv_analysis(
         if not isinstance(data.index, pd.DatetimeIndex):
             raise ValueError("Data must be indexed by DatetimeIndex")
         data = data.sort_index()
+
+    # Point-in-time validation (look-ahead / stale-data / temporal-ordering
+    # screening). Opt-in on the programmatic API; the CLI engages it via
+    # _load_and_validate_data (validate_pit=True by default).
+    pit_results = None
+    if validate_pit:
+        pit_results = validate_point_in_time(data)
+        if pit_results["violations"]:
+            print("Point-in-time validation violations:")
+            for violation in pit_results["violations"]:
+                print(f"  - {violation}")
+        if pit_results["warnings"]:
+            print("Point-in-time validation warnings:")
+            for warning in pit_results["warnings"]:
+                print(f"  - {warning}")
+        if not pit_results["violations"] and not pit_results["warnings"]:
+            print("Point-in-time validation passed (no violations or warnings).")
+        elif not pit_results["violations"]:
+            print("Point-in-time validation passed (no violations).")
+
     n_obs = len(data)
 
     if n_splits < 2:
@@ -1623,10 +1678,13 @@ def cpcv_analysis(
     if fold_benchmark_stats:
         summary['benchmark_metrics_per_fold'] = fold_benchmark_stats
 
+    summary["bias_controls_engaged"] = bool(pit_results is not None)
+
     return {
         "folds": folds,
         "best_params_per_fold": best_params_per_fold,
         "oos_returns": oos_returns,
+        "point_in_time_validation": pit_results,
         "summary": summary,
         "param_stability": param_stability,
     }
@@ -1704,6 +1762,7 @@ def out_of_sample_validation(
     benchmark_slippage: float = 0.0,
     benchmark_expense_ratio: float = 0.0,
     benchmark_cost_is_periodic: bool = False,
+    validate_pit: bool = False,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -1746,6 +1805,12 @@ def out_of_sample_validation(
         benchmark_commission: Commission per trade for benchmark (applies to all benchmarks if multiple provided)
         benchmark_slippage: Slippage per trade for benchmark (applies to all benchmarks if multiple provided)
         benchmark_expense_ratio: Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%) (applies to all benchmarks if multiple provided)
+        validate_pit: When True, run point-in-time validation (look-ahead /
+            stale-data / temporal-ordering screening) on the input data and
+            record the result in `results["point_in_time_validation"]` and
+            `summary["bias_controls_engaged"]`. Default False on the programmatic
+            API (opt-in); the CLI path engages it via `_load_and_validate_data`.
+
     Returns:
         Dictionary with:
             - 'train_val_test_split': Dict with split boundaries and sizes
@@ -1771,6 +1836,25 @@ def out_of_sample_validation(
         if not isinstance(data.index, pd.DatetimeIndex):
             raise ValueError("Data must be indexed by DatetimeIndex")
         data = data.sort_index()
+
+    # Point-in-time validation (look-ahead / stale-data / temporal-ordering
+    # screening). Opt-in on the programmatic API; the CLI engages it via
+    # _load_and_validate_data (validate_pit=True by default).
+    pit_results = None
+    if validate_pit:
+        pit_results = validate_point_in_time(data)
+        if pit_results["violations"]:
+            print("Point-in-time validation violations:")
+            for violation in pit_results["violations"]:
+                print(f"  - {violation}")
+        if pit_results["warnings"]:
+            print("Point-in-time validation warnings:")
+            for warning in pit_results["warnings"]:
+                print(f"  - {warning}")
+        if not pit_results["violations"] and not pit_results["warnings"]:
+            print("Point-in-time validation passed (no violations or warnings).")
+        elif not pit_results["violations"]:
+            print("Point-in-time validation passed (no violations).")
 
     # Split data chronologically
     train_data, val_data, test_data = _split_train_val_test(
@@ -2051,6 +2135,8 @@ def out_of_sample_validation(
     if test_benchmark and not isinstance(test_benchmark, list):
         summary.update(test_benchmark)
 
+    summary["bias_controls_engaged"] = bool(pit_results is not None)
+
     return {
         "train_val_test_split": split_info,
         "validation_results": validation_results,
@@ -2058,6 +2144,7 @@ def out_of_sample_validation(
         "validation_performance": validation_performance,
         "test_performance": test_performance,
         "test_benchmark": test_benchmark,
+        "point_in_time_validation": pit_results,
         "summary": summary,
     }
 

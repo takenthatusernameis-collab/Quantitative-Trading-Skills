@@ -428,6 +428,69 @@ def test_cli_point_in_time_validation_can_be_disabled():
             f"Expected bias_controls_engaged=False when PIT disabled, got {summary.get('bias_controls_engaged')}"
 
 
+def test_out_of_sample_validation_validate_pit_detects_look_ahead():
+    """out_of_sample_validation with validate_pit=True detects point-in-time
+    violations in the input data (positive control).
+
+    Duplicate timestamps violate temporal ordering; validate_point_in_time
+    must record passed=False and bias_controls_engaged must be True.  PIT runs
+    before the train/val/test split, so duplicates are appended at the tail
+    (all land in the test split) to keep the split from crashing.
+    """
+    data = _make_ohlcv_data(periods=400, seed=42)
+    leaky = pd.concat([data, data.iloc[-10:]])
+    strategy_type = "sma_crossover"
+    param_grid = {"fast_period": [3, 5], "slow_period": [8, 10]}
+    factory = lambda params: build_strategy(strategy_type, json.dumps(params))
+
+    results = out_of_sample_validation(
+        data=leaky,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        validate_pit=True,
+    )
+
+    assert results is not None
+    pit = results.get("point_in_time_validation")
+    assert pit is not None, "point_in_time_validation should be recorded when validate_pit=True"
+    assert pit["passed"] is False, f"Expected PIT to fail on leaky data, got {pit}"
+    assert len(pit["violations"]) > 0, "Expected at least one PIT violation"
+    assert results["summary"]["bias_controls_engaged"] is True, \
+        "bias_controls_engaged should be True when PIT ran"
+
+    # Negative control: clean data with validate_pit=True passes.
+    results_clean = out_of_sample_validation(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        validate_pit=True,
+    )
+    pit_clean = results_clean.get("point_in_time_validation")
+    assert pit_clean is not None
+    assert pit_clean["passed"] is True, f"Expected PIT to pass on clean data, got {pit_clean}"
+    assert results_clean["summary"]["bias_controls_engaged"] is True
+
+
 def test_cli_out_of_sample_benchmark_cost_is_periodic_false():
     """CLI end-to-end test for out-of-sample without --benchmark-cost-is-periodic flag (default False).
 
