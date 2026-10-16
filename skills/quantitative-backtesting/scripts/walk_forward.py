@@ -2421,7 +2421,7 @@ def run_cpcv(args) -> int:
     print(f"Loading data from {args.data}...")
     data, pit_results = _load_and_validate_data(
         args.data, args.symbol, args.start, args.end,
-        validate_pit=getattr(args, "validate_point_in_time", False),
+        validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
     )
 
@@ -2757,6 +2757,7 @@ def run_cpcv(args) -> int:
             "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
             "point_in_time_validation": pit_results,
+            "bias_controls_engaged": pit_results is not None,
             "benchmark": getattr(args, "benchmark", None),
             "total_return_benchmark": total_return_benchmark,
             "benchmark_commission": bench_commission,
@@ -2768,6 +2769,8 @@ def run_cpcv(args) -> int:
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
         summary_data["point_in_time_validation"] = pit_results
+    results["bias_controls_engaged"] = bool(pit_results is not None)
+    summary_data["bias_controls_engaged"] = bool(pit_results is not None)
     if benchmark_provenance is not None:
         if isinstance(benchmark_provenance, list):
             summary_data["benchmark_provenance"] = [prov.to_dict() for prov in benchmark_provenance]
@@ -2825,15 +2828,15 @@ def _load_and_validate_data(
     symbol: str,
     start: str,
     end: str,
-    validate_pit: bool = False,
+    validate_pit: bool = True,
     pit_strict: bool = False,
 ) -> tuple[pd.DataFrame, Optional[Dict[str, Any]]]:
     """Load and validate data from file.
 
-    When validate_pit is True, run point-in-time validation on the
-    loaded frame (temporal ordering, duplicate timestamps, stale-data
-    warnings) and print the results. With pit_strict, violations raise
-    so the analysis aborts instead of continuing on suspect data.
+    Point-in-time validation (look-ahead / stale-data / temporal-ordering
+    screening) runs by default so a naive CLI run does not silently proceed
+    without bias controls. With pit_strict, violations raise so the analysis
+    aborts instead of continuing on suspect data.
 
     Returns:
         tuple of (data_frame, pit_results_dict_or_None)
@@ -3201,7 +3204,7 @@ def run_walk_forward(args) -> int:
     print(f"Loading data from {args.data}...")
     data, pit_results = _load_and_validate_data(
         args.data, args.symbol, args.start, args.end,
-        validate_pit=getattr(args, "validate_point_in_time", False),
+        validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
     )
 
@@ -3525,6 +3528,7 @@ def run_walk_forward(args) -> int:
             "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
             "point_in_time_validation": pit_results,
+            "bias_controls_engaged": pit_results is not None,
             "benchmark": getattr(args, "benchmark", None),
             "total_return_benchmark": total_return_benchmark,
             "benchmark_commission": bench_commission,
@@ -3536,6 +3540,8 @@ def run_walk_forward(args) -> int:
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
         summary_data["point_in_time_validation"] = pit_results
+    results["bias_controls_engaged"] = bool(pit_results is not None)
+    summary_data["bias_controls_engaged"] = bool(pit_results is not None)
     if benchmark_provenance is not None:
         if isinstance(benchmark_provenance, list):
             summary_data["benchmark_provenance"] = [bp.to_dict() for bp in benchmark_provenance if bp is not None]
@@ -3585,7 +3591,7 @@ def run_parameter_optimization(args) -> int:
     print(f"Loading data from {args.data}...")
     data, pit_results = _load_and_validate_data(
         args.data, args.symbol, args.start, args.end,
-        validate_pit=getattr(args, "validate_point_in_time", False),
+        validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
     )
 
@@ -4037,7 +4043,7 @@ def run_monte_carlo(args) -> int:
     print(f"Loading data from {args.data}...")
     data, pit_results = _load_and_validate_data(
         args.data, args.symbol, args.start, args.end,
-        validate_pit=getattr(args, "validate_point_in_time", False),
+        validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
     )
 
@@ -4440,6 +4446,7 @@ def run_monte_carlo(args) -> int:
             "n_simulations": args.n_simulations,
             "block_size": args.block_size,
             "point_in_time_validation": pit_results,
+            "bias_controls_engaged": pit_results is not None,
             "benchmark": getattr(args, "benchmark", None),
             "total_return_benchmark": total_return_benchmark,
             "benchmark_commission": bench_commission,
@@ -4450,6 +4457,7 @@ def run_monte_carlo(args) -> int:
     }
     if pit_results is not None:
         mc_save["point_in_time_validation"] = pit_results
+    mc_save["bias_controls_engaged"] = bool(pit_results is not None)
     if dsr is not None:
         mc_save["deflated_sharpe"] = dsr
         mc_save["config"]["n_trials"] = effective_n_trials
@@ -4524,7 +4532,7 @@ def run_out_of_sample_validation(args) -> int:
     print(f"Loading data from {args.data}...")
     data, pit_results = _load_and_validate_data(
         args.data, args.symbol, args.start, args.end,
-        validate_pit=getattr(args, "validate_point_in_time", False),
+        validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
     )
 
@@ -4888,6 +4896,7 @@ def run_out_of_sample_validation(args) -> int:
             "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
             "point_in_time_validation": pit_results,
+            "bias_controls_engaged": pit_results is not None,
             "benchmark": getattr(args, "benchmark", None),
             "total_return_benchmark": total_return_benchmark,
             "benchmark_commission": bench_commission,
@@ -4906,6 +4915,7 @@ def run_out_of_sample_validation(args) -> int:
     }
     if pit_results is not None:
         summary_data["point_in_time_validation"] = pit_results
+    summary_data["bias_controls_engaged"] = bool(pit_results is not None)
     if benchmark_provenance is not None:
         # benchmark_provenance is a single DataProvenance when one benchmark
         # was supplied, or a list of them when multiple benchmarks were
@@ -4992,7 +5002,8 @@ def main():
     common_parser.add_argument("--funding-cost", type=float, default=0.0, help="Annual funding cost rate for leveraged positions (as decimal, e.g., 0.02 = 2%% per year)")
     common_parser.add_argument("--output", type=str, default="results", help="Output directory")
     common_parser.add_argument("--param-grid", type=str, required=True, help="Parameter grid as JSON string")
-    common_parser.add_argument("--validate-point-in-time", action="store_true", help="Run point-in-time validation on the loaded data (temporal ordering, duplicate timestamps, stale-data warnings)")
+    common_parser.add_argument("--validate-point-in-time", action="store_true", default=True, help="Run point-in-time validation on the loaded data (temporal ordering, duplicate timestamps, stale-data warnings); enabled by default, use --no-validate-point-in-time to disable")
+    common_parser.add_argument("--no-validate-point-in-time", action="store_false", dest="validate_point_in_time", help="Disable point-in-time validation (enabled by default)")
     common_parser.add_argument("--point-in-time-strict", action="store_true", help="Abort when point-in-time validation finds violations (default: warn only)")
     common_parser.add_argument("--benchmark", type=str, nargs="+", default=None, help="Path to benchmark OHLCV file(s) (e.g. SPY QQQ) for buy-and-hold baseline comparison (alpha/beta, correlation)")
     common_parser.add_argument("--total-return-benchmark", action="store_true", help="Compute benchmark returns using total return (dividends + price) when dividend/adj_close data is available, instead of price-only returns (applies to all benchmarks)")

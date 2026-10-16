@@ -2,8 +2,10 @@
 
 ## Repository state (as of this session)
 
-- Working tree has **uncommitted changes** (13 DEBUG print removals in `walk_forward.py`). No commits made this session.
+- Working tree has **uncommitted changes** (PIT default-on + `bias_controls_engaged` + 3 new tests in `walk_forward.py` and `test_walk_forward.py`). No commits made this session.
 - `requirements.txt` (declares matplotlib/numpy/pandas) is already present and installed.
+- Test suite: **267/267 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`), up from 264 (3 new regression tests added).
+- Root end-to-end script `verify_end_to_end.py`: **passes, exit 0**.
 
 ## Quantitative-backtesting skill status
 
@@ -13,53 +15,49 @@
 
 ## What changed this session
 
-### Removed 13 stale DEBUG: print() statements from walk_forward.py
+### Engaged point-in-time validation by default in the CLI data-load path
 
-`skills/quantitative-backtesting/scripts/walk_forward.py` contained 13 leftover `print(f"DEBUG: ...")` statements scattered through the `out_of_sample_validation` pipeline (split, training, selection, benchmark-processing phases). These polluted the CLI/stdout of every programmatic call to `out_of_sample_validation`, `walk_forward_analysis`, and `cpcv_analysis` — including the library's own end-to-end verification script. They are dead developer scaffolding, not user-facing output.
+Audit finding: `walk_forward_analysis`, `cpcv_analysis`, and `out_of_sample_validation` (programmatic APIs) never run point-in-time validation, and the CLI wrappers (`run_cpcv`, `run_walk_forward`, `run_out_of_sample`, `run_monte_carlo`) gated `validate_pit` behind `--validate-point-in-time` defaulting to `False`. A naive default run silently proceeded with no look-ahead/stale-data controls, contradicting the repository's point-in-time-correctness objective.
 
-Removed all 13. No logic changed. Verified:
-- `python3 -c "import ast; ast.parse(...)"` syntax OK.
-- Full suite 264/264 passing (same count as before; no regressions).
-- `python3 verify_end_to_end.py` exit 0, no `DEBUG` lines in output.
+Changes in `skills/quantitative-backtesting/scripts/walk_forward.py`:
+- `_load_and_validate_data` default `validate_pit: bool = False` → `validate_pit: bool = True` (non-strict: warns + records, never aborts).
+- All 5 CLI call sites (`run_cpcv` line 2424, `run_walk_forward` 3204, `run_out_of_sample` 3588, `run_monte_carlo` 4040, `run_out_of_sample_validation` 4527) now default to `True`.
+- argparse `--validate-point-in-time` flipped to `default=True` with a `--no-validate-point-in-time` opt-off flag (verified: absent→True, flag→True, `--no-...`→False).
+- Added explicit `bias_controls_engaged` field (always present, `True` when PIT ran) to the CLI summary/config at all 4 summary sites (cpcv, walk_forward, monte_carlo, out_of_sample).
 
-Diff: `skills/quantitative-backtesting/scripts/walk_forward.py | 15 deletions` (13 prints + 2 blank lines left behind).
+Tests added in `skills/quantitative-backtesting/tests/test_walk_forward.py`:
+- `test_load_and_validate_data_runs_pit_by_default` — default runs PIT and passes on clean data; `validate_pit=False` skips it.
+- `test_cli_point_in_time_validation_enabled_by_default` — CLI default engages PIT; `bias_controls_engaged=True`, `pit.passed=True`.
+- `test_cli_point_in_time_validation_can_be_disabled` — `--no-validate-point-in-time` → `bias_controls_engaged=False`.
+
+Verified: full suite 267/267 passing; `verify_end_to_end.py` exit 0; `test_real_data_pipeline_example_runs` (CLI cpcv + monte-carlo subprocess) still exits 0 on clean synthetic data. `run_backtest()` PIT gating (line 169) and `detect_survivorship_bias` (unconditional at line 505) were left untouched.
 
 ## What the previous HANDOFF claimed (now superseded)
 
-The prior next-task ("Verify the split-adjustment fix does not regress the single-benchmark periodic/round-trip cost paths, and add a regression test pinning the corrected alpha/beta for a split-bearing benchmark") is **already complete**. Both regression tests exist and pass:
-- `test_benchmark_stats_with_splits_produces_finite_inference` (line 2882)
-- `test_benchmark_stats_with_splits_regression_pins_corrected_values` (line 2902) — pins `alpha == 0.011441039611221912`, `beta == -0.003953175078033304`, `alpha_pvalue == 0.9813727464` to 1e-8/1e-10.
-- All 16 split/deflated_alpha/benchmark tests pass.
+The prior next-task ("Verify the split-adjustment fix does not regress ... split-bearing benchmark") is **already complete** (both regression tests exist and pass; all 16 split/deflated_alpha/benchmark tests pass).
 
-No further work needed on that item.
+This session's task ("Audit whether point-in-time / survivorship-bias controls are wired into walk-forward and CPCV pipelines by default, or only behind an opt-in flag") is **complete**: controls were opt-in (CLI) / absent (programmatic API); they are now on by default (non-strict) in the CLI data-load path with an explicit `bias_controls_engaged` field.
 
 ## Approaches already tried and why abandoned
 
-- None abandoned. The DEBUG-print removal was a 15-line deterministic cleanup with zero behavioral risk; the prior split-fix regression tests were verified already present and passing.
+- None abandoned. The change was a deterministic, low-risk default flip with an explicit opt-off; all 267 tests pass and end-to-end verification is green.
 
 ## Next task (bounded, high-value)
 
-**Audit whether the point-in-time / survivorship-bias controls are wired into the walk-forward and CPCV pipelines by default, or only behind an opt-in flag.**
+**Extend point-in-time validation to the programmatic APIs** (`out_of_sample_validation`, `walk_forward_analysis`, `cpcv_analysis`) so the primary library entry points — not just the CLI — engage bias controls. These functions take `data` directly and currently never call `validate_point_in_time` or `detect_survivorship_bias`, so `verify_end_to_end.py` and programmatic users run with no bias controls engaged.
 
-Evidence gathered this session:
-- `data_loader.py:392` `validate_point_in_time()` and `data_loader.py:494` `detect_survivorship_bias()` exist and are real.
-- `run_backtest.py:169` gates PIT on `args.validate_point_in_time` (opt-in).
-- `walk_forward.py:2828-2864` `_load_and_validate_data(validate_pit=False)` runs PIT only when the flag is passed; results are recorded under `results["point_in_time_validation"]` when present.
-- `walk_forward.py:505` (in run_backtest) calls `detect_survivorship_bias(data)` unconditionally.
-
-The concern: for the primary quant research entry points (`out_of_sample_validation`, `walk_forward_analysis`, `cpcv_analysis`), look-ahead/survivorship checks are **opt-in**, so a naive default run can silently produce an in-sample-looking backtest with no bias controls engaged. This directly undermines the repository's stated objective (point-in-time correctness, survivorship/look-ahead bias controls).
-
-Relevant files:
-- `skills/quantitative-backtesting/scripts/walk_forward.py` — `_load_and_validate_data` (line ~2828), `out_of_sample_validation`, `walk_forward_analysis`, `cpcv_analysis` signatures
-- `skills/quantitative-backtesting/scripts/run_backtest.py` — CLI arg parsing for `--validate-point-in-time`
-- `skills/quantitative-backtesting/scripts/data_loader.py` — `validate_point_in_time`, `detect_survivorship_bias`
-- `skills/quantitative-backtesting/tests/test_data_loader.py` — existing PIT/survivorship tests
+Suggested approach (smallest safe change):
+1. Add `validate_pit: bool = False` parameter to the three functions (default `False` to avoid breaking existing callers), threading a `validate_point_in_time(data)` call into `out_of_sample_validation` (and walk_forward/cpcv where data is available) that records `results["point_in_time_validation"]` and `summary["bias_controls_engaged"]`.
+2. Add a test that passes a look-ahead-leaky DataFrame through `out_of_sample_validation` with `validate_pit=True` and asserts `point_in_time_validation["passed"] is False` (positive control).
+3. Re-run the full suite (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`) and `verify_end_to_end.py`; confirm 267+ tests still pass.
 
 Constraints:
-- Do not change core logic unless a test or evidence demonstrates a defect.
-- If the opt-in behavior is intentional, document it explicitly in SKILL.md/references and add a test that asserts the default run emits a warning (or records the control as skipped) rather than silently proceeding.
-- If it is unintentional, make the smallest change (e.g. default `validate_pit=True` or an explicit `bias_controls_engaged` field in the summary) and re-run the full suite.
+- Default `validate_pit=False` on programmatic APIs to preserve exact current behavior for existing callers; engagement is opt-in via the parameter until evidence supports flipping the default here too.
+- Do not change `run_backtest.py` survivorship logic (already unconditional).
 - Verify all tests still pass after any change.
 - Do not commit unless explicitly asked.
 
-(End of file)
+Relevant files:
+- `skills/quantitative-backtesting/scripts/walk_forward.py` — `out_of_sample_validation` (line ~1677), `walk_forward_analysis` (line ~247), `cpcv_analysis` (line ~1254)
+- `skills/quantitative-backtesting/scripts/data_loader.py` — `validate_point_in_time` (line 392), `detect_survivorship_bias` (line 494)
+- `skills/quantitative-backtesting/tests/test_walk_forward.py` — existing CLI PIT tests just added

@@ -46,6 +46,7 @@ from walk_forward import (  # noqa: E402
     _add_benchmark_to_summary,
     _benchmark_list_alpha_correction,
     deflated_alpha_ratio,
+    _load_and_validate_data,
     main as walk_forward_main,
 )
 from strategy_builder import build_strategy  # noqa: E402
@@ -338,6 +339,93 @@ def test_cli_out_of_sample_benchmark_cost_is_periodic():
             f"benchmark_cost_is_periodic missing from config. Keys: {list(summary['config'].keys())}"
         assert summary["config"]["benchmark_cost_is_periodic"] is True, \
             f"Expected benchmark_cost_is_periodic=True in config, got {summary['config']['benchmark_cost_is_periodic']}"
+
+
+def test_load_and_validate_data_runs_pit_by_default():
+    """_load_and_validate_data runs point-in-time validation by default."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=200, seed=42)
+        data, pit = _load_and_validate_data(
+            csv_path, symbol="TEST", start="2020-01-01", end="2021-12-31",
+        )
+        assert pit is not None, "PIT should run by default (validate_pit=True)"
+        assert pit["passed"] is True, f"PIT should pass on clean data, got {pit}"
+        assert data is not None and len(data) > 0
+
+        data2, pit2 = _load_and_validate_data(
+            csv_path, symbol="TEST", start="2020-01-01", end="2021-12-31",
+            validate_pit=False,
+        )
+        assert pit2 is None, "PIT should be skipped when validate_pit=False"
+
+
+def test_cli_point_in_time_validation_enabled_by_default():
+    """CLI out-of-sample runs PIT by default; bias_controls_engaged=True."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=500, seed=42)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5], "slow_period": [8, 10]}',
+            "--output", out_dir,
+            "--wf-train-months", "6",
+            "--wf-test-months", "2",
+            "--wf-step-months", "2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, "CLI out-of-sample with default PIT should exit 0"
+
+        summary_path = os.path.join(out_dir, "out_of_sample_summary.json")
+        assert os.path.exists(summary_path), "out_of_sample_summary.json not written"
+        with open(summary_path) as f:
+            summary = json.load(f)
+
+        assert summary.get("bias_controls_engaged") is True, \
+            f"Expected bias_controls_engaged=True by default, got {summary.get('bias_controls_engaged')}"
+        assert "point_in_time_validation" in summary.get("config", {}), \
+            "point_in_time_validation missing from config"
+        pit = summary["config"]["point_in_time_validation"]
+        assert pit is not None and pit.get("passed") is True, \
+            f"Expected PIT to pass on clean data, got {pit}"
+
+
+def test_cli_point_in_time_validation_can_be_disabled():
+    """--no-validate-point-in-time disables PIT; bias_controls_engaged=False."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=500, seed=42)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5], "slow_period": [8, 10]}',
+            "--output", out_dir,
+            "--no-validate-point-in-time",
+            "--wf-train-months", "6",
+            "--wf-test-months", "2",
+            "--wf-step-months", "2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, "CLI out-of-sample with PIT disabled should exit 0"
+
+        summary_path = os.path.join(out_dir, "out_of_sample_summary.json")
+        assert os.path.exists(summary_path), "out_of_sample_summary.json not written"
+        with open(summary_path) as f:
+            summary = json.load(f)
+
+        assert summary.get("bias_controls_engaged") is False, \
+            f"Expected bias_controls_engaged=False when PIT disabled, got {summary.get('bias_controls_engaged')}"
 
 
 def test_cli_out_of_sample_benchmark_cost_is_periodic_false():
@@ -2795,6 +2883,9 @@ def main() -> int:
         ("test_cli_out_of_sample_benchmark_cost_is_periodic", test_cli_out_of_sample_benchmark_cost_is_periodic),
         ("test_cli_out_of_sample_benchmark_cost_is_periodic_false", test_cli_out_of_sample_benchmark_cost_is_periodic_false),
         ("test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv", test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv),
+        ("test_load_and_validate_data_runs_pit_by_default", test_load_and_validate_data_runs_pit_by_default),
+        ("test_cli_point_in_time_validation_enabled_by_default", test_cli_point_in_time_validation_enabled_by_default),
+        ("test_cli_point_in_time_validation_can_be_disabled", test_cli_point_in_time_validation_can_be_disabled),
         ("test_benchmark_stats_with_splits_runs_without_error", test_benchmark_stats_with_splits_runs_without_error),
         ("test_benchmark_stats_with_splits_uses_adjusted_returns", test_benchmark_stats_with_splits_uses_adjusted_returns),
         ("test_add_benchmark_to_summary_splits_path", test_add_benchmark_to_summary_splits_path),
