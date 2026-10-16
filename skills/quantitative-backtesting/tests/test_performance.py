@@ -427,6 +427,36 @@ def test_calculate_metrics_deflated_alpha_single_benchmark():
     assert np.isfinite(da["alpha"])
 
 
+def test_benchmark_stats_drops_leading_nan_from_pct_change():
+    """Regression: a leading NaN in the benchmark return series must not
+    poison alpha/beta/correlation/p-value.
+
+    ``_compute_benchmark_returns`` (and ``_compute_benchmark_total_return``)
+    build the benchmark series with ``close.pct_change()``, which leaves a
+    NaN at the first aligned observation.  Before this fix that NaN
+    propagated through np.mean/sxx/sxy into alpha, beta, correlation and
+    the t-statistic, so every benchmark whose return series started at the shared
+    window start produced NaN alpha/beta and no p-value at all — a silent
+    methodological defect that affected the non-splits path (the splits path
+    was fixed separately in walk_forward.py).
+    """
+    dates = pd.date_range("2020-01-01", periods=60, freq="B")
+    rng = np.random.default_rng(42)
+    strat = pd.Series(rng.normal(0.001, 0.02, 60), index=dates)
+    # Simulate _compute_benchmark_returns: pct_change leaves a leading NaN.
+    bench = pd.Series(np.r_[np.nan, rng.normal(0.001, 0.02, 59)], index=dates)
+
+    stats = _benchmark_stats(strat, bench, 252.0)
+    assert np.isfinite(stats["alpha"]), f"alpha must be finite, got {stats['alpha']}"
+    assert np.isfinite(stats["beta"]), f"beta must be finite, got {stats['beta']}"
+    assert np.isfinite(stats["correlation_with_benchmark"])
+    assert "alpha_pvalue" in stats
+    assert np.isfinite(stats["alpha_pvalue"]), f"alpha_pvalue must be finite, got {stats['alpha_pvalue']}"
+    assert np.isfinite(stats["alpha_tstat"])
+    assert 0.0 <= stats["alpha_pvalue"] <= 1.0
+    assert 0.0 <= stats["r_squared"] <= 1.0
+
+
 def main() -> int:
     tests = [
         ("calculate_metrics_empty_returns_returns_error", test_calculate_metrics_empty_returns_returns_error),
@@ -455,6 +485,7 @@ def main() -> int:
         ("calculate_metrics_deflated_alpha_multiple_benchmarks", test_calculate_metrics_deflated_alpha_multiple_benchmarks),
         ("calculate_metrics_no_deflated_alpha_without_benchmark", test_calculate_metrics_no_deflated_alpha_without_benchmark),
         ("calculate_metrics_deflated_alpha_single_benchmark", test_calculate_metrics_deflated_alpha_single_benchmark),
+        ("benchmark_stats_drops_leading_nan_from_pct_change", test_benchmark_stats_drops_leading_nan_from_pct_change),
     ]
 
     failures = 0

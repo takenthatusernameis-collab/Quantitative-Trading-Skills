@@ -168,6 +168,14 @@ def _benchmark_stats(
     stats["benchmark_cost_is_periodic"] = benchmark_cost_is_periodic
 
     aligned_ret, aligned_bench = returns.align(benchmark_returns, join="inner")
+    # pct_change() leaves a leading NaN on the first aligned observation.  That
+    # NaN propagates through np.mean/sxx/sxy into alpha, beta, correlation and
+    # the t-statistic, silently producing NaN inference (and no p-value) for
+    # every benchmark whose return series starts at the shared window start.
+    # Drop NaNs pairwise so the OLS regression sees only real observations.
+    mask = aligned_ret.notna() & aligned_bench.notna()
+    aligned_ret = aligned_ret[mask]
+    aligned_bench = aligned_bench[mask]
     n = len(aligned_ret)
     if n <= 1:
         return stats
