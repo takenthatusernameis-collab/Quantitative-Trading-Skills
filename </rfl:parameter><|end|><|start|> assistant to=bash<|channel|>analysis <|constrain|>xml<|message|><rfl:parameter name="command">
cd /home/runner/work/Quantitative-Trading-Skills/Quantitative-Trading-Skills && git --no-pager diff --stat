@@ -1,0 +1,21 @@
+# HANDOFF
+
+## Repository state (as of this session)
+- Working tree has uncommitted changes: `validate_pit` default flipped True + docstring updates.
+- Test suite: 268/268 passing (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`).
+- Root end-to-end script `verify_end_to_end.py`: passes, exit 0.
+
+## Quantitative-backtesting skill status
+- `skills/quantitative-backtesting/` is the primary quant asset.
+- Test suite: 268/268 passing.
+- `verify_end_to_end.py`: exit 0.
+
+## What changed this session
+Flipped `validate_pit: bool = False` → `True` in `walk_forward_analysis`, `cpcv_analysis`, and `out_of_sample_validation` (plus the already-True `_load_and_validate_data`), achieving CLI parity so bias controls engage by default. Updated docstrings (no longer "opt-in").
+
+## Next task (bounded, high-value)
+Assess multiple-testing / data-mining controls for CPCV: verify deflated Sharpe ratio and n_trials accounting remain consistent when `validate_pit=True` defaults engage; ensure `bias_controls_engaged` propagates into report artifacts. Relevant files: scripts/walk_forward.py (cpcv ~1300), reports/exporters.
+Constraints: non-strict PIT; verify full suite + end-to-end.
+EOF
+filePath">
+/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/HANDOFF.md

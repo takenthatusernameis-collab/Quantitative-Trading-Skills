@@ -265,7 +265,7 @@ def walk_forward_analysis(
     benchmark_slippage: float = 0.0,
     benchmark_expense_ratio: float = 0.0,
     benchmark_cost_is_periodic: bool = False,
-    validate_pit: bool = False,
+    validate_pit: bool = True,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -303,8 +303,8 @@ def walk_forward_analysis(
         validate_pit: When True, run point-in-time validation (look-ahead /
             stale-data / temporal-ordering screening) on the input data and
             record the result in `results["point_in_time_validation"]` and
-            `summary["bias_controls_engaged"]`. Default False on the programmatic
-            API (opt-in); the CLI path engages it via `_load_and_validate_data`.
+            `summary["bias_controls_engaged"]`. Default True on the programmatic
+            API; default True (CLI parity, non-strict: warns, never aborts).
 
     Returns:
         Dictionary with walk-forward results including:
@@ -1302,7 +1302,7 @@ def cpcv_analysis(
     benchmark_slippage: float = 0.0,
     benchmark_expense_ratio: float = 0.0,
     benchmark_cost_is_periodic: bool = False,
-    validate_pit: bool = False,
+    validate_pit: bool = True,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -1348,8 +1348,8 @@ def cpcv_analysis(
         validate_pit: When True, run point-in-time validation (look-ahead /
             stale-data / temporal-ordering screening) on the input data and
             record the result in `results["point_in_time_validation"]` and
-            `summary["bias_controls_engaged"]`. Default False on the programmatic
-            API (opt-in); the CLI path engages it via `_load_and_validate_data`.
+            `summary["bias_controls_engaged"]`. Default True on the programmatic
+            API; default True (CLI parity, non-strict: warns, never aborts).
 
     Returns:
         Dictionary with CPCV results including:
@@ -1762,7 +1762,7 @@ def out_of_sample_validation(
     benchmark_slippage: float = 0.0,
     benchmark_expense_ratio: float = 0.0,
     benchmark_cost_is_periodic: bool = False,
-    validate_pit: bool = False,
+    validate_pit: bool = True,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -1808,8 +1808,8 @@ def out_of_sample_validation(
         validate_pit: When True, run point-in-time validation (look-ahead /
             stale-data / temporal-ordering screening) on the input data and
             record the result in `results["point_in_time_validation"]` and
-            `summary["bias_controls_engaged"]`. Default False on the programmatic
-            API (opt-in); the CLI path engages it via `_load_and_validate_data`.
+            `summary["bias_controls_engaged"]`. Default True on the programmatic
+            API; default True (CLI parity, non-strict: warns, never aborts).
 
     Returns:
         Dictionary with:
