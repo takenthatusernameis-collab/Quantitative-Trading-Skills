@@ -12,7 +12,7 @@ import numpy as np
 from pathlib import Path
 from typing import Optional, Union, List, Dict, Any, Tuple
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, UTC
 import warnings
 import json
 
@@ -199,7 +199,7 @@ def load_data(
         DataFrame with OHLCV data indexed by date, or tuple with provenance
     """
     path = Path(path)
-    load_ts = datetime.utcnow().isoformat() + "Z"
+    load_ts = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     file_size = path.stat().st_size if path.exists() else 0
     file_format = path.suffix.lower()
 
@@ -666,7 +666,7 @@ def load_multi_symbol(
                 # Create provenance for this symbol
                 prov = DataProvenance(
                     source_path=str(path),
-                    load_timestamp=datetime.utcnow().isoformat() + "Z",
+                    load_timestamp=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                     file_format=Path(path).suffix.lower(),
                     file_size_bytes=Path(path).stat().st_size,
                     symbol_filter=sym,
