@@ -39,20 +39,4 @@ This session's task ("Extend point-in-time validation to the programmatic APIs")
 
 ## Next task (bounded, high-value)
 
-**Flip `validate_pit` default to `True` on the programmatic APIs** (`walk_forward_analysis`, `cpcv_analysis`, `out_of_sample_validation`) so bias controls are engaged by default everywhere — matching the CLI path. Evidence now supports this: the opt-in parameter has been added, a positive-control test confirms leak detection, and all 268 tests pass with no regressions.
-
-Suggested approach (smallest safe change):
-1. Change `validate_pit: bool = False` → `validate_pit: bool = True` in all three function signatures.
-2. Update the docstrings to reflect the new default (no longer "opt-in"; CLI parity).
-3. Add a test asserting `bias_controls_engaged is True` on `walk_forward_analysis` and `cpcv_analysis` with clean data and default arguments (no `validate_pit` passed).
-4. Re-run the full suite (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`) and `verify_end_to_end.py`; confirm tests still pass.
-
-Constraints:
-- Default flip is non-strict: PIT warns + records, never aborts (same as CLI).
-- Do not change `run_backtest.py` survivorship logic (already unconditional).
-- Verify all tests still pass after any change.
-- Do not commit unless explicitly asked.
-
-Relevant files:
-- `skills/quantitative-backtesting/scripts/walk_forward.py` — three function signatures and docstrings
-- `skills/quantitative-backtesting/tests/test_walk_forward.py` — add default-engagement tests for walk_forward/cpcv
+**Assess multiple-testing / data-mining controls in CPCV** — verify deflated Sharpe ratio and `n_trials` accounting remain consistent when bias controls engage by default; ensure `bias_controls_engaged` propagates into report artifacts. Relevant files: `skills/quantitative-backtesting/scripts/walk_forward.py` (cpcv ~1300), `reports/` exporters, tests."""
