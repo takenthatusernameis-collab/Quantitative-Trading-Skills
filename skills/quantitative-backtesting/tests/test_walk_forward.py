@@ -2195,6 +2195,354 @@ def test_market_impact_cost_reduces_returns_dict_panel():
     )
 
 
+def test_cli_walk_forward_commission_sweep():
+    """CLI walk-forward --commissions writes a sweep artifact whose OOS return
+    degrades as the per-trade commission rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "walk-forward",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--commissions", "0.0002", "0.002", "0.004",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI walk-forward commission sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "walk_forward_commission_sweep.json")
+        assert os.path.exists(sweep_path), "walk_forward_commission_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["commissions"] == [0.0002, 0.002, 0.004]
+        assert len(payload["results"]) == 3
+        returns = [r["total_oos_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected OOS return degradation with commission, got {returns}"
+        )
+        assert [r["commission"] for r in payload["results"]] == [0.0002, 0.002, 0.004]
+
+
+def test_cli_walk_forward_slippage_sweep():
+    """CLI walk-forward --slippages writes a sweep artifact whose OOS return
+    degrades as the per-trade slippage rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "walk-forward",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--slippages", "0.0001", "0.001", "0.002",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI walk-forward slippage sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "walk_forward_slippage_sweep.json")
+        assert os.path.exists(sweep_path), "walk_forward_slippage_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["slippages"] == [0.0001, 0.001, 0.002]
+        assert len(payload["results"]) == 3
+        returns = [r["total_oos_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected OOS return degradation with slippage, got {returns}"
+        )
+        assert [r["slippage"] for r in payload["results"]] == [0.0001, 0.001, 0.002]
+
+
+def test_cli_optimize_commission_sweep():
+    """CLI optimize --commissions writes a sweep artifact whose top return
+    degrades as the per-trade commission rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "optimize",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--commissions", "0.0002", "0.002", "0.004",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI optimize commission sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "parameter_optimization_commission_sweep.json")
+        assert os.path.exists(sweep_path), "parameter_optimization_commission_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["commissions"] == [0.0002, 0.002, 0.004]
+        assert len(payload["results"]) == 3
+        returns = [r["top_total_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected top return degradation with commission, got {returns}"
+        )
+        assert [r["commission"] for r in payload["results"]] == [0.0002, 0.002, 0.004]
+
+
+def test_cli_optimize_slippage_sweep():
+    """CLI optimize --slippages writes a sweep artifact whose top return
+    degrades as the per-trade slippage rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "optimize",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--slippages", "0.0001", "0.001", "0.002",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI optimize slippage sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "parameter_optimization_slippage_sweep.json")
+        assert os.path.exists(sweep_path), "parameter_optimization_slippage_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["slippages"] == [0.0001, 0.001, 0.002]
+        assert len(payload["results"]) == 3
+        returns = [r["top_total_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected top return degradation with slippage, got {returns}"
+        )
+        assert [r["slippage"] for r in payload["results"]] == [0.0001, 0.001, 0.002]
+
+
+def test_cli_cpcv_commission_sweep():
+    """CLI cpcv --commissions writes a sweep artifact whose OOS return degrades
+    as the per-trade commission rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "cpcv",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--n-splits", "5",
+            "--test-size", "0.2",
+            "--commissions", "0.0002", "0.002", "0.004",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI cpcv commission sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "cpcv_commission_sweep.json")
+        assert os.path.exists(sweep_path), "cpcv_commission_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["commissions"] == [0.0002, 0.002, 0.004]
+        assert len(payload["results"]) == 3
+        returns = [r["total_oos_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected OOS return degradation with commission, got {returns}"
+        )
+        assert [r["commission"] for r in payload["results"]] == [0.0002, 0.002, 0.004]
+
+
+def test_cli_cpcv_slippage_sweep():
+    """CLI cpcv --slippages writes a sweep artifact whose OOS return degrades
+    as the per-trade slippage rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "cpcv",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--n-splits", "5",
+            "--test-size", "0.2",
+            "--slippages", "0.0001", "0.001", "0.002",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI cpcv slippage sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "cpcv_slippage_sweep.json")
+        assert os.path.exists(sweep_path), "cpcv_slippage_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["slippages"] == [0.0001, 0.001, 0.002]
+        assert len(payload["results"]) == 3
+        returns = [r["total_oos_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected OOS return degradation with slippage, got {returns}"
+        )
+        assert [r["slippage"] for r in payload["results"]] == [0.0001, 0.001, 0.002]
+
+
+def test_cli_monte_carlo_commission_sweep():
+    """CLI monte-carlo --commissions writes a sweep artifact whose return
+    degrades as the per-trade commission rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "monte-carlo",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--n-simulations", "100",
+            "--commissions", "0.0002", "0.002", "0.004",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI monte_carlo commission sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "monte_carlo_commission_sweep.json")
+        assert os.path.exists(sweep_path), "monte_carlo_commission_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["commissions"] == [0.0002, 0.002, 0.004]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected return degradation with commission, got {returns}"
+        )
+        assert [r["commission"] for r in payload["results"]] == [0.0002, 0.002, 0.004]
+
+
+def test_cli_monte_carlo_slippage_sweep():
+    """CLI monte-carlo --slippages writes a sweep artifact whose return degrades
+    as the per-trade slippage rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "monte-carlo",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--n-simulations", "100",
+            "--slippages", "0.0001", "0.001", "0.002",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI monte_carlo slippage sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "monte_carlo_slippage_sweep.json")
+        assert os.path.exists(sweep_path), "monte_carlo_slippage_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["slippages"] == [0.0001, 0.001, 0.002]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected return degradation with slippage, got {returns}"
+        )
+        assert [r["slippage"] for r in payload["results"]] == [0.0001, 0.001, 0.002]
+
+
+def test_cli_out_of_sample_commission_sweep():
+    """CLI out-of-sample --commissions writes a sweep artifact whose held-out
+    test return degrades as the per-trade commission rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--validation-method", "walk_forward",
+            "--commissions", "0.0002", "0.002", "0.004",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI out-of-sample commission sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "out_of_sample_commission_sweep.json")
+        assert os.path.exists(sweep_path), "out_of_sample_commission_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["commissions"] == [0.0002, 0.002, 0.004]
+        assert len(payload["results"]) == 3
+        returns = [r["test_total_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected test return degradation with commission, got {returns}"
+        )
+        assert [r["commission"] for r in payload["results"]] == [0.0002, 0.002, 0.004]
+
+
+def test_cli_out_of_sample_slippage_sweep():
+    """CLI out-of-sample --slippages writes a sweep artifact whose held-out
+    test return degrades as the per-trade slippage rises."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--validation-method", "walk_forward",
+            "--slippages", "0.0001", "0.001", "0.002",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI out-of-sample slippage sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "out_of_sample_slippage_sweep.json")
+        assert os.path.exists(sweep_path), "out_of_sample_slippage_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["slippages"] == [0.0001, 0.001, 0.002]
+        assert len(payload["results"]) == 3
+        returns = [r["test_total_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected test return degradation with slippage, got {returns}"
+        )
+        assert [r["slippage"] for r in payload["results"]] == [0.0001, 0.001, 0.002]
+
+
 def main() -> int:
     tests = [
         ("test_out_of_sample_validation_benchmark_cost_is_periodic", test_out_of_sample_validation_benchmark_cost_is_periodic),

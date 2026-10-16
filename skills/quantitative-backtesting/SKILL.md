@@ -304,6 +304,24 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
       for every ranked combo on constant returns, where zero-variance combos
       are ranked at Sharpe 0 rather than skipped; the `run_parameter_optimization --deflate` CLI
       writes the degenerate DSR dicts into `parameter_optimization.json` on constant returns), and
+      **cost-coefficient sweeps** across all five validation modes (walk-forward,
+      optimize, cpcv, monte-carlo, out-of-sample) for `--impact-coefficients`,
+      `--borrow-costs`, `--funding-costs`, `--commissions`, and `--slippages`.
+      Each sweep writes a `<mode>_<coefficient>_sweep.json` artifact whose
+      per-row metrics record every cost parameter actually applied (so a sweep
+      that varies commission leaves impact/borrow/funding at their single-run
+      values), and returns degrade monotonically as the swept cost rises.
+      Commission/slippage sweep coverage includes
+      `test_cli_walk_forward_commission_sweep`,
+      `test_cli_walk_forward_slippage_sweep`,
+      `test_cli_optimize_commission_sweep`,
+      `test_cli_optimize_slippage_sweep`,
+      `test_cli_cpcv_commission_sweep`,
+      `test_cli_cpcv_slippage_sweep`,
+      `test_cli_monte_carlo_commission_sweep`,
+      `test_cli_monte_carlo_slippage_sweep`,
+      `test_cli_out_of_sample_commission_sweep`, and
+      `test_cli_out_of_sample_slippage_sweep`, and
       multi-asset panel (dict and
       MultiIndex) walk-forward and Monte Carlo integration with
       `CrossSectionalMomentum` and `DualMomentumStrategy`.
