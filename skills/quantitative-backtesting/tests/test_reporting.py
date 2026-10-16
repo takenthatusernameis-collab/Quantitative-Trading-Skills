@@ -559,6 +559,62 @@ class TestTearSheet(unittest.TestCase):
             self.assertIn("point_in_time_validation", summary)
             self.assertTrue(summary["point_in_time_validation"]["passed"])
 
+    def test_generate_tear_sheet_surfaces_bias_controls_engaged(self):
+        """The bias-controls engagement flag is surfaced in both HTML and
+        JSON summary when present at the results level."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            results["bias_controls_engaged"] = True
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("bias_controls_engaged", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("bias_controls_engaged", summary)
+            self.assertTrue(summary["bias_controls_engaged"])
+
+    def test_generate_tear_sheet_surfaces_bias_controls_engaged_from_analysis(self):
+        """When the flag lives on an analysis-result summary (walk-forward /
+        CPCV / Monte Carlo) rather than at the results level, it is still
+        surfaced in the tear-sheet JSON."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            analysis = {
+                "walk_forward": {
+                    "summary": {
+                        "n_periods": 2,
+                        "bias_controls_engaged": True,
+                    },
+                    "best_params_per_period": [],
+                },
+            }
+            generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+                analysis_results=analysis,
+            )
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("bias_controls_engaged", summary)
+            self.assertTrue(summary["bias_controls_engaged"])
+
+    def test_generate_tear_sheet_omits_bias_controls_engaged_when_absent(self):
+        """Without bias_controls_engaged anywhere, the key is omitted from
+        the JSON summary (backward compatible)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertNotIn("bias_controls_engaged", summary)
+
     def test_generate_tear_sheet_handles_missing_equity(self):
         """Tear sheet does not crash when results lack equity_curve."""
         with tempfile.TemporaryDirectory() as tmpdir:

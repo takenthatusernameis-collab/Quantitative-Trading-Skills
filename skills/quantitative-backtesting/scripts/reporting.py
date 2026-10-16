@@ -523,7 +523,20 @@ def generate_tear_sheet(
     # results level (not inside the DataProvenance dict itself).
     data_prov = results.get("data_provenance")
     pit_val = results.get("point_in_time_validation")
-    if data_prov or pit_val:
+    # Bias-controls engagement flag (point-in-time validation, survivorship
+    # screening, and multiple-testing deflation). Mirrors the JSON summary
+    # key so the HTML tear sheet is traceable to the same signal.
+    bias_flag = results.get("bias_controls_engaged")
+    if bias_flag is None:
+        # Fall back to the analysis-result summaries (walk-forward / CPCV /
+        # Monte Carlo) when the flag was recorded there rather than at the
+        # top-level results dict.
+        for _analysis in (analysis or {}).values():
+            if isinstance(_analysis, dict) and isinstance(_analysis.get("summary"), dict):
+                bias_flag = _analysis["summary"].get("bias_controls_engaged")
+                if bias_flag is not None:
+                    break
+    if data_prov or pit_val or bias_flag is not None:
         html_parts.append("<h2>Data Provenance</h2>")
         html_parts.append("<table><tr><th>Field</th><th>Value</th></tr>")
 
@@ -574,6 +587,25 @@ def generate_tear_sheet(
                     html_parts.append(
                         f"<tr><td>point_in_time / {field}</td><td class='metric'>{fmt_prov(pit_val[field])}</td></tr>"
                     )
+
+        # Bias-controls engagement flag (point-in-time validation, survivorship
+        # screening, and multiple-testing deflation). Mirrors the JSON summary
+        # key so the HTML tear sheet is traceable to the same signal.
+        bias_flag = results.get("bias_controls_engaged")
+        if bias_flag is None:
+            # Fall back to the analysis-result summaries (walk-forward / CPCV /
+            # Monte Carlo) when the flag was recorded there rather than at the
+            # top-level results dict.
+            for _analysis in (analysis or {}).values():
+                if isinstance(_analysis, dict) and isinstance(_analysis.get("summary"), dict):
+                    bias_flag = _analysis["summary"].get("bias_controls_engaged")
+                    if bias_flag is not None:
+                        break
+        if bias_flag is not None:
+            html_parts.append(
+                f"<tr><td>bias_controls_engaged</td>"
+                f"<td class='metric'>{fmt_prov(bool(bias_flag))}</td></tr>"
+            )
 
         html_parts.append("</table>")
 
@@ -904,6 +936,18 @@ def generate_tear_sheet(
         summary["point_in_time_validation"] = _json_safe(
             results["point_in_time_validation"]
         )
+    # Bias-controls engagement flag (PIT + deflation controls). Mirrors the
+    # walk-forward / CPCV / Monte Carlo summaries so the tear-sheet JSON is
+    # traceable to the same signal; omitted when absent (backward compatible).
+    bias_flag = results.get("bias_controls_engaged")
+    if bias_flag is None:
+        for _analysis in (analysis or {}).values():
+            if isinstance(_analysis, dict) and isinstance(_analysis.get("summary"), dict):
+                bias_flag = _analysis["summary"].get("bias_controls_engaged")
+                if bias_flag is not None:
+                    break
+    if bias_flag is not None:
+        summary["bias_controls_engaged"] = bool(bias_flag)
 
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2, default=str)

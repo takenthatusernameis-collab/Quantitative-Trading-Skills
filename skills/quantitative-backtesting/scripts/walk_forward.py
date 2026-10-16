@@ -2291,7 +2291,15 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         "deflated_sharpe": (
             float(dsr["deflated_sharpe_ratio"]) if dsr is not None else None
         ),
+        "deflated_sharpe_n_trials": (
+            int(dsr["n_trials"]) if dsr is not None and dsr.get("n_trials") is not None else None
+        ),
         "n_periods": int(summary.get("n_periods", 0)),
+        # Bias-controls engagement flag (point-in-time validation + multiple-
+        # testing deflation). Propagated from the walk-forward summary so the
+        # sweep artifact is traceable to the same signal as the single-run
+        # summary JSON.
+        "bias_controls_engaged": bool(summary.get("bias_controls_engaged", False)),
     }
 
 
@@ -2429,6 +2437,14 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         "deflated_sharpe": (
             float(dsr["deflated_sharpe_ratio"]) if dsr is not None else None
         ),
+        "deflated_sharpe_n_trials": (
+            int(dsr["n_trials"]) if dsr is not None and dsr.get("n_trials") is not None else None
+        ),
+        # Bias-controls engagement flag (point-in-time validation + multiple-
+        # testing deflation). Propagated from the out-of-sample summary so the
+        # sweep artifact is traceable to the same signal as the single-run
+        # summary JSON.
+        "bias_controls_engaged": bool(summary.get("bias_controls_engaged", False)),
     }
 
 
@@ -2499,7 +2515,15 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         "deflated_sharpe": (
             float(dsr["deflated_sharpe_ratio"]) if dsr is not None else None
         ),
+        "deflated_sharpe_n_trials": (
+            int(dsr["n_trials"]) if dsr is not None and dsr.get("n_trials") is not None else None
+        ),
         "n_folds": int(summary.get("n_folds", 0)),
+        # Bias-controls engagement flag (point-in-time validation + multiple-
+        # testing deflation). Propagated from the CPCV summary so the sweep
+        # artifact is traceable to the same signal as the single-run summary
+        # JSON.
+        "bias_controls_engaged": bool(summary.get("bias_controls_engaged", False)),
     }
 
 
@@ -4016,7 +4040,7 @@ def run_parameter_optimization(args) -> int:
 def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                                     bench_commission, bench_slippage, bench_expense_ratio,
                                     impact_coefficient, borrow_cost=None, funding_cost=None,
-                                    commission=None, slippage=None):
+                                    commission=None, slippage=None, pit_results=None):
     """Run the Monte Carlo pipeline for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -4027,9 +4051,13 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     `borrow_cost` / `funding_cost` / `commission` / `slippage` default to the
     CLI args when None, so the same helper serves the market-impact sweep
     (which varies only `impact_coefficient`), the borrow/funding sweeps
-    (which vary one of those while leaving impact at its single-run value),
-    and the commission/slippage sweeps (which vary one of those while leaving
-    impact/borrow/funding at their single-run values).
+    (which vary one of those while leaving the others at their single-run
+    values), and the commission/slippage sweeps (which vary one of those
+    while leaving impact/borrow/funding at their single-run values).
+
+    `pit_results` carries the point-in-time validation outcome from the
+    caller so the sweep artifact records the same bias-controls engagement
+    flag as the single-run Monte Carlo JSON.
     """
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
@@ -4121,7 +4149,14 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         "max_drawdown": float(sm.get("max_drawdown", {}).get("mean", 0.0)),
         "probability_of_ruin": float(mc_results["probability_of_ruin"]),
         "deflated_sharpe": (float(dsr["deflated_sharpe_ratio"]) if dsr is not None else None),
+        "deflated_sharpe_n_trials": (
+            int(dsr["n_trials"]) if dsr is not None and dsr.get("n_trials") is not None else None
+        ),
         "n_simulations": int(mc_results["n_simulations"]),
+        # Bias-controls engagement flag (point-in-time validation + multiple-
+        # testing deflation). Propagated from the CLI args so the sweep artifact
+        # is traceable to the same signal as the single-run Monte Carlo JSON.
+        "bias_controls_engaged": bool(pit_results is not None),
     }
 
 
@@ -4603,6 +4638,7 @@ def run_monte_carlo(args) -> int:
         mc_base_metrics["deflated_sharpe"] = dsr
     if pit_results is not None:
         mc_base_results["point_in_time_validation"] = pit_results
+    mc_base_results["bias_controls_engaged"] = bool(pit_results is not None)
     generate_tear_sheet(
         mc_base_results, mc_base_metrics, args.output,
         symbol=args.symbol,

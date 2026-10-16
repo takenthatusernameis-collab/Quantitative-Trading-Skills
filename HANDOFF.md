@@ -2,41 +2,46 @@
 
 ## Repository state (as of this session)
 
-- Working tree has uncommitted changes (programmatic-API PIT validation + 1 new test). No commits made this session.
+- Working tree has uncommitted changes (tear-sheet bias-controls propagation + 4 new tests). No commits made this session.
 - `requirements.txt` (declares matplotlib/numpy/pandas) is already present and installed.
-- Test suite: **268/268 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`), up from 267 (1 new regression test added).
+- Test suite: **271/271 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`), up from 268 (4 new regression tests added).
 - Root end-to-end script `verify_end_to_end.py`: **passes, exit 0**.
 
 ## Quantitative-backtesting skill status
 
 - `skills/quantitative-backtesting/` is the primary quant asset.
-- **Test suite: 268/268 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`).
+- **Test suite: 271/271 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`).
 - Root end-to-end script `verify_end_to_end.py`: **passes, exit 0**.
 
 ## What changed this session
 
-### Extended point-in-time validation to the programmatic APIs
+### Propagated `bias_controls_engaged` into report artifacts (HANDOFF follow-up)
 
-The CLI path already engaged `validate_point_in_time` by default (prior session). The three programmatic library entry points — `out_of_sample_validation`, `walk_forward_analysis`, `cpcv_analysis` — never called `validate_point_in_time` or `detect_survivorship_bias`, so programmatic users ran with no bias controls engaged.
+The prior session's PIT work recorded `bias_controls_engaged` on the walk-forward / CPCV / OOS / Monte Carlo summaries and JSON artifacts, but the **HTML tear sheet** never rendered it, and the **Monte Carlo tear sheet** (`run_monte_carlo`) never even set it. A reader comparing the HTML report to the JSON summary could not tell whether bias controls were engaged — the exact signal the prior session added.
+
+Changes in `skills/quantitative-backtesting/scripts/reporting.py` (`generate_tear_sheet`):
+- The Data Provenance HTML section now renders `bias_controls_engaged` as a row whenever it is present at the results level (`results["bias_controls_engaged"]`), falling back to `analysis_results["walk_forward"/"cpcv"/"monte_carlo"]["summary"]["bias_controls_engaged"]` when the flag lives on an analysis-result summary rather than at the top level.
+- The section is now emitted when `data_provenance`, `point_in_time_validation`, **or** `bias_controls_engaged` is present (previously the section was skipped when only the flag was set).
+- `tear_sheet_summary.json` now also surfaces `bias_controls_engaged` (same fallback logic), mirroring the HTML.
 
 Changes in `skills/quantitative-backtesting/scripts/walk_forward.py`:
-- Added `validate_pit: bool = False` parameter to `walk_forward_analysis` (line ~268), `cpcv_analysis` (line ~1305), and `out_of_sample_validation` (line ~1765). Default `False` preserves exact current behavior for existing callers; engagement is opt-in via the parameter.
-- Each function now calls `validate_point_in_time(data)` after data normalization when `validate_pit=True`, printing violations/warnings (non-strict: never aborts).
-- Each function records `results["point_in_time_validation"]` and `summary["bias_controls_engaged"]` (mirrors the CLI wrapper pattern).
+- `run_monte_carlo` now sets `mc_base_results["bias_controls_engaged"] = bool(pit_results is not None)` before calling `generate_tear_sheet`, so the Monte Carlo tear sheet is consistent with the walk-forward / CPCV / OOS tear sheets (it previously omitted the flag entirely).
 
-Tests added in `skills/quantitative-backtesting/tests/test_walk_forward.py`:
-- `test_out_of_sample_validation_validate_pit_detects_look_ahead` — positive control: duplicate-timestamp DataFrame through `out_of_sample_validation` with `validate_pit=True` asserts `point_in_time_validation["passed"] is False`; negative control: clean data asserts `passed is True` and `bias_controls_engaged is True`.
+Tests added in `skills/quantitative-backtesting/tests/test_reporting.py`:
+- `test_generate_tear_sheet_surfaces_bias_controls_engaged` — positive control: flag at results level renders in both HTML and JSON.
+- `test_generate_tear_sheet_surfaces_bias_controls_engaged_from_analysis` — flag on an analysis-result summary (walk-forward) is still surfaced in the JSON.
+- `test_generate_tear_sheet_omits_bias_controls_engaged_when_absent` — backward-compat: key omitted when absent.
 
-Verified: full suite 268/268 passing; `verify_end_to_end.py` exit 0.
+Verified: full suite 271/271 passing; `verify_end_to_end.py` exit 0.
 
 ## What the previous HANDOFF claimed (now superseded)
 
-This session's task ("Extend point-in-time validation to the programmatic APIs") is **complete**.
+This session's task ("ensure `bias_controls_engaged` propagates into report artifacts") is **complete**.
 
 ## Approaches already tried and why abandoned
 
-- None abandoned. The change was a deterministic, low-risk opt-in parameter with an explicit `bias_controls_engaged` signal; all 268 tests pass and end-to-end verification is green.
+- None abandoned. The change was a deterministic, low-risk opt-in parameter with an explicit `bias_controls_engaged` signal; all 271 tests pass and end-to-end verification is green.
 
 ## Next task (bounded, high-value)
 
-**Assess multiple-testing / data-mining controls in CPCV** — verify deflated Sharpe ratio and `n_trials` accounting remain consistent when bias controls engage by default; ensure `bias_controls_engaged` propagates into report artifacts. Relevant files: `skills/quantitative-backtesting/scripts/walk_forward.py` (cpcv ~1300), `reports/` exporters, tests."""
+**Audit `n_trials` accounting consistency across the multiple-testing correction paths** — verify that `deflated_sharpe_ratio` receives the same effective trial count in `walk_forward_analysis`, `cpcv_analysis`, `out_of_sample_validation`, and the `run_monte_carlo` `--n-trials` path, and that the sweep helpers (`_walk_forward_sweep_coefficient`, `_monte_carlo_sweep_coefficient`, `_oos_sweep_coefficient`, `_optimize_sweep_coefficient`) propagate `bias_controls_engaged` and `n_trials` into their sweep JSON artifacts. Relevant files: `skills/quantitative-backtesting/scripts/walk_forward.py` (sweep helpers ~4016, 4617), `reports/` exporters, tests.
