@@ -2306,7 +2306,7 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
 def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                                 bench_commission, bench_slippage, bench_expense_ratio,
                                 impact_coefficient, borrow_cost=None, funding_cost=None,
-                                commission=None, slippage=None):
+                                commission=None, slippage=None, pit_results=None):
     """Run parameter optimization for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -2319,6 +2319,10 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
     (which vary one of those while leaving the others at their single-run
     values), and the commission/slippage sweeps (which vary one of those
     while leaving impact/borrow/funding at their single-run values).
+
+    `pit_results` carries the point-in-time validation outcome from the
+    caller so the sweep artifact records the same bias-controls engagement
+    flag as the single-run parameter-optimization JSON.
     """
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
@@ -2350,6 +2354,7 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
     )
     top = results[0] if results else None
+    dsr = top.get("deflated_sharpe") if isinstance(top, dict) else None
     return {
         "impact_coefficient": float(impact_coefficient),
         "borrow_cost": float(borrow_cost),
@@ -2359,6 +2364,22 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         "top_sharpe": (float(top["sharpe_ratio"]) if top is not None else None),
         "top_total_return": (float(top["total_return"]) if top is not None else None),
         "n_combos": int(len(results)),
+        # Deflated Sharpe Ratio (multiple-testing correction) of the best
+        # combination, corrected for all evaluated combos (n_trials = len(
+        # results)). Mirrors the deflated_sharpe key each optimization result
+        # carries when apply_deflation is set.
+        "deflated_sharpe": (
+            float(dsr["deflated_sharpe_ratio"]) if isinstance(dsr, dict) else None
+        ),
+        "deflated_sharpe_n_trials": (
+            int(dsr["n_trials"])
+            if isinstance(dsr, dict) and dsr.get("n_trials") is not None
+            else None
+        ),
+        # Bias-controls engagement flag (point-in-time validation + multiple-
+        # testing deflation). Propagated from the caller so the sweep artifact
+        # is traceable to the same signal as the single-run JSON.
+        "bias_controls_engaged": bool(pit_results is not None),
     }
 
 
@@ -3741,6 +3762,7 @@ def run_parameter_optimization(args) -> int:
             row = _optimize_sweep_coefficient(
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
+                pit_results=pit_results,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_impact_sweep.json"
@@ -3771,6 +3793,7 @@ def run_parameter_optimization(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=cost, funding_cost=args.funding_cost,
+                pit_results=pit_results,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_borrow_sweep.json"
@@ -3801,6 +3824,7 @@ def run_parameter_optimization(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
+                pit_results=pit_results,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_funding_sweep.json"
@@ -3839,6 +3863,7 @@ def run_parameter_optimization(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, commission=cost,
+                pit_results=pit_results,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_commission_sweep.json"
@@ -3874,6 +3899,7 @@ def run_parameter_optimization(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, slippage=cost,
+                pit_results=pit_results,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_slippage_sweep.json"

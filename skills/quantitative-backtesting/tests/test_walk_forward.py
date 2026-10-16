@@ -2975,6 +2975,8 @@ def main() -> int:
         ("test_cli_optimize_impact_sweep", test_cli_optimize_impact_sweep),
         ("test_cli_optimize_borrow_sweep", test_cli_optimize_borrow_sweep),
         ("test_cli_optimize_funding_sweep", test_cli_optimize_funding_sweep),
+        ("test_optimize_impact_sweep_records_bias_controls_and_deflated_sharpe", test_optimize_impact_sweep_records_bias_controls_and_deflated_sharpe),
+        ("test_optimize_sweep_omits_deflated_sharpe_without_deflate", test_optimize_sweep_omits_deflated_sharpe_without_deflate),
         ("test_cli_out_of_sample_impact_sweep", test_cli_out_of_sample_impact_sweep),
         ("test_cli_out_of_sample_borrow_sweep", test_cli_out_of_sample_borrow_sweep),
         ("test_cli_out_of_sample_funding_sweep", test_cli_out_of_sample_funding_sweep),
@@ -3088,6 +3090,82 @@ def test_benchmark_stats_with_splits_regression_pins_corrected_values():
     assert abs(stats["alpha_pvalue"] - 0.9813727464) < 1e-8
     assert np.isfinite(stats["correlation_with_benchmark"])
     assert np.isfinite(stats["r_squared"])
+
+
+def test_optimize_impact_sweep_records_bias_controls_and_deflated_sharpe():
+    """Optimize impact sweep propagates bias_controls_engaged and n_trials.
+
+    With --deflate, every sweep row must surface the bias-controls engagement
+    flag plus the best combination's Deflated Sharpe Ratio and its trial count
+    (n_trials == number of evaluated combinations == n_combos).
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "optimize",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--deflate",
+            "--impact-coefficients", "0", "2", "5",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI optimize impact sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "parameter_optimization_impact_sweep.json")
+        assert os.path.exists(sweep_path), "parameter_optimization_impact_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert len(payload["results"]) == 3
+        for row in payload["results"]:
+            assert row["bias_controls_engaged"] is True, (
+                f"expected bias_controls_engaged True, got {row}"
+            )
+            assert isinstance(row["deflated_sharpe"], float), (
+                f"expected deflated_sharpe float, got {row.get('deflated_sharpe')}"
+            )
+            assert 0.0 <= row["deflated_sharpe"] <= 1.0, row
+            assert row["deflated_sharpe_n_trials"] is not None, row
+            assert row["deflated_sharpe_n_trials"] == row["n_combos"], (
+                f"n_trials {row['deflated_sharpe_n_trials']} != n_combos {row['n_combos']}"
+            )
+
+
+def test_optimize_sweep_omits_deflated_sharpe_without_deflate():
+    """Without --deflate, deflated_sharpe keys are absent but the bias flag is
+    still recorded (opt-in multiple-testing correction, bias controls always
+    traced when point-in-time validation runs)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "optimize",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--impact-coefficients", "0", "2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI optimize sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "parameter_optimization_impact_sweep.json")
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        for row in payload["results"]:
+            assert row["bias_controls_engaged"] is True, row
+            assert row["deflated_sharpe"] is None, row
+            assert row["deflated_sharpe_n_trials"] is None, row
 
 
 if __name__ == "__main__":
