@@ -1547,6 +1547,42 @@ def test_cli_monte_carlo_impact_sweep():
         )
 
 
+
+def test_monte_carlo_n_trials_uses_evaluated_combo_count():
+    """run_monte_carlo with --n-trials and a param grid must deflate using
+    the actually-evaluated combo count, not the user-supplied n_trials.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "monte-carlo",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--n-trials", "500",
+            "--output", out_dir,
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI monte-carlo should exit 0, got {rc}"
+        mc_path = os.path.join(out_dir, "monte_carlo_results.json")
+        assert os.path.exists(mc_path), "monte_carlo_results.json not written"
+        with open(mc_path) as f:
+            payload = json.load(f)
+        assert payload["config"]["n_trials"] == 9, (
+            f"expected n_trials 9 (evaluated combos), got {payload['config'].get('n_trials')}"
+        )
+        assert "deflated_sharpe" in payload
+        assert payload["deflated_sharpe"]["n_trials"] == 9, (
+            f"expected deflated_sharpe n_trials 9, got {payload['deflated_sharpe'].get('n_trials')}"
+        )
+
+
 def test_cli_cpcv_impact_sweep():
     """CLI cpcv --impact-coefficients writes a sweep artifact whose OOS
     returns degrade monotonically as the market-impact coefficient rises."""
