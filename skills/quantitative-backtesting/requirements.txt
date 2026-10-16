@@ -1,0 +1,7 @@
+# Runtime dependencies for the quantitative-backtesting skill.
+# The scripts import numpy, pandas, and matplotlib (reporting/tear-sheet
+# figures). matplotlib is required for the figure-generating tests in
+# tests/test_reporting.py and for the tear-sheet / parameter heatmap outputs.
+matplotlib
+numpy
+pandas
