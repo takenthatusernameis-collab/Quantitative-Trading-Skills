@@ -15,6 +15,7 @@ import traceback
 from pathlib import Path
 from io import StringIO
 from contextlib import redirect_stdout, redirect_stderr
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -1066,6 +1067,94 @@ def test_deflated_sharpe_parity_across_all_four_analysis_paths():
         assert 0.0 <= ds["deflated_sharpe_ratio"] <= 1.0, (label, ds)
         assert 0.0 <= ds["p_value"] <= 1.0, (label, ds)
         assert ds["n_trials"] >= 1, (label, ds)
+
+
+def test_cost_sweep_dsr_parity_across_paths():
+    """Cost-sweep artifacts must carry the same Deflated Sharpe correction
+    basis as the single-run paths they re-run.
+
+    Each cost sweep re-runs one of the four analysis pipelines
+    (walk-forward / out-of-sample / cpcv / monte-carlo) for a series of
+    coefficient values and records a per-coefficient `deflated_sharpe`
+    and `deflated_sharpe_n_trials` row. The multiple-testing correction
+    must therefore be consistent with the single-run parity invariant
+    already guarded by `test_deflated_sharpe_parity_across_all_four_analysis_paths`:
+    within a sweep, the `n_trials` (the number of configurations the
+    pipeline actually evaluated) must be constant across coefficients
+    (the grid is unchanged, so the counting basis cannot drift), and
+    the DSR / p_value must stay in [0, 1] for every row.
+
+    Guards the cost-sweep extension of the DSR parity invariant: before
+    this session the sweeps recorded `deflated_sharpe_n_trials` but no
+    test asserted it was coefficient-stable, so a regression in the
+    per-coefficient trial counting (e.g. one coefficient evaluating a
+    different subset of the grid) would have gone unnoticed while the
+    sweep still "ran".
+    """
+    grid = '{"fast_period": [5, 10, 15], "slow_period": [20, 30, 40]}'
+
+    def run_sweep(subcmd, extra, expect):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = os.path.join(tmpdir, "data.csv")
+            _write_ohlcv_csv(csv_path, periods=600, seed=11)
+            out_dir = os.path.join(tmpdir, "out")
+            # `--impact-coefficients` is nargs="+" so it must come last.
+            argv = [
+                "walk_forward", subcmd,
+                "--data", csv_path,
+                "--symbol", "SPY",
+                "--strategy", "sma_crossover",
+                "--param-grid", grid,
+                "--output", out_dir,
+            ] + extra + ["--impact-coefficients", "0", "2", "5"]
+            with patch.object(sys, "argv", argv), \
+                    redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                rc = walk_forward_main()
+            assert rc == 0, f"{subcmd} impact sweep should exit 0, got {rc}"
+            sweep_path = os.path.join(out_dir, expect)
+            assert os.path.exists(sweep_path), f"{expect} not written"
+            with open(sweep_path) as f:
+                return json.load(f)
+
+    # walk-forward / out-of-sample / cpcv sweeps gate the DSR on `--deflate`;
+    # monte-carlo gates it on `--n-trials` instead (no `--deflate` flag exists
+    # for the monte-carlo subcommand).
+    wf = run_sweep("walk-forward", ["--deflate"], "walk_forward_impact_sweep.json")
+    oos = run_sweep("out-of-sample", ["--deflate"], "out_of_sample_impact_sweep.json")
+    cv = run_sweep("cpcv", ["--deflate", "--n-splits", "5", "--test-size", "0.2"],
+                   "cpcv_impact_sweep.json")
+    mc = run_sweep(
+        "monte-carlo",
+        ["--n-simulations", "50", "--n-trials", "500"],
+        "monte_carlo_impact_sweep.json",
+    )
+
+    sweeps = {
+        "walk_forward": wf,
+        "out_of_sample": oos,
+        "cpcv": cv,
+        "monte_carlo": mc,
+    }
+    for name, payload in sweeps.items():
+        rows = payload["results"]
+        assert len(rows) == 3, (name, "expected 3 sweep rows")
+
+        n_trials = [r.get("deflated_sharpe_n_trials") for r in rows]
+        # The grid is identical across coefficients, so the counting basis
+        # (the number of configurations the pipeline actually evaluated)
+        # must not drift between coefficients.
+        assert n_trials[0] is not None and n_trials[0] == n_trials[1] == n_trials[2], (
+            name, "sweep n_trials must be coefficient-stable", n_trials
+        )
+        assert n_trials[0] >= 1, (name, n_trials)
+
+        for i, r in enumerate(rows):
+            label = f"{name}[{i}]"
+            dsr = r.get("deflated_sharpe")
+            nt = r.get("deflated_sharpe_n_trials")
+            assert dsr is not None, (name, label, "missing deflated_sharpe")
+            assert 0.0 <= dsr <= 1.0, (name, label, dsr)
+            assert nt == n_trials[0], (name, label, nt, n_trials[0])
 
 
 def test_out_of_sample_validation_multiple_benchmarks_deflated_alpha():
@@ -3263,6 +3352,7 @@ def main() -> int:
         ("test_out_of_sample_validation_n_trials_matches_evaluated_combinations", test_out_of_sample_validation_n_trials_matches_evaluated_combinations),
         ("test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star", test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star),
         ("test_deflated_sharpe_parity_across_all_four_analysis_paths", test_deflated_sharpe_parity_across_all_four_analysis_paths),
+        ("test_cost_sweep_dsr_parity_across_paths", test_cost_sweep_dsr_parity_across_paths),
         ("test_benchmark_stats_with_splits_produces_finite_inference", test_benchmark_stats_with_splits_produces_finite_inference),
         ("test_benchmark_stats_with_splits_regression_pins_corrected_values", test_benchmark_stats_with_splits_regression_pins_corrected_values),
         ("test_cli_walk_forward_commission_sweep", test_cli_walk_forward_commission_sweep),

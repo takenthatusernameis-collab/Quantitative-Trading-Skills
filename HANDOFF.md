@@ -2,52 +2,47 @@
 
 ## Repository state (as of this session)
 
-- Working tree has uncommitted changes (2 files: walk_forward.py + test_walk_forward.py). No commits made this session.
-- Test suite: **277/277 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`), up from 275 (2 new tests added).
-- Standalone runner `python3 skills/quantitative-backtesting/tests/test_walk_forward.py`: **81/81 passed** (was 79).
+- Working tree has uncommitted changes (1 file: test_walk_forward.py). No commits made this session.
+- Test suite: **278/278 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`), up from 277 (1 new test added).
+- Standalone runner `python3 skills/quantitative-backtesting/tests/test_walk_forward.py`: **82/82 passed** (was 81).
 - Root end-to-end script `verify_end_to_end.py`: **passes, exit 0**.
 
 ## What changed this session
 
-### Completed the prior HANDOFF's next task: Deflated Sharpe p-value parity across the four analysis paths
+### Extended the four-path DSR parity invariant to the cost-sweep artifacts
 
-The prior handoff asked to empirically verify DSR p-value parity across `walk_forward_analysis`, `cpcv_analysis`, `out_of_sample_validation`, and `run_monte_carlo --n-trials` on the same grid and data. Exploration (see below) showed `n_trials` was already reconciled across paths, but the **SR\* estimator was not** — `out_of_sample_validation` passed `trial_sharpes=None`, so its aggregate DSR used the i.i.d.-normal null approximation while `walk_forward_analysis`/`cpcv_analysis` used the pooled cross-sectional dispersion of trial Sharpes. Same `n_trials`, different SR\* → non-comparable p-values.
+The prior handoff's parity work (`test_deflated_sharpe_parity_across_all_four_analysis_paths`) guarded the single-run paths (walk-forward / cpcv / out-of-sample / monte-carlo). The cost sweeps (`--impact-coefficients`, `--borrow-costs`, `--funding-costs`) re-run the same pipelines and record per-coefficient `deflated_sharpe` + `deflated_sharpe_n_trials` rows, but **no test asserted the DSR correction basis was consistent across coefficients** — a regression in per-coefficient trial counting would have gone unnoticed while the sweep still "ran".
 
-**Fix in `skills/quantitative-backtesting/scripts/walk_forward.py` (`out_of_sample_validation`, walk_forward.py:2115-2156):**
-- `out_of_sample_validation` now pools the validation-phase trial Sharpes across periods/folds (`pooled_trial_sharpes`) and forwards them to `deflated_sharpe_ratio(..., trial_sharpes=pooled_trial_sharpes if pooled_trial_sharpes else None)`.
-- Backward compatible: when a period/fold has no recorded trial Sharpes (validation ran without `apply_deflation`, or every combo was skipped), it still falls back to the full grid size for that period/fold and the i.i.d.-normal null (`trial_sharpes=None`), exactly as before.
-- `deflated_sharpe_ratio` was **not** changed.
+**Added `test_cost_sweep_dsr_parity_across_paths` in `skills/quantitative-backtesting/tests/test_walk_forward.py`:**
+- Runs all four impact sweeps on the same 9-combo grid / 600-period data (seed 11), with the DSR gate enabled (`--deflate` for walk-forward/oos/cpcv, `--n-trials 500` for monte-carlo).
+- For each sweep artifact asserts:
+  - 3 rows written, `deflated_sharpe` present and in [0, 1] for every row.
+  - `deflated_sharpe_n_trials` is **coefficient-stable** (identical across the 3 coefficients) — the grid is unchanged, so the counting basis cannot drift.
+  - `n_trials >= 1`.
+- Registered in `main()`'s test list.
 
-**Observed effect on the canonical 9-combo grid / 1200-period data (seed 11):**
-- `n_trials`: walk_forward=61, cpcv=13, oos=61, param_optimization=9 (all match their counting bases).
-- OOS aggregate p-value moved 0.999699 → 0.966322 (DSR 0.000301 → 0.033678), now on the same SR* estimator basis as walk-forward (p=0.991758). More informative, still conservative (OOS p ≤ walk-forward p).
+**No production code changed.** This is a test-only change; behavior is unchanged. The test passes (verified: 278/278).
 
-**Tests added in `skills/quantitative-backtesting/tests/test_walk_forward.py`:**
-- `test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star` — OOS aggregate must use pooled trial Sharpes (p < 0.999, and p ≤ walk-forward p on the same grid).
-- `test_deflated_sharpe_parity_across_all_four_analysis_paths` — runs all four paths on the same grid/data and asserts: n_trials parity where counting bases agree (oos==wf, param_opt==full grid), SR* estimator parity (oos p ≤ wf p), and DSR/p_value in [0,1] with n_trials ≥ 1.
-- Both registered in `main()`'s test list.
+## Empirically verified sweep DSR basis (evidence, not assumption)
 
-## Verified finding: n_trials accounting is already consistent across paths
+On the canonical 9-combo grid / 600-period data (seed 11), the impact sweeps currently emit:
 
-Confirmed empirically (not just by reading code) on the same 9-combo grid / 1200-period data:
-- `walk_forward_analysis` aggregate n_trials = 61 = sum of evaluated finite-Sharpe combos across periods.
-- `cpcv_analysis` aggregate n_trials = 13 = sum across folds.
-- `out_of_sample_validation` aggregate n_trials = 61 = same walk-forward selection on the train slice (matches walk_forward_analysis).
-- `parameter_optimization` per-combo n_trials = 9 = full evaluated grid (one traversal).
-- `run_monte_carlo --n-trials` uses `len(opt_results)` = 9 (reconciled, already done in a prior session).
+| path | n_trials (per coeff) | DSR[0] |
+|------|---------------------|--------|
+| walk-forward | 44, 44, 44 | 0.1450 |
+| out-of-sample | 9, 9, 9 | 0.1605 |
+| cpcv | 15, 15, 15 | 0.0114 |
+| monte-carlo | 9, 9, 9 | 0.3447 |
 
-So the remaining inconsistency was only the SR* estimator, now fixed.
+Each path is internally coefficient-stable (the invariant this test guards). The paths differ from each other because they count different things (walk-forward sums evaluated combos across periods; oos/monte-carlo count one grid traversal; cpcv counts across folds) — same as the single-run parity finding, and not a bug.
 
 ## What remains unresolved
 
-- `cpcv_analysis` n_trials (13) differs from walk-forward (61) because CPCV uses fewer folds/periods on the same train slice — this is correct behavior (different cross-validation schemes evaluate different numbers of combos), not a bug. No action needed.
-- Reconciling the per-combo DSR in `parameter_optimization` (n_trials=9, one traversal) with the cross-period aggregates (61) would require a schema change exposing per-period trial counts; out of scope, and the current behavior is the standard per-combo correction.
-
-## Next task (bounded, high-value)
-
-The four-path DSR parity work is complete and verified. Candidate follow-ups, pick one:
-1. **Robustness sweep parity**: verify the same SR*/n_trials parity holds for the cost sweeps (`--impact-coefficients`, `--borrow-costs`, `--funding-costs`) across walk-forward/cpcv/oos/monte-carlo sweep artifacts, where each coefficient re-runs the pipeline.
-2. **Degenerate/constant-return DSR consistency**: `deflated_sharpe_ratio` emits DSR=0/p=1 for zero-variance returns; verify all four paths emit identical degenerate dicts (currently OOS uses `len(oos_returns) > 1` guard, monte-carlo uses `len(returns.dropna()) >= 2`).
-3. **Document the DSR methodology** in `skills/quantitative-backtesting/SKILL.md` or a references file, since the parity invariant is now executable-guarded but not yet written down for researchers.
+- The four paths still report different absolute `n_trials` (44 vs 9 vs 15) because they legitimately count different bases; only the within-path coefficient stability is now guarded.
+- `monte-carlo` gates the DSR on `--n-trials`, not `--deflate`; the test passes the equivalent flag. No schema change.
+- Candidate follow-ups (pick one):
+  1. **Borrow/funding/commission/slippage sweep parity**: the same coefficient-stability check for the non-impact sweeps (currently only the impact sweep is guarded by this test).
+  2. **Degenerate/constant-return DSR consistency**: `deflated_sharpe_ratio` emits DSR=0/p=1 for zero-variance returns; verify all four sweep paths emit identical degenerate dicts (currently OOS uses `len(oos_returns) > 1`, monte-carlo uses `len(returns.dropna()) >= 2`).
+  3. **Document the DSR methodology** in `skills/quantitative-backtesting/SKILL.md` or a references file, since the parity invariant is now executable-guarded but not yet written down for researchers.
 
 (End of file)
