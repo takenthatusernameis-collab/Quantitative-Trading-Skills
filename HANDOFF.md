@@ -84,29 +84,40 @@ So the multiple-testing correction uses three different effective trial counts a
 
 **Not fixed this session:** reconciling (3) with (1)/(2)/(4) requires exposing the actually-evaluated trial count from `walk_forward_analysis`/`cpcv_analysis` (a schema change) and is out of scope for this bounded session.
 
+## What changed this session
+
+### `run_monte_carlo --n-trials` n_trials reconciliation: ALREADY COMPLETE in code
+
+The prior HANDOFF's next task is already implemented and verified in the committed code:
+- `run_monte_carlo` (walk_forward.py:4405-4491) calls `parameter_optimization` and uses `effective_n_trials = len(opt_results)` when a grid was searched (the actually-evaluated combo count), else `int(n_trials)` — mirroring `walk_forward_analysis`/`cpcv_analysis`/`out_of_sample_validation`. Same logic in `_monte_carlo_sweep_coefficient` (walk_forward.py:4150-4153) for all five sweep paths (impact/borrow/funding/commission/slippage).
+- Regression test `test_monte_carlo_n_trials_uses_evaluated_combo_count` (test_walk_forward.py:1551) exists and passes: 3x3 grid with `--n-trials 500` records `n_trials == 9` (evaluated combos, not the user-supplied 500).
+- `deflated_sharpe_ratio` itself was not changed.
+
+### Fixed: non-reproducible Monte Carlo sweep artifacts (the actual blocker found this session)
+
+`monte_carlo_simulation` (monte_carlo.py) drew from the unseeded global numpy RNG, so sweep artifacts report a stochastic Monte Carlo **mean** as `total_return`. For MACD (unlevered, gross exposure ≤ 1) funding cost is a true no-op (`leverage_excess = 0`), yet `test_cli_monte_carlo_funding_sweep` failed spuriously and flakily (passed run 1, failed run 2 with different values).
+
+Changes:
+- `monte_carlo.py`: `monte_carlo_simulation` gained `seed: Optional[int] = None`; uses `np.random.default_rng(seed)` for all resampling/draws when set, legacy global RNG otherwise (backward compatible).
+- `walk_forward.py`: added `--seed` CLI arg (common_parser, all subcommands); both `monte_carlo_simulation` call sites (single run + sweep helper) pass `seed=args.seed if args.seed is not None else 0`, so CLI Monte Carlo output is deterministic/reproducible by default and overridable via `--seed`.
+- Corrected comment (walk_forward.py:4460-4466) and `--n-trials` help text that claimed `max(--n-trials, len(opt_results))` while code uses the actually-evaluated count only.
+- Registered `test_cli_monte_carlo_n_trials` (`test_monte_carlo_n_trials_uses_evaluated_combo_count`) in `main()`'s test list (it was missing).
+
+### Verification this session
+
+- Full suite: **275 passed** (was 274 passed + 1 flaky failure).
+- `test_cli_monte_carlo_funding_sweep`: 5/5 deterministic passes after fix.
+- `verify_end_to_end.py`: exit 0.
+- Custom `main()` runner: 79/79 tests passed.
+- Working tree has uncommitted changes (4 files); no commits made this session.
+
 ## Next task (bounded, high-value)
 
-`out_of_sample_validation` n_trials reconciliation is **complete** this session
-(code already reconciled; regression test added, suite 274/274,
-`verify_end_to_end.py` exit 0).
+Empirically verify Deflated Sharpe p-value parity across the four analysis paths on the **same grid and data**:
 
-The remaining `n_trials` accounting inconsistency from the prior audit:
-reconcile `run_monte_carlo --n-trials` effective trial count so Deflated Sharpe
-p-values are comparable across the `--n-trials` Monte Carlo path and the
-walk-forward/CPCV/out_of_sample_validation paths.
+- `walk_forward_analysis` (aggregate n_trials = evaluated finite-Sharpe combos across periods),
+- `cpcv_analysis` (same basis across folds),
+- `out_of_sample_validation` (reconciled to evaluated combos),
+- `run_monte_carlo --n-trials` (reconciled to len(opt_results)).
 
-- `run_monte_carlo --n-trials` (walk_forward.py:4111-4114) uses
-  `effective_n_trials = max(int(n_trials), len(opt_results))`, a third counting
-  basis distinct from `walk_forward_analysis`/`cpcv_analysis`
-  (finite-Sharpe configs evaluated) and `out_of_sample_validation` (now
-  reconciled).
-- Relevant file: `skills/quantitative-backtesting/scripts/walk_forward.py`,
-  `run_monte_carlo`, `effective_n_trials` at walk_forward.py:4111-4114.
-- The cleanest fix exposes the actually-evaluated trial count from
-  `parameter_optimization` (successfully-evaluated combos) and uses it
-  consistently, mirroring the `out_of_sample_validation` reconciliation.
-- Add a regression test asserting `run_monte_carlo --n-trials` deflated_sharpe
-  `n_trials` equals the actually-evaluated combo count and is consistent with
-  `walk_forward_analysis`/`cpcv_analysis` for the same grid.
-- Constraint: do not change `deflated_sharpe_ratio` itself; do not break the
-  test suite or `verify_end_to_end.py` (exit 0).
+Build a short script (e.g. `skills/quantitative-backtesting/scripts/verify_dsr_parity.py` or a test) that runs all four on identical data/grid and asserts the reported `deflated_sharpe.n_trials` values match where the counting bases agree, printing the DSR/p_value for comparison. Constraint: do not change `deflated_sharpe_ratio`; suite must stay green; `verify_end_to_end.py` exit 0.

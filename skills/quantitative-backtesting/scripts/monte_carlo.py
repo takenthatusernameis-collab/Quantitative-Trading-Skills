@@ -122,6 +122,7 @@ def monte_carlo_simulation(
     n_simulations: int = 2000,
     confidence_levels: List[float] = None,
     block_size: Union[int, str, None] = None,
+    seed: Optional[int] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -157,6 +158,11 @@ def monte_carlo_simulation(
     base_returns = base_returns.dropna()
     n_obs = len(base_returns)
     ann_factor = _annualization_factor(base_returns.index)
+
+    # Seeded RNG makes repeated simulations identical (reproducible sweep
+    # artifacts and reports). When no seed is provided, fall back to the
+    # legacy global numpy RNG.
+    rng = np.random.default_rng(seed) if seed is not None else None
 
     # Handle automatic block size selection
     block_size_used = None
@@ -195,20 +201,23 @@ def monte_carlo_simulation(
                 returns_array = base_returns.values
 
                 # Random starting position
-                pos = np.random.randint(0, n_obs)
+                pos = int(rng.integers(0, n_obs)) if rng is not None else int(np.random.randint(0, n_obs))
 
                 for i in range(n_obs):
                     sim_returns[i] = returns_array[pos]
                     # Decide whether to start a new block
-                    if np.random.random() < p_new_block:
-                        pos = np.random.randint(0, n_obs)
+                    draw = rng.random() if rng is not None else np.random.random()
+                    if draw < p_new_block:
+                        pos = int(rng.integers(0, n_obs)) if rng is not None else int(np.random.randint(0, n_obs))
                     else:
                         pos = (pos + 1) % n_obs  # Continue sequentially with wrap
-
                 sim_returns = pd.Series(sim_returns, index=base_returns.index)
         else:
             # Simple i.i.d. bootstrap
-            sim_returns = base_returns.sample(n=n_obs, replace=True).values
+            if rng is not None:
+                sim_returns = base_returns.values[rng.integers(0, n_obs, size=n_obs)]
+            else:
+                sim_returns = base_returns.sample(n=n_obs, replace=True).values
             sim_returns = pd.Series(sim_returns, index=base_returns.index)
 
         # Build equity curve

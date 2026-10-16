@@ -4174,6 +4174,7 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         n_simulations=args.n_simulations,
         confidence_levels=args.confidence_levels,
         block_size=args.block_size,
+        seed=args.seed if args.seed is not None else 0,
     )
 
     sm = mc_results["summary"]
@@ -4459,11 +4460,12 @@ def run_monte_carlo(args) -> int:
     #
     # Trial count: when a parameter grid was searched, the internal
     # optimization evaluated len(opt_results) ranked configurations.
-    # The effective trial count is max(--n-trials, len(opt_results))
-    # so the deflation never understates the search, while still
-    # letting the caller report additional development trials beyond
-    # the grid. Without a grid (or an empty optimization record) the
-    # user-supplied --n-trials is the sole source.
+    # The effective trial count is the number of grid combinations
+    # actually evaluated, mirroring walk_forward_analysis /
+    # cpcv_analysis / out_of_sample_validation so Deflated Sharpe
+    # p-values stay comparable across paths. Without a grid (or an
+    # empty optimization record) the user-supplied --n-trials is the
+    # sole source.
     dsr = None
     n_trials = getattr(args, "n_trials", None)
     effective_n_trials = None
@@ -4566,6 +4568,7 @@ def run_monte_carlo(args) -> int:
         n_simulations=args.n_simulations,
         confidence_levels=args.confidence_levels,
         block_size=args.block_size,
+        seed=args.seed if args.seed is not None else 0,
     )
 
     print(f"Probability of Ruin (>50% drawdown): {mc_results['probability_of_ruin']:.2%}")
@@ -5175,6 +5178,7 @@ def main():
     common_parser.add_argument("--benchmark-expense-ratio", type=float, default=None, help="Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%). Defaults to 0 (applies to all benchmarks).")
     common_parser.add_argument("--benchmark-cost-is-periodic", action="store_true", help="If set, apply benchmark trading costs (commission+slippage) as periodic deductions each period instead of as a round-trip cost on total return (applies to all benchmarks).")
     common_parser.add_argument("--adjust-splits", action="store_true", help="Adjust prices for stock splits using the splits column if present.")
+    common_parser.add_argument("--seed", type=int, default=None, help="Seed for the Monte Carlo random number generator. A fixed default seed is used when unset, so repeated runs (and cost sweeps) are reproducible; set any value to override.")
 
     # Walk-forward analysis
     wf_parser = subparsers.add_parser("walk-forward", parents=[common_parser], help="Run walk-forward analysis")
@@ -5203,7 +5207,7 @@ def main():
     mc_parser.add_argument("--confidence-levels", type=float, nargs="+", default=[0.90, 0.95, 0.99], help="Confidence levels")
     mc_parser.add_argument("--block-size", type=lambda x: x if x == "auto" else int(x), help="Block size for block bootstrap (int or 'auto' for automatic selection)")
     mc_parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
-    mc_parser.add_argument("--n-trials", type=int, default=None, help="Number of development trials (parameter configurations) tested; when set, report the Deflated Sharpe Ratio (multiple-testing correction) for the base backtest Sharpe. When a --param-grid is searched, the effective count is max(n_trials, number of grid combinations evaluated) so the internal search is never understated")
+    mc_parser.add_argument("--n-trials", type=int, default=None, help="Number of development trials (parameter configurations) tested; when set, report the Deflated Sharpe Ratio (multiple-testing correction) for the base backtest Sharpe. When a --param-grid is searched, the effective count is the number of grid combinations actually evaluated; otherwise --n-trials is used.")
     mc_parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="Sweep over multiple market impact coefficients for capacity/impact sensitivity; overrides --impact-coefficient when given (e.g. --impact-coefficients 0 1 2 5).")
     mc_parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual borrow costs for short positions; overrides --borrow-cost when given (e.g. --borrow-costs 0 0.01 0.03).")
     mc_parser.add_argument("--funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual funding costs for leveraged positions; overrides --funding-cost when given (e.g. --funding-costs 0 0.01 0.02).")

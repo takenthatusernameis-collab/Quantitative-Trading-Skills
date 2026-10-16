@@ -3062,6 +3062,7 @@ def main() -> int:
         ("test_cli_walk_forward_multiple_benchmarks", test_cli_walk_forward_multiple_benchmarks),
         ("test_cli_optimize_multiple_benchmarks", test_cli_optimize_multiple_benchmarks),
         ("test_cli_monte_carlo_multiple_benchmarks", test_cli_monte_carlo_multiple_benchmarks),
+        ("test_cli_monte_carlo_n_trials", test_monte_carlo_n_trials_uses_evaluated_combo_count),
         ("test_cli_monte_carlo_impact_sweep", test_cli_monte_carlo_impact_sweep),
         ("test_cli_cpcv_impact_sweep", test_cli_cpcv_impact_sweep),
         ("test_cli_monte_carlo_borrow_sweep", test_cli_monte_carlo_borrow_sweep),
