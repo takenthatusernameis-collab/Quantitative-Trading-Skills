@@ -1773,11 +1773,9 @@ def out_of_sample_validation(
         data = data.sort_index()
 
     # Split data chronologically
-    print(f"DEBUG: About to split data")
     train_data, val_data, test_data = _split_train_val_test(
         data, train_frac, val_frac, test_frac
     )
-    print(f"DEBUG: Data split complete - train: {len(train_data) if train_data is not None else 'None'}, val: {len(val_data) if val_data is not None else 'None'}, test: {len(test_data) if test_data is not None else 'None'}")
 
     # Record split boundaries
     split_info = {
@@ -1803,9 +1801,7 @@ def out_of_sample_validation(
     split_info["separation_check"] = separation_check
 
     # Phase 1: VALIDATION - Run walk-forward or CPCV on training data
-    print(f"DEBUG: About to start training phase with validation_method={validation_method}")
     if validation_method == "walk_forward":
-        print(f"DEBUG: Calling walk_forward_analysis")
         validation_results = walk_forward_analysis(
             data=train_data,
             strategy_factory=strategy_factory,
@@ -1827,9 +1823,7 @@ def out_of_sample_validation(
             benchmark_slippage=benchmark_slippage,
             benchmark_expense_ratio=benchmark_expense_ratio,
         )
-        print(f"DEBUG: walk_forward_analysis completed")
     elif validation_method == "cpcv":
-        print(f"DEBUG: Calling cpcv_analysis")
         validation_results = cpcv_analysis(
             data=train_data,
             strategy_factory=strategy_factory,
@@ -1847,21 +1841,15 @@ def out_of_sample_validation(
             funding_cost=funding_cost,
             apply_deflation=apply_deflation,
         )
-        print(f"DEBUG: cpcv_analysis completed")
     else:
         raise ValueError(f"Unknown validation_method: {validation_method}. Use 'walk_forward' or 'cpcv'.")
-    print(f"DEBUG: Training phase completed")
     # Phase 2: SELECTION - Select best parameters based on criterion
-    print(f"DEBUG: About to start selection phase")
     selected_params = _select_parameters(
         validation_results=validation_results,
         validation_method=validation_method,
         criterion=selection_criterion,
     )
-    print(f"DEBUG: Selection phase completed - selected_params: {selected_params}")
-
     if selected_params is None:
-        print(f"DEBUG: No valid parameters found, returning early")
         return {
             "train_val_test_split": split_info,
             "validation_results": validation_results,
@@ -1874,7 +1862,6 @@ def out_of_sample_validation(
                 "train_val_test_split": split_info,
             },
         }
-    print(f"DEBUG: Continuing after selected_params check")
 
     # Phase 3: CONFIRMATION - Evaluate selected params on validation data
     strategy = strategy_factory(selected_params)
@@ -1961,8 +1948,6 @@ def out_of_sample_validation(
                         benchmark_cost_is_periodic=benchmark_cost_is_periodic,
                     )
                 test_performance.update(test_benchmark)
-    else:
-        print(f"DEBUG: Skipping benchmark processing - benchmark is None or test_returns empty")
     summary = {
         "train_val_test_split": split_info,
         "validation_method": validation_method,

@@ -2,51 +2,63 @@
 
 ## Repository state (as of this session)
 
-- Working tree has uncommitted changes (HANDOFF.md update + test additions + one core fix). No commits made this session.
+- Working tree has **uncommitted changes** (13 DEBUG print removals in `walk_forward.py`). No commits made this session.
 - `requirements.txt` (declares matplotlib/numpy/pandas) is already present and installed.
 
 ## Quantitative-backtesting skill status
 
 - `skills/quantitative-backtesting/` is the primary quant asset.
-- **Test suite: 262/262 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`).
-- Standalone runner `tests/test_walk_forward.py`: **69/69** passed.
-- Root end-to-end script `verify_end_to_end.py`: **passes**.
-- `examples/trading_costs_robustness_example.py` runs to completion.
+- **Test suite: 264/264 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`).
+- Root end-to-end script `verify_end_to_end.py`: **passes, exit 0, zero DEBUG output**.
 
 ## What changed this session
 
-### 1. Added test coverage for multiple benchmarks with splits in Deflated Alpha (HANDOFF next-task)
-Added two registered tests to `skills/quantitative-backtesting/tests/test_walk_forward.py`:
-- `test_benchmark_list_alpha_correction_multiple_benchmarks_with_splits` — mixed split-bearing / split-free benchmark list routes each benchmark through the correct stats path, the split-bearing benchmark is adjusted (total return > -0.2), and the aggregate `deflated_alpha` dict is well-formed with `n_benchmarks == 2`.
-- `test_benchmark_list_alpha_correction_mixed_splits_backward_compat` — per-benchmark deflated_alpha correction applies for >= 2 benchmarks; single-benchmark list must NOT get an aggregate `deflated_alpha` (backward compat).
+### Removed 13 stale DEBUG: print() statements from walk_forward.py
 
-Also re-registered the previously-orphaned `test_benchmark_list_alpha_correction_handles_splits` (it was defined after the `if __name__ == "__main__"` guard and thus never ran).
+`skills/quantitative-backtesting/scripts/walk_forward.py` contained 13 leftover `print(f"DEBUG: ...")` statements scattered through the `out_of_sample_validation` pipeline (split, training, selection, benchmark-processing phases). These polluted the CLI/stdout of every programmatic call to `out_of_sample_validation`, `walk_forward_analysis`, and `cpcv_analysis` — including the library's own end-to-end verification script. They are dead developer scaffolding, not user-facing output.
 
-### 2. Fixed a latent NaN-poisoning bug in the split-aware benchmark stats path (found by the new tests)
-`_benchmark_stats_with_splits` recomputes benchmark returns from split-adjusted prices via `close.pct_change()`, which leaves a leading NaN. That NaN propagated into the OLS alpha/beta/correlation/p-value in `_benchmark_stats`, so **every split-bearing benchmark produced NaN alpha/beta and no statistical inference at all** — a silent methodological defect.
+Removed all 13. No logic changed. Verified:
+- `python3 -c "import ast; ast.parse(...)"` syntax OK.
+- Full suite 264/264 passing (same count as before; no regressions).
+- `python3 verify_end_to_end.py` exit 0, no `DEBUG` lines in output.
 
-Fix in `skills/quantitative-backtesting/scripts/walk_forward.py` (`_benchmark_stats_with_splits`, ~line 3028): drop the leading NaN from the aligned adjusted-return series before delegating to `_benchmark_stats`, matching the non-splits path's contract.
+Diff: `skills/quantitative-backtesting/scripts/walk_forward.py | 15 deletions` (13 prints + 2 blank lines left behind).
 
 ## What the previous HANDOFF claimed (now superseded)
 
-- It claimed 259/259 pytest and 66/66 standalone. True at that time; now 261/261 and 69/69.
-- The next-task item ("Test coverage for multiple benchmarks with splits in Deflated Alpha correction") is now DONE this session.
+The prior next-task ("Verify the split-adjustment fix does not regress the single-benchmark periodic/round-trip cost paths, and add a regression test pinning the corrected alpha/beta for a split-bearing benchmark") is **already complete**. Both regression tests exist and pass:
+- `test_benchmark_stats_with_splits_produces_finite_inference` (line 2882)
+- `test_benchmark_stats_with_splits_regression_pins_corrected_values` (line 2902) — pins `alpha == 0.011441039611221912`, `beta == -0.003953175078033304`, `alpha_pvalue == 0.9813727464` to 1e-8/1e-10.
+- All 16 split/deflated_alpha/benchmark tests pass.
+
+No further work needed on that item.
 
 ## Approaches already tried and why abandoned
 
-- None abandoned. The test-first approach surfaced a real bug rather than a test-only gap; the fix is minimal and verified.
+- None abandoned. The DEBUG-print removal was a 15-line deterministic cleanup with zero behavioral risk; the prior split-fix regression tests were verified already present and passing.
 
 ## Next task (bounded, high-value)
 
-**Verify the split-adjustment fix does not regress the single-benchmark periodic/round-trip cost paths, and add a regression test pinning the corrected alpha/beta for a split-bearing benchmark.** The new `dropna()` in `_benchmark_stats_with_splits` changes the number of aligned observations (252 -> 251) for split-bearing benchmarks, which shifts `alpha`, `beta`, `correlation_with_benchmark`, `alpha_pvalue`, `r_squared`, `tracking_error`, and `information_ratio` relative to the pre-fix (NaN) output. Existing tests that assert on these fields for split-bearing benchmarks should be re-checked; add an explicit regression test asserting that a split-bearing benchmark now yields finite, non-NaN `alpha`/`beta`/`alpha_pvalue` and that the adjusted total return is consistent with the unadjusted path's *shape* (i.e. the split no longer injects a ~-50% drop).
+**Audit whether the point-in-time / survivorship-bias controls are wired into the walk-forward and CPCV pipelines by default, or only behind an opt-in flag.**
+
+Evidence gathered this session:
+- `data_loader.py:392` `validate_point_in_time()` and `data_loader.py:494` `detect_survivorship_bias()` exist and are real.
+- `run_backtest.py:169` gates PIT on `args.validate_point_in_time` (opt-in).
+- `walk_forward.py:2828-2864` `_load_and_validate_data(validate_pit=False)` runs PIT only when the flag is passed; results are recorded under `results["point_in_time_validation"]` when present.
+- `walk_forward.py:505` (in run_backtest) calls `detect_survivorship_bias(data)` unconditionally.
+
+The concern: for the primary quant research entry points (`out_of_sample_validation`, `walk_forward_analysis`, `cpcv_analysis`), look-ahead/survivorship checks are **opt-in**, so a naive default run can silently produce an in-sample-looking backtest with no bias controls engaged. This directly undermines the repository's stated objective (point-in-time correctness, survivorship/look-ahead bias controls).
 
 Relevant files:
-- `skills/quantitative-backtesting/scripts/walk_forward.py` — `_benchmark_stats_with_splits` (the fix)
-- `skills/quantitative-backtesting/tests/test_walk_forward.py` — existing splits tests (`test_benchmark_stats_with_splits_*`, `test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model`, `test_benchmark_list_alpha_correction_*`)
-- `skills/quantitative-backtesting/tests/test_performance.py` — any `_benchmark_stats` assertions
+- `skills/quantitative-backtesting/scripts/walk_forward.py` — `_load_and_validate_data` (line ~2828), `out_of_sample_validation`, `walk_forward_analysis`, `cpcv_analysis` signatures
+- `skills/quantitative-backtesting/scripts/run_backtest.py` — CLI arg parsing for `--validate-point-in-time`
+- `skills/quantitative-backtesting/scripts/data_loader.py` — `validate_point_in_time`, `detect_survivorship_bias`
+- `skills/quantitative-backtesting/tests/test_data_loader.py` — existing PIT/survivorship tests
 
 Constraints:
-- Do not change core logic beyond the already-applied `dropna()` unless a test demonstrates a defect.
+- Do not change core logic unless a test or evidence demonstrates a defect.
+- If the opt-in behavior is intentional, document it explicitly in SKILL.md/references and add a test that asserts the default run emits a warning (or records the control as skipped) rather than silently proceeding.
+- If it is unintentional, make the smallest change (e.g. default `validate_pit=True` or an explicit `bias_controls_engaged` field in the summary) and re-run the full suite.
 - Verify all tests still pass after any change.
 - Do not commit unless explicitly asked.
 
