@@ -214,3 +214,17 @@ In addition to transaction costs, the benchmark (buy-and-hold) can be modeled wi
 The expense ratio is deducted each period from the benchmark's return, reducing the net benchmark return.
 
 Configuration is done via the `--benchmark-expense-ratio` flag (as decimal, e.g., 0.005 for 0.5%).
+
+## Benchmark Split Adjustment
+
+Split adjustment for benchmark returns is **orthogonal to transaction cost
+models**. When benchmark data contains a `splits` column, split adjustment is
+applied to the benchmark series in all benchmark-comparison paths
+(single-benchmark, summary aggregation, and multiple-benchmark alpha
+correction), regardless of whether `benchmark_cost_is_periodic` is `True` or
+`False`.
+
+The `benchmark_cost_is_periodic` flag only controls the timing of benchmark
+transaction costs (once per round-trip vs. charged each period). It does not
+gate split adjustment, which is applied when corporate actions are present to
+avoid injecting artificial price drops into benchmark returns.

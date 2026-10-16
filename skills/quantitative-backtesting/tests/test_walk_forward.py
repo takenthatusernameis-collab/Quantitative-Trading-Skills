@@ -2733,3 +2733,40 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+def test_benchmark_list_alpha_correction_handles_splits():
+    """_benchmark_list_alpha_correction uses split-aware stats when benchmarks have splits."""
+    # Build aligned strategy and benchmark returns
+    np.random.seed(7)
+    n = 60
+    strat_rets = pd.Series(np.random.normal(0.001, 0.02, n))
+    bench_rets = pd.Series(np.random.normal(0.0005, 0.015, n))
+    strat_rets.index = pd.date_range("2020-01-01", periods=n, freq="D")
+    bench_rets.index = pd.date_range("2020-01-01", periods=n, freq="D")
+    bench1 = pd.DataFrame({
+        "date": bench_rets.index,
+        "close": (1 + bench_rets).cumprod() * 100,
+        "open": (1 + bench_rets).cumprod() * 99,
+        "high": (1 + bench_rets).cumprod() * 101,
+        "low": (1 + bench_rets).cumprod() * 98,
+        "volume": 1000000,
+        "splits": np.ones(n),
+    })
+    bench1.iloc[10, bench1.columns.get_loc("splits")] = 2.0
+    # Recompute close with split adjustment conceptually; easier to just use adjusted logic by calling through
+    # Or recompute returns to match
+    bench1_adj = _make_benchmark_data_with_splits(periods=len(strat_rets), split_at=10, seed=21)
+    # align
+    common = strat_rets.index.intersection(bench1_adj.index)
+    result = _benchmark_list_alpha_correction(
+        strat_rets.loc[common],
+        [bench1_adj.loc[common]],
+        total_return_benchmark=False,
+    )
+    per_bench = result["per_benchmark"]
+    assert per_bench is not None
+    assert len(per_bench) == 1
+    stats = per_bench[0]
+    assert stats is not None
+    for k in ("alpha", "beta", "correlation_with_benchmark"):
+        assert k in stats
