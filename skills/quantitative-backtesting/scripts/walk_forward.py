@@ -429,7 +429,7 @@ def walk_forward_analysis(
                     initial_capital=initial_capital,
                 )
 
-                if len(train_returns) > 1 and train_returns.std() > 0:
+                if len(train_returns) > 1 and not _is_constant_returns(train_returns):
                     ann_factor = _annualization_factor(train_returns.index)
                     excess = train_returns - 0.02 / ann_factor
                     sharpe = excess.mean() / excess.std() * np.sqrt(ann_factor)
@@ -700,7 +700,7 @@ def parameter_optimization(
             if len(returns) > 1:
                 ann_factor = _annualization_factor(returns.index)
                 excess = returns - 0.02 / ann_factor
-                sharpe = excess.mean() / excess.std() * np.sqrt(ann_factor) if returns.std() > 0 else 0
+                sharpe = excess.mean() / excess.std() * np.sqrt(ann_factor) if not _is_constant_returns(returns) else 0
                 total_return = (1 + returns).prod() - 1
 
                 result = {
@@ -807,7 +807,7 @@ def overfitting_check(
         diagnostics["param_stability"] = param_stability
 
     # OOS performance
-    if len(oos_returns) > 0 and oos_returns.std() > 0:
+    if len(oos_returns) > 0 and not _is_constant_returns(oos_returns):
         ann_factor = _annualization_factor(oos_returns.index)
         excess = oos_returns - 0.02 / ann_factor
         diagnostics["oos_sharpe"] = float(excess.mean() / excess.std() * np.sqrt(ann_factor))
@@ -849,6 +849,26 @@ def signals_active(signals: pd.Series) -> bool:
     """
     # NaN != 0 evaluates to True in pandas, so we must explicitly exclude NaN
     return bool((signals.notna() & (signals != 0)).any())
+
+
+def _is_constant_returns(returns: pd.Series) -> bool:
+    """Return True when every observation in `returns` is identical.
+
+    A constant (zero-variance) return series carries no statistical
+    information about skill: the Sharpe is undefined and the DSR is
+    defined conservatively as 0 (see ``deflated_sharpe_ratio``).
+
+    Detection is exact (``nunique() == 1``), not a tolerance test on
+    ``std()``. ``pd.Series.std()`` on a constant series is not exactly
+    zero — it is a float-noise residue (~1e-19) — so comparing
+    ``returns.std() > 0`` would wrongly treat a constant series as
+    non-degenerate and route it through the finite-z branch, emitting
+    a non-degenerate DSR (a finite z_score, DSR != 0) for data the
+    contract classifies as degenerate. Exact equality also keeps a
+    genuine near-constant-but-noisy series (real std ~1e-3) on the
+    non-degenerate path, where it belongs.
+    """
+    return bool(returns.nunique(dropna=False) == 1)
 
 
 def deflated_sharpe_ratio(
@@ -945,10 +965,14 @@ def deflated_sharpe_ratio(
     denom = np.sqrt(variance_term)
 
     vol = float(returns.std())
-    if vol > 0:
+    if _is_constant_returns(returns):
+        # Degenerate (constant) returns carry no information about skill
+        z = -np.inf
+    elif vol > 0:
         z = (sr - sr_star) * np.sqrt(t_obs - 1) / denom
     else:
-        # Degenerate (constant) returns carry no information about skill
+        # Zero observations after dropna (impossible here: the guard
+        # above requires len >= 2) — fall back to the degenerate branch.
         z = -np.inf
 
     dsr = 0.5 * (1.0 + math.erf(z / np.sqrt(2.0)))
@@ -1049,10 +1073,14 @@ def deflated_alpha_ratio(
     # annualization factor, so DAR is invariant to the sampling frequency when
     # calendar time is held fixed.
     strat_vol_ann = float(returns.std() * np.sqrt(ann_factor))
-    if strat_vol_ann > 0:
+    if _is_constant_returns(returns):
+        # Degenerate (constant) returns carry no information about skill.
+        sr = 0.0
+    elif strat_vol_ann > 0:
         sr = float(alpha) / strat_vol_ann
     else:
-        # Degenerate (constant) returns carry no information about skill.
+        # Zero observations after dropna (impossible here: the guard
+        # above requires len >= 2) — fall back to the degenerate branch.
         sr = 0.0
 
     ln_benchmarks = np.log(max(int(n_benchmarks), 1))
@@ -1086,10 +1114,14 @@ def deflated_alpha_ratio(
         variance_term = np.finfo(float).tiny
     denom = np.sqrt(variance_term)
 
-    if strat_vol_ann > 0:
+    if _is_constant_returns(returns):
+        # Degenerate (constant) returns carry no information about skill
+        z = -np.inf
+    elif strat_vol_ann > 0:
         z = (sr - sr_star) * np.sqrt(t_obs - 1) / denom
     else:
-        # Degenerate (constant) returns carry no information about skill
+        # Zero observations after dropna (impossible here: the guard
+        # above requires len >= 2) — fall back to the degenerate branch.
         z = -np.inf
 
     dar = 0.5 * (1.0 + math.erf(z / np.sqrt(2.0)))
@@ -1267,7 +1299,7 @@ def _calculate_walk_forward_summary(
     if len(oos_returns) > 1:
         ann_factor = _annualization_factor(oos_returns.index)
         excess = oos_returns - 0.02 / ann_factor
-        if oos_returns.std() > 0:
+        if not _is_constant_returns(oos_returns):
             summary["oos_sharpe"] = float(excess.mean() / oos_returns.std() * np.sqrt(ann_factor))
             summary["oos_volatility"] = float(oos_returns.std() * np.sqrt(ann_factor))
         else:
@@ -1514,7 +1546,7 @@ def cpcv_analysis(
                     initial_capital=initial_capital,
                 )
 
-                if len(train_returns) > 1 and train_returns.std() > 0:
+                if len(train_returns) > 1 and not _is_constant_returns(train_returns):
                     ann_factor = _annualization_factor(train_returns.index)
                     excess = train_returns - 0.02 / ann_factor
                     sharpe = excess.mean() / excess.std() * np.sqrt(ann_factor)
@@ -1706,7 +1738,7 @@ def _calculate_cpcv_summary(
     if len(oos_returns) > 1:
         ann_factor = _annualization_factor(oos_returns.index)
         excess = oos_returns - 0.02 / ann_factor
-        if oos_returns.std() > 0:
+        if not _is_constant_returns(oos_returns):
             summary["oos_sharpe"] = float(excess.mean() / oos_returns.std() * np.sqrt(ann_factor))
             summary["oos_volatility"] = float(oos_returns.std() * np.sqrt(ann_factor))
         else:
@@ -1960,7 +1992,7 @@ def out_of_sample_validation(
 
     ann_factor = _annualization_factor(val_returns.index)
     excess = val_returns - 0.02 / ann_factor
-    val_sharpe = float(excess.mean() / excess.std() * np.sqrt(ann_factor)) if len(val_returns) > 1 and val_returns.std() > 0 else 0.0
+    val_sharpe = float(excess.mean() / excess.std() * np.sqrt(ann_factor)) if len(val_returns) > 1 and not _is_constant_returns(val_returns) else 0.0
     val_total_return = float((1 + val_returns).prod() - 1) if len(val_returns) > 0 else 0.0
 
     validation_performance = {
@@ -1982,7 +2014,7 @@ def out_of_sample_validation(
     ann_factor_test = _annualization_factor(test_returns.index)
     excess_test = test_returns - 0.02 / ann_factor_test
 
-    test_sharpe = float(excess_test.mean() / excess_test.std() * np.sqrt(ann_factor_test)) if len(test_returns) > 1 and test_returns.std() > 0 else 0.0
+    test_sharpe = float(excess_test.mean() / excess_test.std() * np.sqrt(ann_factor_test)) if len(test_returns) > 1 and not _is_constant_returns(test_returns) else 0.0
     test_total_return = float((1 + test_returns).prod() - 1) if len(test_returns) > 0 else 0.0
 
     test_performance = {

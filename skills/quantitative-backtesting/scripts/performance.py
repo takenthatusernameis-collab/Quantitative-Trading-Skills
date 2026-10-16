@@ -35,6 +35,23 @@ def _annualization_factor(index: pd.Index, target_years: float = 1.0) -> float:
         return 252
 
 
+def _is_constant_returns(returns: pd.Series) -> bool:
+    """Return True when every observation in `returns` is identical.
+
+    A constant (zero-variance) return series carries no statistical
+    information about skill: the Sharpe is undefined and is defined
+    conservatively as 0. Detection is exact (``nunique() == 1``), not a
+    tolerance test on ``std()``: ``pd.Series.std()`` on a constant series
+    is a float-noise residue (~1e-19) rather than exactly zero, so
+    ``returns.std() > 0`` would wrongly route a constant series through
+    the finite branch and emit a spurious Sharpe (e.g. -111) that the
+    Deflated Sharpe Ratio then deflates. Exact equality also keeps a
+    genuine near-constant-but-noisy series (real std ~1e-3) on the
+    non-degenerate path, where it belongs.
+    """
+    return bool(returns.nunique(dropna=False) == 1)
+
+
 def _betacf(a: float, b: float, x: float) -> float:
     """Continued-fraction expansion for the incomplete beta function (Lentz)."""
     maxit = 300
@@ -274,7 +291,17 @@ def calculate_metrics(
     # --- Risk-Adjusted Returns ---
     excess_returns = returns - risk_free_rate / ann_factor
     std_excess = excess_returns.std()
-    if std_excess > 0:
+    if _is_constant_returns(returns):
+        # A constant return series has zero variance; the Sharpe is
+        # undefined and is defined as 0 (conservative: no evidence of
+        # skill). Exact detection (nunique==1) is required: pandas
+        # reports a float-noise std (~1e-19) for a constant series, so
+        # `std_excess > 0` would wrongly route it through the finite
+        # branch and emit a spurious Sharpe (e.g. -111) that the
+        # Deflated Sharpe Ratio then deflates.
+        metrics["sharpe_ratio"] = 0.0
+        metrics["sortino_ratio"] = 0.0
+    elif std_excess > 0:
         metrics["sharpe_ratio"] = float(excess_returns.mean() / std_excess * np.sqrt(ann_factor))
         # Sortino: downside deviation
         downside_returns = excess_returns[excess_returns < 0]
