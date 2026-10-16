@@ -2113,14 +2113,29 @@ def out_of_sample_validation(
                             summary[key] = primary_bench[key]
 
     # Add Deflated Sharpe Ratio on test returns if requested
-    # n_trials = total configurations evaluated in validation phase
+    # n_trials = total configurations evaluated in validation phase.
+    #
+    # The trial Sharpes from the validation-phase grid searches are pooled
+    # across periods/folds and forwarded to `deflated_sharpe_ratio` so the
+    # cross-sectional dispersion of the actually-evaluated Sharpes estimates
+    # the expected max Sharpe under the null (SR*). This makes the OOS
+    # aggregate correction use the same SR* estimator as
+    # `walk_forward_analysis` / `cpcv_analysis` (which pool their own
+    # period/fold trial Sharpes), so the reported DSR / p-value is
+    # comparable across all four analysis paths on the same grid and data.
+    # When a period/fold has no recorded trial Sharpes (e.g. `apply_deflation`
+    # was off in the validation phase, or every combo was skipped), fall back
+    # to the full grid size for that period/fold and use the i.i.d.-normal
+    # null approximation (trial_sharpes=None).
     total_trials = 0
+    pooled_trial_sharpes: List[float] = []
     if validation_method == "walk_forward":
         for period in validation_results.get("periods", []):
             if period.get("best_params") is not None:
                 sharps = period.get("trial_sharpes")
                 if sharps:
                     total_trials += len(sharps)
+                    pooled_trial_sharpes.extend(float(s) for s in sharps)
                 else:
                     total_trials += len(list(product(*param_grid.values())))
     elif validation_method == "cpcv":
@@ -2129,6 +2144,7 @@ def out_of_sample_validation(
                 sharps = fold.get("trial_sharpes")
                 if sharps:
                     total_trials += len(sharps)
+                    pooled_trial_sharpes.extend(float(s) for s in sharps)
                 else:
                     total_trials += len(list(product(*param_grid.values())))
 
@@ -2137,7 +2153,7 @@ def out_of_sample_validation(
             sharpe_ratio=test_sharpe,
             returns=test_returns,
             n_trials=total_trials,
-            trial_sharpes=None,  # We don't have the trial sharpes from validation here
+            trial_sharpes=pooled_trial_sharpes if pooled_trial_sharpes else None,
         )
 
     # Add benchmark information to summary (only for single benchmark for backward compatibility)

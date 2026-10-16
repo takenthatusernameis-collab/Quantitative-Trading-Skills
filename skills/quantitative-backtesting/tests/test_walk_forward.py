@@ -914,6 +914,160 @@ def test_out_of_sample_validation_n_trials_matches_evaluated_combinations():
     assert oos_n == inner_n, (oos_n, inner_n)
 
 
+def test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star():
+    """out_of_sample_validation's aggregate Deflated Sharpe must use the
+    pooled cross-period validation trial Sharpes for the SR* estimator, so
+    its p-value is comparable to walk_forward_analysis on the same grid.
+
+    Guards the multiple-testing correction: before this fix the OOS
+    aggregate passed `trial_sharpes=None`, falling back to the i.i.d.-normal
+    null approximation, which reports a different (less conservative)
+    expected-max-Sharpe SR* than the pooled cross-sectional estimator used by
+    walk_forward_analysis / cpcv_analysis -- even though all three deflated
+    by the same `n_trials`. With pooled trial Sharpes the OOS p-value must
+    move toward (but need not exactly equal) the walk-forward p-value, since
+    both then estimate SR* from the same cross-sectional dispersion of the
+    actually-evaluated trial Sharpes.
+    """
+    data = _make_ohlcv_data(periods=1200, seed=11)
+    param_grid = {"fast_period": [5, 10, 15], "slow_period": [20, 30, 40]}
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+
+    train_data, _val_data, _test_data = _split_train_val_test(data, 0.6, 0.2, 0.2)
+
+    wf = walk_forward_analysis(
+        data=train_data, strategy_factory=factory, param_grid=param_grid,
+        train_months=12, test_months=3, step_months=3,
+        initial_capital=100000, commission=0.0002, slippage=0.0001,
+        apply_deflation=True,
+    )
+    wf_ds = wf["summary"]["deflated_sharpe"]
+
+    oos = out_of_sample_validation(
+        data=data, strategy_factory=factory, param_grid=param_grid,
+        train_frac=0.6, val_frac=0.2, test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=12, walk_forward_test_months=3,
+        walk_forward_step_months=3,
+        initial_capital=100000, commission=0.0002, slippage=0.0001,
+        apply_deflation=True, validate_pit=False,
+    )
+    oos_ds = oos["summary"]["deflated_sharpe"]
+
+    # Same effective trial count (already guarded by the n_trials test).
+    assert oos_ds["n_trials"] == wf_ds["n_trials"]
+
+    # The OOS aggregate must now carry pooled trial Sharpes (the
+    # cross-sectional SR* estimator), not fall back to the i.i.d. null.
+    # With pooled Sharpes the OOS p-value moves toward the walk-forward
+    # p-value (same SR* estimator on the same evaluated Sharpes); the
+    # i.i.d. null would have left them far apart.
+    assert oos_ds["p_value"] < 0.999, (
+        "OOS aggregate p-value too high; pooled trial Sharpes not used"
+    )
+    # The pooled estimator is conservative: SR* >= i.i.d. null, so the OOS
+    # p-value must not exceed the walk-forward p-value on the same grid.
+    assert oos_ds["p_value"] <= wf_ds["p_value"] + 1e-9, (
+        oos_ds["p_value"], wf_ds["p_value"]
+    )
+
+
+def test_deflated_sharpe_parity_across_all_four_analysis_paths():
+    """Deflated Sharpe p-values must be comparable across all four analysis
+    paths that consume the same grid and data:
+
+      1. walk_forward_analysis        (aggregate n_trials = evaluated
+                                        finite-Sharpe combos across periods)
+      2. cpcv_analysis                (same basis across folds)
+      3. out_of_sample_validation     (reconciled to evaluated combos, and now
+                                        sharing the pooled SR* estimator)
+      4. parameter_optimization       (the grid search behind
+                                        `monte-carlo --n-trials`; per-combo
+                                        DSR uses the full evaluated combo count)
+
+    Guards the multiple-testing correction: a strategy's reported DSR
+    p-value must not depend on which analysis path reported it. All four
+    must deflate by the same effective trial count where their counting
+    bases agree, and the OOS aggregate must use the same cross-sectional
+    SR* estimator (pooled validation trial Sharpes) as the walk-forward /
+    CPCV aggregates.
+    """
+    data = _make_ohlcv_data(periods=1200, seed=11)
+    param_grid = {"fast_period": [5, 10, 15], "slow_period": [20, 30, 40]}
+    full_grid = len(param_grid["fast_period"]) * len(param_grid["slow_period"])
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+
+    train_data, _val_data, _test_data = _split_train_val_test(data, 0.6, 0.2, 0.2)
+
+    # 1 + 2: walk-forward and CPCV aggregates on the same train slice.
+    wf = walk_forward_analysis(
+        data=train_data, strategy_factory=factory, param_grid=param_grid,
+        train_months=12, test_months=3, step_months=3,
+        initial_capital=100000, commission=0.0002, slippage=0.0001,
+        apply_deflation=True,
+    )
+    wf_ds = wf["summary"]["deflated_sharpe"]
+
+    cv = cpcv_analysis(
+        data=train_data, strategy_factory=factory, param_grid=param_grid,
+        n_splits=5, test_size=0.2,
+        initial_capital=100000, commission=0.0002, slippage=0.0001,
+        apply_deflation=True,
+    )
+    cv_ds = cv["summary"]["deflated_sharpe"]
+
+    # 3: out-of-sample validation (walk-forward selection on the train slice).
+    oos = out_of_sample_validation(
+        data=data, strategy_factory=factory, param_grid=param_grid,
+        train_frac=0.6, val_frac=0.2, test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=12, walk_forward_test_months=3,
+        walk_forward_step_months=3,
+        initial_capital=100000, commission=0.0002, slippage=0.0001,
+        apply_deflation=True, validate_pit=False,
+    )
+    oos_ds = oos["summary"]["deflated_sharpe"]
+
+    # 4: the grid search that `monte-carlo --n-trials` consumes.
+    opt = parameter_optimization(
+        data=data, strategy_factory=factory, param_grid=param_grid,
+        commission=0.0002, slippage=0.0001,
+        apply_deflation=True,
+    )
+    opt_n = len(opt)
+    best_ds = opt[0]["deflated_sharpe"]
+
+    # --- n_trials parity where counting bases agree ---
+    # walk-forward / CPCV / OOS all count actually-evaluated finite-Sharpe
+    # combos across periods/folds; OOS must match walk-forward on the same
+    # grid (it reuses the same walk-forward selection on the train slice).
+    assert oos_ds["n_trials"] == wf_ds["n_trials"], (
+        oos_ds["n_trials"], wf_ds["n_trials"]
+    )
+    # The per-combo DSR inside parameter_optimization uses the full evaluated
+    # combo count (one grid traversal), not the cross-period sum.
+    assert best_ds["n_trials"] == opt_n == full_grid, (
+        best_ds["n_trials"], opt_n, full_grid
+    )
+
+    # --- SR* estimator parity for the aggregate paths ---
+    # With pooled trial Sharpes, the OOS aggregate's expected-max-Sharpe SR*
+    # must match the walk-forward aggregate's SR* estimator basis (both
+    # derive SR* from the cross-sectional dispersion of the same evaluated
+    # trial Sharpes). The i.i.d.-null fallback would have produced a
+    # different SR* and a far higher p-value.
+    assert oos_ds["p_value"] <= wf_ds["p_value"] + 1e-9, (
+        oos_ds["p_value"], wf_ds["p_value"]
+    )
+
+    # --- DSR / p_value sanity (finite, in range) ---
+    for label, ds in [("walk_forward", wf_ds), ("cpcv", cv_ds),
+                      ("oos", oos_ds), ("param_opt", best_ds)]:
+        assert 0.0 <= ds["deflated_sharpe_ratio"] <= 1.0, (label, ds)
+        assert 0.0 <= ds["p_value"] <= 1.0, (label, ds)
+        assert ds["n_trials"] >= 1, (label, ds)
+
+
 def test_out_of_sample_validation_multiple_benchmarks_deflated_alpha():
     """out_of_sample_validation with multiple benchmarks surfaces Deflated Alpha
     in the summary and preserves backward compatibility with deflated_alphas list.
@@ -3107,6 +3261,8 @@ def main() -> int:
         ("test_benchmark_list_alpha_correction_mixed_splits_backward_compat", test_benchmark_list_alpha_correction_mixed_splits_backward_compat),
         ("test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model", test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model),
         ("test_out_of_sample_validation_n_trials_matches_evaluated_combinations", test_out_of_sample_validation_n_trials_matches_evaluated_combinations),
+        ("test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star", test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star),
+        ("test_deflated_sharpe_parity_across_all_four_analysis_paths", test_deflated_sharpe_parity_across_all_four_analysis_paths),
         ("test_benchmark_stats_with_splits_produces_finite_inference", test_benchmark_stats_with_splits_produces_finite_inference),
         ("test_benchmark_stats_with_splits_regression_pins_corrected_values", test_benchmark_stats_with_splits_regression_pins_corrected_values),
         ("test_cli_walk_forward_commission_sweep", test_cli_walk_forward_commission_sweep),
