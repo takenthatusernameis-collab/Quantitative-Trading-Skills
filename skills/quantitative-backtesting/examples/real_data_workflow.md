@@ -66,8 +66,13 @@ panel = load_multi_symbol("universe.csv")  # CSV with symbol column
 
 # Detect survivorship bias
 bias_report = detect_survivorship_bias(panel)
-print(f"Survivorship score: {bias_report['survivorship_score']}")
-# High scores indicate potential survivorship bias
+print(f"Bias score: {bias_report['bias_score']:.3f}")
+print(f"  surviving symbols: {len(bias_report['surviving_symbols'])}")
+print(f"  entered symbols:   {bias_report['entered_symbols']}")
+print(f"  exited symbols:    {bias_report['exited_symbols']}")
+print(f"  insufficient data: {bias_report['insufficient_data']}")
+print(f"  large data gaps:   {bias_report['large_gaps']}")
+# Higher bias_score (0-1) indicates more potential survivorship bias
 ```
 
 ### 5. Split Adjustment
@@ -86,19 +91,19 @@ df = load_data("SPY.csv", adjust_splits=True)
 Model transaction costs, market impact, borrow/funding costs for realism.
 
 ```python
+import json
 from strategy_builder import build_strategy
 
-strategy = build_strategy("sma_crossover", params={"short_window": 20, "long_window": 50})
+strategy = build_strategy("sma_crossover", json.dumps({"fast_period": 20, "slow_period": 50}))
 signals = strategy.generate_signals(df)
-returns = strategy.backtest(
-    df,
-    signals,
-    initial_capital=100000,
-    commission=0.0002,      # 2 bps per trade
-    slippage=0.0001,        # 1 bp slippage
-    impact_coefficient=0.1, # Market impact
-    borrow_cost=0.03,       # 3% annual borrow (for shorts)
-)
+# Enter at next period's open (no look-ahead bias)
+positions = signals.shift(1).fillna(0)
+price_returns = df["close"].pct_change().fillna(0)
+strategy_returns = positions * price_returns
+# Apply costs: 2 bps commission + 1 bps slippage per unit of position change
+position_changes = positions.diff().abs().fillna(0)
+costs = position_changes * (0.0002 + 0.0001)  # 3 bps
+returns = strategy_returns - costs
 ```
 
 ### 7. Benchmark Comparison with Statistical Significance
@@ -149,7 +154,7 @@ Avoid overfitting with proper time-series cross-validation.
 # CLI usage
 python3 scripts/walk_forward.py walk-forward \
   --data data.csv \
-  --param-grid '{"short_window":[10,20,30], "long_window":[40,50,60]}' \
+  --param-grid '{"fast_period":[10,20,30], "slow_period":[40,50,60]}' \
   --train-months 12 --test-months 3 --step-months 3 \
   --benchmark bench.csv --total-return-benchmark \
   --output wf_results
@@ -157,12 +162,15 @@ python3 scripts/walk_forward.py walk-forward \
 
 ### 10. Statistical Robustness (Monte Carlo)
 
-Test robustness to sampling variation.
+Test robustness to sampling variation with block-bootstrap resampling of the strategy's returns.
 
 ```bash
-python3 scripts/run_backtest.py --data data.csv --strategy sma_crossover \
-  --params '{"short_window":20,"long_window":50}' \
-  --monte-carlo --n-simulations 2000
+python3 scripts/walk_forward.py monte-carlo \
+  --data data.csv \
+  --strategy sma_crossover \
+  --params '{"fast_period":20,"slow_period":50}' \
+  --n-simulations 2000 \
+  --output mc_results
 ```
 
 ## Best Practices

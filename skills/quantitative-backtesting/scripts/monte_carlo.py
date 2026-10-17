@@ -227,7 +227,14 @@ def monte_carlo_simulation(
         total_ret = equity.iloc[-1] - 1
         growth = 1 + total_ret
         if growth <= 0 or not np.isfinite(growth):
-            ann_ret = float("nan")
+            # The simulated equity has been wiped out (growth <= 0): the
+            # geometric annualization `growth ** (ann_factor / n_obs)` is not
+            # a real number. Represent the bust as a total loss (-100%
+            # annualized) rather than NaN, so the metric distribution,
+            # summary statistics, and confidence intervals stay finite and
+            # interpretable. The actual cumulative loss is preserved in
+            # `total_return` (which may be below -1 for negative equity).
+            ann_ret = -1.0
         else:
             ann_ret = growth ** (ann_factor / n_obs) - 1
         ann_vol = sim_returns.std() * np.sqrt(ann_factor)

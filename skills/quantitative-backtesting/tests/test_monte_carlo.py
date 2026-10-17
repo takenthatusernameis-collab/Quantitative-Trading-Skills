@@ -209,6 +209,73 @@ def test_monte_carlo_block_size_none_vs_auto_different():
     assert not np.allclose(sharpe_iid, sharpe_auto)
 
 
+def test_standalone_no_nan_on_bust_paths():
+    """Monte Carlo must not emit NaN on paths that bust (growth <= 0).
+
+    A simulated equity curve whose cumulative product drops to zero or
+    below has a non-positive growth factor; ``growth ** (ann_factor / n_obs)``
+    is NaN (or complex) in that case. The simulation must still emit a finite
+    annualized return (NaN) rather than polluting the whole distribution, and
+    the summary mean must equal the plain numpy mean of the distribution
+    (no silent NaN-skipping that would hide the count of bust paths).
+    """
+    rng = np.random.default_rng(11)
+    dates = pd.date_range("2020-01-01", periods=252, freq="B")
+    # Strong negative drift: most simulated paths bust (cumulative equity
+    # drops below zero), which is exactly the regime the NaN guard targets.
+    returns = pd.Series(rng.normal(-0.015, 0.015, 252), index=dates)
+
+    # Pass an explicit seed: monte_carlo_simulation falls back to the global
+    # numpy RNG when seed is None, so without a seed the draws depend on
+    # whatever earlier tests in the suite left in the global RNG state and
+    # the bust-path count is not reproducible across runs.
+    mc = monte_carlo_simulation(base_returns=returns, n_simulations=500, seed=11)
+    arr = mc["metric_distributions"]["annualized_return"]
+    total = mc["metric_distributions"]["total_return"]
+
+    assert not np.any(np.isnan(arr)), (
+        f"annualized_return contained NaN on bust paths: "
+        f"{int(np.isnan(arr).sum())}/{len(arr)}"
+    )
+    assert not np.any(np.isinf(arr)), (
+        f"annualized_return contained inf on bust paths: "
+        f"{int(np.isinf(arr).sum())}/{len(arr)}"
+    )
+    # Bust paths are real: at least some simulated total returns must be
+    # strongly negative (the regime the guard exists for).
+    assert (total < -0.5).any(), (
+        "expected at least one simulated path to bust (total_return < -0.5) "
+        "with this drift; the test does not exercise the guard otherwise"
+    )
+    # Summary mean must reconcile with the distribution (no NaN-skipping).
+    assert mc["summary"]["annualized_return"]["mean"] == float(np.mean(arr)), (
+        "summary annualized_return mean must equal np.mean of the distribution"
+    )
+    assert mc["summary"]["annualized_return"]["std"] == float(np.std(arr)), (
+        "summary annualized_return std must equal np.std of the distribution"
+    )
+
+
+def test_standalone_no_nan_on_extreme_single_move():
+    """A single return below -1 must not produce NaN annualized returns.
+
+    Resampling can place an extreme negative move (e.g. -1.5) into a path,
+    making the cumulative equity negative. The annualized return must stay
+    finite across all simulations.
+    """
+    rng = np.random.default_rng(21)
+    dates = pd.date_range("2020-01-01", periods=252, freq="B")
+    base = pd.Series(rng.normal(0.001, 0.02, 252), index=dates)
+    base.iloc[50] = -1.5  # extreme single-period move
+
+    mc = monte_carlo_simulation(base_returns=base, n_simulations=500)
+    arr = mc["metric_distributions"]["annualized_return"]
+    assert not np.any(np.isnan(arr)), (
+        f"annualized_return contained NaN with a sub -1 base return: "
+        f"{int(np.isnan(arr).sum())}/{len(arr)}"
+    )
+
+
 def main() -> int:
     tests = [
         ("standalone_module_structure", test_standalone_module_structure),

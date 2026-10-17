@@ -131,13 +131,13 @@ Risk Metrics:
   and a text `report.txt` that mirrors the tear sheet, including the aggregate
   and per-benchmark Deflated Alpha sections.
 - `walk_forward.py` - Walk-forward analysis, parameter optimization, CPCV, Monte Carlo simulation CLI, and Deflated Sharpe Ratio multiple-testing correction
-- `monte_carlo.py` - Standalone Monte Carlo simulation (block bootstrap resampling, metric distributions, confidence intervals, probability of ruin). Re-exported from `walk_forward` for backward compatibility.
+- `monte_carlo.py` - Standalone Monte Carlo simulation (block bootstrap resampling, metric distributions, confidence intervals, probability of ruin). Re-exported from `walk_forward` for backward compatibility. On simulated paths where equity is wiped out (growth <= 0), the annualized return is recorded as -100% (a total loss) rather than NaN, so the metric distribution, summary statistics, and confidence intervals stay finite and interpretable; the true cumulative loss is preserved in `total_return`.
 - `reporting.py` - Automated tear sheet and report generation
 - `generate_sample_data.py` - Generates a sample OHLCV dataset for testing
 
 ### tests/
 - `test_walk_forward.py` - Unit tests for walk-forward and parameter optimization
-- `test_monte_carlo.py` - Unit tests for the standalone `monte_carlo.py` module (structure, block bootstrap, probability of ruin, short-series guard, and the `walk_forward` re-export identity)
+- `test_monte_carlo.py` - Unit tests for the standalone `monte_carlo.py` module (structure, block bootstrap, probability of ruin, short-series guard, and the `walk_forward` re-export identity). Also guards the bust-path invariant: simulated paths where equity is wiped out (growth <= 0) must not emit NaN in `annualized_return`, or the whole distribution, summary mean/std, and confidence intervals collapse to NaN. Use an explicit `seed` when reproducing bust-path counts — without one the simulation falls back to the global numpy RNG.
 - `test_run_backtest.py` - Unit tests for the run_backtest CLI entry point and argument parsing
 - `test_strategy_builder.py` - Unit tests for the strategy factory and registry
 - `test_data_loader.py` - Unit tests for data loading and validation
