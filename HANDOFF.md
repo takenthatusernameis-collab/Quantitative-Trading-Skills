@@ -7,30 +7,30 @@
 - Status: Session completed successfully; all tests passing
 
 ## What Changed
-- **Fixed a real crash in `run_walk_forward`** (`skills/quantitative-backtesting/scripts/walk_forward.py:3742`): `benchmark_returns_list` was only assigned inside the `if benchmark is not None` branch but referenced later in the `elif benchmark_returns_list` report block, so **any benchmark-less walk-forward run crashed with `UnboundLocalError` after writing the summary**. Initialized it to `None` alongside `benchmark_returns`. This was masked by the existing test suite because every walk-forward CLI test passed a `--benchmark`.
-- **Completed the `--multi-symbol` walk-forward analog** deferred in prior handoffs. The flag was already accepted by `walk-forward`, `optimize`, `cpcv`, `monte-carlo`, and `out-of-sample`, and survivorship was already threaded into summaries. The remaining gaps were:
-  - `walk-forward` and `cpcv` did not persist `survivorship_bias.json` (only `out-of-sample` and `run_backtest` did). Added the artifact write to all three, plus `multi_symbol` to the walk-forward and cpcv summary `config` for parity with `out-of-sample`/`monte-carlo`.
-  - `optimize` did not persist the artifact at all. Added it.
-- Added 5 regression tests in `skills/quantitative-backtesting/tests/test_walk_forward.py`:
-  - `test_cli_multi_symbol_walk_forward_writes_survivorship_artifact`
-  - `test_cli_multi_symbol_cpcv_writes_survivorship_artifact`
-  - `test_cli_multi_symbol_optimize_writes_survivorship_artifact`
-  - `test_cli_walk_forward_no_benchmark_does_not_crash` (the `UnboundLocalError` regression)
+- **Fixed a real survivorship-bias reporting bug in `run_out_of_sample_validation`** (`skills/quantitative-backtesting/scripts/walk_forward.py:5065`): the out-of-sample `--commissions` sweep dispatch called `_oos_sweep_coefficient` without `survivorship=survivorship`, so any `--multi-symbol` OOS commission sweep recorded `survivorship_bias: None` per row instead of the bias report (surviving/entered/exited symbols, bias_score). Added the missing kwarg, matching the walk-forward/CPCV/optimize/monte-carlo sweep dispatches which already thread it through. Walk-forward's sweep helper already recorded `survivorship_bias` per row (`walk_forward.py:2370`); the oos fix makes the behavior consistent across all five modes.
+- **Added 4 regression tests** in `skills/quantitative-backtesting/tests/test_walk_forward.py`:
+  - `test_cli_multi_symbol_walk_forward_commission_sweep_records_survivorship`
+  - `test_cli_multi_symbol_out_of_sample_commission_sweep_records_survivorship` (covers the oos bug fix)
+  - `test_cli_multi_symbol_cpcv_commission_sweep_records_survivorship`
+  - `test_cli_multi_symbol_optimize_commission_sweep_records_survivorship`
+  Each asserts `--multi-symbol` commission sweeps exit 0, write the `<mode>_commission_sweep.json` artifact, and that every sweep row carries `survivorship_bias` (a dict with `surviving_symbols == ["SURV"]` and `bias_score > 0`) plus `bias_controls_engaged=True`; the walk-forward test additionally asserts OOS return degrades as commission rises.
   - Registered all four new tests in the module's `main()` runner.
-- Updated `skills/quantitative-backtesting/SKILL.md` to document that `--multi-symbol` persists `survivorship_bias.json` on every walk-forward subcommand and to note the new test coverage.
 
 ## What Was Verified
-- Full quant-backtesting suite: **305 passed, 0 failed, ~51s** (301 baseline + 4 new). No regressions.
-- Manual end-to-end runs of `walk-forward`, `cpcv`, `optimize`, and `monte-carlo` with `--multi-symbol` on a synthetic 3-symbol panel (SURV/LATE/EARLY): each exits 0, prints the survivorship report (bias_score 0.667, surviving SURV, entered LATE, exited EARLY), writes `survivorship_bias.json`, sets `bias_controls_engaged=True`, and records `multi_symbol=True` in the summary config.
-- Manual benchmark-less `walk-forward` run now exits 0 and writes `walk_forward_summary.json` + `tear_sheet_summary.json` (previously crashed).
+- Full quant-backtesting suite: **309 passed, 0 failed, ~56s** (305 baseline + 4 new). No regressions.
+- Standalone `test_walk_forward.py` runner: **96/96 passed** (92 baseline + 4 new).
+- All other 8 test files run standalone and pass (data_loader 29/29, performance 30/30, reporting exit 0, run_backtest 41/41, strategy_builder 27/27, cpcv 16/16, monte_carlo 14/14, generate_sample_data 1/1).
+- Manual `--multi-symbol` commission sweep on walk-forward (synthetic 3-symbol panel SURV/LATE/EARLY): exits 0, writes `walk_forward_commission_sweep.json`, each row records `survivorship_bias` (bias_score 0.667, surviving SURV) and `bias_controls_engaged=True`, OOS return degrades 0.0281 → 0.0216 as commission rises 2bp → 4bp.
+- All 5 bundled example scripts (`deflated_alpha_example`, `multiple_benchmarks_example`, `trading_costs_robustness_example`, `full_pipeline_example`) run without error; `real_data_pipeline_example` needs network and was not run.
 
 ## What Remains Unresolved
-- Nothing blocking. The `--multi-symbol` walk-forward analog from HANDOFF_NEXT.md is complete and verified across all five subcommands plus `run_backtest`.
+- Nothing blocking. Survivorship-bias is now recorded in cost-sweep artifacts across all five walk-forward subcommands under `--multi-symbol`.
+- `monte-carlo` has no `--multi-symbol` sweep test yet (its helper at `walk_forward.py:4415` already records `survivorship_bias`, but no multi-symbol monte-carlo test exists); hold unless a concrete research need emerges.
 - No concrete research need has arisen for further panel/multi-asset extensions (e.g., multi-benchmark `--multi-symbol` sweeps); hold unless one emerges.
 
 ## Approaches That Have Already Been Tried/Verified
-- Benchmark-less walk-forward crash: reproduced, fixed with a one-line initializer, verified by manual run + new regression test.
-- `--multi-symbol` artifact parity across walk-forward subcommands: implemented, verified by manual runs + 3 new CLI tests.
+- OOS commission sweep survivorship bug: reproduced (`survivorship_bias: None` per row), fixed with a one-line kwarg, verified by new regression test + manual run.
+- `--multi-symbol` cost-sweep survivorship recording: implemented/verified for walk-forward (pre-existing), out-of-sample (bug fix), cpcv, and optimize via 4 new regression tests; monte-carlo helper already threads survivorship but lacks a multi-symbol sweep test.
 
 ## Next Recommended Task
-The quant-backtesting skill is now in a stable, fully-tested state with consistent `--multi-symbol` behavior across all CLIs. No further bounded work is required this session. If a concrete quant research need emerges (e.g., panel walk-forward sweeps with survivorship threaded through sweep artifacts), start from the established pattern: `_load_and_validate_data(multi_symbol=...)` already returns `survivorship`, and each `_*_sweep_coefficient` helper already accepts a `survivorship=` kwarg.
+Hold unless a concrete quant research need emerges. The established pattern is in place: `_load_and_validate_data(multi_symbol=True)` returns `survivorship`, and each `_*_sweep_coefficient` helper accepts a `survivorship=` kwarg and threads it into its sweep artifact. A natural next step would be adding a `--multi-symbol` monte-carlo commission/impact sweep test (helper already records `survivorship_bias`), but no concrete research need has arisen to justify it.

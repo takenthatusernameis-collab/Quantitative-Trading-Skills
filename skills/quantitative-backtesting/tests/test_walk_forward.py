@@ -3795,6 +3795,10 @@ def main() -> int:
         ("test_cli_multi_symbol_walk_forward_writes_survivorship_artifact", test_cli_multi_symbol_walk_forward_writes_survivorship_artifact),
         ("test_cli_multi_symbol_cpcv_writes_survivorship_artifact", test_cli_multi_symbol_cpcv_writes_survivorship_artifact),
         ("test_cli_multi_symbol_optimize_writes_survivorship_artifact", test_cli_multi_symbol_optimize_writes_survivorship_artifact),
+        ("test_cli_multi_symbol_walk_forward_commission_sweep_records_survivorship", test_cli_multi_symbol_walk_forward_commission_sweep_records_survivorship),
+        ("test_cli_multi_symbol_out_of_sample_commission_sweep_records_survivorship", test_cli_multi_symbol_out_of_sample_commission_sweep_records_survivorship),
+        ("test_cli_multi_symbol_cpcv_commission_sweep_records_survivorship", test_cli_multi_symbol_cpcv_commission_sweep_records_survivorship),
+        ("test_cli_multi_symbol_optimize_commission_sweep_records_survivorship", test_cli_multi_symbol_optimize_commission_sweep_records_survivorship),
         ("test_cli_walk_forward_no_benchmark_does_not_crash", test_cli_walk_forward_no_benchmark_does_not_crash),
     ]
 
@@ -4329,6 +4333,148 @@ def test_cli_multi_symbol_optimize_writes_survivorship_artifact():
         with open(surv_path) as f:
             surv = json.load(f)
         assert surv["surviving_symbols"] == ["SURV"]
+
+
+def _assert_multi_symbol_sweep_records_survivorship(out_dir, sweep_file, expected_commissions):
+    sweep_path = os.path.join(out_dir, sweep_file)
+    assert os.path.exists(sweep_path), f"{sweep_file} not written"
+    with open(sweep_path) as f:
+        payload = json.load(f)
+    results = payload["results"]
+    assert len(results) == len(expected_commissions), (
+        f"expected {len(expected_commissions)} sweep rows, got {len(results)}"
+    )
+    for i, r in enumerate(results):
+        assert r.get("commission") == expected_commissions[i], (
+            f"row {i} commission {r.get('commission')} != {expected_commissions[i]}"
+        )
+        sb = r.get("survivorship_bias")
+        assert isinstance(sb, dict), f"row {i} survivorship_bias not a dict: {sb!r}"
+        assert sb.get("surviving_symbols") == ["SURV"], (
+            f"row {i} surviving_symbols {sb.get('surviving_symbols')!r}"
+        )
+        assert sb.get("bias_score", 0.0) > 0.0, f"row {i} bias_score {sb.get('bias_score')!r}"
+        assert r.get("bias_controls_engaged") is True, (
+            f"row {i} bias_controls_engaged {r.get('bias_controls_engaged')!r}"
+        )
+
+
+def test_cli_multi_symbol_walk_forward_commission_sweep_records_survivorship():
+    """--multi-symbol walk-forward commission sweep records survivorship_bias per row."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "multi.csv")
+        _write_multi_symbol_csv(csv_path)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "walk-forward",
+            "--data", csv_path,
+            "--strategy", "cross_sectional_momentum",
+            "--param-grid", '{"lookback": [20], "top_quantile": [0.4], "bottom_quantile": [0.2]}',
+            "--output", out_dir,
+            "--multi-symbol",
+            "--no-validate-point-in-time",
+            "--train-months", "6", "--test-months", "2", "--step-months", "2",
+            "--commissions", "0.0002", "0.002", "0.004",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI walk-forward --multi-symbol commission sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "walk_forward_commission_sweep.json")
+        assert os.path.exists(sweep_path), "walk_forward_commission_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        results = payload["results"]
+        assert len(results) == 3
+        assert [r["commission"] for r in results] == [0.0002, 0.002, 0.004]
+        returns = [float(r["total_oos_return"]) for r in results]
+        assert returns[2] < returns[0], (
+            f"expected OOS return degradation with commission, got {returns}"
+        )
+        _assert_multi_symbol_sweep_records_survivorship(
+            out_dir, "walk_forward_commission_sweep.json", [0.0002, 0.002, 0.004]
+        )
+
+
+def test_cli_multi_symbol_out_of_sample_commission_sweep_records_survivorship():
+    """--multi-symbol out-of-sample commission sweep records survivorship_bias per row."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "multi.csv")
+        _write_multi_symbol_csv(csv_path)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--strategy", "cross_sectional_momentum",
+            "--param-grid", '{"lookback": [20], "top_quantile": [0.4], "bottom_quantile": [0.2]}',
+            "--output", out_dir,
+            "--multi-symbol",
+            "--no-validate-point-in-time",
+            "--wf-train-months", "6", "--wf-test-months", "2", "--wf-step-months", "2",
+            "--commissions", "0.0002", "0.002", "0.004",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI out-of-sample --multi-symbol commission sweep should exit 0, got {rc}"
+        _assert_multi_symbol_sweep_records_survivorship(
+            out_dir, "out_of_sample_commission_sweep.json", [0.0002, 0.002, 0.004]
+        )
+
+
+def test_cli_multi_symbol_cpcv_commission_sweep_records_survivorship():
+    """--multi-symbol CPCV commission sweep records survivorship_bias per row."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "multi.csv")
+        _write_multi_symbol_csv(csv_path)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "cpcv",
+            "--data", csv_path,
+            "--strategy", "cross_sectional_momentum",
+            "--param-grid", '{"lookback": [20], "top_quantile": [0.4], "bottom_quantile": [0.2]}',
+            "--output", out_dir,
+            "--multi-symbol",
+            "--no-validate-point-in-time",
+            "--n-splits", "4", "--test-size", "0.2",
+            "--commissions", "0.0002", "0.002", "0.004",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI cpcv --multi-symbol commission sweep should exit 0, got {rc}"
+        _assert_multi_symbol_sweep_records_survivorship(
+            out_dir, "cpcv_commission_sweep.json", [0.0002, 0.002, 0.004]
+        )
+
+
+def test_cli_multi_symbol_optimize_commission_sweep_records_survivorship():
+    """--multi-symbol parameter-optimization commission sweep records survivorship_bias per row."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "multi.csv")
+        _write_multi_symbol_csv(csv_path)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "optimize",
+            "--data", csv_path,
+            "--strategy", "cross_sectional_momentum",
+            "--param-grid", '{"lookback": [20], "top_quantile": [0.4], "bottom_quantile": [0.2]}',
+            "--output", out_dir,
+            "--multi-symbol",
+            "--no-validate-point-in-time",
+            "--commissions", "0.0002", "0.002", "0.004",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI optimize --multi-symbol commission sweep should exit 0, got {rc}"
+        _assert_multi_symbol_sweep_records_survivorship(
+            out_dir, "parameter_optimization_commission_sweep.json", [0.0002, 0.002, 0.004]
+        )
 
 
 def test_cli_walk_forward_no_benchmark_does_not_crash():

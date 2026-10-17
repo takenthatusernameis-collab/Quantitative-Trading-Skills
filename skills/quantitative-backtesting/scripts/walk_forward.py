@@ -5067,6 +5067,7 @@ def run_out_of_sample_validation(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, commission=cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "out_of_sample_commission_sweep.json"
