@@ -145,7 +145,7 @@ def _print_survivorship_report(survivorship: Dict[str, Any]) -> None:
         )
 
 
-def run_backtest(data, strategy, args, data_provenance=None, benchmark=None):
+def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, survivorship=None):
     """Run a vectorized backtest and return results with equity curve and trades.
 
     data_provenance: optional DataProvenance (or dict of them for
@@ -379,6 +379,10 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None):
     # Optional point-in-time validation outcome.
     if pit_result is not None:
         results["point_in_time_validation"] = pit_result
+
+    # Optional survivorship-bias report artifact (multi-symbol panels).
+    if survivorship is not None:
+        results["survivorship_bias"] = survivorship
 
     # Optional buy-and-hold benchmark baseline(s).
     # The benchmark return for period t is the close-to-close return
@@ -677,7 +681,7 @@ def main():
                 print(f"{r['slippage']:.6f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
         return 0
     print("Running backtest...")
-    results = run_backtest(data, strategy, args, data_provenance=provenance, benchmark=benchmark)
+    results = run_backtest(data, strategy, args, data_provenance=provenance, benchmark=benchmark, survivorship=survivorship)
     # Thread benchmark provenance through results for downstream serialization
     try:
         if benchmark_provenance is not None:
