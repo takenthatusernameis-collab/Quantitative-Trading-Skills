@@ -428,6 +428,55 @@ class TestTearSheet(unittest.TestCase):
                 self.assertIn(key, summary["metrics"])
             for key in ("alpha_tstat", "alpha_pvalue", "r_squared"):
                 self.assertIn(key, summary["metrics"])
+    def test_generate_tear_sheet_includes_benchmark_metrics_with_corrected_pvalues(self):
+        """When multiple benchmarks are present, the tear sheet summary includes
+        benchmark_metrics with corrected p-value fields (alpha_pvalue,
+        alpha_pvalue_original, deflated_alpha, expected_max_alpha)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            metrics = {
+                "total_return": 0.10,
+                "benchmark_total_return": 0.12,
+                "benchmark_annualized_return": 0.18,
+                "correlation_with_benchmark": 0.85,
+                "alpha": 0.02,
+                "beta": 1.1,
+                "alpha_tstat": 1.9,
+                "alpha_pvalue": 0.06,
+                "r_squared": 0.72,
+                "benchmark_0_alpha_pvalue": 0.08,
+                "benchmark_0_alpha_pvalue_original": 0.06,
+                "benchmark_0_deflated_alpha": 0.5,
+                "benchmark_0_expected_max_alpha": 0.04,
+                "benchmark_1_alpha_pvalue": 0.09,
+                "benchmark_1_alpha_pvalue_original": 0.07,
+                "benchmark_1_deflated_alpha": 0.6,
+                "benchmark_1_expected_max_alpha": 0.05,
+                "deflated_alpha": {
+                    "deflated_alpha_ratio": 0.5,
+                    "p_value": 0.08,
+                    "n_benchmarks": 2,
+                },
+            }
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            self.assertIsNotNone(html_path)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("benchmark_metrics", summary)
+            self.assertEqual(len(summary["benchmark_metrics"]), 2)
+            bm0 = summary["benchmark_metrics"][0]
+            self.assertIn("alpha_pvalue", bm0)
+            self.assertIn("alpha_pvalue_original", bm0)
+            self.assertIn("deflated_alpha", bm0)
+            self.assertIn("expected_max_alpha", bm0)
+            self.assertAlmostEqual(bm0["alpha_pvalue"], 0.08, places=12)
+            self.assertAlmostEqual(bm0["deflated_alpha"], 0.5, places=12)
+            bm1 = summary["benchmark_metrics"][1]
+            self.assertAlmostEqual(bm1["alpha_pvalue"], 0.09, places=12)
+
 
     def test_generate_tear_sheet_omits_benchmark_when_absent(self):
         """Without benchmark metrics, the Benchmark Comparison section is omitted."""

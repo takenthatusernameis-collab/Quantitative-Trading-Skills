@@ -226,14 +226,21 @@ def _extract_benchmark_metrics(metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
         return bench_metrics_list
     reconstructed: List[Dict[str, Any]] = []
     i = 0
-    while f"benchmark_{i}_alpha" in metrics:
+    while True:
+        prefix = f"benchmark_{i}_"
+        # Look for any prefixed key to detect the index exists
+        has_any = any(k.startswith(prefix) for k in metrics.keys())
+        if not has_any:
+            break
         row = {
-            k[len(f"benchmark_{i}_"):]: v
+            k[len(prefix):]: v
             for k, v in metrics.items()
-            if k.startswith(f"benchmark_{i}_")
+            if k.startswith(prefix)
         }
         reconstructed.append(row)
         i += 1
+        if i > 20:  # safety bound
+            break
     return reconstructed
 
 
