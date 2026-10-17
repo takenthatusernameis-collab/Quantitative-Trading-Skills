@@ -3690,7 +3690,3 @@ def test_optimize_sweep_omits_deflated_sharpe_without_deflate():
             assert row["bias_controls_engaged"] is True, row
             assert row["deflated_sharpe"] is None, row
             assert row["deflated_sharpe_n_trials"] is None, row
-
-
-if __name__ == "__main__":
-    sys.exit(main())

@@ -560,15 +560,9 @@ def walk_forward_analysis(
     # trial Sharpes for the cross-sectional SR* estimator (conservative:
     # between-period variation inflates the null Sharpe).
     #
-    # The guard is `len(oos_returns) > 1` only: a constant OOS return series
-    # (zero variance) is a degenerate case, not a reason to skip the
-    # correction. `deflated_sharpe_ratio` handles it internally (it sets
-    # `z = -inf` when `returns.std() == 0`), yielding the conservative
-    # DSR = 0, p_value = 1, z_score = None. Skipping the key with an
-    # `oos_returns.std() > 0` guard would be inconsistent with `run_backtest`
-    # and the `monte-carlo` subcommand, which both emit the degenerate dict
-    # when `n_trials` is provided.
-    if apply_deflation and len(oos_returns) > 1:
+    # Do not skip for constant (zero-variance) return series: `deflated_sharpe_ratio`
+    # handles degenerate cases by returning DSR=0, p_value=1, z_score=None.
+    if apply_deflation and len(oos_returns) > 1 and max(total_evaluated_trials, 1) >= 1:
         summary["deflated_sharpe"] = deflated_sharpe_ratio(
             sharpe_ratio=summary.get("oos_sharpe", 0.0),
             returns=oos_returns,
@@ -1662,15 +1656,9 @@ def cpcv_analysis(
     # trial Sharpes for the cross-sectional SR* estimator (conservative:
     # between-fold variation inflates the null Sharpe).
     #
-    # The guard is `len(oos_returns) > 1` only: a constant OOS return series
-    # (zero variance) is a degenerate case, not a reason to skip the
-    # correction. `deflated_sharpe_ratio` handles it internally (it sets
-    # `z = -inf` when `returns.std() == 0`), yielding the conservative
-    # DSR = 0, p_value = 1, z_score = None. Skipping the key with an
-    # `oos_returns.std() > 0` guard would be inconsistent with `run_backtest`
-    # and the `monte-carlo` subcommand, which both emit the degenerate dict
-    # when `n_trials` is provided.
-    if apply_deflation and len(oos_returns) > 1:
+    # Do not skip for constant (zero-variance) return series: `deflated_sharpe_ratio`
+    # handles degenerate cases by returning DSR=0, p_value=1, z_score=None.
+    if apply_deflation and len(oos_returns) > 1 and max(total_evaluated_trials, 1) >= 1:
         summary["deflated_sharpe"] = deflated_sharpe_ratio(
             sharpe_ratio=summary.get("oos_sharpe", 0.0),
             returns=oos_returns,
@@ -2186,6 +2174,13 @@ def out_of_sample_validation(
             returns=test_returns,
             n_trials=total_trials,
             trial_sharpes=pooled_trial_sharpes if pooled_trial_sharpes else None,
+        )
+    elif apply_deflation and len(test_returns) > 1:
+        summary["deflated_sharpe"] = deflated_sharpe_ratio(
+            sharpe_ratio=test_sharpe,
+            returns=test_returns,
+            n_trials=1,
+            trial_sharpes=None,
         )
 
     # Add benchmark information to summary (only for single benchmark for backward compatibility)

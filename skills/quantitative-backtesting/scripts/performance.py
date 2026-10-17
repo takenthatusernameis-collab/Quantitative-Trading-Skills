@@ -562,6 +562,19 @@ def calculate_metrics(
             n_trials=int(n_trials),
             trial_sharpes=trial_sharpes,
         )
+    elif n_trials is not None and int(n_trials) >= 1 and len(returns.dropna()) >= 2:
+        # Fall back even if returns series has NaNs in length check? But we used len(returns)
+        # Also handle case where returns might be a slice - just in case
+        try:
+            from walk_forward import deflated_sharpe_ratio  # noqa: E402
+        except ImportError:
+            from scripts.walk_forward import deflated_sharpe_ratio  # noqa: E402
+        metrics["deflated_sharpe"] = deflated_sharpe_ratio(
+            sharpe_ratio=metrics["sharpe_ratio"],
+            returns=returns,
+            n_trials=int(n_trials),
+            trial_sharpes=trial_sharpes,
+        )
 
     # Store config metadata
     if config:
