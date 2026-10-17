@@ -2,9 +2,9 @@
 
 ## Repository state (as of this session)
 
-- Working tree: clean (no unstaged or staged changes).
-- Quant backtesting skill: 294/294 tests passing (all test_*.py in skills/quantitative-backtesting/tests/).
-- Previous state: survivorship-bias detection surfaced in tear sheet/reporting (survivorship_bias in HTML and tear_sheet_summary.json), bias_controls_engaged threaded for multi-symbol run_backtest path.
+- Working tree: clean (no unstaged or staged changes) before this session.
+- Quant backtesting skill: 296/296 tests passing (all test_*.py in skills/quantitative-backtesting/tests/).
+- Previous state: survivorship-bias detection surfaced in tear sheet/reporting (survivorship_bias in HTML and tear_sheet_summary.json), bias_controls_engaged threaded for multi-symbol run_backtest path; per-benchmark provenance traceability completed (commit 2444e3d).
 
 ## What changed this session
 
