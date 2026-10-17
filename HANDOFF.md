@@ -8,12 +8,13 @@
 
 ## What changed this session
 
-Nothing. Per the prior handoff and mission instructions, no concrete research need for panel/multi-asset support in walk-forward/CPCV/Monte Carlo/OOS CLIs was identified, so the deferred item remains appropriately deferred. Verified all quant backtesting tests still pass.
+No source changes (working tree clean). Per the prior handoff and mission instructions, no concrete research need for panel/multi-asset support in walk-forward/CPCV/Monte Carlo/OOS CLIs was identified, so the deferred item remains appropriately deferred. Concretely verified (not assumed) the run_backtest --multi-symbol survivorship/bias-controls flow end-to-end on a synthetic three-symbol panel (/tmp/panel_ohlcv.csv; ALPHA/GAMMA full-range, BETA enters 2024-09-02 late): `detect_survivorship_bias` flagged BETA as entered (bias_score 0.667), `survivorship_bias.json` was written, `tear_sheet_summary.json` carries `survivorship_bias` and `bias_controls_engaged: True`, and point-in-time validation passed. Full quant backtesting test suite still passes.
 
 ## What was verified
 
 - Full quant backtesting test suite: 294/294 passed (run_backtest, reporting, data_loader, performance, walk_forward, monte_carlo, strategy_builder).
-- Specific coverage confirmed: survivorship_bias surfaced in reporting (HTML + JSON), bias_controls_engaged set when survivorship or PIT engaged (run_backtest path), panel multi-symbol survivorship end-to-end behavior covered by existing tests.
+- End-to-end run_backtest --multi-symbol --validate-point-in-time on a synthetic panel (ALPHA/GAMMA full-range, BETA enters late): `survivorship_bias.json` written (BETA flagged entered, bias_score 0.667); `tear_sheet_summary.json` contains `survivorship_bias` and `bias_controls_engaged: True`; `point_in_time_validation` passed; `data_provenance.json` written with per-symbol checksums.
+- Specific coverage confirmed: survivorship_bias surfaced in reporting (HTML + JSON), bias_controls_engaged set when survivorship or PIT engaged (run_backtest path).
 
 ## What remains unresolved
 
