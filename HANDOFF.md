@@ -32,17 +32,20 @@ End-to-end verified: `run_backtest --multi-symbol` now writes `Survivorship Bias
 
 ## What was verified
 
-- Full skill test suite: 293/293 passed (was 290; +3 new tests).
+- Full skill test suite: 294/294 passed.
 - End-to-end CLI: `run_backtest --multi-symbol --strategy cross_sectional_momentum` writes the survivorship section to the tear sheet HTML and the survivorship_bias dict to the JSON summary.
+- Item #1 (bias_controls_engaged reflects survivorship) verified end-to-end: a `--multi-symbol` run without `--validate-point-in-time` reports `bias_controls_engaged=True` in `tear_sheet_summary.json` (test `test_cli_multi_symbol_survivorship_sets_bias_controls_engaged`, passing).
 
 ## What remains unresolved
 
-1. **`bias_controls_engaged` does not reflect survivorship screening.** The flag is `bool(pit_results is not None)` everywhere (e.g. `walk_forward.py:573`, `reporting.py` fallback). On a `--multi-symbol` run **without** `--validate-point-in-time`, `pit_results` is None so `bias_controls_engaged` reports False — yet `detect_survivorship_bias` *did* run and `survivorship_bias` is populated. The flag's docstring ("point-in-time validation, survivorship screening, and multiple-testing deflation") therefore overstates what it measures on that path. Small fix: OR the survivorship artifact into the flag on the run_backtest path (and only there, since the other paths have no survivorship concept).
+**No panel/multi-asset support in the walk-forward / CPCV / Monte Carlo / OOS CLIs.** A multi-asset universe can currently only be backtested via `run_backtest --multi-symbol`, which runs a single panel backtest with no rolling validation. There is no walk-forward or CPCV over a multi-symbol universe, and no survivorship detection there. This is a larger feature gap, not a small enhancement; defer unless a concrete research need arises.
 
-2. **No panel/multi-asset support in the walk-forward / CPCV / Monte Carlo / OOS CLIs.** A multi-asset universe can currently only be backtested via `run_backtest --multi-symbol`, which runs a single panel backtest with no rolling validation. There is no walk-forward or CPCV over a multi-symbol universe, and no survivorship detection there. This is a larger feature gap, not a small enhancement; defer unless a concrete research need arises.
+Item #1 (`bias_controls_engaged` reflecting survivorship screening on the run_backtest path) is **resolved**: `run_backtest.py:391-392` sets `results["bias_controls_engaged"] = True` when `pit_result is not None or survivorship is not None`, and reporting.py threads it into `tear_sheet_summary.json`. Covered by `test_cli_multi_symbol_survivorship_sets_bias_controls_engaged`; full suite passes.
 
 ## Next task (precise, evidence-backed)
 
-Fix #1 above: make `bias_controls_engaged` on the run_backtest path reflect survivorship screening, so a `--multi-symbol` run without `--validate-point-in-time` still reports `bias_controls_engaged=True` when `survivorship_bias` is present. Evidence: `run_backtest.py:383-385` sets `results["survivorship_bias"]` independently of `pit_result` (set at `run_backtest.py:168-170` only when `args.validate_point_in_time`), and `reporting.py:1043` reads `bias_flag = results.get("bias_controls_engaged")` without consulting `survivorship_bias`. Bounded change: in `run_backtest` set `results["bias_controls_engaged"] = bool(pit_result is not None or survivorship is not None)`; add a test that a multi-symbol run without `--validate-point-in-time` surfaces `bias_controls_engaged=True` in the tear-sheet JSON. Run full test suite after.
+Item #1 is complete and verified (see above). The only remaining known gap is item #2 (panel/multi-asset walk-forward / CPCV / Monte Carlo / OOS support), which the prior HANDOFF explicitly defers as a larger feature gap unless a concrete research need arises.
+
+**Next task:** Before touching item #2, confirm a concrete research need. If none arises, treat the quant backtesting skill as stable — no further change required; full suite 294/294 passing. If a research need arises, the bounded entry point is adding single-strategy panel universe support to the walk_forward CLI with survivorship detection, verified end-to-end via `tear_sheet_summary.json` reporting `bias_controls_engaged=True` and `survivorship_bias` present. Constraint: do not implement item #2 without a concrete research need (per prior deferral).
 
 (End of file - total 44 lines)
