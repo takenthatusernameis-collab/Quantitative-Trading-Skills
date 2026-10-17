@@ -1920,3 +1920,89 @@ def test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance():
             f"top-level provenance checksums {top_checksums} do not match "
             f"per-row checksums {checksums}"
         )
+
+
+def test_cli_benchmark_name_propagates_to_provenance_and_tear_sheet():
+    """--benchmark-name (and filename-stem fallback) must surface as
+    ``name`` in the benchmark_provenance artifact, the tear-sheet summary's
+    top-level benchmark_provenance, and each per-row benchmark_metrics
+    benchmark_provenance, so a corrected alpha/deflated alpha can be traced
+    back to an identified benchmark rather than list position alone.
+    """
+    from unittest.mock import patch
+    import json
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        b1 = os.path.join(tmpdir, "b1.csv")
+        b2 = os.path.join(tmpdir, "b2.csv")
+        _write_ohlcv_csv(csv_path)
+        _write_ohlcv_csv(b1, seed=1)
+        _write_ohlcv_csv(b2, seed=99)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = ["run_backtest", "--data", csv_path, "--strategy", "sma_crossover",
+                "--params", '{"fast_period": 10, "slow_period": 30}',
+                "--output", out_dir, "--benchmark", b1, b2,
+                "--benchmark-name", "AlphaBeta", "GammaDelta"]
+        with patch.object(sys, "argv", argv), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0
+
+        # Artifact: benchmark_provenance.json carries the supplied names in order.
+        bp_path = os.path.join(out_dir, "benchmark_provenance.json")
+        assert os.path.exists(bp_path), "benchmark_provenance.json not written"
+        with open(bp_path) as f:
+            bp = json.load(f)
+        assert isinstance(bp, list) and len(bp) == 2
+        assert [p["name"] for p in bp] == ["AlphaBeta", "GammaDelta"]
+        assert bp[0]["checksum"] != bp[1]["checksum"], (
+            "both benchmark rows share the same checksum"
+        )
+
+        # Tear-sheet JSON: top-level benchmark_provenance carries the names.
+        ts_path = os.path.join(out_dir, "tear_sheet_summary.json")
+        with open(ts_path) as f:
+            ts = json.load(f)
+        prov_list = ts.get("benchmark_provenance")
+        assert isinstance(prov_list, list) and len(prov_list) == 2
+        assert [p["name"] for p in prov_list] == ["AlphaBeta", "GammaDelta"]
+
+        # Per-row: each benchmark_metrics row links to provenance with a name.
+        bm = ts.get("benchmark_metrics")
+        assert isinstance(bm, list) and len(bm) == 2
+        row_names = [row["benchmark_provenance"]["name"] for row in bm]
+        assert sorted(row_names) == ["AlphaBeta", "GammaDelta"]
+
+
+def test_cli_benchmark_name_derives_from_filename_stem_when_omitted():
+    """When --benchmark-name is omitted, each benchmark's provenance ``name``
+    falls back to the file stem so the tear sheet remains identifiable.
+    """
+    from unittest.mock import patch
+    import json
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        b1 = os.path.join(tmpdir, "custom_benchmark_one.csv")
+        _write_ohlcv_csv(csv_path)
+        _write_ohlcv_csv(b1, seed=1)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = ["run_backtest", "--data", csv_path, "--strategy", "sma_crossover",
+                "--params", '{"fast_period": 10, "slow_period": 30}',
+                "--output", out_dir, "--benchmark", b1]
+        with patch.object(sys, "argv", argv), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0
+
+        bp_path = os.path.join(out_dir, "benchmark_provenance.json")
+        with open(bp_path) as f:
+            bp = json.load(f)
+        assert isinstance(bp, dict)
+        assert bp["name"] == "custom_benchmark_one"
+
+        ts_path = os.path.join(out_dir, "tear_sheet_summary.json")
+        with open(ts_path) as f:
+            ts = json.load(f)
+        prov = ts.get("benchmark_provenance")
+        assert isinstance(prov, dict)
+        assert prov["name"] == "custom_benchmark_one"
