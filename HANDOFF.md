@@ -2,32 +2,37 @@
 
 ## Repository state (as of this session)
 
-- Working tree has 1 modified file (`skills/quantitative-backtesting/tests/test_walk_forward.py`), test-only change, uncommitted.
-- Test suite: **281/281 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`), up from 280 (1 new test added).
+- Working tree has 2 modified files (documentation only, uncommitted):
+  - `skills/quantitative-backtesting/references/validation_methods.md` (+46 lines)
+  - `skills/quantitative-backtesting/SKILL.md` (+1 line)
+- Test suite: **281/281 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`), unchanged.
+- Baseline before this session: clean, `9970406` (HANDOFF + degenerate DSR test committed).
 
 ## What changed this session
 
-### Added degenerate/constant-return DSR consistency test (HANDOFF follow-up #1)
+### Documented the DSR methodology (HANDOFF follow-up #2)
 
-`deflated_sharpe_ratio` must emit the conservative degenerate dict (DSR=0, p=1, z_score=None) for zero-variance returns, and no analysis path may emit a spurious finite-z value on constant data.
+The prior session's degenerate/constant-return DSR test (`test_degenerate_constant_return_dsr_consistency`) and the two parity sweeps (`test_cost_sweep_dsr_parity_across_paths`, `test_non_impact_sweep_dsr_parity_across_paths`) were executable-guarded but not written down for researchers. The invariant they enforce — **DSR parity across the four analysis paths** — was missing from the documentation entirely (a grep for "parity" in `SKILL.md` and `references/` returned nothing).
 
-**Added `test_degenerate_constant_return_dsr_consistency` in `skills/quantitative-backtesting/tests/test_walk_forward.py`:**
-1. Unit contract: `deflated_sharpe_ratio` on exactly-constant returns → DSR=0 / p=1 / z_score=None / n_trials preserved; non-constant series stay on the finite-z path.
-2. `parameter_optimization(apply_deflation=True)` on constant-return data: every combo's `deflated_sharpe` dict is degenerate with `n_trials == 9` (full grid).
-3. Cost basis: varying borrow / funding / commission / slippage does not change `n_trials` and keeps every combo on the degenerate DSR — the grid is unchanged, so the multiple-testing counting basis cannot drift.
-4. `walk_forward_analysis` aggregate on random train / exactly-constant out-of-sample: emits the degenerate aggregate DSR dict instead of a spurious finite-z value.
+**Added to `references/validation_methods.md`** a new "DSR Parity Invariant (Cross-Path Consistency)" subsection, placed immediately before the existing "Usage" subsection of the Deflated Sharpe Ratio section:
 
-Helpers added: `_make_flat_ohlcv_data` (exactly zero returns), `_make_constant_return_ohlcv_data` (exactly constant nonzero returns via recursive close), `_make_random_then_constant_data`, and `_ConstantLongStrategy` stub (always-long, no indicator-warmup zeros so raw constancy survives into strategy returns). Registered in `main()`'s test list.
+1. **Counting basis** per path: walk-forward/CPCV aggregates count actually-evaluated finite-Sharpe combos summed across periods/folds (cross-period sum, not raw grid size; `signals_active`-filtered combos never counted); `out_of_sample_validation` is reconciled to walk-forward's evaluated-combo count on the same grid and shares the pooled SR* estimator; `parameter_optimization` uses the full evaluated combo count from a single grid traversal (the basis `monte-carlo --n-trials` uses, effective count = `max(--n-trials, evaluated combos)`).
+2. **SR* estimator parity** for the aggregate paths: OOS, walk-forward and CPCV all derive `SR*` from the cross-sectional dispersion of the same evaluated trial Sharpes (`std(SR_trials) * sqrt(2*ln(N))`); the i.i.d.-null fallback would yield a different SR* and a far higher p-value, so the pooled estimator is the recommended one for any aggregate DSR.
+3. **Degenerate parity**: on exactly-constant returns every path that reaches deflation emits the conservative degenerate dict (`DSR=0`, `p_value=1`, `z_score=None`) with `n_trials` preserved, including under cost sweeps (varying borrow/funding/commission/slippage must not move the counting basis off the degenerate DSR).
+4. **Executable guard**: the invariant is asserted by the four named tests in `test_walk_forward.py`; a regression that breaks either the counting basis or the SR* estimator fails those tests even while the artifact still looks well-formed.
 
-**No production code changed.** Test-only; behavior unchanged. Verified: 76/76 in test_walk_forward.py, 281/281 full skill suite.
+**Added to `SKILL.md`** a pointer in the Tips section ("DSR methodology") so researchers reach the documented formula, degenerate contract, counting basis, and parity invariant without digging through the test file.
+
+**No production code changed.** Test-only documentation; behavior unchanged. Verified: 281/281 full skill suite.
 
 ## What remains unresolved
 
-- **Document the DSR methodology** in `skills/quantitative-backtesting/SKILL.md` or `references/`: the parity invariant, the degenerate contract, and the counting basis are now executable-guarded but not written down for researchers (prior follow-up #2).
+- The DSR methodology is now documented and executable-guarded. No open methodological questions remain from the prior handoff.
+- Broader repository context: this is a fork of Kilo-Org/kilo-marketplace with a broad inherited catalog. The quantitative-backtesting skill is the active research asset; the rest of the catalog is intentionally untouched.
 
 ## Notes on approaches
 
-- `100 * (1.001 ** t)` is NOT exactly constant in floating point (nunique=3) and does not reach the degenerate branch; use flat prices or recursive `close[t] = close[t-1] * (1 + r)` for exact constancy.
-- CLI-level degenerate sweep artifacts are not feasible with real strategies (indicator warmup emits zeros, breaking exact zero variance); the guarantee is covered at unit/function level instead.
+- The parity invariant was the last un-written piece of the DSR story; the formula, degenerate contract, and per-path counting basis were already documented in `validation_methods.md`, so only the cross-path consistency claim and its test references needed adding.
+- Documentation edits were kept to the two files researchers actually read (`SKILL.md` and `references/validation_methods.md`); no changes to scripts, tests, or the inherited marketplace catalog.
 
 (End of file)

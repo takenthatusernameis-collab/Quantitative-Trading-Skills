@@ -113,6 +113,52 @@ luck, so the correction errs against claiming skill.
   it does not validate the out-of-sample economics of a strategy,
   and it is not evidence of profitability on its own.
 
+### DSR Parity Invariant (Cross-Path Consistency)
+
+The Deflated Sharpe Ratio is computed by four analysis paths that consume the
+same grid and data — `walk_forward_analysis`, `cpcv_analysis`,
+`out_of_sample_validation`, and `parameter_optimization` (the grid search
+behind `monte-carlo --n-trials`). The **parity invariant** is that a strategy's
+reported DSR p-value must not depend on which analysis path reported it.
+
+**Counting basis** (the `n_trials` that drives the correction):
+
+- `walk_forward_analysis` and `cpcv_analysis` (aggregate): `n_trials` is the
+  number of **actually-evaluated, finite-Sharpe** configurations summed across
+  all periods/folds — the cross-period sum, not the raw grid size. Combos
+  filtered out by `signals_active` (flat strategies) are never counted.
+- `out_of_sample_validation`: reconciled to the same evaluated-combo count as
+  walk-forward on the same grid (it reuses the walk-forward selection on the
+  train slice), and it now shares the pooled SR* estimator.
+- `parameter_optimization` (per-combo DSR): uses the **full evaluated combo
+  count** from a single grid traversal — not the cross-period sum. This is
+  the basis `monte-carlo --n-trials` deflates the base backtest Sharpe by
+  (effective count = `max(--n-trials, evaluated combos)`).
+
+**SR* estimator parity for the aggregate paths.** When pooled trial Sharpes
+are available, the OOS aggregate's expected-max-Sharpe `SR*` must match the
+walk-forward / CPCV aggregate's `SR*` basis: all three derive `SR*` from the
+cross-sectional dispersion of the same evaluated trial Sharpes
+(`SR* = std(SR_trials) * sqrt(2 * ln(N))`). The i.i.d.-null fallback
+(`SR* = sqrt(2 * ln(N) / T)`) would produce a different `SR*` and a far higher
+p-value, so the pooled estimator is the recommended one for any aggregate DSR.
+
+**Degenerate parity.** On exactly-constant (zero-variance) returns, every
+path that reaches deflation emits the conservative degenerate dict
+(`DSR = 0`, `p_value = 1`, `z_score = None`) with `n_trials` preserved —
+including under cost sweeps, where varying borrow / funding / commission /
+slippage must not move the counting basis off the degenerate DSR (the grid is
+unchanged, so the multiple-testing counting basis cannot drift).
+
+This invariant is an executable guard, not a documentation note: it is
+asserted by `test_deflated_sharpe_parity_across_all_four_analysis_paths`,
+`test_cost_sweep_dsr_parity_across_paths`,
+`test_non_impact_sweep_dsr_parity_across_paths`, and
+`test_degenerate_constant_return_dsr_consistency` in
+`tests/test_walk_forward.py`. A regression that made one path deflate by a
+different trial count or a different SR* estimator fails those tests even
+while the artifact still looks well-formed.
+
 ### Usage
 
 `parameter_optimization`, `walk_forward_analysis` and `cpcv_analysis`
