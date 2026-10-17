@@ -972,6 +972,22 @@ def generate_tear_sheet(
     # walk-forward path does (single-benchmark runs keep the non-prefixed
     # ``alpha`` / ``beta`` / ``correlation_with_benchmark`` keys).
     bench_metrics_list = _extract_benchmark_metrics(metrics)
+    # Associate each benchmark_metrics row with its provenance so downstream
+    # consumers can trace corrected alpha/deflated alpha back to the exact
+    # benchmark file/checksum without relying on list order alone.
+    bp = results.get("benchmark_provenance")
+    if bp is not None and isinstance(bench_metrics_list, list) and bench_metrics_list:
+        if not isinstance(bp, list):
+            bp_list = [bp]
+        else:
+            bp_list = bp
+        prov_dicts = []
+        for p in bp_list:
+            prov_dicts.append(p.to_dict() if hasattr(p, "to_dict") else (p if isinstance(p, dict) else p))
+        if len(prov_dicts) == len(bench_metrics_list):
+            for row, prov in zip(bench_metrics_list, prov_dicts):
+                if isinstance(row, dict):
+                    row["benchmark_provenance"] = prov
     if len(bench_metrics_list) >= 2:
         summary["benchmark_metrics"] = _json_safe(bench_metrics_list)
 
