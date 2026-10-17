@@ -104,6 +104,78 @@ def _write_benchmark_csv(path: str, periods: int = 300, seed: int = 99) -> None:
     data.reset_index().rename(columns={"index": "date"}).to_csv(path, index=False)
 
 
+def _make_flat_ohlcv_data(periods: int = 300, seed: int = 42) -> pd.DataFrame:
+    """OHLCV with a constant price: exactly zero returns (zero variance)."""
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    return pd.DataFrame({
+        "open": np.full(periods, 100.0),
+        "high": np.full(periods, 100.5),
+        "low": np.full(periods, 99.5),
+        "close": np.full(periods, 100.0),
+        "volume": np.full(periods, 1_000_000),
+    }, index=dates)
+
+
+def _make_constant_return_ohlcv_data(
+    periods: int = 300, daily_return: float = 0.001
+) -> pd.DataFrame:
+    """OHLCV whose close-to-close returns are exactly constant.
+
+    Built recursively so pct_change() yields one unique value exactly
+    (floating-point compounding from ``1.001 ** t`` would not).
+    """
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    close = np.empty(periods, dtype=float)
+    close[0] = 100.0
+    for t in range(1, periods):
+        close[t] = close[t - 1] * (1.0 + daily_return)
+    return pd.DataFrame({
+        "open": close,
+        "high": close * 1.001,
+        "low": close * 0.999,
+        "close": close,
+        "volume": np.full(periods, 1_000_000),
+    }, index=dates)
+
+
+def _make_random_then_constant_data(
+    periods: int = 400, split: int = 252, seed: int = 7
+) -> pd.DataFrame:
+    """Random returns for the first `split` bars, exactly zero returns after.
+
+    Lets a walk-forward run select parameters on non-constant train returns
+    while the combined out-of-sample record is exactly constant, which
+    exercises the degenerate-DSR branch of the aggregate correction.
+    """
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    rets = np.concatenate([rng.normal(0.0005, 0.01, split), np.zeros(periods - split)])
+    close = np.empty(periods, dtype=float)
+    close[0] = 100.0
+    for t in range(1, periods):
+        close[t] = close[t - 1] * (1.0 + rets[t])
+    return pd.DataFrame({
+        "open": close,
+        "high": close * 1.001,
+        "low": close * 0.999,
+        "close": close,
+        "volume": np.full(periods, 1_000_000),
+    }, index=dates)
+
+
+class _ConstantLongStrategy:
+    """Always-long, no-warmup stub strategy: positions are 1.0 on every bar.
+
+    Used so strategy returns are exactly the raw returns, which keeps a
+    constant-return series exactly constant through the pipeline (real
+    strategies with indicator warmup emit zeros at the start, which breaks
+    exact zero variance).
+    """
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+        return pd.Series(1.0, index=data.index)
+
+
 def test_out_of_sample_validation_benchmark_cost_is_periodic():
     """Test that out_of_sample_validation correctly handles benchmark_cost_is_periodic flag."""
     # Create test data with sufficient periods for walk-forward windows
@@ -1330,6 +1402,120 @@ def test_optimize_non_impact_sweep_dsr_parity():
             assert dsr is not None, (cost_kind, label, "missing deflated_sharpe")
             assert 0.0 <= dsr <= 1.0, (cost_kind, label, dsr)
             assert nt == n_trials[0], (cost_kind, label, nt, n_trials[0])
+
+
+def test_degenerate_constant_return_dsr_consistency():
+    """Zero-variance returns must emit the conservative degenerate DSR
+    (deflated_sharpe_ratio = 0, p_value = 1, z_score = None) everywhere the
+    pipeline reaches deflation, and the trial-counting basis must not drift
+    with cost changes.
+
+    Covers:
+      1. deflated_sharpe_ratio unit contract on exactly-constant returns.
+      2. parameter_optimization --deflate: every combo's deflated_sharpe
+         dict is degenerate and n_trials equals the evaluated combo count.
+      3. The optimize path's cost basis: varying borrow/funding/commission/
+         slippage does not change n_trials (the grid is unchanged) and every
+         combo stays on the degenerate DSR under constant returns.
+      4. walk_forward_analysis aggregate: random train / constant out-of-sample
+         emits the degenerate aggregate DSR rather than a spurious finite-z
+         value. (The float-noise residue on a near-constant series must not
+         route through the finite-z branch; see _is_constant_returns.)
+    """
+    grid = {"fast_period": [5, 10, 15], "slow_period": [20, 30, 40]}
+    full_grid = len(grid["fast_period"]) * len(grid["slow_period"])
+    factory = lambda params: _ConstantLongStrategy()
+
+    # --- 1: unit contract ------------------------------------------------
+    dates = pd.date_range("2020-01-01", periods=100, freq="B")
+    constant = pd.Series(np.full(100, 0.001), index=dates)
+    degenerate = deflated_sharpe_ratio(0.0, constant, n_trials=9)
+    assert degenerate["deflated_sharpe_ratio"] == 0.0
+    assert degenerate["p_value"] == 1.0
+    assert degenerate["z_score"] is None
+    assert degenerate["n_trials"] == 9
+    assert degenerate["n_observations"] == 100
+    # Non-constant returns stay on the finite-z path.
+    noisy = pd.Series(
+        np.random.default_rng(3).normal(0.001, 0.01, 100), index=dates
+    )
+    sane = deflated_sharpe_ratio(1.0, noisy, n_trials=9)
+    assert 0.0 <= sane["deflated_sharpe_ratio"] <= 1.0
+    assert sane["z_score"] is not None
+
+    # --- 2 + 3: parameter_optimization on constant returns ---------------
+    data = _make_flat_ohlcv_data(periods=400)
+    opt = parameter_optimization(
+        data=data,
+        strategy_factory=factory,
+        param_grid=grid,
+        commission=0.0,
+        slippage=0.0,
+        impact_coefficient=0.0,
+        borrow_cost=0.0,
+        funding_cost=0.0,
+        apply_deflation=True,
+    )
+    assert len(opt) == full_grid
+    for result in opt:
+        ds = result["deflated_sharpe"]
+        assert ds["deflated_sharpe_ratio"] == 0.0, result["params"]
+        assert ds["p_value"] == 1.0, result["params"]
+        assert ds["z_score"] is None, result["params"]
+        assert ds["n_trials"] == full_grid, result["params"]
+
+    # Cost changes must not move the counting basis off the degenerate DSR.
+    base_kwargs = dict(
+        commission=0.0, slippage=0.0, impact_coefficient=0.0,
+        borrow_cost=0.0, funding_cost=0.0,
+    )
+    for kwargs in [
+        {"borrow_cost": 0.03},
+        {"funding_cost": 0.02},
+        {"commission": 0.001},
+        {"slippage": 0.001},
+    ]:
+        run_kwargs = dict(base_kwargs)
+        run_kwargs.update(kwargs)
+        priced = parameter_optimization(
+            data=data,
+            strategy_factory=factory,
+            param_grid=grid,
+            apply_deflation=True,
+            **run_kwargs,
+        )
+        assert len(priced) == full_grid, kwargs
+        for result in priced:
+            ds = result["deflated_sharpe"]
+            assert ds["deflated_sharpe_ratio"] == 0.0, (kwargs, result["params"])
+            assert ds["p_value"] == 1.0, (kwargs, result["params"])
+            assert ds["z_score"] is None, (kwargs, result["params"])
+            assert ds["n_trials"] == full_grid, (kwargs, result["params"])
+
+    # --- 4: walk-forward aggregate on random train / constant OOS --------
+    wf_data = _make_random_then_constant_data(periods=400, split=252, seed=7)
+    wf = walk_forward_analysis(
+        data=wf_data,
+        strategy_factory=factory,
+        param_grid=grid,
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0,
+        slippage=0.0,
+        impact_coefficient=0.0,
+        borrow_cost=0.0,
+        funding_cost=0.0,
+        apply_deflation=True,
+    )
+    ds = wf["summary"]["deflated_sharpe"]
+    assert ds is not None
+    assert ds["deflated_sharpe_ratio"] == 0.0
+    assert ds["p_value"] == 1.0
+    assert ds["z_score"] is None
+    assert ds["n_trials"] >= 1
+    assert wf["summary"]["n_periods"] >= 1
 
 
 def test_out_of_sample_validation_multiple_benchmarks_deflated_alpha():
@@ -3530,6 +3716,7 @@ def main() -> int:
         ("test_cost_sweep_dsr_parity_across_paths", test_cost_sweep_dsr_parity_across_paths),
         ("test_non_impact_sweep_dsr_parity_across_paths", test_non_impact_sweep_dsr_parity_across_paths),
         ("test_optimize_non_impact_sweep_dsr_parity", test_optimize_non_impact_sweep_dsr_parity),
+        ("test_degenerate_constant_return_dsr_consistency", test_degenerate_constant_return_dsr_consistency),
         ("test_benchmark_stats_with_splits_produces_finite_inference", test_benchmark_stats_with_splits_produces_finite_inference),
         ("test_benchmark_stats_with_splits_regression_pins_corrected_values", test_benchmark_stats_with_splits_regression_pins_corrected_values),
         ("test_cli_walk_forward_commission_sweep", test_cli_walk_forward_commission_sweep),

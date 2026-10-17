@@ -3,34 +3,31 @@
 ## Repository state (as of this session)
 
 - Working tree has 1 modified file (`skills/quantitative-backtesting/tests/test_walk_forward.py`), test-only change, uncommitted.
-- Test suite: **280/280 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`), up from 279 (1 new test added).
-- Standalone runner `python3 skills/quantitative-backtesting/tests/test_walk_forward.py`: **84/84 passed** (was 83/83).
-- Root end-to-end script `verify_end_to_end.py`: not re-run this session (passed in prior session).
+- Test suite: **281/281 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`), up from 280 (1 new test added).
 
 ## What changed this session
 
-### Extended the DSR parity guard to the optimize subcommand's non-impact cost sweeps
+### Added degenerate/constant-return DSR consistency test (HANDOFF follow-up #1)
 
-The prior handoff's `test_cost_sweep_dsr_parity_across_paths` guarded only `--impact-coefficients` sweeps across walk-forward/oos/cpcv/monte-carlo (no optimize), and `test_non_impact_sweep_dsr_parity_across_paths` guarded the four non-impact sweeps across those same four paths — but neither covered the `optimize` subcommand's `parameter_optimization_*_sweep.json` artifacts. A regression in per-cost trial counting for the optimize path would have gone unnoticed while the sweep still "ran".
+`deflated_sharpe_ratio` must emit the conservative degenerate dict (DSR=0, p=1, z_score=None) for zero-variance returns, and no analysis path may emit a spurious finite-z value on constant data.
 
-**Added `test_optimize_non_impact_sweep_dsr_parity` in `skills/quantitative-backtesting/tests/test_walk_forward.py`:**
-- Runs all four non-impact sweeps (borrow / funding / commission / slippage) for the `optimize` subcommand on the same 9-combo grid / 600-period data (seed 11), with `--deflate`.
-- For each of the 4 sweep artifacts asserts:
-  - 3 rows written, `deflated_sharpe` present and in [0, 1] for every row.
-  - `deflated_sharpe_n_trials` is **cost-stable** (identical across the 3 costs) — the grid is unchanged, so the counting basis cannot drift.
-  - `n_trials >= 1`.
-- Registered in `main()`'s test list.
+**Added `test_degenerate_constant_return_dsr_consistency` in `skills/quantitative-backtesting/tests/test_walk_forward.py`:**
+1. Unit contract: `deflated_sharpe_ratio` on exactly-constant returns → DSR=0 / p=1 / z_score=None / n_trials preserved; non-constant series stay on the finite-z path.
+2. `parameter_optimization(apply_deflation=True)` on constant-return data: every combo's `deflated_sharpe` dict is degenerate with `n_trials == 9` (full grid).
+3. Cost basis: varying borrow / funding / commission / slippage does not change `n_trials` and keeps every combo on the degenerate DSR — the grid is unchanged, so the multiple-testing counting basis cannot drift.
+4. `walk_forward_analysis` aggregate on random train / exactly-constant out-of-sample: emits the degenerate aggregate DSR dict instead of a spurious finite-z value.
 
-**No production code changed.** Test-only; behavior unchanged. Verified: 280/280 passing (pytest) and 84/84 (standalone).
+Helpers added: `_make_flat_ohlcv_data` (exactly zero returns), `_make_constant_return_ohlcv_data` (exactly constant nonzero returns via recursive close), `_make_random_then_constant_data`, and `_ConstantLongStrategy` stub (always-long, no indicator-warmup zeros so raw constancy survives into strategy returns). Registered in `main()`'s test list.
 
-## Empirically verified optimize sweep DSR basis (evidence, not assumption)
-
-On the canonical 9-combo grid / 600-period data (seed 11), each optimize non-impact sweep is internally cost-stable: `deflated_sharpe_n_trials == n_combos == 9` across all 3 costs, and `deflated_sharpe` stays in [0, 1] for every row.
+**No production code changed.** Test-only; behavior unchanged. Verified: 76/76 in test_walk_forward.py, 281/281 full skill suite.
 
 ## What remains unresolved
 
-- Candidate follow-ups (pick one):
-  1. **Degenerate/constant-return DSR consistency**: `deflated_sharpe_ratio` emits DSR=0/p=1 for zero-variance returns; verify all four sweep paths emit identical degenerate dicts (currently OOS uses `len(oos_returns) > 1`, monte-carlo uses `len(returns.dropna()) >= 2`).
-  2. **Document the DSR methodology** in `skills/quantitative-backtesting/SKILL.md` or a references file, since the parity invariant is now executable-guarded across all five sweep kinds (impact, borrow, funding, commission, slippage) for four paths plus optimize's cost sweeps, but not yet written down for researchers.
+- **Document the DSR methodology** in `skills/quantitative-backtesting/SKILL.md` or `references/`: the parity invariant, the degenerate contract, and the counting basis are now executable-guarded but not written down for researchers (prior follow-up #2).
+
+## Notes on approaches
+
+- `100 * (1.001 ** t)` is NOT exactly constant in floating point (nunique=3) and does not reach the degenerate branch; use flat prices or recursive `close[t] = close[t-1] * (1 + r)` for exact constancy.
+- CLI-level degenerate sweep artifacts are not feasible with real strategies (indicator warmup emits zeros, breaking exact zero variance); the guarantee is covered at unit/function level instead.
 
 (End of file)
