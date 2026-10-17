@@ -969,6 +969,36 @@ def test_cli_multi_symbol_writes_survivorship_artifact():
         assert metrics["total_trades"] > 0
 
 
+def test_cli_multi_symbol_survivorship_sets_bias_controls_engaged():
+    """A --multi-symbol run without --validate-point-in-time still reports
+    bias_controls_engaged=True because survivorship screening ran."""
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "multi.csv")
+        _write_multi_symbol_csv(csv_path)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest", "--data", csv_path, "--multi-symbol",
+            "--strategy", "cross_sectional_momentum",
+            "--params", '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}',
+            "--output", out_dir,
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+
+        assert rc == 0
+
+        summary_path = os.path.join(out_dir, "tear_sheet_summary.json")
+        assert os.path.exists(summary_path)
+        with open(summary_path) as f:
+            summary = json.load(f)
+        assert summary.get("bias_controls_engaged") is True, \
+            f"Expected bias_controls_engaged=True, got {summary.get('bias_controls_engaged')}"
+        assert "survivorship_bias" in summary
+
+
 def main() -> int:
     tests = [
         ("signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
