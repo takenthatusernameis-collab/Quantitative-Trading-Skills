@@ -9,32 +9,28 @@
 
 ## What changed this session
 
-No source changes. This session executed the prior agent's handoff by:
-- Inspecting repository state, tests, and the quantitative-backtesting skill implementation.
-- Confirming current state matches the prior handoff (multi-asset universe support only exists in `run_backtest --multi-symbol`; walk-forward/CPCV/Monte Carlo/OOS have no panel/multi-symbol support; `benchmark_cost_is_periodic` and per-benchmark Deflated Alpha multiple-testing correction are implemented and present in `results/metrics.json`).
-- Re-verifying the full quant backtesting test suite baseline is green in this environment (all test files exit 0).
-- Running `verify_end_to_end.py` end-to-end (passes).
+No source changes. This session confirmed the prior agent's assignment is complete:
+- Re-verified the full quant backtesting test suite baseline is green in this environment (296 passed, 22 warnings, ~47s).
+- Re-ran `verify_end_to_end.py` end-to-end (passes): `benchmark_cost_is_periodic` accepted/propagated/recorded; different cost models produce different benchmark returns.
+- Confirmed no concrete research need has arisen; panel/multi-asset support in walk-forward/CPCV/Monte Carlo/OOS remains deferred per the standing hold directive.
 
 ## What was verified
 
-- All quant backtesting test files pass (exit 0); explicit counts above.
-- `verify_end_to_end.py` passes: `benchmark_cost_is_periodic` end-to-end works (flag accepted/propagated/recorded; different cost models -> different benchmark returns).
-- Confirmed panel/multi-asset support is limited to `run_backtest --multi-symbol` (with survivorship detection, provenance, bias_controls_engaged=True). walk_forward.py, monte_carlo.py (CLI paths) have no `--multi-symbol` flag and no survivorship_bias integration. run_backtest.py already implements the pattern: `load_multi_symbol()` + `detect_survivorship_bias()` + sets `bias_controls_engaged=True` when survivorship/PIT engaged.
-- Confirmed panel/multi-asset support is limited to `run_backtest --multi-symbol` (with survivorship detection, provenance, bias_controls_engaged=True). walk_forward.py, monte_carlo.py (CLI paths) have no `--multi-symbol` flag and no survivorship_bias integration. run_backtest.py already implements the pattern: `load_multi_symbol()` + `detect_survivorship_bias()` + sets `bias_controls_engaged=True` when survivorship/PIT engaged.
+- All quant backtesting test files pass (exit 0); explicit counts: data_loader 29/29, performance 30/30, run_backtest 41/41, strategy_builder 27/27, cpcv 16/16, monte_carlo 14/14, generate_sample_data 1/1; walk_forward and reporting silent-on-pass, exit 0. Baseline recorded as 296/296.
+- `verify_end_to_end.py` passes.
+- Confirmed panel/multi-asset support is limited to `run_backtest --multi-symbol` (survivorship detection, provenance, bias_controls_engaged=True). walk_forward.py, monte_carlo.py CLI paths have no `--multi-symbol` flag and no survivorship_bias integration (zero references in walk_forward.py).
 
 ## What remains unresolved
 
-**No panel/multi-asset support in the walk-forward / CPCV / Monte Carlo / OOS CLIs.** A multi-asset universe can currently only be backtested via `run_backtest --multi-symbol`, which runs a single panel backtest with no rolling validation. There is no walk-forward/CPCV/Monte Carlo/OOS over a multi-symbol universe, and no survivorship detection there. This is a larger feature gap, not a small enhancement; defer unless a concrete research need arises.
-
-The prior handoff's deferred item remains valid. The test `test_cli_multi_symbol_survivorship_sets_bias_controls_engaged` covers the run_backtest path.
+**No panel/multi-asset support in the walk-forward / CPCV / Monte Carlo / OOS CLIs.** A multi-asset universe can currently only be backtested via `run_backtest --multi-symbol` (single panel backtest, no rolling validation). Deferred per standing hold; not a small enhancement.
 
 ## Next task (precise, evidence-backed)
 
-Do **not** implement panel support in walk-forward/CPCV/Monte Carlo/OOS unless a concrete research need arises. The quant backtesting skill is stable with all 296 tests passing.
+Hold unless a concrete research need arises. The quant backtesting skill is stable with all 296 tests passing.
 
 If a concrete research need arises, the bounded entry point is:
 1. Add single-strategy panel universe support to the `walk_forward` CLI (or its subcommands), loading multi-symbol panels (analogous to `run_backtest --multi-symbol`) via `load_multi_symbol()` from data_loader, with `detect_survivorship_bias()` applied to the universe used for that analysis. Add `--multi-symbol` flag to common/walk-forward/CPCV/OOS/monte-carlo CLIs as needed.
-2. Thread `survivorship_bias` into walk-forward/CPCV/Monte Carlo/OOS results so it appears in tear sheets/summaries (reporting already renders survivorship_bias when present; ensure paths populate it in `tear_sheet_summary.json`/equivalent).
+2. Thread `survivorship_bias` into walk-forward/CPCF/Monte Carlo/OOS results so it appears in tear sheets/summaries (reporting already renders survivorship_bias when present; ensure paths populate it in `tear_sheet_summary.json`/equivalent).
 3. Set `bias_controls_engaged=True` when survivorship/PIT is engaged in those paths (extend to survivorship cases).
 4. Verify end-to-end: generated artifacts must include `survivorship_bias` and `bias_controls_engaged=True` in `tear_sheet_summary.json` (or equivalent summary), with tests covering the new paths.
 
@@ -42,7 +38,7 @@ Constraints: Keep changes minimal and reversible; do not scope creep to generic 
 
 ## Evidence
 
-- Tests: 296 passed, 22 warnings (no failures). See pytest output.
+- Tests: 296 passed, 22 warnings (no failures).
 - run_backtest multi-symbol pattern: `run_backtest.py` lines ~510-540 show `load_multi_symbol()` + `detect_survivorship_bias()` + artifact writing + setting bias controls.
 - Data loader has `detect_survivorship_bias()` (data_loader.py ~494+) and `load_multi_symbol()` (~622+).
-- walk_forward.py imports from data_loader but has no multi-symbol handling; no survivorship_bias usage.
+- walk_forward.py imports from data_loader but has no multi-symbol handling; no survivorship_bias usage (grep: 0 matches).
