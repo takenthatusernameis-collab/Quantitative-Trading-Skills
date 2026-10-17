@@ -2993,6 +2993,7 @@ def run_cpcv(args) -> int:
             report_results["benchmark_provenance"] = benchmark_provenance
         if pit_results is not None:
             report_results["point_in_time_validation"] = pit_results
+        report_results["bias_controls_engaged"] = bool(pit_results is not None)
         metrics = calculate_metrics(report_results)
         generate_report(metrics, args.output, symbol=args.symbol, strategy_name=f"{args.strategy}_cpcv")
         generate_tear_sheet(
@@ -3770,6 +3771,7 @@ def run_walk_forward(args) -> int:
             report_results["benchmark_provenance"] = benchmark_provenance
         if pit_results is not None:
             report_results["point_in_time_validation"] = pit_results
+        report_results["bias_controls_engaged"] = bool(pit_results is not None)
         metrics = calculate_metrics(report_results)
         generate_report(metrics, args.output, symbol=args.symbol, strategy_name=f"{args.strategy}_walk_forward")
         generate_tear_sheet(
@@ -5203,6 +5205,7 @@ def run_out_of_sample_validation(args) -> int:
                     report_results["benchmark_provenance"] = benchmark_provenance
         if pit_results is not None:
             report_results["point_in_time_validation"] = pit_results
+        report_results["bias_controls_engaged"] = bool(pit_results is not None)
         metrics = calculate_metrics(report_results)
         if dsr is not None:
             metrics["deflated_sharpe"] = dsr
