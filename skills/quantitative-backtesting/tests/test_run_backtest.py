@@ -1758,3 +1758,68 @@ def test_cli_run_backtest_slippage_sweep():
         assert len(payload["results"]) == 3
         returns = [r["total_return"] for r in payload["results"]]
         assert returns[2] <= returns[0]
+
+def test_cli_multi_benchmark_provenance_shapes():
+    """Two-benchmark run writes list with both checksums; single keeps dict; none omits artifact."""
+    from unittest.mock import patch
+    import json
+    import tempfile
+    import os
+    import sys
+    from io import StringIO
+    from contextlib import redirect_stdout, redirect_stderr
+
+    # Case 1: two benchmarks
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        b1 = os.path.join(tmpdir, "b1.csv")
+        b2 = os.path.join(tmpdir, "b2.csv")
+        _write_ohlcv_csv(csv_path)
+        _write_ohlcv_csv(b1, seed=1)
+        _write_ohlcv_csv(b2, seed=99)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = ["run_backtest", "--data", csv_path, "--strategy", "sma_crossover",
+                "--params", '{"fast_period": 10, "slow_period": 30}',
+                "--output", out_dir, "--benchmark", b1, b2]
+        with patch.object(sys, "argv", argv), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0
+        bp = os.path.join(out_dir, 'benchmark_provenance.json')
+        with open(bp) as f:
+            d = json.load(f)
+        assert isinstance(d, list)
+        assert len(d) == 2
+        assert d[0]['checksum'] and d[1]['checksum']
+        assert d[0]['checksum'] != d[1]['checksum']
+
+    # Case 2: single benchmark
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        b1 = os.path.join(tmpdir, "b1.csv")
+        _write_ohlcv_csv(csv_path)
+        _write_ohlcv_csv(b1, seed=1)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = ["run_backtest", "--data", csv_path, "--strategy", "sma_crossover",
+                "--params", '{"fast_period": 10, "slow_period": 30}',
+                "--output", out_dir, "--benchmark", b1]
+        with patch.object(sys, "argv", argv), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0
+        bp = os.path.join(out_dir, 'benchmark_provenance.json')
+        with open(bp) as f:
+            d = json.load(f)
+        assert isinstance(d, dict)
+
+    # Case 3: no benchmark
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = ["run_backtest", "--data", csv_path, "--strategy", "sma_crossover",
+                "--params", '{"fast_period": 10, "slow_period": 30}',
+                "--output", out_dir]
+        with patch.object(sys, "argv", argv), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0
+        bp = os.path.join(out_dir, 'benchmark_provenance.json')
+        assert not os.path.exists(bp)

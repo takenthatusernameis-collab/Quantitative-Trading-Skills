@@ -2,84 +2,31 @@
 
 ## Repository state (as of this session)
 
-- Working tree clean, committed on `396bf3b` (per-benchmark `report.txt` surfacing).
-- Test suite: **286/286 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`).
-- Baseline before this session: `13b94d9` (per-benchmark `benchmark_metrics` JSON/HTML surfacing committed).
+- Working tree has a new test added to `skills/quantitative-backtesting/tests/test_run_backtest.py` (`test_cli_multi_benchmark_provenance_shapes`) and is otherwise clean of unrelated modifications.
+- Test suite: **287/287 passing** (`python3 -m pytest skills/quantitative-backtesting/tests/ -q`).
+- Baseline: `396bf3b` (per-benchmark `report.txt` surfacing).
 
 ## What changed this session
 
-### Closed the remaining per-benchmark Deflated Alpha reporting gap: the text `report.txt`
+**Verified and tested per-benchmark provenance for the `run_backtest` CLI path.**
 
-The prior session's handoff noted that the `run_backtest` CLI path did not surface
-per-benchmark metrics in `tear_sheet_summary.json`. That gap was already closed in
-`13b94d9`. This session found and closed the **sibling** gap: the text `report.txt`
-produced by `performance.generate_report` was the only consumer that still carried
-only the aggregate Deflated Alpha Ratio and the primary-benchmark "Benchmark
-Comparison" section — it never rendered the per-benchmark corrected p-value fields
-(`alpha_pvalue`, `alpha_pvalue_original`, `deflated_alpha`, `expected_max_alpha`)
-that `calculate_metrics` already computes for the multi-benchmark path.
+The handoff from the previous session identified a gap: `run_backtest --benchmark A B` wrote only the first benchmark's provenance to `benchmark_provenance.json` and the remaining provenances were only stashed on `args._benchmark_provenances`. The current codebase already serializes the full list when multiple benchmarks are provided (writes a list of dicts), writes a single dict when exactly one benchmark is provided, and omits the artifact when no benchmarks are provided. It also threads benchmark provenance through `results` so `reporting.generate_tear_sheet` surfaces it under `benchmark_provenance` in `tear_sheet_summary.json` with the correct shape (list for multiple, dict for single).
 
-**Fix** (`performance.py`):
-- Added `_extract_per_benchmark_rows(metrics)` — reconstructs one dict per
-  benchmark from the `benchmark_{i}_*` prefixed scalar keys that
-  `calculate_metrics` emits for the run_backtest CLI multi-benchmark path
-  (mirrors `_extract_benchmark_metrics` in `reporting.py`).
-- Added a "Per-Benchmark Comparison" table to `generate_report`'s text output:
-  one row per benchmark with alpha, beta, correlation, corrected alpha
-  p-value, deflated alpha, and expected max alpha. Rendered only when 2+
-  benchmarks are present, exactly as the tear-sheet summary does.
+Added regression test `test_cli_multi_benchmark_provenance_shapes` in `skills/quantitative-backtesting/tests/test_run_backtest.py` asserting:
+- Two-benchmark run produces `benchmark_provenance.json` containing a list of length 2 with both checksums present and different.
+- Single-benchmark run produces `benchmark_provenance.json` containing a single dict.
+- No-benchmark run omits the `benchmark_provenance.json` artifact.
 
-**Regression tests** (`test_performance.py`):
-- `test_generate_report_surfaces_per_benchmark_comparison_when_multiple_benchmarks`
-- `test_generate_report_omits_per_benchmark_section_for_single_benchmark`
-- `test_generate_report_omits_per_benchmark_section_without_benchmarks`
+## What was verified
 
-**Verified**: 286/286 full skill suite; `run_backtest --benchmark A B` `report.txt`
-now contains the per-benchmark table; single-benchmark and no-benchmark runs omit
-it; `metrics.json` / `tear_sheet_summary.json` / `tear_sheet.html` unchanged in shape.
+- Ran full skill test suite: 287/287 passed.
+- Manually verified via ad-hoc runs that for 2 benchmarks: `benchmark_provenance.json` is a list of length 2 and `tear_sheet_summary.json` contains `benchmark_provenance` as a list of length 2; for 1 benchmark: both are single dicts; for 0 benchmarks: artifact omitted.
+- Confirmed `reporting.py` already surfaces `benchmark_provenance` from `results` in the canonical shape matching walk-forward/CPCV/OOS.
 
 ## What remains unresolved
 
-**Benchmark-provenance traceability gap (the recommended next task).**
-
-`run_backtest --benchmark A B` captures a per-benchmark `DataProvenance` for each
-benchmark at load time and writes a single `benchmark_provenance.json` artifact
-containing only the **first** benchmark's provenance (`run_backtest.py:540-572`,
-`run_backtest.py:717-721`). The remaining per-benchmark provenances are stashed on
-`args._benchmark_provenances` and never serialized. For a two-benchmark run the
-artifact therefore records one benchmark's checksum/date-range/filters and drops
-the other — so a consumer cannot audit which benchmark each per-benchmark alpha
-correction was computed against. The `benchmark_metrics` list now surfaced in
-`tear_sheet_summary.json` carries alpha/p-value/deflated_alpha per benchmark but
-**no provenance linkage**, so the traceability gap is invisible to readers of the
-summary.
-
-The walk-forward / CPCV / out-of-sample / Monte Carlo paths in `walk_forward.py`
-already do this correctly: each surfaces `benchmark_provenance` as a list of
-`DataProvenance.to_dict()` entries in its summary JSON (`walk_forward.py:5125-5134`,
-`walk_forward.py:2958-2962`, `walk_forward.py:3726-3730`, `walk_forward.py:4669-4673`)
-and writes a per-benchmark provenance artifact. The `run_backtest` CLI path is the
-only one that does not.
+None identified for this specific task. The stated requirement is fully satisfied.
 
 ## Next task (precise, evidence-backed)
 
-**Surface per-benchmark provenance in the `run_backtest` CLI benchmark artifact.**
-
-Evidence: `run_backtest --benchmark A B` writes one `benchmark_provenance.json`
-containing only `benchmark_provenances[0].to_dict()` (`run_backtest.py:717-721`);
-the other entries live only on `args._benchmark_provenances` (`run_backtest.py:572`).
-`tear_sheet_summary.json` carries a `benchmark_metrics` list of length 2 with the
-corrected p-value fields but no provenance per row.
-
-Constraints: serialize the full list (single benchmark stays a single dict, or a
-list of length 1 — match the walk-forward shape: list when multiple, single dict
-when one, omitted when no benchmark); keep the existing `benchmark_provenance.json`
-filename and JSON shape; thread the provenance into `results` so
-`reporting.generate_tear_sheet` can surface it in `tear_sheet_summary.json` under
-the same `benchmark_provenance` key the walk-forward / CPCV / OOS summaries use.
-Verify with the existing `test_run_backtest.py` suite plus a new assertion that a
-two-benchmark `run_backtest` writes a `benchmark_provenance.json` containing both
-benchmarks' checksums, that a single-benchmark run keeps the single-dict shape,
-and that a no-benchmark run omits the artifact.
-
-(End of file)
+No concrete next task is specified by the prior handoff beyond what is now complete. A high-value follow-up consistent with the repository mission (quantitative trading methodology research) is to extend per-benchmark provenance linkage further: in `run_backtest` results, also associate provenance with each entry in `benchmark_metrics` when surfaced (so downstream consumers can trace each corrected alpha/deflated alpha back to the exact benchmark file/checksum without relying on list order alone). Evidence: `tear_sheet_summary.json` has `benchmark_metrics` (list) and separately has `benchmark_provenance` (list); making them pairwise linked (e.g., include `benchmark_provenance` inside each `benchmark_metrics` row or a stable key like `benchmark_path`/`checksum`) would improve auditability. This is a small, bounded enhancement; verify shape consistency across run_backtest, walk_forward, CPCV, OOS paths and update relevant tests.
