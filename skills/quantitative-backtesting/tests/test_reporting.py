@@ -664,6 +664,74 @@ class TestTearSheet(unittest.TestCase):
                 summary = json.load(f)
             self.assertNotIn("bias_controls_engaged", summary)
 
+    def test_generate_tear_sheet_surfaces_survivorship_bias(self):
+        """The survivorship-bias detection artifact is surfaced in both HTML
+        and JSON summary when present at the results level (multi-symbol
+        panel backtests)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            results["survivorship_bias"] = {
+                "bias_score": 0.42,
+                "surviving_symbols": ["SURV"],
+                "entered_symbols": [{"symbol": "LATE", "start_date": "2020-03-01"}],
+                "exited_symbols": [{"symbol": "EARLY", "end_date": "2021-06-01"}],
+                "insufficient_data": ["LOW"],
+                "large_gaps": [{"symbol": "GAP", "max_gap_days": 45}],
+            }
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Survivorship Bias Detection", html)
+            self.assertIn("bias_score", html)
+            self.assertIn("surviving_symbols", html)
+            self.assertIn("entered_symbols", html)
+            self.assertIn("exited_symbols", html)
+            self.assertIn("insufficient_data", html)
+            self.assertIn("large_gaps", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("survivorship_bias", summary)
+            self.assertEqual(summary["survivorship_bias"]["bias_score"], 0.42)
+            self.assertEqual(summary["survivorship_bias"]["surviving_symbols"], ["SURV"])
+
+    def test_generate_tear_sheet_omits_survivorship_bias_when_absent(self):
+        """Without survivorship_bias, the section and summary key are omitted
+        (backward compatible)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertNotIn("survivorship_bias", summary)
+
+    def test_generate_tear_sheet_surfaces_survivorship_bias_without_provenance(self):
+        """The survivorship section renders even when no data provenance /
+        point-in-time / bias-controls artifacts are present (the common
+        panel-backtest case)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            results["survivorship_bias"] = {
+                "bias_score": 0.1,
+                "surviving_symbols": ["A", "B"],
+                "entered_symbols": [],
+                "exited_symbols": [],
+                "insufficient_data": [],
+                "large_gaps": [],
+            }
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Survivorship Bias Detection", html)
+
     def test_generate_tear_sheet_handles_missing_equity(self):
         """Tear sheet does not crash when results lack equity_curve."""
         with tempfile.TemporaryDirectory() as tmpdir:

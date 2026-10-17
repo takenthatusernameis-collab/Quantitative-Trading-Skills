@@ -190,6 +190,24 @@ def _json_safe(obj: Any) -> Any:
     return str(obj)
 
 
+def _fmt_prov(v: Any) -> str:
+    """Format a provenance/survivorship value for the tear sheet table.
+
+    Mirrors the inline formatter previously defined inside the Data
+    Provenance section; hoisted to module level so the Survivorship Bias
+    Detection section can reuse it without duplicating the logic.
+    """
+    if v is None:
+        return "N/A"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (dict, list)):
+        return json.dumps(v)
+    if isinstance(v, (int, float)):
+        return str(v)
+    return str(v)
+
+
 def _format_params(params: Optional[Dict[str, Any]]) -> str:
     """Format a params dict as a readable 'k1=v1, k2=v2' string."""
     if not params:
@@ -567,17 +585,6 @@ def generate_tear_sheet(
         html_parts.append("<h2>Data Provenance</h2>")
         html_parts.append("<table><tr><th>Field</th><th>Value</th></tr>")
 
-        def fmt_prov(v):
-            if v is None:
-                return "N/A"
-            if isinstance(v, bool):
-                return "true" if v else "false"
-            if isinstance(v, (dict, list)):
-                return json.dumps(v)
-            if isinstance(v, (int, float)):
-                return str(v)
-            return str(v)
-
         prov_fields = [
             "source_path", "load_timestamp", "file_format", "file_size_bytes",
             "symbol_filter", "start_date_filter", "end_date_filter",
@@ -599,41 +606,50 @@ def generate_tear_sheet(
                 for field in prov_fields:
                     if field in prov:
                         html_parts.append(
-                            f"<tr><td>{sym} / {field}</td><td class='metric'>{fmt_prov(prov[field])}</td></tr>"
+                            f"<tr><td>{sym} / {field}</td><td class='metric'>{_fmt_prov(prov[field])}</td></tr>"
                         )
         elif isinstance(data_prov, dict):
             for field in prov_fields:
                 if field in data_prov:
                     html_parts.append(
-                        f"<tr><td>{field}</td><td class='metric'>{fmt_prov(data_prov[field])}</td></tr>"
+                        f"<tr><td>{field}</td><td class='metric'>{_fmt_prov(data_prov[field])}</td></tr>"
                     )
 
         if pit_val is not None:
             for field in ["passed", "violations", "warnings"]:
                 if field in pit_val:
                     html_parts.append(
-                        f"<tr><td>point_in_time / {field}</td><td class='metric'>{fmt_prov(pit_val[field])}</td></tr>"
+                        f"<tr><td>point_in_time / {field}</td><td class='metric'>{_fmt_prov(pit_val[field])}</td></tr>"
                     )
 
-        # Bias-controls engagement flag (point-in-time validation, survivorship
-        # screening, and multiple-testing deflation). Mirrors the JSON summary
-        # key so the HTML tear sheet is traceable to the same signal.
-        bias_flag = results.get("bias_controls_engaged")
-        if bias_flag is None:
-            # Fall back to the analysis-result summaries (walk-forward / CPCV /
-            # Monte Carlo) when the flag was recorded there rather than at the
-            # top-level results dict.
-            for _analysis in (analysis or {}).values():
-                if isinstance(_analysis, dict) and isinstance(_analysis.get("summary"), dict):
-                    bias_flag = _analysis["summary"].get("bias_controls_engaged")
-                    if bias_flag is not None:
-                        break
         if bias_flag is not None:
             html_parts.append(
                 f"<tr><td>bias_controls_engaged</td>"
-                f"<td class='metric'>{fmt_prov(bool(bias_flag))}</td></tr>"
+                f"<td class='metric'>{_fmt_prov(bool(bias_flag))}</td></tr>"
             )
 
+        html_parts.append("</table>")
+
+    # Survivorship-bias detection artifact (multi-symbol panels). Threaded
+    # onto results["survivorship_bias"] by the run_backtest CLI path; the
+    # tear sheet surfaces it so a panel backtest is traceable to the
+    # entered/exited/insufficient/gap analysis that flagged universe
+    # selection risk. Rendered in its own section so it appears even when
+    # no data provenance / point-in-time / bias-controls artifacts are
+    # present (the common case for a panel backtest run without --validate-point-in-time).
+    surv = results.get("survivorship_bias")
+    if isinstance(surv, dict):
+        html_parts.append("<h2>Survivorship Bias Detection</h2>")
+        html_parts.append("<table><tr><th>Field</th><th>Value</th></tr>")
+        for field in [
+            "bias_score", "surviving_symbols", "entered_symbols",
+            "exited_symbols", "insufficient_data", "large_gaps",
+        ]:
+            if field in surv:
+                html_parts.append(
+                    f"<tr><td>{field}</td>"
+                    f"<td class='metric'>{_fmt_prov(surv[field])}</td></tr>"
+                )
         html_parts.append("</table>")
 
     cpcv_results = analysis.get("cpcv")
@@ -1013,6 +1029,13 @@ def generate_tear_sheet(
         summary["point_in_time_validation"] = _json_safe(
             results["point_in_time_validation"]
         )
+    # Survivorship-bias detection artifact (multi-symbol panels). Threaded
+    # onto results["survivorship_bias"] by the run_backtest CLI path; the
+    # tear-sheet JSON carries it so a panel backtest is traceable to the
+    # entered/exited/insufficient/gap analysis that flagged universe
+    # selection risk. Omitted when absent (backward compatible).
+    if results.get("survivorship_bias"):
+        summary["survivorship_bias"] = _json_safe(results["survivorship_bias"])
     # Bias-controls engagement flag (PIT + deflation controls). Mirrors the
     # walk-forward / CPCV / Monte Carlo summaries so the tear-sheet JSON is
     # traceable to the same signal; omitted when absent (backward compatible).
