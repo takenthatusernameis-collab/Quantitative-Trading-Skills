@@ -384,6 +384,13 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     if survivorship is not None:
         results["survivorship_bias"] = survivorship
 
+    # Bias-controls engagement flag (point-in-time validation and/or
+    # survivorship screening on this path). Multiple-testing deflation
+    # (Deflated Sharpe) is recorded separately in metrics; this flag is
+    # about bias controls engaged during backtest setup/validation.
+    if pit_result is not None or survivorship is not None:
+        results["bias_controls_engaged"] = True
+
     # Optional buy-and-hold benchmark baseline(s).
     # The benchmark return for period t is the close-to-close return
     # from t-1 to t (no shift): the strategy already trades at the next
