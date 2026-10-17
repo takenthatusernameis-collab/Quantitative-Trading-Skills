@@ -225,7 +225,11 @@ def monte_carlo_simulation(
 
         # Calculate metrics
         total_ret = equity.iloc[-1] - 1
-        ann_ret = (1 + total_ret) ** (ann_factor / n_obs) - 1
+        growth = 1 + total_ret
+        if growth <= 0 or not np.isfinite(growth):
+            ann_ret = float("nan")
+        else:
+            ann_ret = growth ** (ann_factor / n_obs) - 1
         ann_vol = sim_returns.std() * np.sqrt(ann_factor)
 
         excess = sim_returns - 0.02 / ann_factor
