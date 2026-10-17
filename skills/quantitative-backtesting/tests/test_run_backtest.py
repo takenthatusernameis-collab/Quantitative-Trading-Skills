@@ -1823,3 +1823,70 @@ def test_cli_multi_benchmark_provenance_shapes():
         assert rc == 0
         bp = os.path.join(out_dir, 'benchmark_provenance.json')
         assert not os.path.exists(bp)
+
+
+def test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance():
+    """The run_backtest CLI tear-sheet JSON must pair each benchmark_metrics
+    row with the provenance of the exact benchmark file it came from, so
+    downstream consumers can trace corrected alpha/deflated alpha back to the
+    file and checksum without relying on list order alone.
+    """
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        b1 = os.path.join(tmpdir, "b1.csv")
+        b2 = os.path.join(tmpdir, "b2.csv")
+        _write_ohlcv_csv(csv_path)
+        _write_ohlcv_csv(b1, seed=1)
+        _write_ohlcv_csv(b2, seed=99)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = ["run_backtest", "--data", csv_path, "--strategy", "sma_crossover",
+                "--params", '{"fast_period": 10, "slow_period": 30}',
+                "--output", out_dir, "--benchmark", b1, b2]
+        with patch.object(sys, "argv", argv), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0
+
+        ts_path = os.path.join(out_dir, "tear_sheet_summary.json")
+        with open(ts_path) as f:
+            ts = json.load(f)
+
+        bm = ts.get("benchmark_metrics")
+        assert isinstance(bm, list), (
+            f"tear-sheet benchmark_metrics missing or not a list. Keys: {sorted(ts.keys())}"
+        )
+        assert len(bm) == 2, f"expected 2 benchmark_metrics rows, got {len(bm)}"
+
+        checksums = []
+        for i, row in enumerate(bm):
+            assert "benchmark_provenance" in row, (
+                f"benchmark_metrics[{i}] missing benchmark_provenance"
+            )
+            prov = row["benchmark_provenance"]
+            assert isinstance(prov, dict), (
+                f"benchmark_metrics[{i}].benchmark_provenance not a dict"
+            )
+            assert prov.get("checksum"), (
+                f"benchmark_metrics[{i}] provenance missing checksum"
+            )
+            assert prov["source_path"] in (b1, b2), (
+                f"benchmark_metrics[{i}] provenance source_path not a benchmark file"
+            )
+            checksums.append(prov["checksum"])
+
+        assert checksums[0] != checksums[1], (
+            f"both benchmark rows share the same checksum {checksums[0]}"
+        )
+
+        # Top-level benchmark_provenance list matches the per-row provenances.
+        prov_list = ts.get("benchmark_provenance")
+        assert isinstance(prov_list, list), (
+            f"top-level benchmark_provenance should be a list, got {type(prov_list)}"
+        )
+        assert len(prov_list) == 2
+        top_checksums = [p["checksum"] for p in prov_list]
+        assert top_checksums == checksums, (
+            f"top-level provenance checksums {top_checksums} do not match "
+            f"per-row checksums {checksums}"
+        )

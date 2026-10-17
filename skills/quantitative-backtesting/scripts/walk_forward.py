@@ -2985,6 +2985,12 @@ def run_cpcv(args) -> int:
             report_results["benchmark"] = benchmark_returns
         elif benchmark_returns_list:
             report_results["benchmark_list"] = benchmark_returns_list
+        # Thread benchmark provenance through the report results so the
+        # tear-sheet summary can associate each benchmark_metrics row with
+        # the exact benchmark file/checksum (mirrors the run_backtest CLI
+        # path, which already serializes it into results["benchmark_provenance"]).
+        if benchmark_provenance is not None:
+            report_results["benchmark_provenance"] = benchmark_provenance
         if pit_results is not None:
             report_results["point_in_time_validation"] = pit_results
         metrics = calculate_metrics(report_results)
@@ -3752,6 +3758,16 @@ def run_walk_forward(args) -> int:
         }
         if benchmark_returns is not None:
             report_results["benchmark"] = benchmark_returns
+        elif benchmark_returns_list:
+            report_results["benchmark_list"] = benchmark_returns_list
+        # Thread benchmark provenance through the report results so the
+        # tear-sheet summary is traceable to the exact benchmark file(s).
+        # Single-benchmark path: benchmark_provenance is a DataProvenance;
+        # multi-benchmark path: it is a list of them (matching the shape of
+        # results["benchmark_list"] / results["benchmark_provenance"] used by
+        # the run_backtest CLI path).
+        if benchmark_provenance is not None:
+            report_results["benchmark_provenance"] = benchmark_provenance
         if pit_results is not None:
             report_results["point_in_time_validation"] = pit_results
         metrics = calculate_metrics(report_results)
@@ -4716,6 +4732,11 @@ def run_monte_carlo(args) -> int:
         mc_base_results["benchmark"] = benchmark_returns
     elif benchmark_returns_list:
         mc_base_results["benchmark_list"] = benchmark_returns_list
+    # Thread benchmark provenance through the tear-sheet results so the
+    # Monte Carlo tear sheet can associate each benchmark_metrics row with
+    # the exact benchmark file/checksum (mirrors the run_backtest CLI path).
+    if benchmark_provenance is not None:
+        mc_base_results["benchmark_provenance"] = benchmark_provenance
     mc_base_metrics = calculate_metrics(mc_base_results)
     if dsr is not None:
         mc_base_metrics["deflated_sharpe"] = dsr
@@ -5170,6 +5191,16 @@ def run_out_of_sample_validation(args) -> int:
             )
             if bench_returns is not None:
                 report_results["benchmark"] = bench_returns
+            # Thread benchmark provenance through the report results so the
+            # tear-sheet summary is traceable to the exact benchmark file.
+            # The report path renders a single benchmark (the first when
+            # multiple were supplied), so thread the provenance of that same
+            # first benchmark when a list was captured.
+            if benchmark_provenance is not None:
+                if isinstance(benchmark_provenance, list) and benchmark_provenance:
+                    report_results["benchmark_provenance"] = benchmark_provenance[0]
+                else:
+                    report_results["benchmark_provenance"] = benchmark_provenance
         if pit_results is not None:
             report_results["point_in_time_validation"] = pit_results
         metrics = calculate_metrics(report_results)

@@ -3936,3 +3936,149 @@ def test_optimize_sweep_omits_deflated_sharpe_without_deflate():
             assert row["bias_controls_engaged"] is True, row
             assert row["deflated_sharpe"] is None, row
             assert row["deflated_sharpe_n_trials"] is None, row
+
+
+def test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance():
+    """The tear-sheet JSON summary must pair each benchmark_metrics row with
+    the provenance of the exact benchmark file it came from, so downstream
+    consumers can trace corrected alpha/deflated alpha back to the file and
+    checksum without relying on list order alone.
+
+    Regression coverage across the multi-benchmark CLI paths (cpcv,
+    walk-forward, optimize, monte-carlo), whose tear sheets render a
+    Per-Benchmark Comparison section. The out-of-sample CLI tear sheet is
+    single-benchmark by design and is covered by a separate test.
+    """
+    grid = '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}'
+
+    # The optimize CLI path writes a parameter_optimization.json artifact
+    # (not a tear sheet); its per-combo benchmark_metrics rows are verified
+    # by the existing test_cli_optimize_multiple_benchmarks test. The
+    # remaining multi-benchmark CLI paths all render a tear sheet.
+    cases = [
+        ("cpcv", ["--n-splits", "5", "--test-size", "0.2"]),
+        ("walk-forward", ["--train-months", "12", "--test-months", "3", "--step-months", "2"]),
+        ("monte-carlo", ["--n-simulations", "30"]),
+    ]
+
+    for cmd, extra in cases:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = os.path.join(tmpdir, "data.csv")
+            bench1_path = os.path.join(tmpdir, "bench1.csv")
+            bench2_path = os.path.join(tmpdir, "bench2.csv")
+            _write_ohlcv_csv(csv_path, periods=800)
+            _write_benchmark_csv(bench1_path, periods=800, seed=99)
+            _write_benchmark_csv(bench2_path, periods=800, seed=7)
+            out_dir = os.path.join(tmpdir, "out")
+            argv = [
+                "walk_forward", cmd,
+                "--data", csv_path,
+                "--benchmark", bench1_path, bench2_path,
+                "--strategy", "sma_crossover",
+                "--param-grid", grid,
+                "--benchmark-commission", "0.001",
+                "--benchmark-slippage", "0.001",
+                "--benchmark-cost-is-periodic",
+            ] + extra + ["--output", out_dir]
+            with patch.object(sys, "argv", argv), \
+                    redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                rc = walk_forward_main()
+            assert rc == 0, f"{cmd} should exit 0, got {rc}"
+
+            ts_path = os.path.join(out_dir, "tear_sheet_summary.json")
+            assert os.path.exists(ts_path), f"{cmd}: tear_sheet_summary.json not written"
+            with open(ts_path) as f:
+                ts = json.load(f)
+
+            bm = ts.get("benchmark_metrics")
+            assert isinstance(bm, list), (
+                f"{cmd}: tear-sheet benchmark_metrics missing or not a list. Keys: {sorted(ts.keys())}"
+            )
+            assert len(bm) == 2, f"{cmd}: expected 2 benchmark_metrics rows, got {len(bm)}"
+
+            # Each row must carry the provenance of its own benchmark file.
+            checksums = []
+            for i, row in enumerate(bm):
+                assert "benchmark_provenance" in row, (
+                    f"{cmd}: benchmark_metrics[{i}] missing benchmark_provenance"
+                )
+                prov = row["benchmark_provenance"]
+                assert isinstance(prov, dict), (
+                    f"{cmd}: benchmark_metrics[{i}].benchmark_provenance not a dict"
+                )
+                assert prov.get("checksum"), (
+                    f"{cmd}: benchmark_metrics[{i}] provenance missing checksum"
+                )
+                assert prov.get("source_path") in (bench1_path, bench2_path), (
+                    f"{cmd}: benchmark_metrics[{i}] provenance source_path not a benchmark file"
+                )
+                checksums.append(prov["checksum"])
+
+            # The two checksums must differ (different benchmark files).
+            assert checksums[0] != checksums[1], (
+                f"{cmd}: both benchmark rows share the same checksum {checksums[0]}"
+            )
+
+            # The top-level benchmark_provenance list must match the per-row
+            # provenances pairwise (same checksums, same order).
+            prov_list = ts.get("benchmark_provenance")
+            assert isinstance(prov_list, list), (
+                f"{cmd}: top-level benchmark_provenance should be a list, got {type(prov_list)}"
+            )
+            assert len(prov_list) == 2, (
+                f"{cmd}: expected 2 benchmark_provenance entries, got {len(prov_list)}"
+            )
+            top_checksums = [p["checksum"] for p in prov_list]
+            assert top_checksums == checksums, (
+                f"{cmd}: top-level provenance checksums {top_checksums} do not match "
+                f"per-row checksums {checksums}"
+            )
+
+
+def test_cli_oos_tear_sheet_carries_provenance():
+    """The out-of-sample tear sheet must carry benchmark_provenance so the
+    report is traceable to the exact benchmark file(s).
+
+    The OOS report path renders a single benchmark (the first when multiple
+    were supplied), so the tear-sheet provenance is dict-shaped in both the
+    single- and multi-benchmark cases.
+    """
+    grid = '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}'
+    for bench_paths, label in [
+        (["bench.csv"], "single"),
+        (["bench1.csv", "bench2.csv"], "multi"),
+    ]:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = os.path.join(tmpdir, "data.csv")
+            _write_ohlcv_csv(csv_path, periods=800)
+            for i, name in enumerate(bench_paths):
+                _write_benchmark_csv(os.path.join(tmpdir, name), periods=800, seed=99 + i)
+            out_dir = os.path.join(tmpdir, "out")
+            argv = [
+                "walk_forward", "out-of-sample",
+                "--data", csv_path, "--benchmark",
+            ] + [os.path.join(tmpdir, n) for n in bench_paths] + [
+                "--strategy", "sma_crossover",
+                "--param-grid", grid,
+                "--output", out_dir,
+                "--benchmark-commission", "0.001",
+                "--benchmark-slippage", "0.001",
+                "--benchmark-cost-is-periodic",
+            ]
+            with patch.object(sys, "argv", argv), \
+                    redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                rc = walk_forward_main()
+            assert rc == 0, f"OOS {label} should exit 0, got {rc}"
+
+            ts_path = os.path.join(out_dir, "tear_sheet_summary.json")
+            with open(ts_path) as f:
+                ts = json.load(f)
+            prov = ts.get("benchmark_provenance")
+            assert isinstance(prov, dict), (
+                f"OOS {label}: tear sheet should carry a dict-shaped "
+                f"benchmark_provenance, got {type(prov)}"
+            )
+            assert prov.get("checksum"), f"OOS {label}: provenance missing checksum"
+            assert prov["source_path"] == os.path.join(tmpdir, bench_paths[0]), (
+                f"OOS {label}: provenance should reference the first benchmark file"
+            )
