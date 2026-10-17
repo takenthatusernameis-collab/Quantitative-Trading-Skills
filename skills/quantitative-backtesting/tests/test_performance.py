@@ -16,7 +16,7 @@ import pandas as pd
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
-from performance import _annualization_factor, calculate_metrics, _benchmark_stats  # noqa: E402
+from performance import _annualization_factor, calculate_metrics, _benchmark_stats, generate_report  # noqa: E402
 
 
 def _make_returns(periods: int = 10, seed: int = 42) -> pd.Series:
@@ -457,6 +457,119 @@ def test_benchmark_stats_drops_leading_nan_from_pct_change():
     assert 0.0 <= stats["r_squared"] <= 1.0
 
 
+def _make_two_benchmark_metrics() -> dict:
+    """Build a metrics dict shaped like the run_backtest CLI multi-benchmark path.
+
+    ``calculate_metrics`` emits per-benchmark stats for the multi-benchmark
+    path as ``benchmark_{i}_*`` prefixed scalar keys plus an aggregate
+    ``deflated_alpha`` dict. This helper reproduces that shape deterministically
+    so the text-report regression tests do not depend on a full backtest run.
+    """
+    return {
+        "total_return": 0.10,
+        "total_trades": 5,
+        "benchmark_0_alpha": 0.02,
+        "benchmark_0_beta": 1.1,
+        "benchmark_0_correlation_with_benchmark": 0.85,
+        "benchmark_0_alpha_pvalue": 0.08,
+        "benchmark_0_alpha_pvalue_original": 0.06,
+        "benchmark_0_deflated_alpha": 0.5,
+        "benchmark_0_expected_max_alpha": 0.04,
+        "benchmark_1_alpha": 0.01,
+        "benchmark_1_beta": 0.9,
+        "benchmark_1_correlation_with_benchmark": 0.7,
+        "benchmark_1_alpha_pvalue": 0.09,
+        "benchmark_1_alpha_pvalue_original": 0.07,
+        "benchmark_1_deflated_alpha": 0.6,
+        "benchmark_1_expected_max_alpha": 0.05,
+        "deflated_alpha": {
+            "deflated_alpha_ratio": 0.5,
+            "p_value": 0.08,
+            "n_benchmarks": 2,
+        },
+    }
+
+
+def test_generate_report_surfaces_per_benchmark_comparison_when_multiple_benchmarks():
+    """The text report renders a Per-Benchmark Comparison section for 2+ benchmarks.
+
+    The HTML tear sheet and JSON summary already surface per-benchmark Deflated
+    Alpha metrics (alpha_pvalue, alpha_pvalue_original, deflated_alpha,
+    expected_max_alpha) for the multi-benchmark run_backtest CLI path; the text
+    report was the one consumer that only carried the aggregate DAR. This is a
+    regression guard that the per-benchmark rows are rendered and that the
+    corrected p-value fields are surfaced per benchmark.
+    """
+    import tempfile
+
+    metrics = _make_two_benchmark_metrics()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        generate_report(metrics, tmpdir, symbol="SPY", strategy_name="SMA")
+        with open(Path(tmpdir) / "report.txt") as f:
+            content = f.read()
+
+    assert "Per-Benchmark Comparison" in content
+    assert "Benchmark 0" in content
+    assert "Benchmark 1" in content
+    # Corrected p-value fields are surfaced per benchmark, not just the
+    # aggregate deflated_alpha dict.
+    assert "0.0800" in content  # benchmark_0 alpha_pvalue
+    assert "0.0900" in content  # benchmark_1 alpha_pvalue
+    assert "0.5000" in content  # benchmark_0 deflated_alpha
+    assert "0.6000" in content  # benchmark_1 deflated_alpha
+    assert "0.0400" in content  # benchmark_0 expected_max_alpha
+    assert "0.0500" in content  # benchmark_1 expected_max_alpha
+
+
+def test_generate_report_omits_per_benchmark_section_for_single_benchmark():
+    """Without multiple benchmarks, no Per-Benchmark Comparison section renders.
+
+    Backward compatible: single-benchmark runs keep the non-prefixed
+    ``alpha`` / ``beta`` / ``correlation_with_benchmark`` keys in the existing
+    Benchmark Comparison section and emit no per-benchmark rows.
+    """
+    import tempfile
+
+    metrics = {
+        "total_return": 0.10,
+        "benchmark_total_return": 0.12,
+        "benchmark_annualized_return": 0.18,
+        "correlation_with_benchmark": 0.85,
+        "alpha": 0.02,
+        "beta": 1.1,
+        "alpha_tstat": 1.9,
+        "alpha_pvalue": 0.06,
+        "r_squared": 0.72,
+        "deflated_alpha": {
+            "deflated_alpha_ratio": 0.5,
+            "p_value": 0.08,
+            "n_benchmarks": 1,
+        },
+    }
+    with tempfile.TemporaryDirectory() as tmpdir:
+        generate_report(metrics, tmpdir, symbol="SPY", strategy_name="SMA")
+        with open(Path(tmpdir) / "report.txt") as f:
+            content = f.read()
+
+    assert "Benchmark Comparison" in content
+    assert "Per-Benchmark Comparison" not in content
+    assert "Benchmark 0" not in content
+
+
+def test_generate_report_omits_per_benchmark_section_without_benchmarks():
+    """Without any benchmark metrics, no benchmark sections render."""
+    import tempfile
+
+    metrics = {"total_return": 0.10, "total_trades": 5}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        generate_report(metrics, tmpdir, symbol="SPY", strategy_name="SMA")
+        with open(Path(tmpdir) / "report.txt") as f:
+            content = f.read()
+
+    assert "Per-Benchmark Comparison" not in content
+    assert "Benchmark Comparison" not in content
+
+
 def main() -> int:
     tests = [
         ("calculate_metrics_empty_returns_returns_error", test_calculate_metrics_empty_returns_returns_error),
@@ -486,6 +599,9 @@ def main() -> int:
         ("calculate_metrics_no_deflated_alpha_without_benchmark", test_calculate_metrics_no_deflated_alpha_without_benchmark),
         ("calculate_metrics_deflated_alpha_single_benchmark", test_calculate_metrics_deflated_alpha_single_benchmark),
         ("benchmark_stats_drops_leading_nan_from_pct_change", test_benchmark_stats_drops_leading_nan_from_pct_change),
+        ("generate_report_surfaces_per_benchmark_comparison_when_multiple_benchmarks", test_generate_report_surfaces_per_benchmark_comparison_when_multiple_benchmarks),
+        ("generate_report_omits_per_benchmark_section_for_single_benchmark", test_generate_report_omits_per_benchmark_section_for_single_benchmark),
+        ("generate_report_omits_per_benchmark_section_without_benchmarks", test_generate_report_omits_per_benchmark_section_without_benchmarks),
     ]
 
     failures = 0

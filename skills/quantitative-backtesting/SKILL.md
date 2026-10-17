@@ -122,7 +122,14 @@ Risk Metrics:
 - `run_backtest.py` - Main entry point for running backtests with configurable parameters (supports `--n-trials` to report the Deflated Sharpe Ratio of the final backtest Sharpe; `--validate-point-in-time` / `--point-in-time-strict` to screen for look-ahead bias and data-integrity violations, aborting on violations in strict mode; `--multi-symbol` to load a multi-symbol panel, run survivorship-bias detection, and backtest a panel strategy; `--benchmark` to load a buy-and-hold baseline (e.g. SPY) and report alpha, beta, and correlation vs. the market)
 - `data_loader.py` - Utilities for loading and validating market data from various sources (includes `DataProvenance` tracking, `validate_point_in_time`, `detect_survivorship_bias`, and `load_multi_symbol` for panel files with a `symbol`/`ticker` column)
 - `strategy_builder.py` - Factory for creating common strategy templates (trend, mean reversion, momentum)
-- `performance.py` - Comprehensive performance analytics and metric calculation
+- `performance.py` - Comprehensive performance analytics and metric calculation.
+  `calculate_metrics` computes risk-adjusted returns, drawdown statistics,
+  trade-level analytics, benchmark comparison (single and multi-benchmark,
+  with the Deflated Alpha Ratio multiple-testing correction applied per
+  benchmark and in aggregate for 2+ benchmarks), and the Deflated Sharpe
+  Ratio when `--n-trials` is reported. `generate_report` writes `metrics.json`
+  and a text `report.txt` that mirrors the tear sheet, including the aggregate
+  and per-benchmark Deflated Alpha sections.
 - `walk_forward.py` - Walk-forward analysis, parameter optimization, CPCV, Monte Carlo simulation CLI, and Deflated Sharpe Ratio multiple-testing correction
 - `monte_carlo.py` - Standalone Monte Carlo simulation (block bootstrap resampling, metric distributions, confidence intervals, probability of ruin). Re-exported from `walk_forward` for backward compatibility.
 - `reporting.py` - Automated tear sheet and report generation
@@ -218,7 +225,15 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   prints a "Multiple-Testing Correction" section and `generate_tear_sheet`
   renders a table plus a top-level `deflated_sharpe` key in the JSON summary
   when a `deflated_sharpe` dict is present, and both omit it when absent.
-  Covers **parameter sensitivity heatmap**: `generate_parameter_heatmap`
+  Covers **per-benchmark Deflated Alpha reporting**: for the multi-benchmark
+  `run_backtest` CLI path, `generate_report` renders a "Per-Benchmark
+  Comparison" table (alpha, beta, correlation, corrected alpha p-value,
+  deflated alpha, expected max alpha per benchmark) mirroring the tear sheet,
+  `generate_tear_sheet` renders a "Per-Benchmark Comparison" table and surfaces
+  a top-level `benchmark_metrics` list in the JSON summary, and both omit the
+  per-benchmark detail when fewer than 2 benchmarks are present (single-
+  benchmark runs keep the non-prefixed `alpha` / `beta` /
+  `correlation_with_benchmark` keys). Covers **parameter sensitivity heatmap**: `generate_parameter_heatmap`
   produces a 2D heatmap figure for Sharpe/DSR/total-return across a two-parameter
   grid, handles degenerate DSR dicts (z_score=None) as NaN, and integrates into
   `generate_tear_sheet` when `parameter_optimization` results with exactly two

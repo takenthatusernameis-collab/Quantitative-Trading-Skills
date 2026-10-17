@@ -650,6 +650,36 @@ def calculate_metrics(
     return metrics
 
 
+def _extract_per_benchmark_rows(metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Reconstruct the per-benchmark stat rows from ``metrics``.
+
+    ``calculate_metrics`` emits per-benchmark stats for the multi-benchmark
+    (run_backtest CLI) path as ``benchmark_{i}_*`` prefixed scalar keys (e.g.
+    ``benchmark_0_alpha``, ``benchmark_1_alpha_pvalue_original``). This helper
+    unprefixeds them into one dict per benchmark so the text report can render a
+    per-benchmark comparison section mirroring the HTML tear sheet.
+
+    Returns an empty list when no benchmark metrics are present.
+    """
+    rows: List[Dict[str, Any]] = []
+    i = 0
+    while True:
+        prefix = f"benchmark_{i}_"
+        has_any = any(k.startswith(prefix) for k in metrics.keys())
+        if not has_any:
+            break
+        row = {
+            k[len(prefix):]: v
+            for k, v in metrics.items()
+            if k.startswith(prefix)
+        }
+        rows.append(row)
+        i += 1
+        if i > 20:  # safety bound
+            break
+    return rows
+
+
 def generate_report(
     metrics: Dict[str, Any],
     output_dir: Union[str, Path],
@@ -667,6 +697,16 @@ def generate_report(
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    def fmt_pct(val: Any) -> str:
+        if isinstance(val, (int, float)) and np.isfinite(float(val)):
+            return f"{float(val):.2%}"
+        return "N/A"
+
+    def fmt_num(val: Any) -> str:
+        if isinstance(val, (int, float)) and np.isfinite(float(val)):
+            return f"{float(val):.4f}"
+        return "N/A"
 
     # Save metrics as JSON
     metrics_path = output_dir / "metrics.json"
@@ -777,6 +817,39 @@ def generate_report(
             f"Observations:                {da.get('n_observations', 0)}",
             "",
         ])
+
+    # Per-benchmark detail for the multi-benchmark (run_backtest CLI) path.
+    # ``calculate_metrics`` emits per-benchmark stats as ``benchmark_{i}_*``
+    # prefixed scalar keys; reconstruct one row per benchmark here so the text
+    # report carries the same per-benchmark Deflated Alpha correction fields
+    # (alpha_pvalue, alpha_pvalue_original, deflated_alpha,
+    # expected_max_alpha) that the HTML tear sheet and JSON summary surface.
+    # Omitted when fewer than 2 benchmarks are present, exactly as the
+    # tear-sheet summary does (single-benchmark runs keep the non-prefixed
+    # ``alpha`` / ``beta`` / ``correlation_with_benchmark`` keys above).
+    per_benchmark_rows = _extract_per_benchmark_rows(metrics)
+    if len(per_benchmark_rows) >= 2:
+        lines.extend([
+            "--- Per-Benchmark Comparison ---",
+            f"{'Benchmark':<12}{'Alpha':>12}{'Beta':>10}{'Corr':>10}{'P-Value':>12}{'Deflated Alpha':>16}{'Max Alpha':>12}",
+        ])
+        for i, row in enumerate(per_benchmark_rows):
+            alpha = row.get("alpha")
+            beta = row.get("beta")
+            corr = row.get("correlation_with_benchmark", row.get("correlation"))
+            pval = row.get("alpha_pvalue", row.get("alpha_pvalue_original"))
+            da_val = row.get("deflated_alpha")
+            ema = row.get("expected_max_alpha")
+            lines.append(
+                f"Benchmark {i:<3}"
+                f"{fmt_pct(alpha) if isinstance(alpha, (int, float)) else 'N/A':>12}"
+                f"{fmt_num(beta) if isinstance(beta, (int, float)) else 'N/A':>10}"
+                f"{fmt_num(corr) if isinstance(corr, (int, float)) else 'N/A':>10}"
+                f"{fmt_num(pval) if isinstance(pval, (int, float)) else 'N/A':>12}"
+                f"{fmt_num(da_val) if isinstance(da_val, (int, float)) else 'N/A':>16}"
+                f"{fmt_num(ema) if isinstance(ema, (int, float)) else 'N/A':>12}"
+            )
+        lines.append("")
 
     lines.append("=" * 60)
 
