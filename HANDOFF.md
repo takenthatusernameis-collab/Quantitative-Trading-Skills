@@ -3,19 +3,23 @@
 ## Repository state (as of this session)
 
 - Working tree: clean (no unstaged or staged changes).
-- Quant backtesting skill: 296/296 tests passing (all test_*.py in skills/quantitative-backtesting/tests/).
-- Verified: full test suite passes after inspection (46.99s). No source modifications made in this session per mission guidance.
+- Quant backtesting skill: all test files pass (exit 0). Explicit runner counts: data_loader 29/29, performance 30/30, run_backtest 41/41, strategy_builder 27/27, cpcv 16/16, monte_carlo 14/14, generate_sample_data 1/1; walk_forward (79 test defs) and reporting (52 test defs) silent-on-pass, exit 0. Prior baseline recorded as 296/296.
+- `verify_end_to_end.py` (repo root): PASSES — `benchmark_cost_is_periodic` is accepted by `out_of_sample_validation`, propagated to `walk_forward_analysis`, recorded in test performance + summary, and round-trip vs periodic benchmark cost models produce different benchmark returns (diff ~0.00156 on synthetic data).
+- No source modifications made in this session per mission guidance (hold directive; no concrete research need arose).
 
 ## What changed this session
 
 No source changes. This session executed the prior agent's handoff by:
 - Inspecting repository state, tests, and the quantitative-backtesting skill implementation.
-- Confirming current state matches the prior handoff (multi-asset universe support only exists in `run_backtest --multi-symbol`; walk-forward/CPCV/Monte Carlo/OOS have no panel/multi-symbol support).
-- Running the full quant backtesting test suite to verify baseline is green (296 passed).
+- Confirming current state matches the prior handoff (multi-asset universe support only exists in `run_backtest --multi-symbol`; walk-forward/CPCV/Monte Carlo/OOS have no panel/multi-symbol support; `benchmark_cost_is_periodic` and per-benchmark Deflated Alpha multiple-testing correction are implemented and present in `results/metrics.json`).
+- Re-verifying the full quant backtesting test suite baseline is green in this environment (all test files exit 0).
+- Running `verify_end_to_end.py` end-to-end (passes).
 
 ## What was verified
 
-- Full quant backtesting test suite: 296/296 passed (run_backtest, reporting, data_loader, performance, walk_forward, monte_carlo, strategy_builder).
+- All quant backtesting test files pass (exit 0); explicit counts above.
+- `verify_end_to_end.py` passes: `benchmark_cost_is_periodic` end-to-end works (flag accepted/propagated/recorded; different cost models -> different benchmark returns).
+- Confirmed panel/multi-asset support is limited to `run_backtest --multi-symbol` (with survivorship detection, provenance, bias_controls_engaged=True). walk_forward.py, monte_carlo.py (CLI paths) have no `--multi-symbol` flag and no survivorship_bias integration. run_backtest.py already implements the pattern: `load_multi_symbol()` + `detect_survivorship_bias()` + sets `bias_controls_engaged=True` when survivorship/PIT engaged.
 - Confirmed panel/multi-asset support is limited to `run_backtest --multi-symbol` (with survivorship detection, provenance, bias_controls_engaged=True). walk_forward.py, monte_carlo.py (CLI paths) have no `--multi-symbol` flag and no survivorship_bias integration. run_backtest.py already implements the pattern: `load_multi_symbol()` + `detect_survivorship_bias()` + sets `bias_controls_engaged=True` when survivorship/PIT engaged.
 
 ## What remains unresolved
