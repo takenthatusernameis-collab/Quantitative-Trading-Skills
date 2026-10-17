@@ -979,6 +979,20 @@ def generate_tear_sheet(
     # summary, if present (backward compatible: omitted when absent).
     if results.get("data_provenance"):
         summary["data_provenance"] = _json_safe(results["data_provenance"])
+    # Surface benchmark provenance (full list when multiple, single dict when one).
+    bp = results.get("benchmark_provenance")
+    if bp is not None:
+        if isinstance(bp, list):
+            if len(bp) == 1:
+                p = bp[0]
+                summary["benchmark_provenance"] = _json_safe(p.to_dict() if hasattr(p, "to_dict") else p)
+            else:
+                summary["benchmark_provenance"] = _json_safe([p.to_dict() if hasattr(p, "to_dict") else p for p in bp])
+        elif hasattr(bp, "to_dict"):
+            summary["benchmark_provenance"] = _json_safe(bp.to_dict())
+        else:
+            # If it's already a dict/list, preserve appropriate shape? but dict means single
+            summary["benchmark_provenance"] = _json_safe(bp)
     if results.get("point_in_time_validation"):
         summary["point_in_time_validation"] = _json_safe(
             results["point_in_time_validation"]

@@ -538,6 +538,7 @@ def main():
     # across benchmarks.
     benchmark = None
     benchmark_provenance = None
+    benchmark_provenances = []
     benchmark_paths = getattr(args, "benchmark", None)
     if benchmark_paths:
         # Normalize to a list of paths for uniform handling.
@@ -566,8 +567,8 @@ def main():
         # Pass the list of benchmark DataFrames to run_backtest();
         # a single-element list is also accepted (backward compatible).
         benchmark = benchmark_frames if len(benchmark_frames) > 1 else benchmark_frames[0]
-        # Keep the first provenance for the artifact/report (the primary benchmark).
-        benchmark_provenance = benchmark_provenances[0]
+        # Keep all provenances (preserves traceability for multi-benchmark runs).
+        benchmark_provenance = benchmark_provenances
         # Stash all provenances on args so downstream code can serialize them.
         args._benchmark_provenances = benchmark_provenances
 
@@ -677,6 +678,12 @@ def main():
         return 0
     print("Running backtest...")
     results = run_backtest(data, strategy, args, data_provenance=provenance, benchmark=benchmark)
+    # Thread benchmark provenance through results for downstream serialization
+    try:
+        if benchmark_provenance is not None:
+            results["benchmark_provenance"] = benchmark_provenance
+    except Exception:
+        pass
 
     # Surface point-in-time validation results in the logs and
     # abort in strict mode before investing more in the run.
@@ -714,10 +721,22 @@ def main():
         json.dump(results.get("data_provenance"), f, indent=2, default=str)
     print(f"Data provenance saved to: {prov_path}")
 
-    if benchmark_provenance is not None:
+    if benchmark_provenance is not None or len(benchmark_provenances) > 0:
         bench_prov_path = output_dir / "benchmark_provenance.json"
         with open(bench_prov_path, "w") as f:
-            json.dump(benchmark_provenance.to_dict(), f, indent=2, default=str)
+            if len(benchmark_provenances) == 1:
+                json.dump(benchmark_provenances[0].to_dict(), f, indent=2, default=str)
+            elif len(benchmark_provenances) > 1:
+                json.dump([p.to_dict() for p in benchmark_provenances], f, indent=2, default=str)
+            elif isinstance(benchmark_provenance, list):
+                if len(benchmark_provenance) == 1:
+                    p = benchmark_provenance[0]
+                    json.dump(p.to_dict() if hasattr(p, 'to_dict') else p, f, indent=2, default=str)
+                else:
+                    json.dump([p.to_dict() if hasattr(p, 'to_dict') else p for p in benchmark_provenance], f, indent=2, default=str)
+            else:
+                bp = benchmark_provenance
+                json.dump(bp.to_dict() if hasattr(bp, 'to_dict') else bp, f, indent=2, default=str)
         print(f"Benchmark provenance saved to: {bench_prov_path}")
 
     if survivorship is not None:
