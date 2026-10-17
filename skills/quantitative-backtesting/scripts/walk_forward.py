@@ -2998,6 +2998,7 @@ def run_cpcv(args) -> int:
             "benchmark_slippage": bench_slippage,
             "benchmark_expense_ratio": bench_expense_ratio,
             "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
+            "multi_symbol": getattr(args, "multi_symbol", False),
         },
     }
     if pit_results is not None:
@@ -3008,6 +3009,13 @@ def run_cpcv(args) -> int:
     if survivorship is not None:
         results["survivorship_bias"] = survivorship
         summary_data["survivorship_bias"] = survivorship
+        # Persist the survivorship-bias report as a standalone artifact so
+        # panel CPCV runs are auditable on the same file name used by the
+        # run_backtest CLI path.
+        surv_path = output_dir / "survivorship_bias.json"
+        with open(surv_path, "w") as f:
+            json.dump(survivorship, f, indent=2, default=str)
+        print(f"Survivorship bias report saved to: {surv_path}")
     if benchmark_provenance is not None:
         if isinstance(benchmark_provenance, list):
             summary_data["benchmark_provenance"] = [prov.to_dict() for prov in benchmark_provenance]
@@ -3734,6 +3742,7 @@ def run_walk_forward(args) -> int:
 
     # Compute benchmark comparison metrics if benchmark provided
     benchmark_returns = None
+    benchmark_returns_list = None
     if benchmark is not None and len(results["oos_returns"]) > 0:
         if isinstance(benchmark, list):
             # Multiple benchmarks: the aggregate Deflated Alpha comparison is
@@ -3837,6 +3846,7 @@ def run_walk_forward(args) -> int:
             "benchmark_slippage": bench_slippage,
             "benchmark_expense_ratio": bench_expense_ratio,
             "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
+            "multi_symbol": getattr(args, "multi_symbol", False),
         },
     }
     if pit_results is not None:
@@ -3847,6 +3857,13 @@ def run_walk_forward(args) -> int:
     if survivorship is not None:
         results["survivorship_bias"] = survivorship
         summary_data["survivorship_bias"] = survivorship
+        # Persist the survivorship-bias report as a standalone artifact so
+        # panel walk-forward runs are auditable on the same file name used by
+        # the run_backtest CLI path.
+        surv_path = output_dir / "survivorship_bias.json"
+        with open(surv_path, "w") as f:
+            json.dump(survivorship, f, indent=2, default=str)
+        print(f"Survivorship bias report saved to: {surv_path}")
     if benchmark_provenance is not None:
         if isinstance(benchmark_provenance, list):
             summary_data["benchmark_provenance"] = [bp.to_dict() for bp in benchmark_provenance if bp is not None]
@@ -4250,6 +4267,15 @@ def run_parameter_optimization(args) -> int:
             else:
                 json.dump(benchmark_provenance.to_dict(), f, indent=2, default=str)
         print(f"Benchmark provenance saved to: {bench_prov_path}")
+
+    # Persist the survivorship-bias report as a standalone artifact so panel
+    # parameter-optimization runs are auditable on the same file name used by
+    # the run_backtest CLI path.
+    if survivorship is not None:
+        surv_path = output_dir / "survivorship_bias.json"
+        with open(surv_path, "w") as f:
+            json.dump(survivorship, f, indent=2, default=str)
+        print(f"Survivorship bias report saved to: {surv_path}")
 
     return 0
 

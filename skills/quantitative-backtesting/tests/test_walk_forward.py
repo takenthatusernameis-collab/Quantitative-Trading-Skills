@@ -3792,6 +3792,10 @@ def main() -> int:
         ("test_cli_multi_symbol_load_and_validate_data_returns_survivorship", test_cli_multi_symbol_load_and_validate_data_returns_survivorship),
         ("test_cli_multi_symbol_out_of_sample_sets_bias_controls_engaged", test_cli_multi_symbol_out_of_sample_sets_bias_controls_engaged),
         ("test_cli_multi_symbol_out_of_sample_writes_survivorship_artifact", test_cli_multi_symbol_out_of_sample_writes_survivorship_artifact),
+        ("test_cli_multi_symbol_walk_forward_writes_survivorship_artifact", test_cli_multi_symbol_walk_forward_writes_survivorship_artifact),
+        ("test_cli_multi_symbol_cpcv_writes_survivorship_artifact", test_cli_multi_symbol_cpcv_writes_survivorship_artifact),
+        ("test_cli_multi_symbol_optimize_writes_survivorship_artifact", test_cli_multi_symbol_optimize_writes_survivorship_artifact),
+        ("test_cli_walk_forward_no_benchmark_does_not_crash", test_cli_walk_forward_no_benchmark_does_not_crash),
     ]
 
     failures = 0
@@ -4088,6 +4092,23 @@ def test_cli_oos_tear_sheet_carries_provenance():
             )
 
 
+def _write_single_symbol_csv(path: str, periods: int = 600) -> None:
+    """Write a single-symbol OHLCV CSV for walk-forward tests."""
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    rng = np.random.default_rng(7)
+    rets = rng.normal(0.0005, 0.015, periods)
+    prices = 100 * np.exp(np.cumsum(rets))
+    pd.DataFrame({
+        "date": [d.strftime("%Y-%m-%d") for d in dates],
+        "symbol": "SPY",
+        "open": prices,
+        "high": prices * 1.01,
+        "low": prices * 0.99,
+        "close": prices,
+        "volume": rng.integers(1_000_000, 10_000_000, periods),
+    }).to_csv(path, index=False)
+
+
 def _write_multi_symbol_csv(path: str, periods: int = 600) -> None:
     """Write a panel with one survivor, one late entry, one early exit."""
     dates = pd.date_range("2020-01-01", periods=periods, freq="B")
@@ -4197,6 +4218,149 @@ def test_cli_multi_symbol_out_of_sample_writes_survivorship_artifact():
         assert [e["symbol"] for e in surv["entered_symbols"]] == ["LATE"]
         assert [e["symbol"] for e in surv["exited_symbols"]] == ["EARLY"]
         assert surv["bias_score"] > 0.0
+
+
+def test_cli_multi_symbol_walk_forward_writes_survivorship_artifact():
+    """--multi-symbol on walk-forward persists survivorship_bias.json.
+
+    Regression for a defect where the walk-forward summary was written but
+    the standalone survivorship artifact was not, so panel walk-forward runs
+    were not auditable on the same file name as the run_backtest CLI path.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "multi.csv")
+        _write_multi_symbol_csv(csv_path)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "walk-forward",
+            "--data", csv_path,
+            "--strategy", "cross_sectional_momentum",
+            "--param-grid", '{"lookback": [20], "top_quantile": [0.4], "bottom_quantile": [0.2]}',
+            "--output", out_dir,
+            "--multi-symbol",
+            "--no-validate-point-in-time",
+            "--train-months", "6",
+            "--test-months", "2",
+            "--step-months", "2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI walk-forward --multi-symbol should exit 0, got {rc}"
+
+        surv_path = os.path.join(out_dir, "survivorship_bias.json")
+        assert os.path.exists(surv_path), "survivorship_bias.json not written for walk-forward --multi-symbol"
+        with open(surv_path) as f:
+            surv = json.load(f)
+        assert surv["surviving_symbols"] == ["SURV"]
+        assert [e["symbol"] for e in surv["entered_symbols"]] == ["LATE"]
+        assert [e["symbol"] for e in surv["exited_symbols"]] == ["EARLY"]
+        assert surv["bias_score"] > 0.0
+
+        summary_path = os.path.join(out_dir, "walk_forward_summary.json")
+        with open(summary_path) as f:
+            summary = json.load(f)
+        assert summary["config"].get("multi_symbol") is True, \
+            "walk-forward summary config should record multi_symbol=True"
+        assert summary.get("bias_controls_engaged") is True
+        assert summary.get("survivorship_bias") is not None
+
+
+def test_cli_multi_symbol_cpcv_writes_survivorship_artifact():
+    """--multi-symbol on CPCV persists survivorship_bias.json."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "multi.csv")
+        _write_multi_symbol_csv(csv_path)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "cpcv",
+            "--data", csv_path,
+            "--strategy", "cross_sectional_momentum",
+            "--param-grid", '{"lookback": [20], "top_quantile": [0.4], "bottom_quantile": [0.2]}',
+            "--output", out_dir,
+            "--multi-symbol",
+            "--no-validate-point-in-time",
+            "--n-splits", "4",
+            "--test-size", "0.2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI cpcv --multi-symbol should exit 0, got {rc}"
+
+        surv_path = os.path.join(out_dir, "survivorship_bias.json")
+        assert os.path.exists(surv_path), "survivorship_bias.json not written for cpcv --multi-symbol"
+        with open(surv_path) as f:
+            surv = json.load(f)
+        assert surv["surviving_symbols"] == ["SURV"]
+
+        summary_path = os.path.join(out_dir, "cpcv_summary.json")
+        with open(summary_path) as f:
+            summary = json.load(f)
+        assert summary["config"].get("multi_symbol") is True, \
+            "cpcv summary config should record multi_symbol=True"
+
+
+def test_cli_multi_symbol_optimize_writes_survivorship_artifact():
+    """--multi-symbol on parameter optimization persists survivorship_bias.json."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "multi.csv")
+        _write_multi_symbol_csv(csv_path)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "optimize",
+            "--data", csv_path,
+            "--strategy", "cross_sectional_momentum",
+            "--param-grid", '{"lookback": [20], "top_quantile": [0.4], "bottom_quantile": [0.2]}',
+            "--output", out_dir,
+            "--multi-symbol",
+            "--no-validate-point-in-time",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI optimize --multi-symbol should exit 0, got {rc}"
+
+        surv_path = os.path.join(out_dir, "survivorship_bias.json")
+        assert os.path.exists(surv_path), "survivorship_bias.json not written for optimize --multi-symbol"
+        with open(surv_path) as f:
+            surv = json.load(f)
+        assert surv["surviving_symbols"] == ["SURV"]
+
+
+def test_cli_walk_forward_no_benchmark_does_not_crash():
+    """walk-forward without a benchmark must not raise UnboundLocalError.
+
+    Regression for a defect where `benchmark_returns_list` was only assigned
+    inside the `if benchmark is not None` branch but referenced in the
+    `elif benchmark_returns_list` report block below, so any benchmark-less
+    walk-forward run crashed after writing the summary.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_single_symbol_csv(csv_path)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "walk-forward",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [5], "slow_period": [10]}',
+            "--output", out_dir,
+            "--no-validate-point-in-time",
+            "--train-months", "6",
+            "--test-months", "2",
+            "--step-months", "2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI walk-forward without benchmark should exit 0, got {rc}"
+        assert os.path.exists(os.path.join(out_dir, "walk_forward_summary.json"))
+        assert os.path.exists(os.path.join(out_dir, "tear_sheet_summary.json"))
 
 
 if __name__ == "__main__":

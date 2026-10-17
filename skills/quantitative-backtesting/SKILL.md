@@ -130,7 +130,7 @@ Risk Metrics:
   Ratio when `--n-trials` is reported. `generate_report` writes `metrics.json`
   and a text `report.txt` that mirrors the tear sheet, including the aggregate
   and per-benchmark Deflated Alpha sections.
-- `walk_forward.py` - Walk-forward analysis, parameter optimization, CPCV, Monte Carlo simulation CLI, and Deflated Sharpe Ratio multiple-testing correction
+- `walk_forward.py` - Walk-forward analysis, parameter optimization, CPCV, Monte Carlo simulation CLI, and Deflated Sharpe Ratio multiple-testing correction. Accepts `--multi-symbol` on every subcommand (`walk-forward`, `optimize`, `cpcv`, `monte-carlo`, `out-of-sample`): when set, loads the symbol panel via `load_multi_symbol()`, runs `detect_survivorship_bias()`, prints the survivorship report, persists `survivorship_bias.json`, and threads `survivorship_bias` + `bias_controls_engaged=True` into the summary JSON and tear sheet.
 - `monte_carlo.py` - Standalone Monte Carlo simulation (block bootstrap resampling, metric distributions, confidence intervals, probability of ruin). Re-exported from `walk_forward` for backward compatibility. On simulated paths where equity is wiped out (growth <= 0), the annualized return is recorded as -100% (a total loss) rather than NaN, so the metric distribution, summary statistics, and confidence intervals stay finite and interpretable; the true cumulative loss is preserved in `total_return`.
 - `reporting.py` - Automated tear sheet and report generation
 - `generate_sample_data.py` - Generates a sample OHLCV dataset for testing
@@ -168,7 +168,7 @@ Risk Metrics:
 - Document all assumptions and data sources for reproducibility
 - Run `--validate-point-in-time` on every backtest to screen for temporal-order violations, duplicate timestamps, and signal/next-return correlation (a look-ahead indicator); add `--point-in-time-strict` to make violations fail the run
 - The out-of-sample validation framework (`walk_forward.py out-of-sample`) enforces a **strict chronological train/validation/test split** via `_verify_split_separation`: the three splits must be pairwise disjoint and ordered (`train_end < val_start`, `val_end < test_start`), and the check result is recorded in `train_val_test_split.separation_check`. A leak here would silently produce an in-sample-optimistic result indistinguishable from a genuine out-of-sample one, so the check is a correctness guard, not a cosmetic one.
-- For multi-symbol universes, run `--multi-symbol` to detect survivorship bias (late entries, early exits, insufficient history, data gaps) and review `survivorship_bias.json` before trusting panel results
+- For multi-symbol universes, run `--multi-symbol` to detect survivorship bias (late entries, early exits, insufficient history, data gaps) and review `survivorship_bias.json` before trusting panel results. The flag is accepted by every walk-forward subcommand (`walk-forward`, `optimize`, `cpcv`, `monte-carlo`, `out-of-sample`) as well as `run_backtest`; when set, the survivorship-bias report is persisted as `survivorship_bias.json` in the output directory and threaded into the summary JSON (`survivorship_bias`, `bias_controls_engaged=True`) so panel runs are auditable on the same file name across all CLIs.
 - The CLI writes `data_provenance.json` (source path, checksum, filters, transformations, validation outcome) next to the results so every backtest is reproducible and auditable
 
 ## Common Use Cases
@@ -341,6 +341,16 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
       multi-asset panel (dict and
       MultiIndex) walk-forward and Monte Carlo integration with
       `CrossSectionalMomentum` and `DualMomentumStrategy`.
+      **`--multi-symbol` artifact parity across all five walk-forward
+      subcommands**: `test_cli_multi_symbol_out_of_sample_*` (existing),
+      plus `test_cli_multi_symbol_walk_forward_writes_survivorship_artifact`,
+      `test_cli_multi_symbol_cpcv_writes_survivorship_artifact`, and
+      `test_cli_multi_symbol_optimize_writes_survivorship_artifact`, which
+      assert each subcommand persists `survivorship_bias.json` and records
+      `multi_symbol=True` in its summary config; and
+      `test_cli_walk_forward_no_benchmark_does_not_crash`, a regression for an
+      `UnboundLocalError` on `benchmark_returns_list` in the benchmark-less
+      walk-forward report path.
   - `test_cpcv.py` - CPCV fold structure, purge/embargo behavior, parameter
     stability calculation, summary metrics, **Deflated Sharpe Ratio
     correction** (`apply_deflation` on `cpcv_analysis`), CLI integration,
