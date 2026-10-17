@@ -3327,12 +3327,9 @@ def _benchmark_list_alpha_correction(
                         bench_result["deflated_alpha"] = dar["deflated_alpha_ratio"]
                         bench_result["expected_max_alpha"] = dar["expected_max_alpha"]
                     except Exception:
-                        corrected_p = min(p_values[i] * n_benchmarks, 1.0)
-                        bench_result["alpha_pvalue_original"] = p_values[i]
-                        bench_result["alpha_pvalue"] = corrected_p
-                        bench_result.setdefault("deflated_alpha", None)
-                        bench_result.setdefault("expected_max_alpha", None)
-                    else:
+                        # DAR computation failed (e.g. too few aligned
+                        # observations): fall back to a Bonferroni correction
+                        # rather than silently dropping the correction.
                         corrected_p = min(p_values[i] * n_benchmarks, 1.0)
                         bench_result["alpha_pvalue_original"] = p_values[i]
                         bench_result["alpha_pvalue"] = corrected_p

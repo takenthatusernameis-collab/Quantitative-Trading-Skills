@@ -1779,6 +1779,65 @@ def test_benchmark_list_alpha_correction_deflated_alpha():
     assert result_single["deflated_alpha"] is None, "Single benchmark must not get a deflated_alpha"
 
 
+def test_benchmark_list_alpha_correction_per_benchmark_pvalue_is_dar_pvalue():
+    """Per-benchmark ``alpha_pvalue`` must equal the Deflated Alpha Ratio p-value.
+
+    Regression guard for a defect where the DAR p-value computed by
+    ``deflated_alpha_ratio`` was discarded: a stray ``else`` clause on the
+    ``try``/``except`` overwrote the corrected p-value with a Bonferroni
+    fallback (``min(p * N, 1.0)``) on the success path, so the reported
+    ``alpha_pvalue`` disagreed with the ``deflated_alpha`` ratio the same dict
+    had just computed.  The corrected p-value must be the DAR p-value whenever
+    the cross-sectional estimator is available.
+    """
+    periods = 252
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    bench1 = _make_benchmark_data(periods=periods, seed=99)
+    bench2 = _make_benchmark_data(periods=periods, seed=7)
+    strategy_returns = pd.Series(
+        np.random.default_rng(123).normal(0.0005, 0.012, periods), index=dates
+    )
+
+    result = _benchmark_list_alpha_correction(
+        strategy_returns, [bench1, bench2],
+        benchmark_commission=0.001, benchmark_slippage=0.001,
+        benchmark_cost_is_periodic=True,
+    )
+
+    trial_alphas = [
+        r["alpha"] for r in result["per_benchmark"]
+        if r is not None and "alpha" in r and np.isfinite(r["alpha"])
+    ]
+    assert len(trial_alphas) >= 2, "Expected at least 2 finite trial alphas"
+
+    # deflated_alpha_ratio accepts benchmark_returns but does not consume it;
+    # the DAR depends only on alpha, returns, n_benchmarks and trial_alphas, so
+    # it can be recomputed exactly from the surfaced per-benchmark alpha.
+    bench_returns_list = [bench1["close"].pct_change(), bench2["close"].pct_change()]
+    for i, stats in enumerate(result["per_benchmark"]):
+        assert stats is not None
+        dar = deflated_alpha_ratio(
+            alpha=stats["alpha"],
+            returns=strategy_returns,
+            benchmark_returns=bench_returns_list[i],
+            n_benchmarks=result["n_benchmarks"],
+            trial_alphas=trial_alphas,
+        )
+        bonferroni = min(stats["alpha_pvalue_original"] * result["n_benchmarks"], 1.0)
+        assert abs(stats["alpha_pvalue"] - dar["p_value"]) < 1e-12, (
+            f"benchmark {i}: alpha_pvalue {stats['alpha_pvalue']} != DAR p_value "
+            f"{dar['p_value']} (Bonferroni fallback would be {bonferroni})"
+        )
+        assert abs(stats["deflated_alpha"] - dar["deflated_alpha_ratio"]) < 1e-12, (
+            f"benchmark {i}: deflated_alpha {stats['deflated_alpha']} != DAR ratio "
+            f"{dar['deflated_alpha_ratio']}"
+        )
+        assert abs(stats["expected_max_alpha"] - dar["expected_max_alpha"]) < 1e-12, (
+            f"benchmark {i}: expected_max_alpha {stats['expected_max_alpha']} != "
+            f"DAR expected_max_alpha {dar['expected_max_alpha']}"
+        )
+
+
 def test_cpcv_analysis_multiple_benchmarks_deflated_alpha():
     """cpcv_analysis with multiple benchmarks surfaces Deflated Alpha at the
     fold level and in the aggregate summary, and leaves single-benchmark
