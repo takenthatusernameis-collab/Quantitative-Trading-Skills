@@ -206,6 +206,37 @@ def _fmt_sharpe(val: Any) -> str:
     return "N/A"
 
 
+def _extract_benchmark_metrics(metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Reconstruct the per-benchmark stats list from ``metrics``.
+
+    Two sources are possible, in priority order:
+
+    (a) ``benchmark_metrics`` — a list of per-benchmark stat dicts surfaced
+        directly by the validation pipelines (walk-forward / CPCV / OOS /
+        Monte Carlo) on their summaries.
+    (b) ``benchmark_N_*`` keys — produced by ``calculate_metrics`` when
+        ``results["benchmark_list"]`` has 2+ entries (the run_backtest CLI
+        path). Reconstruct rows from those prefixed keys so both shapes are
+        handled uniformly by the HTML tear sheet and the JSON summary.
+
+    Returns an empty list when no benchmark metrics are present.
+    """
+    bench_metrics_list = metrics.get("benchmark_metrics")
+    if isinstance(bench_metrics_list, list) and bench_metrics_list:
+        return bench_metrics_list
+    reconstructed: List[Dict[str, Any]] = []
+    i = 0
+    while f"benchmark_{i}_alpha" in metrics:
+        row = {
+            k[len(f"benchmark_{i}_"):]: v
+            for k, v in metrics.items()
+            if k.startswith(f"benchmark_{i}_")
+        }
+        reconstructed.append(row)
+        i += 1
+    return reconstructed
+
+
 def generate_tear_sheet(
     results: Dict[str, Any],
     metrics: Dict[str, Any],
@@ -427,18 +458,7 @@ def generate_tear_sheet(
         #       ``results["benchmark_list"]`` has 2+ entries (e.g. the Monte Carlo
         #       tear sheet built from ``mc_base_results``). Reconstruct rows from
         #       those prefixed keys so the detail section renders either way.
-        bench_metrics_list = metrics.get("benchmark_metrics")
-        if not isinstance(bench_metrics_list, list) or not bench_metrics_list:
-            bench_metrics_list = []
-            i = 0
-            while f"benchmark_{i}_alpha" in metrics:
-                row = {
-                    k[len(f"benchmark_{i}_"):]: v
-                    for k, v in metrics.items()
-                    if k.startswith(f"benchmark_{i}_")
-                }
-                bench_metrics_list.append(row)
-                i += 1
+        bench_metrics_list = _extract_benchmark_metrics(metrics)
         if bench_metrics_list:
             html_parts.append("<h3>Per-Benchmark Comparison</h3>")
             html_parts.append(
@@ -901,6 +921,12 @@ def generate_tear_sheet(
     # the scalar-only `metrics` field above; surface it explicitly.
     if "deflated_sharpe" in metrics:
         summary["deflated_sharpe"] = metrics["deflated_sharpe"]
+    # The aggregate Deflated Alpha Ratio (multiple-benchmark correction) is a
+    # dict, so it is likewise filtered out of the scalar-only `metrics` field;
+    # surface it explicitly so the run_backtest CLI tear sheet carries the same
+    # aggregate correction the walk-forward / CPCV / OOS summaries emit.
+    if "deflated_alpha" in metrics:
+        summary["deflated_alpha"] = _json_safe(metrics["deflated_alpha"])
 
     # Surface analysis results in the JSON summary (JSON-safe extraction only).
     if analysis:
@@ -927,6 +953,20 @@ def generate_tear_sheet(
                 "n_simulations": mc.get("n_simulations"),
                 "base_observations": mc.get("base_observations"),
             }
+
+    # Surface the per-benchmark Deflated Alpha metrics in the JSON summary
+    # when 2+ benchmarks were tested (the canonical multiple-testing
+    # correction). ``calculate_metrics`` only emits the ``benchmark_N_*``
+    # prefixed scalar keys for the run_backtest CLI path, so reconstruct the
+    # per-benchmark dicts here (mirroring the HTML reconstruction below) and
+    # expose them as ``benchmark_metrics`` — the same key the walk-forward /
+    # CPCV / OOS summaries use, so downstream consumers see one shape.
+    # Omitted when fewer than 2 benchmarks are present, exactly as the
+    # walk-forward path does (single-benchmark runs keep the non-prefixed
+    # ``alpha`` / ``beta`` / ``correlation_with_benchmark`` keys).
+    bench_metrics_list = _extract_benchmark_metrics(metrics)
+    if len(bench_metrics_list) >= 2:
+        summary["benchmark_metrics"] = _json_safe(bench_metrics_list)
 
     # Surface data provenance and point-in-time validation outcome in JSON
     # summary, if present (backward compatible: omitted when absent).

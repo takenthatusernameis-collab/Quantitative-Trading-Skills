@@ -460,6 +460,73 @@ def calculate_metrics(
             primary_alpha = metrics.get("benchmark_0_alpha", 0.0)
             # For multiple-testing correction, we need to know how many benchmarks were tested
             n_benchmarks = len([a for a in benchmark_alphas if not np.isnan(a)])
+            # Cross-sectional trial alphas: finite alphas only, mirroring
+            # ``_benchmark_list_alpha_correction`` in walk_forward.py so the
+            # run_backtest CLI path applies the same per-benchmark correction
+            # (corrected alpha_pvalue / deflated_alpha / expected_max_alpha)
+            # that the validation pipelines surface in ``benchmark_metrics``.
+            trial_alphas = [a for a in benchmark_alphas if not np.isnan(a)]
+
+            for i, bench_metric in enumerate(benchmark_metrics):
+                if not bench_metric:
+                    continue
+                prefix = f"benchmark_{i}_"
+                # ``bench_metric`` stores prefixed keys (``benchmark_0_alpha``,
+                # ``benchmark_0_alpha_pvalue`` …); read them through the prefix
+                # so a benchmark that failed to produce stats (empty dict) is
+                # skipped rather than mis-corrected. The corrected fields are
+                # written back onto the same prefixed keys in ``metrics``
+                # (``bench_metric`` was already merged into ``metrics`` above),
+                # so the tear-sheet summary reconstruction and the per-benchmark
+                # ``benchmark_metrics`` list stay consistent.
+                alpha_key = f"{prefix}alpha"
+                pval_key = f"{prefix}alpha_pvalue"
+                if alpha_key not in bench_metric or not np.isfinite(bench_metric[alpha_key]):
+                    continue
+                alpha_val = bench_metric[alpha_key]
+                original_p = bench_metric.get(pval_key)
+                if original_p is None:
+                    original_p = 1.0
+
+                if n_benchmarks >= 2 and len(trial_alphas) >= 2:
+                    try:
+                        # Import deflated_alpha_ratio with circular import protection
+                        try:
+                            from walk_forward import deflated_alpha_ratio  # noqa: E402
+                        except ImportError:
+                            from scripts.walk_forward import deflated_alpha_ratio  # noqa: E402
+
+                        bench_returns = (
+                            benchmark_list[i] if benchmark_list[i] is not None else pd.Series()
+                        )
+                        da_result = deflated_alpha_ratio(
+                            alpha=alpha_val,
+                            returns=returns,
+                            benchmark_returns=bench_returns,
+                            n_benchmarks=n_benchmarks,
+                            trial_alphas=trial_alphas,
+                        )
+                        metrics[f"{prefix}alpha_pvalue_original"] = original_p
+                        metrics[f"{prefix}alpha_pvalue"] = da_result["p_value"]
+                        metrics[f"{prefix}deflated_alpha"] = da_result["deflated_alpha_ratio"]
+                        metrics[f"{prefix}expected_max_alpha"] = da_result["expected_max_alpha"]
+                    except Exception:
+                        # DAR computation failed (e.g. too few aligned
+                        # observations): fall back to a Bonferroni correction
+                        # rather than silently dropping the correction.
+                        corrected_p = min(original_p * n_benchmarks, 1.0)
+                        metrics[f"{prefix}alpha_pvalue_original"] = original_p
+                        metrics[f"{prefix}alpha_pvalue"] = corrected_p
+                        metrics.setdefault(f"{prefix}deflated_alpha", None)
+                        metrics.setdefault(f"{prefix}expected_max_alpha", None)
+                else:
+                    # Fallback (Bonferroni) when too few trial alphas for the
+                    # cross-sectional estimator.
+                    corrected_p = min(original_p * n_benchmarks, 1.0)
+                    metrics[f"{prefix}alpha_pvalue_original"] = original_p
+                    metrics[f"{prefix}alpha_pvalue"] = corrected_p
+                    metrics.setdefault(f"{prefix}deflated_alpha", None)
+                    metrics.setdefault(f"{prefix}expected_max_alpha", None)
 
             if n_benchmarks >= 2:
                 try:
