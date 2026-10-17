@@ -21,7 +21,15 @@ from itertools import product
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from scripts.strategy_builder import build_strategy
-from scripts.data_loader import load_data, validate_data, validate_point_in_time, _compute_benchmark_total_return, adjust_for_splits
+from scripts.data_loader import (
+    load_data,
+    validate_data,
+    validate_point_in_time,
+    load_multi_symbol,
+    detect_survivorship_bias,
+    _compute_benchmark_total_return,
+    adjust_for_splits,
+)
 from scripts.performance import calculate_metrics, generate_report, _annualization_factor, _benchmark_stats
 from scripts.reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
@@ -2284,7 +2292,7 @@ def _select_parameters(
 def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                                     bench_commission, bench_slippage, bench_expense_ratio,
                                     impact_coefficient, borrow_cost=None, funding_cost=None,
-                                    commission=None, slippage=None):
+                                    commission=None, slippage=None, survivorship=None):
     """Run walk-forward for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -2294,6 +2302,10 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
     `borrow_cost` / `funding_cost` default to the CLI args when None, so the
     same helper serves the market-impact sweep (which varies only
     `impact_coefficient`) and the borrow/funding sweeps.
+
+    `survivorship` carries the survivorship-bias detection report from the
+    caller so the sweep artifact records the same bias-controls signal as the
+    single-run walk-forward summary.
     """
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
@@ -2352,13 +2364,18 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         # sweep artifact is traceable to the same signal as the single-run
         # summary JSON.
         "bias_controls_engaged": bool(summary.get("bias_controls_engaged", False)),
+        # Survivorship-bias detection report (multi-symbol panels). Threaded
+        # through so a panel walk-forward sweep is traceable to the universe
+        # selection risk flagged at load time.
+        "survivorship_bias": survivorship,
     }
 
 
 def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                                 bench_commission, bench_slippage, bench_expense_ratio,
                                 impact_coefficient, borrow_cost=None, funding_cost=None,
-                                commission=None, slippage=None, pit_results=None):
+                                commission=None, slippage=None, pit_results=None,
+                                survivorship=None):
     """Run parameter optimization for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -2375,6 +2392,9 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
     `pit_results` carries the point-in-time validation outcome from the
     caller so the sweep artifact records the same bias-controls engagement
     flag as the single-run parameter-optimization JSON.
+    `survivorship` carries the survivorship-bias detection report from the
+    caller so the sweep artifact records the same bias-controls signal as the
+    single-run JSON.
     """
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
@@ -2431,14 +2451,19 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         # Bias-controls engagement flag (point-in-time validation + multiple-
         # testing deflation). Propagated from the caller so the sweep artifact
         # is traceable to the same signal as the single-run JSON.
-        "bias_controls_engaged": bool(pit_results is not None),
+        "bias_controls_engaged": bool(pit_results is not None or survivorship is not None),
+        # Survivorship-bias detection report (multi-symbol panels). Threaded
+        # through so a panel optimization sweep is traceable to the universe
+        # selection risk flagged at load time.
+        "survivorship_bias": survivorship,
     }
 
 
 def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                            bench_commission, bench_slippage, bench_expense_ratio,
                            impact_coefficient, borrow_cost=None, funding_cost=None,
-                           commission=None, slippage=None):
+                           commission=None, slippage=None, pit_results=None,
+                           survivorship=None):
     """Run out-of-sample validation for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -2451,6 +2476,13 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
     (which vary one of those while leaving the others at their single-run
     values), and the commission/slippage sweeps (which vary one of those
     while leaving impact/borrow/funding at their single-run values).
+
+    `pit_results` carries the point-in-time validation outcome from the
+    caller so the sweep artifact records the same bias-controls engagement
+    flag as the single-run out-of-sample JSON.
+    `survivorship` carries the survivorship-bias detection report from the
+    caller so the sweep artifact records the same bias-controls signal as the
+    single-run out-of-sample JSON.
     """
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
@@ -2517,14 +2549,18 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         # testing deflation). Propagated from the out-of-sample summary so the
         # sweep artifact is traceable to the same signal as the single-run
         # summary JSON.
-        "bias_controls_engaged": bool(summary.get("bias_controls_engaged", False)),
+        "bias_controls_engaged": bool(summary.get("bias_controls_engaged", False) or survivorship is not None),
+        # Survivorship-bias detection report (multi-symbol panels). Threaded
+        # through so a panel out-of-sample sweep is traceable to the universe
+        # selection risk flagged at load time.
+        "survivorship_bias": survivorship,
     }
 
 
 def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                             bench_commission, bench_slippage, bench_expense_ratio,
                             impact_coefficient, borrow_cost=None, funding_cost=None,
-                            commission=None, slippage=None):
+                            commission=None, slippage=None, survivorship=None):
     """Run CPCV for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -2537,6 +2573,10 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
     (which vary one of those while leaving impact at its single-run value),
     and the commission/slippage sweeps (which vary one of those while leaving
     impact/borrow/funding at their single-run values).
+
+    `survivorship` carries the survivorship-bias detection report from the
+    caller so the sweep artifact records the same bias-controls signal as the
+    single-run CPCV summary.
     """
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
@@ -2597,16 +2637,21 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         # artifact is traceable to the same signal as the single-run summary
         # JSON.
         "bias_controls_engaged": bool(summary.get("bias_controls_engaged", False)),
+        # Survivorship-bias detection report (multi-symbol panels). Threaded
+        # through so a panel CPCV sweep is traceable to the universe selection
+        # risk flagged at load time.
+        "survivorship_bias": survivorship,
     }
 
 
 def run_cpcv(args) -> int:
     """Run CPCV analysis from CLI args."""
     print(f"Loading data from {args.data}...")
-    data, pit_results = _load_and_validate_data(
+    data, pit_results, survivorship = _load_and_validate_data(
         args.data, args.symbol, args.start, args.end,
         validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
+        multi_symbol=getattr(args, "multi_symbol", False),
     )
 
     # Load benchmark if provided
@@ -2642,6 +2687,7 @@ def run_cpcv(args) -> int:
             row = _cpcv_sweep_coefficient(
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "cpcv_impact_sweep.json"
@@ -2680,6 +2726,7 @@ def run_cpcv(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=cost, funding_cost=args.funding_cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "cpcv_borrow_sweep.json"
@@ -2715,6 +2762,7 @@ def run_cpcv(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "cpcv_funding_sweep.json"
@@ -2755,6 +2803,7 @@ def run_cpcv(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, commission=cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "cpcv_commission_sweep.json"
@@ -2792,6 +2841,7 @@ def run_cpcv(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, slippage=cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "cpcv_slippage_sweep.json"
@@ -2953,8 +3003,11 @@ def run_cpcv(args) -> int:
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
         summary_data["point_in_time_validation"] = pit_results
-    results["bias_controls_engaged"] = bool(pit_results is not None)
-    summary_data["bias_controls_engaged"] = bool(pit_results is not None)
+    results["bias_controls_engaged"] = bool(pit_results is not None or survivorship is not None)
+    summary_data["bias_controls_engaged"] = bool(pit_results is not None or survivorship is not None)
+    if survivorship is not None:
+        results["survivorship_bias"] = survivorship
+        summary_data["survivorship_bias"] = survivorship
     if benchmark_provenance is not None:
         if isinstance(benchmark_provenance, list):
             summary_data["benchmark_provenance"] = [prov.to_dict() for prov in benchmark_provenance]
@@ -2993,7 +3046,9 @@ def run_cpcv(args) -> int:
             report_results["benchmark_provenance"] = benchmark_provenance
         if pit_results is not None:
             report_results["point_in_time_validation"] = pit_results
-        report_results["bias_controls_engaged"] = bool(pit_results is not None)
+        if survivorship is not None:
+            report_results["survivorship_bias"] = survivorship
+        report_results["bias_controls_engaged"] = bool(pit_results is not None or survivorship is not None)
         metrics = calculate_metrics(report_results)
         generate_report(metrics, args.output, symbol=args.symbol, strategy_name=f"{args.strategy}_cpcv")
         generate_tear_sheet(
@@ -3021,7 +3076,8 @@ def _load_and_validate_data(
     end: str,
     validate_pit: bool = True,
     pit_strict: bool = False,
-) -> tuple[pd.DataFrame, Optional[Dict[str, Any]]]:
+    multi_symbol: bool = False,
+) -> tuple[Any, Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Load and validate data from file.
 
     Point-in-time validation (look-ahead / stale-data / temporal-ordering
@@ -3029,15 +3085,43 @@ def _load_and_validate_data(
     without bias controls. With pit_strict, violations raise so the analysis
     aborts instead of continuing on suspect data.
 
+    When ``multi_symbol`` is True, the file is loaded as a symbol panel via
+    ``load_multi_symbol`` (requiring a 'symbol' or 'ticker' column) and
+    survivorship-bias detection runs on the panel. The loaded data is a
+    ``dict`` of {symbol: DataFrame}, which the analysis pipelines convert to a
+    MultiIndex panel internally.
+
     Returns:
-        tuple of (data_frame, pit_results_dict_or_None)
+        tuple of (data_frame_or_dict, pit_results_dict_or_None, survivorship_dict_or_None)
     """
-    data = load_data(data_path, symbol=symbol, start=start, end=end)
-    if not validate_data(data):
-        raise ValueError("Data validation failed!")
+    survivorship = None
+    if multi_symbol:
+        print("Multi-symbol mode: loading the full symbol universe...")
+        data = load_multi_symbol(data_path, return_provenance=False)
+        if not data:
+            raise ValueError(
+                "No symbols could be loaded from the multi-symbol file!"
+            )
+        survivorship = detect_survivorship_bias(data)
+        _print_survivorship_report(survivorship)
+    else:
+        data = load_data(data_path, symbol=symbol, start=start, end=end)
+        if not validate_data(data):
+            raise ValueError("Data validation failed!")
     pit = None
     if validate_pit:
-        pit = validate_point_in_time(data)
+        if isinstance(data, dict):
+            # Multi-symbol panels have no single signal column, so each
+            # symbol frame is validated for structural violations instead.
+            combined = {"passed": True, "violations": [], "warnings": []}
+            for df in data.values():
+                frame_result = validate_point_in_time(df)
+                combined["passed"] = combined["passed"] and frame_result["passed"]
+                combined["violations"].extend(frame_result["violations"])
+                combined["warnings"].extend(frame_result["warnings"])
+            pit = combined
+        else:
+            pit = validate_point_in_time(data)
         if pit["violations"]:
             print("Point-in-time validation violations:")
             for violation in pit["violations"]:
@@ -3055,7 +3139,31 @@ def _load_and_validate_data(
                 "Point-in-time validation failed in strict mode: "
                 + "; ".join(pit["violations"])
             )
-    return data, pit
+    return data, pit, survivorship
+
+
+def _print_survivorship_report(survivorship: Dict[str, Any]) -> None:
+    """Print a survivorship-bias detection report to the log."""
+    print("Survivorship bias detection:")
+    print(f"  bias_score: {survivorship['bias_score']:.3f}")
+    print(f"  surviving symbols: {len(survivorship['surviving_symbols'])}")
+    for entry in survivorship["entered_symbols"]:
+        print(
+            f"  entered after sample start: {entry['symbol']} "
+            f"({entry['days_after_global_start']} days late)"
+        )
+    for entry in survivorship["exited_symbols"]:
+        print(
+            f"  exited before sample end: {entry['symbol']} "
+            f"({entry['days_before_global_end']} days early)"
+        )
+    for symbol in survivorship["insufficient_data"]:
+        print(f"  insufficient observations: {symbol}")
+    for entry in survivorship["large_gaps"]:
+        print(
+            f"  large data gap: {entry['symbol']} "
+            f"(max {entry['max_gap_days']} days)"
+        )
 
 
 def _load_benchmark(benchmark_path: str, total_return_benchmark: bool = False) -> tuple[pd.DataFrame, Optional[Any]]:
@@ -3390,10 +3498,11 @@ def _parse_param_grid(param_grid_str: str) -> Dict[str, List[Any]]:
 def run_walk_forward(args) -> int:
     """Run walk-forward analysis from CLI args."""
     print(f"Loading data from {args.data}...")
-    data, pit_results = _load_and_validate_data(
+    data, pit_results, survivorship = _load_and_validate_data(
         args.data, args.symbol, args.start, args.end,
         validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
+        multi_symbol=getattr(args, "multi_symbol", False),
     )
 
     # Load benchmark if provided
@@ -3435,6 +3544,7 @@ def run_walk_forward(args) -> int:
             row = _walk_forward_sweep_coefficient(
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "walk_forward_impact_sweep.json"
@@ -3466,6 +3576,7 @@ def run_walk_forward(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=cost, funding_cost=args.funding_cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "walk_forward_borrow_sweep.json"
@@ -3497,6 +3608,7 @@ def run_walk_forward(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "walk_forward_funding_sweep.json"
@@ -3536,6 +3648,7 @@ def run_walk_forward(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, commission=cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "walk_forward_commission_sweep.json"
@@ -3572,6 +3685,7 @@ def run_walk_forward(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, slippage=cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "walk_forward_slippage_sweep.json"
@@ -3728,8 +3842,11 @@ def run_walk_forward(args) -> int:
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
         summary_data["point_in_time_validation"] = pit_results
-    results["bias_controls_engaged"] = bool(pit_results is not None)
-    summary_data["bias_controls_engaged"] = bool(pit_results is not None)
+    results["bias_controls_engaged"] = bool(pit_results is not None or survivorship is not None)
+    summary_data["bias_controls_engaged"] = bool(pit_results is not None or survivorship is not None)
+    if survivorship is not None:
+        results["survivorship_bias"] = survivorship
+        summary_data["survivorship_bias"] = survivorship
     if benchmark_provenance is not None:
         if isinstance(benchmark_provenance, list):
             summary_data["benchmark_provenance"] = [bp.to_dict() for bp in benchmark_provenance if bp is not None]
@@ -3771,7 +3888,9 @@ def run_walk_forward(args) -> int:
             report_results["benchmark_provenance"] = benchmark_provenance
         if pit_results is not None:
             report_results["point_in_time_validation"] = pit_results
-        report_results["bias_controls_engaged"] = bool(pit_results is not None)
+        if survivorship is not None:
+            report_results["survivorship_bias"] = survivorship
+        report_results["bias_controls_engaged"] = bool(pit_results is not None or survivorship is not None)
         metrics = calculate_metrics(report_results)
         generate_report(metrics, args.output, symbol=args.symbol, strategy_name=f"{args.strategy}_walk_forward")
         generate_tear_sheet(
@@ -3788,10 +3907,11 @@ def run_walk_forward(args) -> int:
 def run_parameter_optimization(args) -> int:
     """Run parameter optimization from CLI args."""
     print(f"Loading data from {args.data}...")
-    data, pit_results = _load_and_validate_data(
+    data, pit_results, survivorship = _load_and_validate_data(
         args.data, args.symbol, args.start, args.end,
         validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
+        multi_symbol=getattr(args, "multi_symbol", False),
     )
 
     # Load benchmark if provided
@@ -3829,7 +3949,7 @@ def run_parameter_optimization(args) -> int:
             row = _optimize_sweep_coefficient(
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
-                pit_results=pit_results,
+                pit_results=pit_results, survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_impact_sweep.json"
@@ -3861,6 +3981,7 @@ def run_parameter_optimization(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=cost, funding_cost=args.funding_cost,
                 pit_results=pit_results,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_borrow_sweep.json"
@@ -3892,6 +4013,7 @@ def run_parameter_optimization(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
                 pit_results=pit_results,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_funding_sweep.json"
@@ -3931,6 +4053,7 @@ def run_parameter_optimization(args) -> int:
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, commission=cost,
                 pit_results=pit_results,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_commission_sweep.json"
@@ -3967,6 +4090,7 @@ def run_parameter_optimization(args) -> int:
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, slippage=cost,
                 pit_results=pit_results,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_slippage_sweep.json"
@@ -4133,7 +4257,8 @@ def run_parameter_optimization(args) -> int:
 def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                                     bench_commission, bench_slippage, bench_expense_ratio,
                                     impact_coefficient, borrow_cost=None, funding_cost=None,
-                                    commission=None, slippage=None, pit_results=None):
+                                    commission=None, slippage=None, pit_results=None,
+                                    survivorship=None):
     """Run the Monte Carlo pipeline for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -4151,6 +4276,9 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     `pit_results` carries the point-in-time validation outcome from the
     caller so the sweep artifact records the same bias-controls engagement
     flag as the single-run Monte Carlo JSON.
+    `survivorship` carries the survivorship-bias detection report from the
+    caller so the sweep artifact records the same bias-controls signal as the
+    single-run Monte Carlo JSON.
     """
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
@@ -4254,17 +4382,22 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         # Bias-controls engagement flag (point-in-time validation + multiple-
         # testing deflation). Propagated from the CLI args so the sweep artifact
         # is traceable to the same signal as the single-run Monte Carlo JSON.
-        "bias_controls_engaged": bool(pit_results is not None),
+        "bias_controls_engaged": bool(pit_results is not None or survivorship is not None),
+        # Survivorship-bias detection report (multi-symbol panels). Threaded
+        # through so a panel Monte Carlo sweep is traceable to the universe
+        # selection risk flagged at load time.
+        "survivorship_bias": survivorship,
     }
 
 
 def run_monte_carlo(args) -> int:
     """Run Monte Carlo simulation from CLI args."""
     print(f"Loading data from {args.data}...")
-    data, pit_results = _load_and_validate_data(
+    data, pit_results, survivorship = _load_and_validate_data(
         args.data, args.symbol, args.start, args.end,
         validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
+        multi_symbol=getattr(args, "multi_symbol", False),
     )
 
     # Load benchmark if provided
@@ -4300,6 +4433,7 @@ def run_monte_carlo(args) -> int:
             row = _monte_carlo_sweep_coefficient(
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "monte_carlo_impact_sweep.json"
@@ -4336,6 +4470,7 @@ def run_monte_carlo(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=cost, funding_cost=args.funding_cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "monte_carlo_borrow_sweep.json"
@@ -4369,6 +4504,7 @@ def run_monte_carlo(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "monte_carlo_funding_sweep.json"
@@ -4406,6 +4542,7 @@ def run_monte_carlo(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, commission=cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "monte_carlo_commission_sweep.json"
@@ -4440,6 +4577,7 @@ def run_monte_carlo(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, slippage=cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "monte_carlo_slippage_sweep.json"
@@ -4669,18 +4807,21 @@ def run_monte_carlo(args) -> int:
             "n_simulations": args.n_simulations,
             "block_size": args.block_size,
             "point_in_time_validation": pit_results,
-            "bias_controls_engaged": pit_results is not None,
+            "bias_controls_engaged": bool(pit_results is not None or survivorship is not None),
             "benchmark": getattr(args, "benchmark", None),
             "total_return_benchmark": total_return_benchmark,
             "benchmark_commission": bench_commission,
             "benchmark_slippage": bench_slippage,
             "benchmark_expense_ratio": bench_expense_ratio,
             "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
+            "multi_symbol": getattr(args, "multi_symbol", False),
         },
     }
     if pit_results is not None:
         mc_save["point_in_time_validation"] = pit_results
-    mc_save["bias_controls_engaged"] = bool(pit_results is not None)
+    mc_save["bias_controls_engaged"] = bool(pit_results is not None or survivorship is not None)
+    if survivorship is not None:
+        mc_save["survivorship_bias"] = survivorship
     if dsr is not None:
         mc_save["deflated_sharpe"] = dsr
         mc_save["config"]["n_trials"] = effective_n_trials
@@ -4744,7 +4885,9 @@ def run_monte_carlo(args) -> int:
         mc_base_metrics["deflated_sharpe"] = dsr
     if pit_results is not None:
         mc_base_results["point_in_time_validation"] = pit_results
-    mc_base_results["bias_controls_engaged"] = bool(pit_results is not None)
+    if survivorship is not None:
+        mc_base_results["survivorship_bias"] = survivorship
+    mc_base_results["bias_controls_engaged"] = bool(pit_results is not None or survivorship is not None)
     generate_tear_sheet(
         mc_base_results, mc_base_metrics, args.output,
         symbol=args.symbol,
@@ -4759,10 +4902,11 @@ def run_monte_carlo(args) -> int:
 def run_out_of_sample_validation(args) -> int:
     """Run out-of-sample validation from CLI args."""
     print(f"Loading data from {args.data}...")
-    data, pit_results = _load_and_validate_data(
+    data, pit_results, survivorship = _load_and_validate_data(
         args.data, args.symbol, args.start, args.end,
         validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
+        multi_symbol=getattr(args, "multi_symbol", False),
     )
 
     # Load benchmark if provided
@@ -5140,11 +5284,14 @@ def run_out_of_sample_validation(args) -> int:
             "cpcv_test_size": args.cpcv_test_size,
             "cpcv_purge_size": args.cpcv_purge_size,
             "cpcv_embargo_size": args.cpcv_embargo_size,
+            "multi_symbol": getattr(args, "multi_symbol", False),
         },
     }
     if pit_results is not None:
         summary_data["point_in_time_validation"] = pit_results
-    summary_data["bias_controls_engaged"] = bool(pit_results is not None)
+    summary_data["bias_controls_engaged"] = bool(pit_results is not None or survivorship is not None)
+    if survivorship is not None:
+        summary_data["survivorship_bias"] = survivorship
     if benchmark_provenance is not None:
         # benchmark_provenance is a single DataProvenance when one benchmark
         # was supplied, or a list of them when multiple benchmarks were
@@ -5158,6 +5305,14 @@ def run_out_of_sample_validation(args) -> int:
     with open(summary_path, "w") as f:
         json.dump(summary_data, f, indent=2, default=str)
     print(f"\nOut-of-sample summary saved to: {summary_path}")
+
+    # Optional survivorship-bias artifact (multi-symbol panels). Mirrors the
+    # run_backtest CLI so panel runs are auditable on the same file name.
+    if survivorship is not None:
+        surv_path = Path(args.output) / "survivorship_bias.json"
+        with open(surv_path, "w") as f:
+            json.dump(survivorship, f, indent=2, default=str)
+        print(f"Survivorship bias report saved to: {surv_path}")
 
     # Generate full report if test returns available
     if len(results["test_performance"]["test_returns"]) > 0:
@@ -5205,7 +5360,9 @@ def run_out_of_sample_validation(args) -> int:
                     report_results["benchmark_provenance"] = benchmark_provenance
         if pit_results is not None:
             report_results["point_in_time_validation"] = pit_results
-        report_results["bias_controls_engaged"] = bool(pit_results is not None)
+        if survivorship is not None:
+            report_results["survivorship_bias"] = survivorship
+        report_results["bias_controls_engaged"] = bool(pit_results is not None or survivorship is not None)
         metrics = calculate_metrics(report_results)
         if dsr is not None:
             metrics["deflated_sharpe"] = dsr
@@ -5252,6 +5409,7 @@ def main():
     common_parser.add_argument("--benchmark-expense-ratio", type=float, default=None, help="Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%). Defaults to 0 (applies to all benchmarks).")
     common_parser.add_argument("--benchmark-cost-is-periodic", action="store_true", help="If set, apply benchmark trading costs (commission+slippage) as periodic deductions each period instead of as a round-trip cost on total return (applies to all benchmarks).")
     common_parser.add_argument("--adjust-splits", action="store_true", help="Adjust prices for stock splits using the splits column if present.")
+    common_parser.add_argument("--multi-symbol", action="store_true", help="Load every symbol in a multi-symbol file (with a 'symbol' or 'ticker' column) as a panel, run survivorship-bias detection, and backtest a panel. Requires a panel strategy such as cross_sectional_momentum or dual_momentum.")
     common_parser.add_argument("--seed", type=int, default=None, help="Seed for the Monte Carlo random number generator. A fixed default seed is used when unset, so repeated runs (and cost sweeps) are reproducible; set any value to override.")
 
     # Walk-forward analysis

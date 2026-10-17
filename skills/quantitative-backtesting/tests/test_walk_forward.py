@@ -419,14 +419,15 @@ def test_load_and_validate_data_runs_pit_by_default():
     with tempfile.TemporaryDirectory() as tmpdir:
         csv_path = os.path.join(tmpdir, "data.csv")
         _write_ohlcv_csv(csv_path, periods=200, seed=42)
-        data, pit = _load_and_validate_data(
+        data, pit, surv = _load_and_validate_data(
             csv_path, symbol="TEST", start="2020-01-01", end="2021-12-31",
         )
         assert pit is not None, "PIT should run by default (validate_pit=True)"
         assert pit["passed"] is True, f"PIT should pass on clean data, got {pit}"
+        assert surv is None, "Survivorship should be None without --multi-symbol"
         assert data is not None and len(data) > 0
 
-        data2, pit2 = _load_and_validate_data(
+        data2, pit2, surv2 = _load_and_validate_data(
             csv_path, symbol="TEST", start="2020-01-01", end="2021-12-31",
             validate_pit=False,
         )
@@ -3788,6 +3789,9 @@ def main() -> int:
         ("test_cli_monte_carlo_slippage_sweep", test_cli_monte_carlo_slippage_sweep),
         ("test_cli_out_of_sample_commission_sweep", test_cli_out_of_sample_commission_sweep),
         ("test_cli_out_of_sample_slippage_sweep", test_cli_out_of_sample_slippage_sweep),
+        ("test_cli_multi_symbol_load_and_validate_data_returns_survivorship", test_cli_multi_symbol_load_and_validate_data_returns_survivorship),
+        ("test_cli_multi_symbol_out_of_sample_sets_bias_controls_engaged", test_cli_multi_symbol_out_of_sample_sets_bias_controls_engaged),
+        ("test_cli_multi_symbol_out_of_sample_writes_survivorship_artifact", test_cli_multi_symbol_out_of_sample_writes_survivorship_artifact),
     ]
 
     failures = 0
@@ -4082,3 +4086,119 @@ def test_cli_oos_tear_sheet_carries_provenance():
             assert prov["source_path"] == os.path.join(tmpdir, bench_paths[0]), (
                 f"OOS {label}: provenance should reference the first benchmark file"
             )
+
+
+def _write_multi_symbol_csv(path: str, periods: int = 600) -> None:
+    """Write a panel with one survivor, one late entry, one early exit."""
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    rows = []
+    for i, (sym, start, end) in enumerate([
+        ("SURV", 0, periods), ("LATE", 120, periods), ("EARLY", 0, periods - 120),
+    ]):
+        rng = np.random.default_rng(i + 1)
+        rets = rng.normal(0.0005, 0.015, end - start)
+        prices = 100 * np.exp(np.cumsum(rets))
+        for j, d in enumerate(dates[start:end]):
+            rows.append({
+                "date": d.strftime("%Y-%m-%d"),
+                "symbol": sym,
+                "open": prices[j],
+                "high": prices[j] * 1.01,
+                "low": prices[j] * 0.99,
+                "close": prices[j],
+                "volume": int(rng.integers(1_000_000, 10_000_000)),
+            })
+    pd.DataFrame(rows).to_csv(path, index=False)
+
+
+def test_cli_multi_symbol_load_and_validate_data_returns_survivorship():
+    """_load_and_validate_data returns a survivorship dict with --multi-symbol."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "multi.csv")
+        _write_multi_symbol_csv(csv_path)
+        data, pit, surv = _load_and_validate_data(
+            csv_path, symbol="SURV", start="2020-01-01", end="2021-12-31",
+            multi_symbol=True,
+        )
+        assert surv is not None, "survivorship should be returned with multi_symbol=True"
+        assert surv["surviving_symbols"] == ["SURV"]
+        assert [e["symbol"] for e in surv["entered_symbols"]] == ["LATE"]
+        assert [e["symbol"] for e in surv["exited_symbols"]] == ["EARLY"]
+        assert surv["bias_score"] > 0.0
+
+
+def test_cli_multi_symbol_out_of_sample_sets_bias_controls_engaged():
+    """--multi-symbol on out-of-sample sets bias_controls_engaged=True and
+    threads survivorship_bias into the summary JSON."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "multi.csv")
+        _write_multi_symbol_csv(csv_path)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--strategy", "cross_sectional_momentum",
+            "--param-grid", '{"lookback": [20], "top_quantile": [0.4], "bottom_quantile": [0.2]}',
+            "--output", out_dir,
+            "--multi-symbol",
+            "--no-validate-point-in-time",
+            "--wf-train-months", "6",
+            "--wf-test-months", "2",
+            "--wf-step-months", "2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI out-of-sample --multi-symbol should exit 0, got {rc}"
+
+        summary_path = os.path.join(out_dir, "out_of_sample_summary.json")
+        assert os.path.exists(summary_path), "out_of_sample_summary.json not written"
+        with open(summary_path) as f:
+            summary = json.load(f)
+
+        assert summary.get("bias_controls_engaged") is True, \
+            f"Expected bias_controls_engaged=True with --multi-symbol, got {summary.get('bias_controls_engaged')}"
+        assert "survivorship_bias" in summary, \
+            "survivorship_bias missing from out-of-sample summary"
+        surv = summary["survivorship_bias"]
+        assert surv["surviving_symbols"] == ["SURV"]
+        assert surv["bias_score"] > 0.0
+
+
+def test_cli_multi_symbol_out_of_sample_writes_survivorship_artifact():
+    """--multi-symbol persists the survivorship_bias.json artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "multi.csv")
+        _write_multi_symbol_csv(csv_path)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--strategy", "cross_sectional_momentum",
+            "--param-grid", '{"lookback": [20], "top_quantile": [0.4], "bottom_quantile": [0.2]}',
+            "--output", out_dir,
+            "--multi-symbol",
+            "--wf-train-months", "6",
+            "--wf-test-months", "2",
+            "--wf-step-months", "2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI out-of-sample --multi-symbol should exit 0, got {rc}"
+
+        surv_path = os.path.join(out_dir, "survivorship_bias.json")
+        assert os.path.exists(surv_path), "survivorship_bias.json not written"
+        with open(surv_path) as f:
+            surv = json.load(f)
+        assert surv["surviving_symbols"] == ["SURV"]
+        assert [e["symbol"] for e in surv["entered_symbols"]] == ["LATE"]
+        assert [e["symbol"] for e in surv["exited_symbols"]] == ["EARLY"]
+        assert surv["bias_score"] > 0.0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())
