@@ -58,6 +58,8 @@ def parse_args():
     parser.add_argument("--point-in-time-strict", action="store_true", help="Abort with a non-zero exit code when point-in-time validation finds violations (default: warn only)")
     parser.add_argument("--multi-symbol", action="store_true", help="Load every symbol in a multi-symbol file (with a 'symbol' or 'ticker' column) as a panel, run survivorship-bias detection, and backtest a panel. Requires a panel strategy such as cross_sectional_momentum or dual_momentum.")
     parser.add_argument("--benchmark", type=str, nargs="+", default=None, help="Path to benchmark OHLCV file(s) (e.g. SPY QQQ) for buy-and-hold baseline comparison (alpha/beta, correlation)")
+    parser.add_argument("--benchmark-name", type=str, nargs="+", default=None, help="Optional name(s) for each benchmark (corresponding to --benchmark order). If omitted, derived from filename.")
+    parser.add_argument("--benchmark-names", type=str, nargs="+", default=None, help="Alias for --benchmark-name (optional).")
     parser.add_argument("--total-return-benchmark", action="store_true", help="Compute benchmark returns using total return (dividends + price) when dividend/adj_close data is available, instead of price-only returns (applies to all benchmarks)")
     parser.add_argument("--benchmark-commission", type=float, default=None, help="Commission per trade for benchmark (as decimal). Defaults to strategy commission if not specified (applies to all benchmarks).")
     parser.add_argument("--benchmark-slippage", type=float, default=None, help="Slippage per trade for benchmark (as decimal). Defaults to strategy slippage if not specified (applies to all benchmarks).")
@@ -557,7 +559,18 @@ def main():
             benchmark_paths = [benchmark_paths]
         benchmark_frames = []
         benchmark_provenances = []
-        for path in benchmark_paths:
+        # Resolve benchmark names
+        bench_names = getattr(args, "benchmark_names", None) or getattr(args, "benchmark_name", None)
+        if bench_names:
+            if len(bench_names) != len(benchmark_paths):
+                # If lengths mismatch, try to be tolerant - pad/truncate
+                if len(bench_names) < len(benchmark_paths):
+                    bench_names = bench_names + [None] * (len(benchmark_paths) - len(bench_names))
+                else:
+                    bench_names = bench_names[:len(benchmark_paths)]
+        else:
+            bench_names = [None] * len(benchmark_paths)
+        for i, path in enumerate(benchmark_paths):
             print(f"Loading benchmark data from {path}...")
             bench_df, bench_prov = load_data(path, return_provenance=True, adjust_splits=getattr(args, "adjust_splits", False))
             print(
@@ -573,6 +586,19 @@ def main():
             if not validate_data(bench_df):
                 print("Benchmark data validation failed!")
                 return 1
+            # Attach name to provenance
+            if hasattr(bench_prov, '__dict__'):
+                name = bench_names[i]
+                if name is None:
+                    try:
+                        name = Path(path).stem
+                    except Exception:
+                        name = str(path)
+                try:
+                    # Set attribute if possible
+                    setattr(bench_prov, 'name', name)
+                except Exception:
+                    pass
             benchmark_frames.append(bench_df)
             benchmark_provenances.append(bench_prov)
         # Pass the list of benchmark DataFrames to run_backtest();

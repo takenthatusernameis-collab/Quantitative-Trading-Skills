@@ -44,10 +44,14 @@ class DataProvenance:
     transformations_applied: List[str] = field(default_factory=list)
     checksum: Optional[str] = None
     total_return_type: Optional[str] = None
+    name: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to JSON-serializable dictionary."""
-        return asdict(self)
+        d = asdict(self)
+        if 'name' not in d:
+            d['name'] = None
+        return d
 
     def to_json(self) -> str:
         """Convert to JSON string."""
