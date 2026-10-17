@@ -3752,6 +3752,8 @@ def main() -> int:
         ("test_cli_cpcv_slippage_sweep", test_cli_cpcv_slippage_sweep),
         ("test_cli_monte_carlo_commission_sweep", test_cli_monte_carlo_commission_sweep),
         ("test_cli_monte_carlo_slippage_sweep", test_cli_monte_carlo_slippage_sweep),
+        ("test_cli_multi_symbol_monte_carlo_commission_sweep_records_survivorship", test_cli_multi_symbol_monte_carlo_commission_sweep_records_survivorship),
+
         ("test_cli_out_of_sample_commission_sweep", test_cli_out_of_sample_commission_sweep),
         ("test_cli_out_of_sample_slippage_sweep", test_cli_out_of_sample_slippage_sweep),
         ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
@@ -3787,6 +3789,8 @@ def main() -> int:
         ("test_cli_cpcv_slippage_sweep", test_cli_cpcv_slippage_sweep),
         ("test_cli_monte_carlo_commission_sweep", test_cli_monte_carlo_commission_sweep),
         ("test_cli_monte_carlo_slippage_sweep", test_cli_monte_carlo_slippage_sweep),
+        ("test_cli_multi_symbol_monte_carlo_commission_sweep_records_survivorship", test_cli_multi_symbol_monte_carlo_commission_sweep_records_survivorship),
+
         ("test_cli_out_of_sample_commission_sweep", test_cli_out_of_sample_commission_sweep),
         ("test_cli_out_of_sample_slippage_sweep", test_cli_out_of_sample_slippage_sweep),
         ("test_cli_multi_symbol_load_and_validate_data_returns_survivorship", test_cli_multi_symbol_load_and_validate_data_returns_survivorship),
@@ -4474,6 +4478,35 @@ def test_cli_multi_symbol_optimize_commission_sweep_records_survivorship():
         assert rc == 0, f"CLI optimize --multi-symbol commission sweep should exit 0, got {rc}"
         _assert_multi_symbol_sweep_records_survivorship(
             out_dir, "parameter_optimization_commission_sweep.json", [0.0002, 0.002, 0.004]
+        )
+
+
+
+
+def test_cli_multi_symbol_monte_carlo_commission_sweep_records_survivorship():
+    """--multi-symbol monte-carlo commission sweep records survivorship_bias per row."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "multi.csv")
+        _write_multi_symbol_csv(csv_path)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "monte-carlo",
+            "--data", csv_path,
+            "--strategy", "cross_sectional_momentum",
+            "--param-grid", '{"lookback": [20], "top_quantile": [0.4], "bottom_quantile": [0.2]}',
+            "--output", out_dir,
+            "--multi-symbol",
+            "--no-validate-point-in-time",
+            "--n-trials", "10",
+            "--commissions", "0.0002", "0.002", "0.004",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI monte-carlo --multi-symbol commission sweep should exit 0, got {rc}"
+        _assert_multi_symbol_sweep_records_survivorship(
+            out_dir, "monte_carlo_commission_sweep.json", [0.0002, 0.002, 0.004]
         )
 
 
