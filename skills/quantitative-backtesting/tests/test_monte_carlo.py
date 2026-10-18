@@ -276,23 +276,55 @@ def test_standalone_no_nan_on_extreme_single_move():
     )
 
 
+def test_main_registers_every_module_level_test():
+    """main() must register every module-level ``test_*`` function.
+
+    Regression guard for a defect where a test function was defined but
+    omitted from the runner's registry, so the suite reported a lower
+    count than the number of tests actually defined. A test defined but
+    never registered is dead code: it cannot fail, so it provides no
+    coverage of the feature it targets. This is a structural check: no
+    test is executed here.
+
+    In this file the guard specifically protects the Monte Carlo bust-path
+    invariant: simulated paths where equity is wiped out (growth <= 0)
+    must not emit NaN in ``annualized_return``, or the whole distribution,
+    summary mean/std, and confidence intervals collapse to NaN. Those tests
+    must remain registered.
+    """
+    import inspect
+
+    module_tests = {
+        obj
+        for name, obj in list(globals().items())
+        if name.startswith("test_")
+        and inspect.isfunction(obj)
+        and obj.__module__ == __name__
+    }
+    registered = {fn for _, fn in TEST_REGISTRY}
+
+    missing = module_tests - registered
+    assert not missing, (
+        f"test functions defined but not registered in TEST_REGISTRY: "
+        f"{sorted(f.__name__ for f in missing)}. A test outside the "
+        "runner is dead code and provides no coverage."
+    )
+    phantom = registered - module_tests
+    assert not phantom, (
+        f"entries in TEST_REGISTRY that are not module-level test_* "
+        f"functions: {sorted(f.__name__ for f in phantom)}"
+    )
+    # Labels must be unique so the runner cannot silently skip a test
+    # (duplicate labels would overwrite each other in a name->fn map).
+    labels = [name for name, _ in TEST_REGISTRY]
+    assert len(labels) == len(set(labels)), (
+        f"TEST_REGISTRY has duplicate labels: "
+        f"{[l for l in labels if labels.count(l) > 1]}"
+    )
+
+
 def main() -> int:
-    tests = [
-        ("standalone_module_structure", test_standalone_module_structure),
-        ("standalone_basic_structure", test_standalone_basic_structure),
-        ("standalone_block_bootstrap", test_standalone_block_bootstrap),
-        ("standalone_probability_of_ruin", test_standalone_probability_of_ruin),
-        ("standalone_short_series_raises", test_standalone_short_series_raises),
-        ("standalone_matches_walk_forward_re_export", test_standalone_matches_walk_forward_re_export),
-        ("standalone_reproducible_structure", test_standalone_reproducible_structure),
-        ("estimate_optimal_block_size_basic", test_estimate_optimal_block_size_basic),
-        ("estimate_optimal_block_size_ar1_vs_politis_white", test_estimate_optimal_block_size_ar1_vs_politis_white),
-        ("estimate_optimal_block_size_short_series", test_estimate_optimal_block_size_short_series),
-        ("estimate_optimal_block_size_zero_variance", test_estimate_optimal_block_size_zero_variance),
-        ("monte_carlo_auto_block_size", test_monte_carlo_auto_block_size),
-        ("monte_carlo_auto_block_size_reproducible", test_monte_carlo_auto_block_size_reproducible),
-        ("monte_carlo_block_size_none_vs_auto_different", test_monte_carlo_block_size_none_vs_auto_different),
-    ]
+    tests = TEST_REGISTRY
     failures = 0
     for name, fn in tests:
         try:
@@ -306,6 +338,26 @@ def main() -> int:
     print(f"\n{len(tests) - failures}/{len(tests)} tests passed")
     return 1 if failures else 0
 
+
+TEST_REGISTRY = [
+    ("standalone_module_structure", test_standalone_module_structure),
+    ("standalone_basic_structure", test_standalone_basic_structure),
+    ("standalone_block_bootstrap", test_standalone_block_bootstrap),
+    ("standalone_probability_of_ruin", test_standalone_probability_of_ruin),
+    ("standalone_short_series_raises", test_standalone_short_series_raises),
+    ("standalone_matches_walk_forward_re_export", test_standalone_matches_walk_forward_re_export),
+    ("standalone_reproducible_structure", test_standalone_reproducible_structure),
+    ("estimate_optimal_block_size_basic", test_estimate_optimal_block_size_basic),
+    ("estimate_optimal_block_size_ar1_vs_politis_white", test_estimate_optimal_block_size_ar1_vs_politis_white),
+    ("estimate_optimal_block_size_short_series", test_estimate_optimal_block_size_short_series),
+    ("estimate_optimal_block_size_zero_variance", test_estimate_optimal_block_size_zero_variance),
+    ("monte_carlo_auto_block_size", test_monte_carlo_auto_block_size),
+    ("monte_carlo_auto_block_size_reproducible", test_monte_carlo_auto_block_size_reproducible),
+    ("monte_carlo_block_size_none_vs_auto_different", test_monte_carlo_block_size_none_vs_auto_different),
+    ("test_standalone_no_nan_on_bust_paths", test_standalone_no_nan_on_bust_paths),
+    ("test_standalone_no_nan_on_extreme_single_move", test_standalone_no_nan_on_extreme_single_move),
+    ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
+]
 
 if __name__ == "__main__":
     sys.exit(main())
