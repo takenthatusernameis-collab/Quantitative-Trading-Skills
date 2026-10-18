@@ -36,16 +36,5 @@
   "plot_files": [
     "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/examples/example_output/equity_curve.png",
     "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/examples/example_output/returns_distribution.png"
-  ],
-  "deflated_alpha": {
-    "deflated_alpha_ratio": 0.0,
-    "p_value": 1.0,
-    "alpha": -0.09261244506834217,
-    "expected_max_alpha": 0.0,
-    "z_score": -11.44440972397737,
-    "n_benchmarks": 1,
-    "n_observations": 504,
-    "skewness": -0.15623515693550766,
-    "kurtosis": 5.680703676093877
-  }
+  ]
 }
