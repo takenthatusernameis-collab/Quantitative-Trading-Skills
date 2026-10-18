@@ -458,7 +458,7 @@ def signals_active(signals: pd.Series) -> bool:
 def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
                                    impact_coefficient=None, borrow_cost=None,
                                    funding_cost=None, commission=None,
-                                   slippage=None):
+                                   slippage=None, survivorship=None):
     """Run backtest for a single cost coefficient.
 
     No file I/O or stdout; returns per-coefficient metrics dict.
@@ -486,7 +486,7 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
 
     sweep_args = SweepArgs(args)
     results = run_backtest(data, strategy, sweep_args,
-                           data_provenance=provenance, benchmark=benchmark)
+                           data_provenance=provenance, benchmark=benchmark, survivorship=survivorship)
 
     rfr = getattr(args, "risk_free_rate", None)
     metrics = calculate_metrics(results) if rfr is None else calculate_metrics(results, risk_free_rate=rfr)
@@ -623,7 +623,8 @@ def main():
         for coeff in args.impact_coefficients:
             sweep_results.append(
                 _run_backtest_sweep_coefficient(
-                    args, data, strategy, provenance, benchmark, coeff
+                    args, data, strategy, provenance, benchmark, coeff,
+                    survivorship=survivorship,
                 )
             )
         sweep_path = output_dir / "run_backtest_impact_sweep.json"
@@ -643,7 +644,8 @@ def main():
         for cost in args.borrow_costs:
             sweep_results.append(
                 _run_backtest_sweep_coefficient(
-                    args, data, strategy, provenance, benchmark, args.impact_coefficient, borrow_cost=cost
+                    args, data, strategy, provenance, benchmark, args.impact_coefficient, borrow_cost=cost,
+                    survivorship=survivorship,
                 )
             )
         sweep_path = output_dir / "run_backtest_borrow_cost_sweep.json"
@@ -662,7 +664,8 @@ def main():
         for cost in args.funding_costs:
             sweep_results.append(
                 _run_backtest_sweep_coefficient(
-                    args, data, strategy, provenance, benchmark, args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost
+                    args, data, strategy, provenance, benchmark, args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
+                    survivorship=survivorship,
                 )
             )
         sweep_path = output_dir / "run_backtest_funding_cost_sweep.json"
@@ -681,7 +684,8 @@ def main():
         for cost in args.commissions:
             sweep_results.append(
                 _run_backtest_sweep_coefficient(
-                    args, data, strategy, provenance, benchmark, commission=cost
+                    args, data, strategy, provenance, benchmark, commission=cost,
+                    survivorship=survivorship,
                 )
             )
         sweep_path = output_dir / "run_backtest_commission_sweep.json"
@@ -700,7 +704,8 @@ def main():
         for cost in args.slippages:
             sweep_results.append(
                 _run_backtest_sweep_coefficient(
-                    args, data, strategy, provenance, benchmark, slippage=cost
+                    args, data, strategy, provenance, benchmark, slippage=cost,
+                    survivorship=survivorship,
                 )
             )
         sweep_path = output_dir / "run_backtest_slippage_sweep.json"

@@ -3966,7 +3966,8 @@ def run_parameter_optimization(args) -> int:
             row = _optimize_sweep_coefficient(
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
-                pit_results=pit_results, survivorship=survivorship,
+                survivorship=survivorship,
+                pit_results=pit_results,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_impact_sweep.json"
@@ -4966,6 +4967,7 @@ def run_out_of_sample_validation(args) -> int:
             row = _oos_sweep_coefficient(
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "out_of_sample_impact_sweep.json"
@@ -4997,6 +4999,7 @@ def run_out_of_sample_validation(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=cost, funding_cost=args.funding_cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "out_of_sample_borrow_sweep.json"
@@ -5028,6 +5031,7 @@ def run_out_of_sample_validation(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "out_of_sample_funding_sweep.json"
@@ -5104,6 +5108,7 @@ def run_out_of_sample_validation(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, slippage=cost,
+                survivorship=survivorship,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "out_of_sample_slippage_sweep.json"
