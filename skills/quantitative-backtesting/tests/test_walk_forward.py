@@ -2179,6 +2179,84 @@ def test_cli_walk_forward_multiple_benchmarks():
         assert len(summary["benchmark_metrics"]) == 2
 
 
+def test_cli_walk_forward_constant_benchmarks_defensive_fallback_surfaces_metrics():
+    """CLI walk-forward with constant-price benchmarks surfaces benchmark_metrics via the defensive fallback.
+
+    A constant-price benchmark has zero return variance (sxx == 0), so
+    _benchmark_stats emits no alpha key, _benchmark_list_alpha_correction
+    returns deflated_alpha=None, and walk_forward_analysis therefore leaves
+    summary["deflated_alpha"] unset. The defensive block at walk_forward.py:3757
+    re-runs the correction on the CLI side because
+    results["summary"].get("deflated_alpha") is None, and must still write
+    summary["benchmark_metrics"] (one entry per benchmark) into
+    walk_forward_summary.json. No deflated alpha can be computed from constant
+    benchmarks, so it must remain absent rather than be fabricated.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        bench1_path = os.path.join(tmpdir, "bench1.csv")
+        bench2_path = os.path.join(tmpdir, "bench2.csv")
+        _write_ohlcv_csv(csv_path, periods=800)
+        flat = _make_flat_ohlcv_data(periods=800)
+        flat.reset_index().rename(columns={"index": "date"}).to_csv(bench1_path, index=False)
+        flat.reset_index().rename(columns={"index": "date"}).to_csv(bench2_path, index=False)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "walk-forward",
+            "--data", csv_path,
+            "--benchmark", bench1_path, bench2_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5], "slow_period": [8, 10]}',
+            "--output", out_dir,
+            "--benchmark-commission", "0.001",
+            "--benchmark-slippage", "0.001",
+            "--train-months", "12",
+            "--test-months", "3",
+            "--step-months", "2",
+        ]
+        series_lengths = []
+
+        def counting_correction(*args, **kwargs):
+            try:
+                series_lengths.append(len(args[0]))
+            except Exception:
+                series_lengths.append(None)
+            return _benchmark_list_alpha_correction(*args, **kwargs)
+
+        with patch.object(sys, "argv", argv), \
+                patch("walk_forward._benchmark_list_alpha_correction", side_effect=counting_correction), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI walk-forward with constant benchmarks should exit 0, got {rc}"
+        summary_path = os.path.join(out_dir, "walk_forward_summary.json")
+        assert os.path.exists(summary_path), "walk_forward_summary.json not written"
+        with open(summary_path) as f:
+            payload = json.load(f)
+
+        summary = payload["summary"]
+        # The aggregate call inside walk_forward_analysis (walk_forward.py:536)
+        # and the defensive fallback call (walk_forward.py:3761) both receive
+        # the full combined OOS returns, which is longer than any per-period
+        # slice (walk_forward.py:476). Exactly two such calls proves the
+        # fallback block executed on top of analysis's own call.
+        max_len = max(series_lengths)
+        full_series_calls = sum(1 for n in series_lengths if n == max_len)
+        assert full_series_calls == 2, (
+            f"Expected exactly 2 full-series correction calls "
+            f"(aggregate in analysis + defensive fallback), got {full_series_calls}"
+        )
+
+        assert "benchmark_metrics" in summary, (
+            f"benchmark_metrics missing from summary. Keys: {sorted(summary.keys())}"
+        )
+        assert isinstance(summary["benchmark_metrics"], list)
+        assert len(summary["benchmark_metrics"]) == 2
+        # Constant-price benchmarks carry no finite alpha, so no deflated
+        # alpha can be computed by either the analysis or the fallback.
+        assert summary.get("deflated_alpha") is None
+
+
 def test_cli_optimize_multiple_benchmarks():
     """CLI optimize subcommand accepts multiple --benchmark files, does not crash
     in the per-combo benchmark block or provenance save, and writes a
@@ -3938,6 +4016,7 @@ def main() -> int:
         ("test_cli_cpcv_multiple_benchmarks", test_cli_cpcv_multiple_benchmarks),
         ("test_out_of_sample_validation_multiple_benchmarks_deflated_alpha", test_out_of_sample_validation_multiple_benchmarks_deflated_alpha),
         ("test_cli_walk_forward_multiple_benchmarks", test_cli_walk_forward_multiple_benchmarks),
+        ("test_cli_walk_forward_constant_benchmarks_defensive_fallback_surfaces_metrics", test_cli_walk_forward_constant_benchmarks_defensive_fallback_surfaces_metrics),
         ("test_cli_optimize_multiple_benchmarks", test_cli_optimize_multiple_benchmarks),
         ("test_cli_monte_carlo_multiple_benchmarks", test_cli_monte_carlo_multiple_benchmarks),
         ("test_cli_monte_carlo_n_trials", test_monte_carlo_n_trials_uses_evaluated_combo_count),
