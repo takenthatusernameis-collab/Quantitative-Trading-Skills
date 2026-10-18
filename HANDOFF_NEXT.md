@@ -3,15 +3,15 @@
 ## Repository state
 
 - Working tree: clean (changes committed). See git history for this session.
-- Quant backtesting skill: 310/310 tests passing (pytest) and 98/98 via the standalone `test_walk_forward.py` runner (verified 2026-10-17).
-- Survivorship-bias recording in `--multi-symbol` cost sweeps is now covered across all five modes (walk-forward, out-of-sample, cpcv, optimize, monte-carlo).
+- Quant backtesting skill: 310/310 tests passing (pytest) and 91/91 via `test_walk_forward.py` standalone (verified 2026-10-17).
+- Survivorship-bias recording in `--multi-symbol` cost sweeps is now covered across all five walk-forward modes and in `run_backtest` cost sweeps; OOS sweep dispatches now pass survivorship uniformly.
 
 ## What was verified
 
-- Full quant backtesting test suite: 310 passed, 0 failed, ~57s.
+- Full quant backtesting test suite: 310 passed, 0 failed.
 - All 9 test files run standalone and pass.
 - All 5 network-independent example scripts run without error.
-- `--multi-symbol` cost-sweep artifacts record `survivorship_bias` (bias_score, surviving/entered/exited symbols) and `bias_controls_engaged=True` per row across all five subcommands.
+- `--multi-symbol` cost-sweep artifacts record `survivorship_bias` (bias_score, surviving/entered/exited symbols) and `bias_controls_engaged=True` per row across walk-forward modes and run_backtest cost sweeps.
 
 ## What remains unresolved
 

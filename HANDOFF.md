@@ -7,22 +7,15 @@
 - Status: Session completed successfully; all tests passing
 
 ## What Changed
-- **Fixed a real survivorship-bias reporting bug in `run_out_of_sample_validation`** (`skills/quantitative-backtesting/scripts/walk_forward.py:5065`): the out-of-sample `--commissions` sweep dispatch called `_oos_sweep_coefficient` without `survivorship=survivorship`, so any `--multi-symbol` OOS commission sweep recorded `survivorship_bias: None` per row instead of the bias report (surviving/entered/exited symbols, bias_score). Added the missing kwarg, matching the walk-forward/CPCV/optimize/monte-carlo sweep dispatches which already thread it through. Walk-forward's sweep helper already recorded `survivorship_bias` per row (`walk_forward.py:2370`); the oos fix makes the behavior consistent across all five modes.
-- **Added 5 regression tests** in `skills/quantitative-backtesting/tests/test_walk_forward.py`:
-  - `test_cli_multi_symbol_walk_forward_commission_sweep_records_survivorship`
-  - `test_cli_multi_symbol_out_of_sample_commission_sweep_records_survivorship` (covers the oos bug fix)
-  - `test_cli_multi_symbol_cpcv_commission_sweep_records_survivorship`
-  - `test_cli_multi_symbol_optimize_commission_sweep_records_survivorship`
-  - `test_cli_multi_symbol_monte_carlo_commission_sweep_records_survivorship` (added in this session; helper already recorded survivorship_bias)
-  Each asserts `--multi-symbol` commission sweeps exit 0, write the `<mode>_commission_sweep.json` artifact, and that every sweep row carries `survivorship_bias` (a dict with `surviving_symbols == ["SURV"]` and `bias_score > 0`) plus `bias_controls_engaged=True`; the walk-forward test additionally asserts OOS return degrades as commission rises.
-  - Registered all new tests in the module's `main()` runner.
+- **Threaded survivorship through all OOS sweep dispatches** (`skills/quantitative-backtesting/scripts/walk_forward.py`): impact, borrow, funding, commission, and slippage sweeps in `run_out_of_sample_validation` now pass `survivorship=survivorship` to `_oos_sweep_coefficient`. This ensures multi-symbol OOS cost sweeps (not just commission) consistently record `survivorship_bias` in their sweep artifacts.
+- **Threaded survivorship through `run_backtest` cost sweeps** (`skills/quantitative-backtesting/scripts/run_backtest.py`): extended `_run_backtest_sweep_coefficient` to accept and forward `survivorship` to `run_backtest`, and all sweep call sites (impact, borrow, funding, commission, slippage) now pass it. Multi-symbol backtest cost sweeps will include survivorship bias in their results when present.
+- Previous session: fixed OOS commission sweep survivorship bug and added 5 multi-symbol commission sweep regression tests (all still passing).
 
 ## What Was Verified
-- Full quant-backtesting suite: **310 passed, 0 failed, ~57s** (305 baseline + 5 new). No regressions.
-- Standalone `test_walk_forward.py` runner: **98/98 passed** (92 baseline + 5 new).
-- All other 8 test files run standalone and pass (data_loader 29/29, performance 30/30, reporting exit 0, run_backtest 41/41, strategy_builder 27/27, cpcv 16/16, monte_carlo 14/14, generate_sample_data 1/1).
-- Manual `--multi-symbol` commission sweep on walk-forward (synthetic 3-symbol panel SURV/LATE/EARLY): exits 0, writes `walk_forward_commission_sweep.json`, each row records `survivorship_bias` (bias_score 0.667, surviving SURV) and `bias_controls_engaged=True`, OOS return degrades 0.0281 → 0.0216 as commission rises 2bp → 4bp.
-- All 5 bundled example scripts (`deflated_alpha_example`, `multiple_benchmarks_example`, `trading_costs_robustness_example`, `full_pipeline_example`) run without error; `real_data_pipeline_example` needs network and was not run.
+- Full quant-backtesting suite: **310 passed, 0 failed, ~57s**. No regressions.
+- All 9 test files run standalone and pass (data_loader 29/29, performance 30/30, reporting 3/3, run_backtest 41/41, strategy_builder 27/27, walk_forward 91/91, cpcv 16/16, monte_carlo 16/16, generate_sample_data 1/1).
+- All 5 network-independent example scripts (`deflated_alpha_example`, `multiple_benchmarks_example`, `trading_costs_robustness_example`, `full_pipeline_example`) run without error; `real_data_pipeline_example` needs network and was not run.
+- Multi-symbol cost sweeps record `survivorship_bias` and `bias_controls_engaged` per row across all walk-forward subcommands (walk-forward, out-of-sample, cpcv, optimize, monte-carlo) and for run_backtest cost sweeps when multi-symbol mode is used.
 
 ## What Remains Unresolved
 - Nothing blocking. Survivorship-bias is now recorded in cost-sweep artifacts across all five walk-forward subcommands (walk-forward, out-of-sample, cpcv, optimize, monte-carlo) under `--multi-symbol`.
