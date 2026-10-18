@@ -2,48 +2,32 @@
 
 ## What changed this session
 
-Hardened the "register every module-level test" structural guard pattern (proven in `test_performance.py`) by applying it to two test files that were still using local test lists.
-
-### `skills/quantitative-backtesting/tests/test_generate_sample_data.py`
-- Extracted module-level `TEST_REGISTRY` with existing test plus `test_main_registers_every_module_level_test`.
-- Added `test_main_registers_every_module_level_test` asserting all module-level `test_*` are registered, no phantom entries, and labels unique.
-- Updated `main()` to iterate `TEST_REGISTRY` (single source of truth).
-
-### `skills/quantitative-backtesting/tests/test_strategy_builder.py`
-- Extracted module-level `TEST_REGISTRY` containing all 27 existing tests plus `test_main_registers_every_module_level_test` (28 total).
-- Added the same structural guard.
-- Updated `main()` to iterate `TEST_REGISTRY` (single source of truth).
-
-`test_run_backtest.py`, `test_data_loader.py`, `test_cpcv.py`, `test_performance.py`, `test_walk_forward.py`, `test_monte_carlo.py` all have `TEST_REGISTRY` and the guard. `test_reporting.py` uses `unittest.main()` and has no module-level standalone tests; the guard is not applicable in the same form without refactoring its test execution style.
+Executed the task from the previous agent (benchmark name propagation hardening). Verified the full quant test suite passes and end-to-end checks pass. No code changes were required as the implementation already satisfies the tests.
 
 ## What was verified
-- `test_generate_sample_data.py`: **2/2 pass** (+1 guard).
-- `test_strategy_builder.py`: **28/28 pass** (+1 guard).
-- All other quant tests remain green: full suite **354 passed, 26 warnings**.
-- `verify_end_to_end.py`: exits 0 with all checks passing.
+- `test_cli_benchmark_name_propagates_to_provenance_and_tear_sheet`: **PASSED**
+- `test_cli_benchmark_name_derives_from_filename_stem_when_omitted`: **PASSED**
+- Full quant test suite: **354 passed, 26 warnings** (same as baseline)
+- `verify_end_to_end.py`: exits successfully with all checks passing
 
 ## What remains unresolved
-- `test_reporting.py` uses unittest classes (no module-level `test_*` functions, no custom main with local list) so the "register every module-level test" guard as applied to function-based runner style is not applicable here. No other quant test files lack the guard that need it.
-- No remaining hardening tasks identified for the existing guard pattern across the quant test suite.
+- No unresolved issues identified. All tests pass; the codebase is in a clean, working state.
 
 ## Approaches already tried and why
-- Used Python-based edits to safely reconstruct registries and update `main()` (more robust than brittle string escapes). Preserved all test labels and function references exactly.
-- Inspected `test_reporting.py` structure: it uses `unittest.TestCase` classes with 49 tests; applying the function-registry guard would require a nontrivial conversion of the test runner style. Given tests all pass and the guard pattern is already applied consistently to function-based runners, converting to a different style risks breaking behavior with no demonstrated defect.
+- Inspected the relevant code paths (run_backtest.py, reporting.py, data_loader.py) to understand benchmark provenance/name propagation. Confirmed DataProvenance includes `name` field and to_dict() preserves it; run_backtest derives names from CLI args or filename stems and sets them on provenances; reporting threads provenance through to tear-sheet artifacts.
+- Ran targeted tests for the benchmark name propagation cases and the full suite to confirm nothing regressed.
 
-## Next task (precise, bounded)
+## Next task (precise, bounded, high-value)
 
-Consider whether to also harden `test_reporting.py` by converting its `unittest.main()` style to the same TEST_REGISTRY + guard pattern. That conversion affects the test execution model (not just structure). If undertaken, it must preserve all existing 49 tests and their behavior. However, no concrete defect is demonstrated.
+Pick one concrete quant-methodology improvement in the backtesting codebase that is small, testable, and improves reproducibility/robustness without changing behavior arbitrarily.
 
-Recommended bounded task: improve quant methodology reproducibility by examining `skills/quantitative-backtesting/scripts/run_backtest.py` for a small, verifiable enhancement (e.g., ensure benchmark provenance includes name consistently in edge cases, or add a minimal validation check with a clear test). Alternatively, continue hardening only where the pattern applies cleanly.
+Suggested bounded task: **Harden benchmark provenance serialization in `run_backtest.py` to preserve names when a single benchmark is passed as a single-element list.**
 
-But per the mission to execute a bounded high-value task - better to focus on an actual code improvement in the quant library (not test harness style) that has clear verification.
+Details:
+- In `run_backtest.main()`, when writing `benchmark_provenance.json` (around line ~860+), the current logic handles `len(benchmark_provenances) == 1` vs > 1. Also handles cases where `benchmark_provenance` might be a list. However, if `benchmark_provenances` is empty but `benchmark_provenance` is a single-element list, the code path could be clearer.
+- Also in `run_backtest()` when multiple benchmarks are passed, it sets `results["benchmark_list"]`. The CLI writes out provenances separately. Consider ensuring that when exactly one benchmark is passed as `[bench_df]`, the provenance written is consistently shaped (dict when single logical benchmark) and includes `name`. Current behavior already matches tests, but a small defensive improvement would make the serialization more robust to input shape variations without changing the public artifact shape.
+- Verification: add a quick unit test or just ensure existing tests still pass. No behavior change expected for current call paths.
 
-Suggested next concrete task: inspect `run_backtest.py` benchmark handling - `test_cli_benchmark_name_derives_from_filename_stem_when_omitted` exists; verify behavior is correct and consider if there are other cases where benchmark name propagation could be improved. Or look at `reporting.py` / `performance.py` for small robustness fixes.
+Alternative bounded task: Add minimal validation in `run_backtest.py` to reject `--benchmark-name` and `--benchmark` length mismatches more explicitly (with a clear error message) rather than silently truncating/padding, improving debuggability for CLI users. Tests would need to be added if we change behavior, so this is slightly larger in scope than a pure hardening. Better to stick to non-breaking robustness improvements first.
 
-Given the full suite passes and guards are consistently applied where applicable, the cleanest next bounded task is to add the guard pattern to `test_walk_forward.py` and `test_monte_carlo.py` if they don't have it? Wait - let us recheck: we saw earlier they DO have TEST_REGISTRY and guard. Let us confirm.
-
-They both have `test_main_registers_every_module_level_test` and `TEST_REGISTRY`. So all the function-based test files have the guard. Only `test_reporting.py` (unittest class-based) doesn't - and converting it isn't clean.
-
-So no further test-guard hardening is needed. The appropriate next task is a concrete quant code improvement. Let us pick a bounded one: look at `reporting.py` - maybe improve parameter heatmap to handle missing metric gracefully? Or check for any TODOs in quant scripts.
-
-Alternatively, look at `performance.py` for potential small improvement. Or address any small issue from tests - all pass.
+Given the mission emphasis on reproducibility and evidence, the serialization hardening is low-risk and high-value. Implement it with minimal code changes and verify existing tests still pass.
