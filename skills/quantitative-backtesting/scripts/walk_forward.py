@@ -35,6 +35,105 @@ from scripts.reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
 
 
+def _resolve_latency_fill_rate(args) -> tuple[int, float]:
+    """Resolve `--latency` / `--fill-rate` from CLI args with fail-fast validation.
+
+    Mirrors the validation performed inside `_calculate_strategy_returns` /
+    `walk_forward_analysis` / `cpcv_analysis` / `out_of_sample_validation` so
+    an invalid CLI value is rejected at the boundary instead of being swallowed
+    by the per-combo try/except inside the sweep helpers.
+
+    Returns:
+        Tuple of (latency, fill_rate). `latency` is clamped to >= 0; `fill_rate`
+        is normalised to 1.0 when None and validated to be in (0, 1].
+    """
+    latency = getattr(args, "latency", 0)
+    if latency is None:
+        latency = 0
+    if latency < 0:
+        latency = 0
+    fill_rate = getattr(args, "fill_rate", 1.0)
+    if fill_rate is None:
+        fill_rate = 1.0
+    if fill_rate <= 0 or fill_rate > 1:
+        raise ValueError(
+            f"--fill-rate must be in (0, 1], got {fill_rate}"
+        )
+    return int(latency), float(fill_rate)
+
+
+def _run_latency_fill_rate_sweep(
+    args,
+    runner,
+    latency_values,
+    fill_rate_values,
+    latency_artifact,
+    fill_rate_artifact,
+    latency_header,
+    fill_rate_header,
+    row_cells,
+):
+    """Run latency and/or fill-rate sweeps for one analysis path.
+
+    Mirrors the existing per-path cost-sweep blocks (impact / borrow / funding /
+    commission / slippage) but factors the latency / fill-rate sweep out so the
+    five CLI paths (walk-forward, optimize, monte-carlo, cpcv, out-of-sample)
+    share one implementation instead of each carrying a ~35-line copy.
+
+    Args:
+        args: CLI args namespace (uses ``args.output``).
+        runner: callable(value, key) -> per-value metrics dict, where ``key`` is
+            ``"latency"`` or ``"fill_rate"``. Must thread the value down to the
+            underlying analysis function and record it under the same key.
+        latency_values: latencies to sweep. A single-element list (the default)
+            is skipped, preserving the original single-run path.
+        fill_rate_values: fill rates to sweep. Single-element -> skipped.
+        latency_artifact / fill_rate_artifact: JSON filenames written into
+            ``args.output``.
+        latency_header / fill_rate_header: column headers printed above each
+            sweep table.
+        row_cells: callable(metrics_dict, value_key) -> list of formatted cell
+            strings matching the corresponding header order.
+
+    Returns:
+        True if a sweep was run (the caller should ``return 0``), else False.
+    """
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if len(latency_values) > 1:
+        sweep_rows = [runner(v, "latency") for v in latency_values]
+        sweep_path = output_dir / latency_artifact
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"latencies": latency_values, "results": sweep_rows},
+                f, indent=2, default=str,
+            )
+        print(f"\nLatency sweep ({len(latency_values)} latencies) saved to: {sweep_path}")
+        print(" | ".join(latency_header))
+        print("-" * len(" | ".join(latency_header)))
+        for row in sweep_rows:
+            print(" | ".join(row_cells(row, "latency")))
+        return True
+
+    if len(fill_rate_values) > 1:
+        sweep_rows = [runner(v, "fill_rate") for v in fill_rate_values]
+        sweep_path = output_dir / fill_rate_artifact
+        with open(sweep_path, "w") as f:
+            json.dump(
+                {"fill_rates": fill_rate_values, "results": sweep_rows},
+                f, indent=2, default=str,
+            )
+        print(f"\nFill-rate sweep ({len(fill_rate_values)} fill rates) saved to: {sweep_path}")
+        print(" | ".join(fill_rate_header))
+        print("-" * len(" | ".join(fill_rate_header)))
+        for row in sweep_rows:
+            print(" | ".join(row_cells(row, "fill_rate")))
+        return True
+
+    return False
+
+
 def _split_train_val_test(
     data: Union[pd.DataFrame, dict],
     train_frac: float = 0.6,
@@ -2393,16 +2492,21 @@ def _select_parameters(
 def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                                     bench_commission, bench_slippage, bench_expense_ratio,
                                     impact_coefficient, borrow_cost=None, funding_cost=None,
-                                    commission=None, slippage=None, survivorship=None):
+                                    commission=None, slippage=None, latency=None, fill_rate=None,
+                                    survivorship=None):
     """Run walk-forward for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
     sweep table and JSON artifact. Mirrors the single-run body of run_walk_forward
     for one coefficient value.
 
-    `borrow_cost` / `funding_cost` default to the CLI args when None, so the
-    same helper serves the market-impact sweep (which varies only
-    `impact_coefficient`) and the borrow/funding sweeps.
+    `borrow_cost` / `funding_cost` / `commission` / `slippage` default to the
+    CLI args when None, so the same helper serves the market-impact sweep (which
+    varies only `impact_coefficient`) and the borrow/funding sweeps.
+
+    `latency` / `fill_rate` default to the CLI args when None, so the same
+    helper serves the latency / fill-rate sweeps (which vary only one of those
+    while leaving the other at its single-run value).
 
     `survivorship` carries the survivorship-bias detection report from the
     caller so the sweep artifact records the same bias-controls signal as the
@@ -2416,6 +2520,18 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         commission = args.commission
     if slippage is None:
         slippage = args.slippage
+    if latency is None:
+        latency = getattr(args, "latency", 0)
+    if latency is None:
+        latency = 0
+    if latency < 0:
+        latency = 0
+    if fill_rate is None:
+        fill_rate = getattr(args, "fill_rate", 1.0)
+    if fill_rate is None:
+        fill_rate = 1.0
+    if fill_rate <= 0 or fill_rate > 1:
+        raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -2433,6 +2549,8 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         adv_window=args.adv_window,
         borrow_cost=borrow_cost,
         funding_cost=funding_cost,
+        latency=latency,
+        fill_rate=fill_rate,
         apply_deflation=args.deflate,
         benchmark=benchmark,
         total_return_benchmark=total_return_benchmark,
@@ -2449,6 +2567,8 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         "funding_cost": float(funding_cost),
         "commission": float(commission),
         "slippage": float(slippage),
+        "latency": int(latency),
+        "fill_rate": float(fill_rate),
         "total_oos_return": float(summary.get("total_oos_return", 0.0)),
         "oos_sharpe": (
             float(summary["oos_sharpe"]) if summary.get("oos_sharpe") is not None else None
@@ -2475,8 +2595,8 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
 def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                                 bench_commission, bench_slippage, bench_expense_ratio,
                                 impact_coefficient, borrow_cost=None, funding_cost=None,
-                                commission=None, slippage=None, pit_results=None,
-                                survivorship=None):
+                                commission=None, slippage=None, latency=None, fill_rate=None,
+                                pit_results=None, survivorship=None):
     """Run parameter optimization for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -2489,6 +2609,10 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
     (which vary one of those while leaving the others at their single-run
     values), and the commission/slippage sweeps (which vary one of those
     while leaving impact/borrow/funding at their single-run values).
+
+    `latency` / `fill_rate` default to the CLI args when None, so the same
+    helper serves the latency / fill-rate sweeps (which vary only one of
+    those while leaving the other at its single-run value).
 
     `pit_results` carries the point-in-time validation outcome from the
     caller so the sweep artifact records the same bias-controls engagement
@@ -2505,6 +2629,18 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         commission = args.commission
     if slippage is None:
         slippage = args.slippage
+    if latency is None:
+        latency = getattr(args, "latency", 0)
+    if latency is None:
+        latency = 0
+    if latency < 0:
+        latency = 0
+    if fill_rate is None:
+        fill_rate = getattr(args, "fill_rate", 1.0)
+    if fill_rate is None:
+        fill_rate = 1.0
+    if fill_rate <= 0 or fill_rate > 1:
+        raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -2518,6 +2654,8 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         adv_window=args.adv_window,
         borrow_cost=borrow_cost,
         funding_cost=funding_cost,
+        latency=latency,
+        fill_rate=fill_rate,
         apply_deflation=args.deflate,
         benchmark=benchmark,
         total_return_benchmark=total_return_benchmark,
@@ -2534,6 +2672,8 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         "funding_cost": float(funding_cost),
         "commission": float(commission),
         "slippage": float(slippage),
+        "latency": int(latency),
+        "fill_rate": float(fill_rate),
         "top_sharpe": (float(top["sharpe_ratio"]) if top is not None else None),
         "top_total_return": (float(top["total_return"]) if top is not None else None),
         "n_combos": int(len(results)),
@@ -2563,8 +2703,8 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
 def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                            bench_commission, bench_slippage, bench_expense_ratio,
                            impact_coefficient, borrow_cost=None, funding_cost=None,
-                           commission=None, slippage=None, pit_results=None,
-                           survivorship=None):
+                           commission=None, slippage=None, latency=None, fill_rate=None,
+                           pit_results=None, survivorship=None):
     """Run out-of-sample validation for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -2577,6 +2717,10 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
     (which vary one of those while leaving the others at their single-run
     values), and the commission/slippage sweeps (which vary one of those
     while leaving impact/borrow/funding at their single-run values).
+
+    `latency` / `fill_rate` default to the CLI args when None, so the same
+    helper serves the latency / fill-rate sweeps (which vary only one of
+    those while leaving the other at its single-run value).
 
     `pit_results` carries the point-in-time validation outcome from the
     caller so the sweep artifact records the same bias-controls engagement
@@ -2593,6 +2737,18 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         commission = args.commission
     if slippage is None:
         slippage = args.slippage
+    if latency is None:
+        latency = getattr(args, "latency", 0)
+    if latency is None:
+        latency = 0
+    if latency < 0:
+        latency = 0
+    if fill_rate is None:
+        fill_rate = getattr(args, "fill_rate", 1.0)
+    if fill_rate is None:
+        fill_rate = 1.0
+    if fill_rate <= 0 or fill_rate > 1:
+        raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -2619,6 +2775,8 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         adv_window=args.adv_window,
         borrow_cost=borrow_cost,
         funding_cost=funding_cost,
+        latency=latency,
+        fill_rate=fill_rate,
         apply_deflation=args.deflate,
         benchmark=benchmark,
         total_return_benchmark=total_return_benchmark,
@@ -2636,6 +2794,8 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         "funding_cost": float(funding_cost),
         "commission": float(commission),
         "slippage": float(slippage),
+        "latency": int(latency),
+        "fill_rate": float(fill_rate),
         "test_total_return": float(test_perf.get("test_total_return", 0.0)),
         "test_sharpe": (
             float(test_perf["test_sharpe"]) if test_perf.get("test_sharpe") is not None else None
@@ -2661,7 +2821,8 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
 def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                             bench_commission, bench_slippage, bench_expense_ratio,
                             impact_coefficient, borrow_cost=None, funding_cost=None,
-                            commission=None, slippage=None, survivorship=None):
+                            commission=None, slippage=None, latency=None, fill_rate=None,
+                            survivorship=None):
     """Run CPCV for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -2675,6 +2836,10 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
     and the commission/slippage sweeps (which vary one of those while leaving
     impact/borrow/funding at their single-run values).
 
+    `latency` / `fill_rate` default to the CLI args when None, so the same
+    helper serves the latency / fill-rate sweeps (which vary only one of
+    those while leaving the other at its single-run value).
+
     `survivorship` carries the survivorship-bias detection report from the
     caller so the sweep artifact records the same bias-controls signal as the
     single-run CPCV summary.
@@ -2687,6 +2852,18 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         commission = args.commission
     if slippage is None:
         slippage = args.slippage
+    if latency is None:
+        latency = getattr(args, "latency", 0)
+    if latency is None:
+        latency = 0
+    if latency < 0:
+        latency = 0
+    if fill_rate is None:
+        fill_rate = getattr(args, "fill_rate", 1.0)
+    if fill_rate is None:
+        fill_rate = 1.0
+    if fill_rate <= 0 or fill_rate > 1:
+        raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -2704,6 +2881,8 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         adv_window=args.adv_window,
         borrow_cost=borrow_cost,
         funding_cost=funding_cost,
+        latency=latency,
+        fill_rate=fill_rate,
         apply_deflation=args.deflate,
         benchmark=benchmark,
         total_return_benchmark=total_return_benchmark,
@@ -2720,6 +2899,8 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         "funding_cost": float(funding_cost),
         "commission": float(commission),
         "slippage": float(slippage),
+        "latency": int(latency),
+        "fill_rate": float(fill_rate),
         "total_oos_return": float(summary.get("total_oos_return", 0.0)),
         "oos_sharpe": (
             float(summary["oos_sharpe"]) if summary.get("oos_sharpe") is not None else None
@@ -2774,6 +2955,8 @@ def run_cpcv(args) -> int:
                 b, prov = _load_benchmark(bench_file, total_return_benchmark)
                 benchmark.append(b)
                 benchmark_provenance.append(prov)
+
+    latency, fill_rate = _resolve_latency_fill_rate(args)
 
     impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
 
@@ -2887,6 +3070,41 @@ def run_cpcv(args) -> int:
             )
         return 0
 
+    borrow_costs = [float(c) for c in (args.borrow_costs or [args.borrow_cost])]
+    funding_costs = [float(c) for c in (args.funding_costs or [args.funding_cost])]
+
+    # Execution-latency / partial-fill sweeps for CPCV: re-run the CPCV
+    # pipeline for each latency / fill-rate and record degradation in a single
+    # artifact. Single value keeps the original path.
+    latencies = [int(l) for l in (args.latencies or [args.latency])]
+    fill_rates = [float(f) for f in (args.fill_rates or [args.fill_rate])]
+    if _run_latency_fill_rate_sweep(
+        args,
+        runner=lambda v, key: _cpcv_sweep_coefficient(
+            args, data, benchmark, total_return_benchmark,
+            bench_commission, bench_slippage, bench_expense_ratio,
+            args.impact_coefficient, borrow_cost=args.borrow_cost,
+            funding_cost=args.funding_cost, **{key: v},
+            survivorship=survivorship,
+        ),
+        latency_values=latencies,
+        fill_rate_values=fill_rates,
+        latency_artifact="cpcv_latency_sweep.json",
+        fill_rate_artifact="cpcv_fill_rate_sweep.json",
+        latency_header=["Latency", "Total OOS Return", "OOS Sharpe", "Avg Param Stability", "Overfitting Risk", "Deflated Sharpe", "N Folds"],
+        fill_rate_header=["Fill Rate", "Total OOS Return", "OOS Sharpe", "Avg Param Stability", "Overfitting Risk", "Deflated Sharpe", "N Folds"],
+        row_cells=lambda row, key: [
+            str(row[key]),
+            f"{row['total_oos_return']:.4f}",
+            "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}",
+            f"{row['avg_param_stability']:.4f}",
+            str(row["overfitting_risk"]),
+            "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}",
+            str(row["n_folds"]),
+        ],
+    ):
+        return 0
+
     commissions = [float(c) for c in (args.commissions or [args.commission])]
     slippages = [float(s) for s in (args.slippages or [args.slippage])]
 
@@ -2984,6 +3202,8 @@ def run_cpcv(args) -> int:
         adv_window=args.adv_window,
         borrow_cost=args.borrow_cost,
         funding_cost=args.funding_cost,
+        latency=latency,
+        fill_rate=fill_rate,
         apply_deflation=args.deflate,
         benchmark=benchmark,
         total_return_benchmark=total_return_benchmark,
@@ -3089,6 +3309,8 @@ def run_cpcv(args) -> int:
             "adv_window": args.adv_window,
             "borrow_cost": args.borrow_cost,
             "funding_cost": args.funding_cost,
+            "latency": latency,
+            "fill_rate": fill_rate,
             "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
             "point_in_time_validation": pit_results,
@@ -3634,6 +3856,8 @@ def run_walk_forward(args) -> int:
                 benchmark.append(b)
                 benchmark_provenance.append(prov)
 
+    latency, fill_rate = _resolve_latency_fill_rate(args)
+
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -3641,6 +3865,36 @@ def run_walk_forward(args) -> int:
     impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
     borrow_costs = [float(c) for c in (args.borrow_costs or [args.borrow_cost])]
     funding_costs = [float(c) for c in (args.funding_costs or [args.funding_cost])]
+
+    # Execution-latency / partial-fill sweeps for walk-forward: re-run the
+    # walk-forward pipeline for each latency / fill-rate and record
+    # degradation in a single artifact. Single value keeps the original path.
+    latencies = [int(l) for l in (args.latencies or [args.latency])]
+    fill_rates = [float(f) for f in (args.fill_rates or [args.fill_rate])]
+    if _run_latency_fill_rate_sweep(
+        args,
+        runner=lambda v, key: _walk_forward_sweep_coefficient(
+            args, data, benchmark, total_return_benchmark,
+            bench_commission, bench_slippage, bench_expense_ratio,
+            args.impact_coefficient, borrow_cost=args.borrow_cost,
+            funding_cost=args.funding_cost, **{key: v},
+            survivorship=survivorship,
+        ),
+        latency_values=latencies,
+        fill_rate_values=fill_rates,
+        latency_artifact="walk_forward_latency_sweep.json",
+        fill_rate_artifact="walk_forward_fill_rate_sweep.json",
+        latency_header=["Latency", "Total OOS Return", "OOS Sharpe", "Deflated Sharpe", "N Periods"],
+        fill_rate_header=["Fill Rate", "Total OOS Return", "OOS Sharpe", "Deflated Sharpe", "N Periods"],
+        row_cells=lambda row, key: [
+            str(row[key]),
+            f"{row['total_oos_return']:.4f}",
+            "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}",
+            "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}",
+            str(row["n_periods"]),
+        ],
+    ):
+        return 0
 
     # Capacity / cost sensitivity sweeps for walk-forward: re-run the
     # walk-forward pipeline for each coefficient/cost and record degradation
@@ -3830,6 +4084,8 @@ def run_walk_forward(args) -> int:
         adv_window=args.adv_window,
         borrow_cost=args.borrow_cost,
         funding_cost=args.funding_cost,
+        latency=latency,
+        fill_rate=fill_rate,
         apply_deflation=args.deflate,
         benchmark=benchmark,
         total_return_benchmark=total_return_benchmark,
@@ -3937,6 +4193,8 @@ def run_walk_forward(args) -> int:
             "adv_window": args.adv_window,
             "borrow_cost": args.borrow_cost,
             "funding_cost": args.funding_cost,
+            "latency": latency,
+            "fill_rate": fill_rate,
             "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
             "point_in_time_validation": pit_results,
@@ -4052,6 +4310,8 @@ def run_parameter_optimization(args) -> int:
                 benchmark.append(b)
                 benchmark_provenance.append(prov)
 
+    latency, fill_rate = _resolve_latency_fill_rate(args)
+
     impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
     borrow_costs = [float(c) for c in (args.borrow_costs or [args.borrow_cost])]
     funding_costs = [float(c) for c in (args.funding_costs or [args.funding_cost])]
@@ -4154,6 +4414,36 @@ def run_parameter_optimization(args) -> int:
             )
         return 0
 
+    # Execution-latency / partial-fill sweeps for parameter optimization:
+    # re-run the optimization pipeline for each latency / fill-rate and
+    # record degradation in a single artifact. Single value keeps the
+    # original path.
+    latencies = [int(l) for l in (args.latencies or [args.latency])]
+    fill_rates = [float(f) for f in (args.fill_rates or [args.fill_rate])]
+    if _run_latency_fill_rate_sweep(
+        args,
+        runner=lambda v, key: _optimize_sweep_coefficient(
+            args, data, benchmark, total_return_benchmark,
+            bench_commission, bench_slippage, bench_expense_ratio,
+            args.impact_coefficient, borrow_cost=args.borrow_cost,
+            funding_cost=args.funding_cost, **{key: v},
+            pit_results=pit_results, survivorship=survivorship,
+        ),
+        latency_values=latencies,
+        fill_rate_values=fill_rates,
+        latency_artifact="parameter_optimization_latency_sweep.json",
+        fill_rate_artifact="parameter_optimization_fill_rate_sweep.json",
+        latency_header=["Latency", "Top Sharpe", "Top Total Return", "N Combos"],
+        fill_rate_header=["Fill Rate", "Top Sharpe", "Top Total Return", "N Combos"],
+        row_cells=lambda row, key: [
+            str(row[key]),
+            "N/A" if row["top_sharpe"] is None else f"{row['top_sharpe']:.4f}",
+            "N/A" if row["top_total_return"] is None else f"{row['top_total_return']:.4f}",
+            str(row["n_combos"]),
+        ],
+    ):
+        return 0
+
     commissions = [float(c) for c in (args.commissions or [args.commission])]
     slippages = [float(s) for s in (args.slippages or [args.slippage])]
 
@@ -4245,6 +4535,8 @@ def run_parameter_optimization(args) -> int:
         adv_window=args.adv_window,
         borrow_cost=args.borrow_cost,
         funding_cost=args.funding_cost,
+        latency=latency,
+        fill_rate=fill_rate,
         apply_deflation=args.deflate,
         benchmark=benchmark,
         total_return_benchmark=total_return_benchmark,
@@ -4385,8 +4677,8 @@ def run_parameter_optimization(args) -> int:
 def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                                     bench_commission, bench_slippage, bench_expense_ratio,
                                     impact_coefficient, borrow_cost=None, funding_cost=None,
-                                    commission=None, slippage=None, pit_results=None,
-                                    survivorship=None):
+                                    commission=None, slippage=None, latency=None, fill_rate=None,
+                                    pit_results=None, survivorship=None):
     """Run the Monte Carlo pipeline for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -4400,6 +4692,10 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     (which vary one of those while leaving the others at their single-run
     values), and the commission/slippage sweeps (which vary one of those
     while leaving impact/borrow/funding at their single-run values).
+
+    `latency` / `fill_rate` default to the CLI args when None, so the same
+    helper serves the latency / fill-rate sweeps (which vary only one of
+    those while leaving the other at its single-run value).
 
     `pit_results` carries the point-in-time validation outcome from the
     caller so the sweep artifact records the same bias-controls engagement
@@ -4416,6 +4712,18 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         commission = args.commission
     if slippage is None:
         slippage = args.slippage
+    if latency is None:
+        latency = getattr(args, "latency", 0)
+    if latency is None:
+        latency = 0
+    if latency < 0:
+        latency = 0
+    if fill_rate is None:
+        fill_rate = getattr(args, "fill_rate", 1.0)
+    if fill_rate is None:
+        fill_rate = 1.0
+    if fill_rate <= 0 or fill_rate > 1:
+        raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -4431,6 +4739,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
             adv_window=args.adv_window,
             borrow_cost=borrow_cost,
             funding_cost=funding_cost,
+            latency=latency,
+            fill_rate=fill_rate,
             benchmark=benchmark,
             total_return_benchmark=total_return_benchmark,
             benchmark_commission=bench_commission,
@@ -4453,6 +4763,7 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     returns = _calculate_strategy_returns(data, signals, commission, slippage,
                                           impact_coefficient, args.adv_window,
                                           borrow_cost, funding_cost,
+                                          latency=latency, fill_rate=fill_rate,
                                           initial_capital=args.initial_capital)
 
     dsr = None
@@ -4498,6 +4809,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         "funding_cost": float(funding_cost),
         "commission": float(commission),
         "slippage": float(slippage),
+        "latency": int(latency),
+        "fill_rate": float(fill_rate),
         "total_return": float(sm.get("total_return", {}).get("mean", 0.0)),
         "sharpe_ratio": float(sm.get("sharpe_ratio", {}).get("mean", 0.0)),
         "max_drawdown": float(sm.get("max_drawdown", {}).get("mean", 0.0)),
@@ -4547,6 +4860,8 @@ def run_monte_carlo(args) -> int:
                 b, prov = _load_benchmark(bench_file, total_return_benchmark)
                 benchmark.append(b)
                 benchmark_provenance.append(prov)
+
+    latency, fill_rate = _resolve_latency_fill_rate(args)
 
     impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
 
@@ -4654,6 +4969,37 @@ def run_monte_carlo(args) -> int:
             )
         return 0
 
+    # Execution-latency / partial-fill sweeps for Monte Carlo: re-run the
+    # Monte Carlo pipeline for each latency / fill-rate and record
+    # degradation in a single artifact. Single value keeps the original path.
+    latencies = [int(l) for l in (args.latencies or [args.latency])]
+    fill_rates = [float(f) for f in (args.fill_rates or [args.fill_rate])]
+    if _run_latency_fill_rate_sweep(
+        args,
+        runner=lambda v, key: _monte_carlo_sweep_coefficient(
+            args, data, benchmark, total_return_benchmark,
+            bench_commission, bench_slippage, bench_expense_ratio,
+            args.impact_coefficient, borrow_cost=args.borrow_cost,
+            funding_cost=args.funding_cost, **{key: v},
+            survivorship=survivorship,
+        ),
+        latency_values=latencies,
+        fill_rate_values=fill_rates,
+        latency_artifact="monte_carlo_latency_sweep.json",
+        fill_rate_artifact="monte_carlo_fill_rate_sweep.json",
+        latency_header=["Latency", "Total Return", "Sharpe Ratio", "Max Drawdown", "Prob. of Ruin", "Deflated Sharpe"],
+        fill_rate_header=["Fill Rate", "Total Return", "Sharpe Ratio", "Max Drawdown", "Prob. of Ruin", "Deflated Sharpe"],
+        row_cells=lambda row, key: [
+            str(row[key]),
+            f"{row['total_return']:.4f}",
+            f"{row['sharpe_ratio']:.4f}",
+            f"{row['max_drawdown']:.4f}",
+            f"{row['probability_of_ruin']:.2%}",
+            "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}",
+        ],
+    ):
+        return 0
+
     commissions = [float(c) for c in (args.commissions or [args.commission])]
     slippages = [float(s) for s in (args.slippages or [args.slippage])]
 
@@ -4745,6 +5091,8 @@ def run_monte_carlo(args) -> int:
             adv_window=args.adv_window,
             borrow_cost=args.borrow_cost,
             funding_cost=args.funding_cost,
+            latency=latency,
+            fill_rate=fill_rate,
             benchmark=benchmark,
             total_return_benchmark=total_return_benchmark,
             benchmark_commission=bench_commission,
@@ -4771,6 +5119,7 @@ def run_monte_carlo(args) -> int:
     returns = _calculate_strategy_returns(data, signals, args.commission, args.slippage,
                                           args.impact_coefficient, args.adv_window,
                                           args.borrow_cost, args.funding_cost,
+                                          latency=latency, fill_rate=fill_rate,
                                           initial_capital=args.initial_capital)
 
     # Multiple-testing correction: the base backtest's Sharpe was
@@ -4932,6 +5281,8 @@ def run_monte_carlo(args) -> int:
             "adv_window": args.adv_window,
             "borrow_cost": args.borrow_cost,
             "funding_cost": args.funding_cost,
+            "latency": latency,
+            "fill_rate": fill_rate,
             "n_simulations": args.n_simulations,
             "block_size": args.block_size,
             "point_in_time_validation": pit_results,
@@ -5053,6 +5404,8 @@ def run_out_of_sample_validation(args) -> int:
             benchmark.append(b)
             benchmark_provenance.append(prov)
 
+    latency, fill_rate = _resolve_latency_fill_rate(args)
+
     impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
     borrow_costs = [float(c) for c in (args.borrow_costs or [args.borrow_cost])]
     funding_costs = [float(c) for c in (args.funding_costs or [args.funding_cost])]
@@ -5153,6 +5506,35 @@ def run_out_of_sample_validation(args) -> int:
                 f"{row['funding_cost']:>13.4f} | {row['test_total_return']:>16.4f} | "
                 f"{sharpe_txt:>11} | {dsr_txt:>15}"
             )
+        return 0
+
+    # Execution-latency / partial-fill sweeps for out-of-sample validation:
+    # re-run the validation pipeline for each latency / fill-rate and record
+    # degradation in a single artifact. Single value keeps the original path.
+    latencies = [int(l) for l in (args.latencies or [args.latency])]
+    fill_rates = [float(f) for f in (args.fill_rates or [args.fill_rate])]
+    if _run_latency_fill_rate_sweep(
+        args,
+        runner=lambda v, key: _oos_sweep_coefficient(
+            args, data, benchmark, total_return_benchmark,
+            bench_commission, bench_slippage, bench_expense_ratio,
+            args.impact_coefficient, borrow_cost=args.borrow_cost,
+            funding_cost=args.funding_cost, **{key: v},
+            survivorship=survivorship,
+        ),
+        latency_values=latencies,
+        fill_rate_values=fill_rates,
+        latency_artifact="out_of_sample_latency_sweep.json",
+        fill_rate_artifact="out_of_sample_fill_rate_sweep.json",
+        latency_header=["Latency", "Test Total Return", "Test Sharpe", "Deflated Sharpe"],
+        fill_rate_header=["Fill Rate", "Test Total Return", "Test Sharpe", "Deflated Sharpe"],
+        row_cells=lambda row, key: [
+            str(row[key]),
+            f"{row['test_total_return']:.4f}",
+            "N/A" if row["test_sharpe"] is None else f"{row['test_sharpe']:.4f}",
+            "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}",
+        ],
+    ):
         return 0
 
     commissions = [float(c) for c in (args.commissions or [args.commission])]
@@ -5263,6 +5645,8 @@ def run_out_of_sample_validation(args) -> int:
         adv_window=args.adv_window,
         borrow_cost=args.borrow_cost,
         funding_cost=args.funding_cost,
+        latency=latency,
+        fill_rate=fill_rate,
         apply_deflation=args.deflate,
         benchmark=benchmark,
         total_return_benchmark=total_return_benchmark,
@@ -5399,6 +5783,8 @@ def run_out_of_sample_validation(args) -> int:
             "adv_window": args.adv_window,
             "borrow_cost": args.borrow_cost,
             "funding_cost": args.funding_cost,
+            "latency": latency,
+            "fill_rate": fill_rate,
             "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
             "point_in_time_validation": pit_results,
@@ -5539,11 +5925,15 @@ def main():
     common_parser.add_argument("--total-return-benchmark", action="store_true", help="Compute benchmark returns using total return (dividends + price) when dividend/adj_close data is available, instead of price-only returns (applies to all benchmarks)")
     common_parser.add_argument("--benchmark-commission", type=float, default=None, help="Commission per trade for benchmark (as decimal). Defaults to strategy commission if not specified (applies to all benchmarks).")
     common_parser.add_argument("--benchmark-slippage", type=float, default=None, help="Slippage per trade for benchmark (as decimal). Defaults to strategy slippage if not specified (applies to all benchmarks).")
-    common_parser.add_argument("--benchmark-expense-ratio", type=float, default=None, help="Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%). Defaults to 0 (applies to all benchmarks).")
+    common_parser.add_argument("--benchmark-expense-ratio", type=float, default=None, help="Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5 percent). Defaults to 0 (applies to all benchmarks).")
     common_parser.add_argument("--benchmark-cost-is-periodic", action="store_true", help="If set, apply benchmark trading costs (commission+slippage) as periodic deductions each period instead of as a round-trip cost on total return (applies to all benchmarks).")
     common_parser.add_argument("--adjust-splits", action="store_true", help="Adjust prices for stock splits using the splits column if present.")
     common_parser.add_argument("--multi-symbol", action="store_true", help="Load every symbol in a multi-symbol file (with a 'symbol' or 'ticker' column) as a panel, run survivorship-bias detection, and backtest a panel. Requires a panel strategy such as cross_sectional_momentum or dual_momentum.")
     common_parser.add_argument("--seed", type=int, default=None, help="Seed for the Monte Carlo random number generator. A fixed default seed is used when unset, so repeated runs (and cost sweeps) are reproducible; set any value to override.")
+    common_parser.add_argument("--latency", type=int, default=0, help="Execution latency in periods (0 = no delay, 1 = one period delay). Delays position execution by latency periods after signal generation.")
+    common_parser.add_argument("--fill-rate", type=float, default=1.0, help="Execution fill rate (0 < r <= 1); only this fraction of each targeted position change is filled, scaling the achieved position and all transaction costs proportionally. Default 1.0 (full fill, backward compatible).")
+    common_parser.add_argument("--fill-rates", type=float, nargs="+", default=None, help="List of fill rates to sweep (overrides --fill-rate).")
+    common_parser.add_argument("--latencies", type=int, nargs="+", default=None, help="List of execution latencies (in periods) to sweep (overrides --latency). Delays position execution by each latency after signal generation.")
 
     # Walk-forward analysis
     wf_parser = subparsers.add_parser("walk-forward", parents=[common_parser], help="Run walk-forward analysis")

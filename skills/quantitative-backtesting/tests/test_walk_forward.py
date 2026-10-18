@@ -4110,6 +4110,9 @@ def main() -> int:
         ("test_walk_forward_analysis_fill_rate_invalid_raises", test_walk_forward_analysis_fill_rate_invalid_raises),
         ("test_walk_forward_analysis_negative_latency_clamped_to_zero", test_walk_forward_analysis_negative_latency_clamped_to_zero),
         ("test_parameter_optimization_default_latency_fill_rate_match_explicit_defaults", test_parameter_optimization_default_latency_fill_rate_match_explicit_defaults),
+        ("test_cli_walk_forward_latency_sweep", test_cli_walk_forward_latency_sweep),
+        ("test_cli_walk_forward_fill_rate_sweep", test_cli_walk_forward_fill_rate_sweep),
+        ("test_cli_walk_forward_invalid_fill_rate_rejected", test_cli_walk_forward_invalid_fill_rate_rejected),
     ]
 
     failures = 0
@@ -4993,6 +4996,112 @@ def test_parameter_optimization_default_latency_fill_rate_match_explicit_default
     assert defaults == explicit
 
 
+def test_cli_walk_forward_latency_sweep():
+    """CLI walk-forward --latencies writes a sweep artifact whose OOS return
+    degrades as execution latency rises (positions executed later)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "walk-forward",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--latencies", "0", "2", "5",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI walk-forward latency sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "walk_forward_latency_sweep.json")
+        assert os.path.exists(sweep_path), "walk_forward_latency_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["latencies"] == [0, 2, 5]
+        assert len(payload["results"]) == 3
+        # Each row records the latency it was swept at.
+        assert [r["latency"] for r in payload["results"]] == [0, 2, 5]
+        # Fill rate is held at the single-run default (1.0) for a latency sweep.
+        assert all(r["fill_rate"] == 1.0 for r in payload["results"])
+        returns = [r["total_oos_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected OOS return degradation with latency, got {returns}"
+        )
+
+
+def test_cli_walk_forward_fill_rate_sweep():
+    """CLI walk-forward --fill-rates writes a sweep artifact whose OOS return
+    degrades as the fill rate falls (less of each targeted position change is
+    filled, so turnover and costs scale down with the achieved position)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "walk-forward",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--fill-rates", "1.0", "0.5", "0.1",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI walk-forward fill-rate sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "walk_forward_fill_rate_sweep.json")
+        assert os.path.exists(sweep_path), "walk_forward_fill_rate_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["fill_rates"] == [1.0, 0.5, 0.1]
+        assert len(payload["results"]) == 3
+        # Each row records the fill rate it was swept at.
+        assert [r["fill_rate"] for r in payload["results"]] == [1.0, 0.5, 0.1]
+        # Latency is held at the single-run default (0) for a fill-rate sweep.
+        assert all(r["latency"] == 0 for r in payload["results"])
+        returns = [r["total_oos_return"] for r in payload["results"]]
+        assert returns[2] < returns[0], (
+            f"expected OOS return degradation with lower fill rate, got {returns}"
+        )
+
+
+def test_cli_walk_forward_invalid_fill_rate_rejected():
+    """CLI --fill-rate outside (0, 1] is rejected at the boundary with a
+    ValueError before any backtest runs (mirrors the run_backtest CLI path,
+    which also does not catch the ValueError)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "walk-forward",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [5], "slow_period": [10]}',
+            "--output", out_dir,
+            "--fill-rate", "0",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            try:
+                walk_forward_main()
+            except ValueError as e:
+                assert "fill_rate" in str(e) or "fill-rate" in str(e), (
+                    f"unexpected ValueError message: {e}"
+                )
+            else:
+                raise AssertionError(
+                    "CLI should reject fill_rate=0 with a ValueError"
+                )
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(main())
@@ -5111,3 +5220,8 @@ def test_out_of_sample_validation_negative_latency_clamped_to_zero():
     zero = out_of_sample_validation(latency=0, fill_rate=1.0, **common)
 
     assert clamped["summary"] == zero["summary"]
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())
