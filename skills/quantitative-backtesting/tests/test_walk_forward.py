@@ -4996,3 +4996,118 @@ def test_parameter_optimization_default_latency_fill_rate_match_explicit_default
 if __name__ == "__main__":
     import sys
     sys.exit(main())
+
+def test_cpcv_analysis_defaults_preserve_latency_and_fill_rate():
+    """cpcv_analysis defaults (latency=0, fill_rate=1.0) are bitwise identical to
+    explicitly passing latency=0, fill_rate=1.0, so prior behavior is preserved.
+    """
+    data = _make_ohlcv_data(periods=400, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [5, 10], "slow_period": [20, 30]}
+    common = dict(
+        data=data, strategy_factory=factory, param_grid=param_grid,
+        initial_capital=100000, commission=0.0002, slippage=0.0001,
+    )
+
+    defaults = cpcv_analysis(**common)
+    explicit = cpcv_analysis(latency=0, fill_rate=1.0, **common)
+
+    pd.testing.assert_series_equal(defaults["oos_returns"], explicit["oos_returns"])
+    assert defaults["summary"] == explicit["summary"]
+
+
+def test_cpcv_analysis_fill_rate_invalid_raises():
+    """fill_rate outside (0, 1] raises ValueError before execution."""
+    data = _make_ohlcv_data(periods=200, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [5], "slow_period": [10]}
+
+    for bad_fill_rate in (0.0, -0.5, 1.5):
+        try:
+            cpcv_analysis(
+                data=data, strategy_factory=factory, param_grid=param_grid,
+                initial_capital=100000, commission=0.0, slippage=0.0,
+                latency=0, fill_rate=bad_fill_rate,
+            )
+        except ValueError:
+            continue
+        else:
+            raise AssertionError(
+                f"cpcv_analysis should raise ValueError for fill_rate={bad_fill_rate}"
+            )
+
+
+def test_cpcv_analysis_negative_latency_clamped_to_zero():
+    """Negative latency is clamped to 0 (no accidental look-ahead), so results
+    reproduce latency=0 exactly."""
+    data = _make_ohlcv_data(periods=300, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [5], "slow_period": [10]}
+    common = dict(
+        data=data, strategy_factory=factory, param_grid=param_grid,
+        initial_capital=100000, commission=0.0, slippage=0.0,
+    )
+
+    clamped = cpcv_analysis(latency=-3, fill_rate=1.0, **common)
+    zero = cpcv_analysis(latency=0, fill_rate=1.0, **common)
+
+    pd.testing.assert_series_equal(clamped["oos_returns"], zero["oos_returns"])
+    assert clamped["summary"] == zero["summary"]
+
+
+def test_out_of_sample_validation_defaults_preserve_latency_and_fill_rate():
+    """out_of_sample_validation defaults (latency=0, fill_rate=1.0) are bitwise
+    identical to explicitly passing latency=0, fill_rate=1.0.
+    """
+    data = _make_ohlcv_data(periods=400, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [5, 10], "slow_period": [20, 30]}
+    common = dict(
+        data=data, strategy_factory=factory, param_grid=param_grid,
+        train_size=0.6, test_size=0.2, validation_size=0.2,
+        initial_capital=100000, commission=0.0002, slippage=0.0001,
+    )
+
+    defaults = out_of_sample_validation(**common)
+    explicit = out_of_sample_validation(latency=0, fill_rate=1.0, **common)
+
+    assert defaults["summary"] == explicit["summary"]
+
+
+def test_out_of_sample_validation_fill_rate_invalid_raises():
+    """fill_rate outside (0, 1] raises ValueError before execution."""
+    data = _make_ohlcv_data(periods=200, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [5], "slow_period": [10]}
+
+    for bad_fill_rate in (0.0, -0.5, 1.5):
+        try:
+            out_of_sample_validation(
+                data=data, strategy_factory=factory, param_grid=param_grid,
+                train_size=0.5, test_size=0.25, validation_size=0.25,
+                initial_capital=100000, commission=0.0, slippage=0.0,
+                latency=0, fill_rate=bad_fill_rate,
+            )
+        except ValueError:
+            continue
+        else:
+            raise AssertionError(
+                f"out_of_sample_validation should raise ValueError for fill_rate={bad_fill_rate}"
+            )
+
+
+def test_out_of_sample_validation_negative_latency_clamped_to_zero():
+    """Negative latency is clamped to 0 (no accidental look-ahead)."""
+    data = _make_ohlcv_data(periods=300, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [5], "slow_period": [10]}
+    common = dict(
+        data=data, strategy_factory=factory, param_grid=param_grid,
+        train_size=0.5, test_size=0.25, validation_size=0.25,
+        initial_capital=100000, commission=0.0, slippage=0.0,
+    )
+
+    clamped = out_of_sample_validation(latency=-3, fill_rate=1.0, **common)
+    zero = out_of_sample_validation(latency=0, fill_rate=1.0, **common)
+
+    assert clamped["summary"] == zero["summary"]
