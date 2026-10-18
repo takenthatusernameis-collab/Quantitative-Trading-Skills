@@ -567,39 +567,92 @@ def test_generate_report_omits_per_benchmark_section_without_benchmarks():
     assert "Benchmark Comparison" not in content
 
 
+def test_main_registers_every_module_level_test():
+    """main() must register every module-level ``test_*`` function.
+
+    Regression guard for a defect where a test function was defined after
+    the ``if __name__ == "__main__"`` block (and therefore unreachable at
+    runtime) yet omitted from the registry, so the suite reported a lower
+    count than the number of tests actually defined. A test defined but
+    never registered is dead code: it cannot fail, so it provides no
+    coverage of the feature it targets.
+
+    The check is structural: every callable named ``test_*`` at module
+    scope must appear in ``TEST_REGISTRY``, and every registry entry must
+    be a real module-level function. No test is executed here.
+    """
+    import inspect
+
+    module_tests = {
+        obj
+        for name, obj in list(globals().items())
+        if name.startswith("test_")
+        and inspect.isfunction(obj)
+        and obj.__module__ == __name__
+    }
+    registered = {fn for _, fn in TEST_REGISTRY}
+
+    missing = module_tests - registered
+    assert not missing, (
+        f"test functions defined but not registered in TEST_REGISTRY: "
+        f"{sorted(f.__name__ for f in missing)}. A test outside the "
+        "runner is dead code and provides no coverage."
+    )
+    phantom = registered - module_tests
+    assert not phantom, (
+        f"entries in TEST_REGISTRY that are not module-level test_* "
+        f"functions: {sorted(f.__name__ for f in phantom)}"
+    )
+    # Labels must be unique so the runner cannot silently skip a test
+    # (duplicate labels would overwrite each other in a name->fn map).
+    labels = [name for name, _ in TEST_REGISTRY]
+    assert len(labels) == len(set(labels)), (
+        f"TEST_REGISTRY has duplicate labels: "
+        f"{[l for l in labels if labels.count(l) > 1]}"
+    )
+
+
+# Module-level registry of (label, callable) pairs. Kept at module scope
+# (rather than a local inside main()) so structural checks like
+# ``test_main_registers_every_module_level_test`` can introspect it
+# without executing the suite.
+TEST_REGISTRY = [
+    ("calculate_metrics_empty_returns_returns_error", test_calculate_metrics_empty_returns_returns_error),
+    ("total_return_matches_compound_returns", test_total_return_matches_compound_returns),
+    ("trade_analytics_populated", test_trade_analytics_populated),
+    ("annualization_factors", test_annualization_factors),
+    ("annualization_factor_non_datetime_index", test_annualization_factor_non_datetime_index),
+    ("trade_metrics_use_return_for_avg_win_loss", test_trade_metrics_use_return_for_avg_win_loss),
+    ("profit_factor_uses_pnl_gross_profit_over_gross_loss", test_profit_factor_uses_pnl_gross_profit_over_gross_loss),
+    ("expectancy_is_mean_pnl", test_expectancy_is_mean_pnl),
+    ("avg_trade_duration_is_calendar_days", test_avg_trade_duration_is_calendar_days),
+    ("trade_metrics_handle_missing_return_field", test_trade_metrics_handle_missing_return_field),
+    ("trade_metrics_absent_when_no_trades", test_trade_metrics_absent_when_no_trades),
+    ("closed_at_end_metrics_are_surfaced", test_closed_at_end_metrics_are_surfaced),
+    ("closed_at_end_metrics_absent_when_no_forced_closes", test_closed_at_end_metrics_absent_when_no_forced_closes),
+    ("benchmark_alpha_significance_reported", test_benchmark_alpha_significance_reported),
+    ("benchmark_significance_omitted_without_benchmark", test_benchmark_significance_omitted_without_benchmark),
+    ("benchmark_t_distribution_pvalue_known_values", test_benchmark_t_distribution_pvalue_known_values),
+    ("benchmark_stats_perfect_fit_has_r_squared_one", test_benchmark_stats_perfect_fit_has_r_squared_one),
+    ("benchmark_stats_total_return_type_recorded", test_benchmark_stats_total_return_type_recorded),
+    ("benchmark_stats_applies_trading_costs", test_benchmark_stats_applies_trading_costs),
+    ("calculate_metrics_passes_total_return_benchmark_flag", test_calculate_metrics_passes_total_return_benchmark_flag),
+    ("calculate_metrics_passes_benchmark_costs", test_calculate_metrics_passes_benchmark_costs),
+    ("alpha_sign_flip_between_benchmark_modes", test_alpha_sign_flip_between_benchmark_modes),
+    ("benchmark_stats_applies_periodic_benchmark_costs", test_benchmark_stats_applies_periodic_benchmark_costs),
+    ("calculate_metrics_deflated_alpha_multiple_benchmarks", test_calculate_metrics_deflated_alpha_multiple_benchmarks),
+    ("calculate_metrics_no_deflated_alpha_without_benchmark", test_calculate_metrics_no_deflated_alpha_without_benchmark),
+    ("calculate_metrics_deflated_alpha_single_benchmark", test_calculate_metrics_deflated_alpha_single_benchmark),
+    ("benchmark_stats_drops_leading_nan_from_pct_change", test_benchmark_stats_drops_leading_nan_from_pct_change),
+    ("generate_report_surfaces_per_benchmark_comparison_when_multiple_benchmarks", test_generate_report_surfaces_per_benchmark_comparison_when_multiple_benchmarks),
+    ("generate_report_omits_per_benchmark_section_for_single_benchmark", test_generate_report_omits_per_benchmark_section_for_single_benchmark),
+    ("generate_report_omits_per_benchmark_section_without_benchmarks", test_generate_report_omits_per_benchmark_section_without_benchmarks),
+    ("main_registers_every_module_level_test", test_main_registers_every_module_level_test),
+]
+
+
 def main() -> int:
-    tests = [
-        ("calculate_metrics_empty_returns_returns_error", test_calculate_metrics_empty_returns_returns_error),
-        ("total_return_matches_compound_returns", test_total_return_matches_compound_returns),
-        ("trade_analytics_populated", test_trade_analytics_populated),
-        ("annualization_factors", test_annualization_factors),
-        ("annualization_factor_non_datetime_index", test_annualization_factor_non_datetime_index),
-        ("trade_metrics_use_return_for_avg_win_loss", test_trade_metrics_use_return_for_avg_win_loss),
-        ("profit_factor_uses_pnl_gross_profit_over_gross_loss", test_profit_factor_uses_pnl_gross_profit_over_gross_loss),
-        ("expectancy_is_mean_pnl", test_expectancy_is_mean_pnl),
-        ("avg_trade_duration_is_calendar_days", test_avg_trade_duration_is_calendar_days),
-        ("trade_metrics_handle_missing_return_field", test_trade_metrics_handle_missing_return_field),
-        ("trade_metrics_absent_when_no_trades", test_trade_metrics_absent_when_no_trades),
-        ("closed_at_end_metrics_are_surfaced", test_closed_at_end_metrics_are_surfaced),
-        ("closed_at_end_metrics_absent_when_no_forced_closes", test_closed_at_end_metrics_absent_when_no_forced_closes),
-        ("benchmark_alpha_significance_reported", test_benchmark_alpha_significance_reported),
-        ("benchmark_significance_omitted_without_benchmark", test_benchmark_significance_omitted_without_benchmark),
-        ("benchmark_t_distribution_pvalue_known_values", test_benchmark_t_distribution_pvalue_known_values),
-        ("benchmark_stats_perfect_fit_has_r_squared_one", test_benchmark_stats_perfect_fit_has_r_squared_one),
-        ("benchmark_stats_total_return_type_recorded", test_benchmark_stats_total_return_type_recorded),
-        ("benchmark_stats_applies_trading_costs", test_benchmark_stats_applies_trading_costs),
-        ("calculate_metrics_passes_total_return_benchmark_flag", test_calculate_metrics_passes_total_return_benchmark_flag),
-        ("calculate_metrics_passes_benchmark_costs", test_calculate_metrics_passes_benchmark_costs),
-        ("alpha_sign_flip_between_benchmark_modes", test_alpha_sign_flip_between_benchmark_modes),
-        ("benchmark_stats_applies_periodic_benchmark_costs", test_benchmark_stats_applies_periodic_benchmark_costs),
-        ("calculate_metrics_deflated_alpha_multiple_benchmarks", test_calculate_metrics_deflated_alpha_multiple_benchmarks),
-        ("calculate_metrics_no_deflated_alpha_without_benchmark", test_calculate_metrics_no_deflated_alpha_without_benchmark),
-        ("calculate_metrics_deflated_alpha_single_benchmark", test_calculate_metrics_deflated_alpha_single_benchmark),
-        ("benchmark_stats_drops_leading_nan_from_pct_change", test_benchmark_stats_drops_leading_nan_from_pct_change),
-        ("generate_report_surfaces_per_benchmark_comparison_when_multiple_benchmarks", test_generate_report_surfaces_per_benchmark_comparison_when_multiple_benchmarks),
-        ("generate_report_omits_per_benchmark_section_for_single_benchmark", test_generate_report_omits_per_benchmark_section_for_single_benchmark),
-        ("generate_report_omits_per_benchmark_section_without_benchmarks", test_generate_report_omits_per_benchmark_section_without_benchmarks),
-    ]
+    tests = TEST_REGISTRY
 
     failures = 0
     for name, fn in tests:
@@ -617,26 +670,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-def test_benchmark_stats_applies_periodic_benchmark_costs():
-    """When benchmark_cost_is_periodic is True, costs are deducted each period."""
-    ret = pd.Series([0.01, 0.00, 0.01, -0.005])
-    bench = pd.Series([0.005, 0.005, 0.005, 0.005])
-    ann_factor = 252
-    stats_periodic = _benchmark_stats(
-        ret, bench, ann_factor,
-        benchmark_commission=0.001,
-        benchmark_slippage=0.001,
-        benchmark_cost_is_periodic=True,
-    )
-    stats_roundtrip = _benchmark_stats(
-        ret, bench, ann_factor,
-        benchmark_commission=0.001,
-        benchmark_slippage=0.001,
-        benchmark_cost_is_periodic=False,
-    )
-    assert stats_periodic["benchmark_cost_is_periodic"] is True
-    assert stats_roundtrip["benchmark_cost_is_periodic"] is False
-    # Both should be different from zero-cost case
-    stats_none = _benchmark_stats(ret, bench, ann_factor)
-    assert stats_periodic["benchmark_total_return"] != stats_none["benchmark_total_return"]
-    assert stats_roundtrip["benchmark_total_return"] != stats_none["benchmark_total_return"]
