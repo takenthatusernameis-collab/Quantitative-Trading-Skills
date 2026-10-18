@@ -744,37 +744,68 @@ def test_ols_hedge_backward_compat_default_is_log_ratio():
 
 
 
-def main() -> int:
-    tests = [
-        ("build_strategy_unknown_type_raises", test_build_strategy_unknown_type_raises),
-        ("build_strategy_parses_params", test_build_strategy_parses_params),
-        ("registry_listing_and_defaults_agree", test_registry_listing_and_defaults_agree),
-        ("all_registered_strategies_generate_valid_signals", test_all_registered_strategies_generate_valid_signals),
-        ("sma_crossover_signals_are_binary_with_crossovers", test_sma_crossover_signals_are_binary_with_crossovers),
-        ("donchian_breakout_uses_prior_period_high", test_donchian_breakout_uses_prior_period_high),
-        ("cross_sectional_momentum_multi_asset_dict", test_cross_sectional_momentum_multi_asset_dict),
-        ("cross_sectional_momentum_multiindex_dataframe", test_cross_sectional_momentum_multiindex_dataframe),
-        ("cross_sectional_momentum_single_asset_fallback", test_cross_sectional_momentum_single_asset_fallback),
-        ("cross_sectional_momentum_respects_quantiles", test_cross_sectional_momentum_respects_quantiles),
-        ("cross_sectional_momentum_symmetric_quantiles_flat", test_cross_sectional_momentum_symmetric_quantiles_flat),
-        ("cross_sectional_momentum_overlapping_quantiles_warn", test_cross_sectional_momentum_overlapping_quantiles_warn),
-        ("cross_sectional_momentum_asymmetric_no_warning", test_cross_sectional_momentum_asymmetric_no_warning),
-        ("dual_momentum_multi_asset_dict", test_dual_momentum_multi_asset_dict),
-        ("dual_momentum_multiindex_dataframe", test_dual_momentum_multiindex_dataframe),
-        ("dual_momentum_single_asset_fallback", test_dual_momentum_single_asset_fallback),
-        ("dual_momentum_absolute_momentum_filter", test_dual_momentum_absolute_momentum_filter),
-        ("dual_momentum_respects_top_quantile", test_dual_momentum_respects_top_quantile),
-        ("mean_reversion_zscore_pairs_two_asset_dict", test_mean_reversion_zscore_pairs_two_asset_dict),
-        ("mean_reversion_zscore_pairs_multiindex_two_assets", test_mean_reversion_zscore_pairs_multiindex_two_assets),
-        ("mean_reversion_zscore_single_asset_fallback", test_mean_reversion_zscore_single_asset_fallback),
-        ("mean_reversion_zscore_rejects_three_assets", test_mean_reversion_zscore_rejects_three_assets),
-        ("ols_hedge_recovers_known_hedge_ratio", test_ols_hedge_recovers_known_hedge_ratio),
-        ("ols_hedge_multiindex_two_assets", test_ols_hedge_multiindex_two_assets),
-        ("ols_hedge_spread_is_stationary", test_ols_hedge_spread_is_stationary),
-        ("ols_hedge_ignores_hedge_ratio", test_ols_hedge_ignores_hedge_ratio),
-        ("ols_hedge_backward_compat_default_is_log_ratio", test_ols_hedge_backward_compat_default_is_log_ratio),
-    ]
+def test_main_registers_every_module_level_test():
+    """main() must register every module-level ``test_*`` function."""
+    import inspect
 
+    module_tests = {
+        obj
+        for name, obj in list(globals().items())
+        if name.startswith("test_")
+        and inspect.isfunction(obj)
+        and obj.__module__ == __name__
+    }
+    registered = {fn for _, fn in TEST_REGISTRY}
+
+    missing = module_tests - registered
+    assert not missing, (
+        f"test functions defined but not registered in TEST_REGISTRY: "
+        f"{sorted(f.__name__ for f in missing)}"
+    )
+    phantom = registered - module_tests
+    assert not phantom, (
+        f"entries in TEST_REGISTRY that are not module-level test_* "
+        f"functions: {sorted(f.__name__ for f in phantom)}"
+    )
+    labels = [name for name, _ in TEST_REGISTRY]
+    assert len(labels) == len(set(labels)), (
+        f"TEST_REGISTRY has duplicate labels: "
+        f"{[l for l in labels if labels.count(l) > 1]}"
+    )
+
+TEST_REGISTRY = [
+    ("build_strategy_unknown_type_raises", test_build_strategy_unknown_type_raises),
+    ("build_strategy_parses_params", test_build_strategy_parses_params),
+    ("registry_listing_and_defaults_agree", test_registry_listing_and_defaults_agree),
+    ("all_registered_strategies_generate_valid_signals", test_all_registered_strategies_generate_valid_signals),
+    ("sma_crossover_signals_are_binary_with_crossovers", test_sma_crossover_signals_are_binary_with_crossovers),
+    ("donchian_breakout_uses_prior_period_high", test_donchian_breakout_uses_prior_period_high),
+    ("cross_sectional_momentum_multi_asset_dict", test_cross_sectional_momentum_multi_asset_dict),
+    ("cross_sectional_momentum_multiindex_dataframe", test_cross_sectional_momentum_multiindex_dataframe),
+    ("cross_sectional_momentum_single_asset_fallback", test_cross_sectional_momentum_single_asset_fallback),
+    ("cross_sectional_momentum_respects_quantiles", test_cross_sectional_momentum_respects_quantiles),
+    ("cross_sectional_momentum_symmetric_quantiles_flat", test_cross_sectional_momentum_symmetric_quantiles_flat),
+    ("cross_sectional_momentum_overlapping_quantiles_warn", test_cross_sectional_momentum_overlapping_quantiles_warn),
+    ("cross_sectional_momentum_asymmetric_no_warning", test_cross_sectional_momentum_asymmetric_no_warning),
+    ("dual_momentum_multi_asset_dict", test_dual_momentum_multi_asset_dict),
+    ("dual_momentum_multiindex_dataframe", test_dual_momentum_multiindex_dataframe),
+    ("dual_momentum_single_asset_fallback", test_dual_momentum_single_asset_fallback),
+    ("dual_momentum_absolute_momentum_filter", test_dual_momentum_absolute_momentum_filter),
+    ("dual_momentum_respects_top_quantile", test_dual_momentum_respects_top_quantile),
+    ("mean_reversion_zscore_pairs_two_asset_dict", test_mean_reversion_zscore_pairs_two_asset_dict),
+    ("mean_reversion_zscore_pairs_multiindex_two_assets", test_mean_reversion_zscore_pairs_multiindex_two_assets),
+    ("mean_reversion_zscore_single_asset_fallback", test_mean_reversion_zscore_single_asset_fallback),
+    ("mean_reversion_zscore_rejects_three_assets", test_mean_reversion_zscore_rejects_three_assets),
+    ("ols_hedge_recovers_known_hedge_ratio", test_ols_hedge_recovers_known_hedge_ratio),
+    ("ols_hedge_multiindex_two_assets", test_ols_hedge_multiindex_two_assets),
+    ("ols_hedge_spread_is_stationary", test_ols_hedge_spread_is_stationary),
+    ("ols_hedge_ignores_hedge_ratio", test_ols_hedge_ignores_hedge_ratio),
+    ("ols_hedge_backward_compat_default_is_log_ratio", test_ols_hedge_backward_compat_default_is_log_ratio),
+    ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
+]
+
+def main() -> int:
+    tests = TEST_REGISTRY
     failures = 0
     for name, fn in tests:
         try:
@@ -784,7 +815,6 @@ def main() -> int:
             failures += 1
             print(f"FAIL  {name}")
             traceback.print_exc()
-
     print(f"\n{len(tests) - failures}/{len(tests)} tests passed")
     return 1 if failures else 0
 

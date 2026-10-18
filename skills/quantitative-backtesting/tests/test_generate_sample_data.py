@@ -50,8 +50,46 @@ def test_generate_sample_data_creates_valid_file():
             pass
 
 
+
+def test_main_registers_every_module_level_test():
+    """main() must register every module-level ``test_*`` function."""
+    import inspect
+
+    module_tests = {
+        obj
+        for name, obj in list(globals().items())
+        if name.startswith("test_")
+        and inspect.isfunction(obj)
+        and obj.__module__ == __name__
+    }
+    registered = {fn for _, fn in TEST_REGISTRY}
+
+    missing = module_tests - registered
+    assert not missing, (
+        f"test functions defined but not registered in TEST_REGISTRY: "
+        f"{sorted(f.__name__ for f in missing)}"
+    )
+    phantom = registered - module_tests
+    assert not phantom, (
+        f"entries in TEST_REGISTRY that are not module-level test_* "
+        f"functions: {sorted(f.__name__ for f in phantom)}"
+    )
+    labels = [name for name, _ in TEST_REGISTRY]
+    assert len(labels) == len(set(labels)), (
+        f"TEST_REGISTRY has duplicate labels: "
+        f"{[l for l in labels if labels.count(l) > 1]}"
+    )
+
+
+TEST_REGISTRY = [
+    ("generate_sample_data_creates_valid_file", test_generate_sample_data_creates_valid_file),
+    ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
+]
+
+
+
 def main() -> int:
-    tests = [("generate_sample_data_creates_valid_file", test_generate_sample_data_creates_valid_file)]
+    tests = TEST_REGISTRY
     failures = 0
     for name, fn in tests:
         try:
