@@ -559,38 +559,73 @@ def test_adjust_for_splits_volume_scaled():
     assert adjusted["volume"].iloc[3] == 1300.0
 
 
+def test_main_registers_every_module_level_test():
+    import inspect
+
+    module_tests = {
+        obj
+        for name, obj in list(globals().items())
+        if name.startswith("test_")
+        and inspect.isfunction(obj)
+        and obj.__module__ == __name__
+    }
+    registered = {fn for _, fn in TEST_REGISTRY}
+
+    missing = module_tests - registered
+    assert not missing, (
+        f"test functions defined but not registered in TEST_REGISTRY: "
+        f"{sorted(f.__name__ for f in missing)}. A test outside the "
+        "runner is dead code and provides no coverage."
+    )
+    phantom = registered - module_tests
+    assert not phantom, (
+        f"entries in TEST_REGISTRY that are not module-level test_* "
+        f"functions: {sorted(f.__name__ for f in phantom)}"
+    )
+    labels = [name for name, _ in TEST_REGISTRY]
+    assert len(labels) == len(set(labels)), (
+        f"TEST_REGISTRY has duplicate labels: "
+        f"{[l for l in labels if labels.count(l) > 1]}"
+    )
+
+
+# Module-level registry of (label, callable) pairs.
+TEST_REGISTRY = [
+    ("test_load_data_unsupported_format_raises", test_load_data_unsupported_format_raises),
+    ("test_load_data_missing_columns_raises", test_load_data_missing_columns_raises),
+    ("test_load_data_parses_and_sorts_csv", test_load_data_parses_and_sorts_csv),
+    ("test_validate_data_accepts_clean_frame", test_validate_data_accepts_clean_frame),
+    ("test_validate_data_rejects_bad_frames", test_validate_data_rejects_bad_frames),
+    ("test_validate_data_handles_short_series", test_validate_data_handles_short_series),
+    ("test_provenance_tracking_basic", test_provenance_tracking_basic),
+    ("test_provenance_serialization", test_provenance_serialization),
+    ("test_validate_point_in_time_clean", test_validate_point_in_time_clean),
+    ("test_validate_point_in_time_detects_lookahead", test_validate_point_in_time_detects_lookahead),
+    ("test_validate_point_in_time_detects_same_bar_lookahead", test_validate_point_in_time_detects_same_bar_lookahead),
+    ("test_validate_point_in_time_non_monotonic", test_validate_point_in_time_non_monotonic),
+    ("test_validate_point_in_time_lookback_windows", test_validate_point_in_time_lookback_windows),
+    ("test_detect_survivorship_bias_survivors_only", test_detect_survivorship_bias_survivors_only),
+    ("test_detect_survivorship_bias_entries_exits_insufficient", test_detect_survivorship_bias_entries_exits_insufficient),
+    ("test_detect_survivorship_bias_empty", test_detect_survivorship_bias_empty),
+    ("test_load_multi_symbol_provenance_complete", test_load_multi_symbol_provenance_complete),
+    ("test_compute_benchmark_total_return_with_dividends", test_compute_benchmark_total_return_with_dividends),
+    ("test_compute_benchmark_total_return_with_adj_close", test_compute_benchmark_total_return_with_adj_close),
+    ("test_compute_benchmark_total_return_fallback_price_only", test_compute_benchmark_total_return_fallback_price_only),
+    ("test_detect_benchmark_total_return_type", test_detect_benchmark_total_return_type),
+    ("test_provenance_includes_total_return_type", test_provenance_includes_total_return_type),
+    ("test_load_multi_symbol_provenance_includes_total_return_type", test_load_multi_symbol_provenance_includes_total_return_type),
+    ("test_adjust_for_splits_divides_pre_split_prices", test_adjust_for_splits_divides_pre_split_prices),
+    ("test_adjust_for_splits_zero_return_on_split_date", test_adjust_for_splits_zero_return_on_split_date),
+    ("test_adjust_for_splits_no_split_column_is_identity", test_adjust_for_splits_no_split_column_is_identity),
+    ("test_adjust_for_splits_no_actual_splits_is_identity", test_adjust_for_splits_no_actual_splits_is_identity),
+    ("test_adjust_for_splits_multiple_splits_accumulate", test_adjust_for_splits_multiple_splits_accumulate),
+    ("test_adjust_for_splits_volume_scaled", test_adjust_for_splits_volume_scaled),
+    ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
+]
+
+
 def main() -> int:
-    tests = [
-        ("load_data_unsupported_format_raises", test_load_data_unsupported_format_raises),
-        ("load_data_missing_columns_raises", test_load_data_missing_columns_raises),
-        ("load_data_parses_and_sorts_csv", test_load_data_parses_and_sorts_csv),
-        ("validate_data_accepts_clean_frame", test_validate_data_accepts_clean_frame),
-        ("validate_data_rejects_bad_frames", test_validate_data_rejects_bad_frames),
-        ("validate_data_handles_short_series", test_validate_data_handles_short_series),
-        ("test_provenance_tracking_basic", test_provenance_tracking_basic),
-        ("test_provenance_serialization", test_provenance_serialization),
-        ("test_validate_point_in_time_clean", test_validate_point_in_time_clean),
-        ("test_validate_point_in_time_detects_lookahead", test_validate_point_in_time_detects_lookahead),
-        ("test_validate_point_in_time_detects_same_bar_lookahead", test_validate_point_in_time_detects_same_bar_lookahead),
-        ("test_validate_point_in_time_non_monotonic", test_validate_point_in_time_non_monotonic),
-        ("test_validate_point_in_time_lookback_windows", test_validate_point_in_time_lookback_windows),
-        ("test_detect_survivorship_bias_survivors_only", test_detect_survivorship_bias_survivors_only),
-        ("test_detect_survivorship_bias_entries_exits_insufficient", test_detect_survivorship_bias_entries_exits_insufficient),
-        ("test_detect_survivorship_bias_empty", test_detect_survivorship_bias_empty),
-        ("test_load_multi_symbol_provenance_complete", test_load_multi_symbol_provenance_complete),
-        ("test_compute_benchmark_total_return_with_dividends", test_compute_benchmark_total_return_with_dividends),
-        ("test_compute_benchmark_total_return_with_adj_close", test_compute_benchmark_total_return_with_adj_close),
-        ("test_compute_benchmark_total_return_fallback_price_only", test_compute_benchmark_total_return_fallback_price_only),
-        ("test_detect_benchmark_total_return_type", test_detect_benchmark_total_return_type),
-        ("test_provenance_includes_total_return_type", test_provenance_includes_total_return_type),
-        ("test_load_multi_symbol_provenance_includes_total_return_type", test_load_multi_symbol_provenance_includes_total_return_type),
-        ("test_adjust_for_splits_divides_pre_split_prices", test_adjust_for_splits_divides_pre_split_prices),
-        ("test_adjust_for_splits_zero_return_on_split_date", test_adjust_for_splits_zero_return_on_split_date),
-        ("test_adjust_for_splits_no_split_column_is_identity", test_adjust_for_splits_no_split_column_is_identity),
-        ("test_adjust_for_splits_no_actual_splits_is_identity", test_adjust_for_splits_no_actual_splits_is_identity),
-        ("test_adjust_for_splits_multiple_splits_accumulate", test_adjust_for_splits_multiple_splits_accumulate),
-        ("test_adjust_for_splits_volume_scaled", test_adjust_for_splits_volume_scaled),
-    ]
+    tests = TEST_REGISTRY
 
     failures = 0
     for name, fn in tests:
