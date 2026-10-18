@@ -445,6 +445,7 @@ def walk_forward_analysis(
                 test_returns = _calculate_strategy_returns(
                     test_data, test_signals, commission, slippage,
                     impact_coefficient, adv_window, borrow_cost, funding_cost,
+                    latency, fill_rate,
                     initial_capital=initial_capital,
                 )
 
@@ -1386,6 +1387,8 @@ def cpcv_analysis(
     adv_window: int = 20,
     borrow_cost: float = 0.0,
     funding_cost: float = 0.0,
+    latency: int = 0,
+    fill_rate: float = 1.0,
     apply_deflation: bool = False,
     benchmark: Optional[pd.DataFrame] = None,
     total_return_benchmark: bool = False,
@@ -1425,6 +1428,11 @@ def cpcv_analysis(
             e.g., 0.03 = 3% per year). Applied daily on short exposure.
         funding_cost: Annual funding cost rate for leveraged positions (as decimal,
             e.g., 0.02 = 2% per year). Applied daily on gross exposure exceeding 1x.
+        latency: Execution latency in periods passed to _calculate_strategy_returns.
+            Positions are delayed by `1 + latency` periods after signal generation.
+            Default 0 (no added delay beyond the standard next-period fill).
+        fill_rate: Fraction of each targeted position change that is filled,
+            passed to _calculate_strategy_returns. Default 1.0 (full fill).
         apply_deflation: When True, compute the Deflated Sharpe Ratio
             (multiple-testing correction) for each fold's in-sample
             parameter selection, plus an aggregate correction on the
@@ -1450,6 +1458,17 @@ def cpcv_analysis(
             - 'summary': aggregate metrics
             - 'param_stability': parameter stability across folds
     """
+    # Fail fast on invalid execution-realism parameters rather than silently
+    # skipping every grid combination inside the per-combo try/except below.
+    if fill_rate is None:
+        fill_rate = 1.0
+    if fill_rate <= 0 or fill_rate > 1:
+        raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
+    if latency is None:
+        latency = 0
+    if latency < 0:
+        latency = 0
+
     if isinstance(data, dict):
         # Normalize dict panel data (symbol -> OHLCV DataFrame) to a
         # MultiIndex (field, symbol) panel. Strategies and return
@@ -1594,6 +1613,7 @@ def cpcv_analysis(
                 test_returns = _calculate_strategy_returns(
                     test_data, test_signals, commission, slippage,
                     impact_coefficient, adv_window, borrow_cost, funding_cost,
+                    latency, fill_rate,
                     initial_capital=initial_capital,
                 )
 
@@ -1601,6 +1621,7 @@ def cpcv_analysis(
                 train_returns = _calculate_strategy_returns(
                     train_data, train_signals, commission, slippage,
                     impact_coefficient, adv_window, borrow_cost, funding_cost,
+                    latency, fill_rate,
                     initial_capital=initial_capital,
                 )
 
@@ -1841,6 +1862,8 @@ def out_of_sample_validation(
     adv_window: int = 20,
     borrow_cost: float = 0.0,
     funding_cost: float = 0.0,
+    latency: int = 0,
+    fill_rate: float = 1.0,
     apply_deflation: bool = False,
     benchmark: Optional[List[pd.DataFrame]] = None,
     total_return_benchmark: bool = False,
@@ -1885,6 +1908,11 @@ def out_of_sample_validation(
         adv_window: Rolling window for Average Daily Volume calculation
         borrow_cost: Annual borrow cost rate for short positions
         funding_cost: Annual funding cost rate for leveraged positions
+        latency: Execution latency in periods passed to _calculate_strategy_returns.
+            Positions are delayed by `1 + latency` periods after signal generation.
+            Default 0 (no added delay beyond the standard next-period fill).
+        fill_rate: Fraction of each targeted position change that is filled,
+            passed to _calculate_strategy_returns. Default 1.0 (full fill).
         apply_deflation: Compute Deflated Sharpe Ratio for multiple-testing correction
         benchmark: Optional list of benchmark OHLCV DataFrames for buy-and-hold comparison. When multiple benchmarks are provided, alpha p-values are corrected for multiple comparisons using a Deflated Alpha analogue.
         total_return_benchmark: Compute benchmark returns using total return (dividends + price)
@@ -1907,6 +1935,17 @@ def out_of_sample_validation(
             - 'test_benchmark': Benchmark comparison on test data (if benchmark provided). When multiple benchmarks are provided, this is a list of benchmark comparisons, and the summary includes multiple-testing correction for benchmark alpha.
             - 'summary': Aggregate summary with key metrics, deflated Sharpe, and deflated alpha p-values when multiple benchmarks are provided
     """
+    # Fail fast on invalid execution-realism parameters rather than silently
+    # skipping every grid combination inside the per-combo try/except below.
+    if fill_rate is None:
+        fill_rate = 1.0
+    if fill_rate <= 0 or fill_rate > 1:
+        raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
+    if latency is None:
+        latency = 0
+    if latency < 0:
+        latency = 0
+
     # Normalize data format
     if isinstance(data, dict):
         data = _dict_to_multiindex(data)
@@ -1986,6 +2025,8 @@ def out_of_sample_validation(
             adv_window=adv_window,
             borrow_cost=borrow_cost,
             funding_cost=funding_cost,
+            latency=latency,
+            fill_rate=fill_rate,
             apply_deflation=apply_deflation,
             benchmark=benchmark,
             total_return_benchmark=total_return_benchmark,
@@ -2009,6 +2050,8 @@ def out_of_sample_validation(
             adv_window=adv_window,
             borrow_cost=borrow_cost,
             funding_cost=funding_cost,
+            latency=latency,
+            fill_rate=fill_rate,
             apply_deflation=apply_deflation,
         )
     else:
@@ -2039,6 +2082,7 @@ def out_of_sample_validation(
     val_returns = _calculate_strategy_returns(
         val_data, val_signals, commission, slippage,
         impact_coefficient, adv_window, borrow_cost, funding_cost,
+        latency, fill_rate,
         initial_capital=initial_capital,
     )
 
@@ -2060,6 +2104,7 @@ def out_of_sample_validation(
     test_returns = _calculate_strategy_returns(
                     test_data, test_signals, commission, slippage,
                     impact_coefficient, adv_window, borrow_cost, funding_cost,
+                    latency, fill_rate,
                     initial_capital=initial_capital,
                 )
 
