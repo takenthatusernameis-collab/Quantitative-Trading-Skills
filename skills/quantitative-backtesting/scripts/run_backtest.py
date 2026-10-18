@@ -66,6 +66,8 @@ def parse_args():
     parser.add_argument("--benchmark-expense-ratio", type=float, default=None, help="Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%). Defaults to 0 (applies to all benchmarks).")
     parser.add_argument("--benchmark-cost-is-periodic", action="store_true", help="If set, apply benchmark trading costs (commission+slippage) as periodic deductions each period instead of as a round-trip cost on total return (applies to all benchmarks).")
     parser.add_argument("--latency", type=int, default=0, help="Execution latency in periods (0 = no delay, 1 = one period delay). Delays position execution by latency periods after signal generation.")
+    parser.add_argument("--fill-rate", type=float, default=1.0, help="Execution fill rate (0 < r <= 1); only this fraction of each targeted position change is filled, scaling the achieved position and all transaction costs proportionally. Default 1.0 (full fill, backward compatible).")
+    parser.add_argument("--fill-rates", type=float, nargs="+", default=None, help="List of fill rates to sweep (overrides --fill-rate).")
     parser.add_argument("--adjust-splits", action="store_true", help="Adjust prices for stock splits using the splits column if present.")
     return parser.parse_args()
 
@@ -210,7 +212,18 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     latency = getattr(args, 'latency', 0) or 0
     if latency < 0:
         latency = 0
+    # Account for partial execution fill rate (only a fraction of each
+    # targeted position change is filled; scales position and costs)
+    fill_rate = getattr(args, 'fill_rate', 1.0)
+    if fill_rate is None:
+        fill_rate = 1.0
+    if fill_rate <= 0 or fill_rate > 1:
+        raise ValueError(
+            f"--fill-rate must be in (0, 1], got {fill_rate}"
+        )
     positions = signals.shift(1 + latency).fillna(0)
+    if fill_rate < 1.0:
+        positions = positions * fill_rate
     raw_returns = close.pct_change()
 
     # Transaction costs: apply on position changes
@@ -370,6 +383,8 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             "benchmark_slippage": getattr(args, "benchmark_slippage", None) if getattr(args, "benchmark_slippage", None) is not None else args.slippage,
             "benchmark_expense_ratio": getattr(args, "benchmark_expense_ratio", None) if getattr(args, "benchmark_expense_ratio", None) is not None else 0.0,
             "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
+            "latency": getattr(args, "latency", 0),
+            "fill_rate": fill_rate,
         },
     }
 
@@ -459,11 +474,11 @@ def signals_active(signals: pd.Series) -> bool:
     return bool((signals.notna() & (signals != 0)).any())
 
 
-
 def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
                                    impact_coefficient=None, borrow_cost=None,
                                    funding_cost=None, commission=None,
-                                   slippage=None, survivorship=None):
+                                   slippage=None, fill_rate=None,
+                                   survivorship=None):
     """Run backtest for a single cost coefficient.
 
     No file I/O or stdout; returns per-coefficient metrics dict.
@@ -478,6 +493,8 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
         commission = args.commission
     if slippage is None:
         slippage = args.slippage
+    if fill_rate is None:
+        fill_rate = args.fill_rate
 
     class SweepArgs:
         def __init__(self, base):
@@ -488,6 +505,7 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
             self.funding_cost = funding_cost
             self.commission = commission
             self.slippage = slippage
+            self.fill_rate = fill_rate
 
     sweep_args = SweepArgs(args)
     results = run_backtest(data, strategy, sweep_args,
@@ -502,6 +520,7 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
         "funding_cost": funding_cost,
         "commission": commission,
         "slippage": slippage,
+        "fill_rate": fill_rate,
         "total_return": metrics.get("total_return", 0.0),
         "annualized_return": metrics.get("annualized_return", 0.0),
         "sharpe_ratio": metrics.get("sharpe_ratio", 0.0),
@@ -723,6 +742,27 @@ def main():
             for r in sweep_results:
                 print(f"{r['slippage']:.6f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
         return 0
+
+    if getattr(args, "fill_rates", None) is not None and len(args.fill_rates) > 1:
+        sweep_results = []
+        for rate in args.fill_rates:
+            sweep_results.append(
+                _run_backtest_sweep_coefficient(
+                    args, data, strategy, provenance, benchmark, fill_rate=rate,
+                    survivorship=survivorship,
+                )
+            )
+        sweep_path = output_dir / "run_backtest_fill_rate_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump({"fill_rates": args.fill_rates, "results": sweep_results}, f, indent=2)
+        print(f"Sweep results saved to: {sweep_path}")
+        if sweep_results:
+            print("\nFill rate sweep:")
+            print("rate\treturn\tann_ret\tSharpe\tmaxDD")
+            for r in sweep_results:
+                print(f"{r['fill_rate']:.4f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
+        return 0
+
     print("Running backtest...")
     results = run_backtest(data, strategy, args, data_provenance=provenance, benchmark=benchmark, survivorship=survivorship)
     # Thread benchmark provenance through results for downstream serialization

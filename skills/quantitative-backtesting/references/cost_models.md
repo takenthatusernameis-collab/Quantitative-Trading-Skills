@@ -155,6 +155,30 @@ Typical funding costs:
 - **Retail margin rates**: 5% - 10%+ per year
 - **Futures implied financing**: Embedded in basis; typically near risk-free rate
 
+### Fill Rate Model
+
+The fill rate models partial execution: only a fraction of each targeted
+position change is filled, so the achieved position is `fill_rate` times the
+targeted position. Because position changes are scaled, all transaction
+costs scale with the filled notional:
+
+```
+fill_rate = 0.5  # only 50% of each order is filled
+positions = signals.shift(1 + latency).fillna(0) * fill_rate
+position_changes = positions.diff().abs()
+costs = position_changes * (commission + slippage)
+# market impact, borrow cost, and funding cost all scale through `positions`
+```
+
+Since the achieved position is scaled, market exposure (position returns)
+scales by the same factor: partial fills reduce both expected returns and
+trading costs. The default fill rate is 1.0 (full fill), which is backward
+compatible with all existing cost models.
+
+Constraints:
+- `fill_rate` must be in (0, 1]; values outside this range are rejected.
+- `fill_rate = 1.0` reproduces the unmodified execution model exactly.
+
 ## Configuration
 
 Costs are passed as decimal fractions (not bps) to the backtest entry points:
@@ -167,6 +191,8 @@ Costs are passed as decimal fractions (not bps) to the backtest entry points:
 | `--adv-window`      | int    | `20`     | Rolling window for ADV calculation                 |
 | `--borrow-cost`     | float  | `0.0`    | Annual borrow rate for shorts (e.g., 0.03 = 3%)   |
 | `--funding-cost`    | float  | `0.0`    | Annual funding rate for leverage (e.g., 0.02 = 2%) |
+| `--fill-rate`       | float  | `1.0`    | Fraction of each position change filled (0 < r <= 1) |
+| `--fill-rates`      | list   | None     | List of fill rates to sweep (overrides --fill-rate) |
 
 In the walk-forward module, `commission`, `slippage`, `impact_coefficient`,
 `adv_window`, `borrow_cost`, and `funding_cost` are keyword arguments to

@@ -53,7 +53,8 @@ class _Args:
                  impact_coefficient=0.0, adv_window=20,
                  borrow_cost=0.0, funding_cost=0.0,
                  validate_point_in_time=False, point_in_time_strict=False,
-                 multi_symbol=False, benchmark=None, risk_free_rate=None):
+                 multi_symbol=False, benchmark=None, risk_free_rate=None,
+                 fill_rate=1.0):
         self.commission = commission
         self.slippage = slippage
         self.initial_capital = initial_capital
@@ -69,6 +70,7 @@ class _Args:
         self.multi_symbol = multi_symbol
         self.benchmark = benchmark
         self.risk_free_rate = risk_free_rate
+        self.fill_rate = fill_rate
 
 
 def test_signals_active_detects_flat_and_active_series():
@@ -690,6 +692,118 @@ def test_run_backtest_borrow_cost_frequency_aware():
     )
 
 
+def test_parse_args_accepts_fill_rate():
+    """parse_args accepts --fill-rate and defaults it to 1.0."""
+    from unittest.mock import patch
+
+    with patch.object(sys, "argv", ["prog", "--data", "d.csv", "--fill-rate", "0.5"]):
+        args = parse_args()
+    assert args.fill_rate == 0.5
+
+    with patch.object(sys, "argv", ["prog", "--data", "d.csv", "--fill-rates", "1.0", "0.5", "0.25"]):
+        args = parse_args()
+    assert args.fill_rates == [1.0, 0.5, 0.25]
+
+    with patch.object(sys, "argv", ["prog", "--data", "d.csv"]):
+        args = parse_args()
+    assert args.fill_rate == 1.0
+    assert args.fill_rates is None
+
+
+def test_run_backtest_fill_rate_default_is_one():
+    """fill_rate defaults to 1.0 and is recorded in the results config."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    results = run_backtest(data, strategy, _Args())
+    assert results["config"]["fill_rate"] == 1.0
+
+
+def test_run_backtest_fill_rate_one_identical_to_default():
+    """fill_rate=1.0 must produce results identical to the default run."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    base = run_backtest(data, strategy, _Args())
+    filled = run_backtest(data, strategy, _Args(fill_rate=1.0))
+    pd.testing.assert_series_equal(base["returns"], filled["returns"])
+    pd.testing.assert_series_equal(base["equity_curve"], filled["equity_curve"])
+    assert base["trades"] == filled["trades"]
+
+
+def test_run_backtest_fill_rate_scales_borrow_cost_with_position():
+    """Partial fill scales the achieved position, so per-period borrow cost
+    on a constant short position scales linearly with the fill rate."""
+    args_full = _Args(commission=0.0, slippage=0.0, borrow_cost=0.10, fill_rate=1.0)
+    args_half = _Args(commission=0.0, slippage=0.0, borrow_cost=0.10, fill_rate=0.5)
+    daily = _make_flat_price_data(periods=60, freq="B")
+    full = run_backtest(daily, _AlwaysShort(), args_full)
+    half = run_backtest(daily, _AlwaysShort(), args_half)
+    assert np.allclose(half["returns"], full["returns"] * 0.5)
+
+
+def test_run_backtest_fill_rate_reduces_trading_costs():
+    """On flat (zero-return) prices, strategy returns equal negative costs,
+    so fill_rate < 1 must strictly reduce total cost and scale linearly."""
+    data = _make_flat_price_data(periods=100)
+    # donchian_breakout takes positions on flat data (period < len(data)),
+    # producing position changes on which transaction costs are charged.
+    strategy = build_strategy("donchian_breakout", '{"period": 20}')
+    full = run_backtest(data, strategy, _Args(commission=0.001, slippage=0.0005,
+                                              impact_coefficient=0.5, fill_rate=1.0))
+    half = run_backtest(data, strategy, _Args(commission=0.001, slippage=0.0005,
+                                              impact_coefficient=0.5, fill_rate=0.5))
+    assert full["returns"].sum() < 0, "expected nonzero trading costs at full fill"
+    assert half["returns"].sum() > full["returns"].sum(), (
+        "half fill must reduce total trading cost"
+    )
+    assert np.isclose(half["returns"].sum(), full["returns"].sum() * 0.5, rtol=1e-6, atol=1e-12), (
+        f"expected cost to halve with fill_rate=0.5: {half['returns'].sum()} vs "
+        f"{full['returns'].sum() * 0.5}"
+    )
+
+
+def test_run_backtest_fill_rate_invalid_values_rejected():
+    """fill_rate outside (0, 1] must raise ValueError."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    for rate in (0.0, -0.5, 1.5, 2.0):
+        try:
+            run_backtest(data, strategy, _Args(fill_rate=rate))
+            assert False, f"expected ValueError for fill_rate={rate}"
+        except ValueError:
+            pass
+
+
+def test_cli_run_backtest_fill_rate_sweep():
+    """CLI run_backtest --fill-rates writes a sweep artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 5, "slow_period": 20}',
+            "--output", out_dir,
+            "--fill-rates", "1.0", "0.5", "0.25",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+
+        assert rc == 0, f"CLI run_backtest fill-rate sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "run_backtest_fill_rate_sweep.json")
+        assert os.path.exists(sweep_path), "run_backtest_fill_rate_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["fill_rates"] == [1.0, 0.5, 0.25]
+        assert len(payload["results"]) == 3
+        assert [r["fill_rate"] for r in payload["results"]] == [1.0, 0.5, 0.25]
+        for r in payload["results"]:
+            for key in ("total_return", "annualized_return", "sharpe_ratio", "max_drawdown"):
+                assert key in r, f"sweep result missing {key}"
+
+
 def test_run_backtest_serializes_data_provenance_into_results():
     """run_backtest serializes the DataProvenance captured at load time.
 
@@ -1042,6 +1156,13 @@ def main() -> int:
         ("cli_benchmark_writes_artifact_and_metrics", test_cli_benchmark_writes_artifact_and_metrics),
         ("cli_total_return_benchmark_writes_provenance_and_differs_from_price", test_cli_total_return_benchmark_writes_provenance_and_differs_from_price),
         ("cli_total_return_benchmark_alpha_differs", test_cli_total_return_benchmark_alpha_differs),
+        ("parse_args_accepts_fill_rate", test_parse_args_accepts_fill_rate),
+        ("run_backtest_fill_rate_default_is_one", test_run_backtest_fill_rate_default_is_one),
+        ("run_backtest_fill_rate_one_identical_to_default", test_run_backtest_fill_rate_one_identical_to_default),
+        ("run_backtest_fill_rate_scales_borrow_cost_with_position", test_run_backtest_fill_rate_scales_borrow_cost_with_position),
+        ("run_backtest_fill_rate_reduces_trading_costs", test_run_backtest_fill_rate_reduces_trading_costs),
+        ("run_backtest_fill_rate_invalid_values_rejected", test_run_backtest_fill_rate_invalid_values_rejected),
+        ("cli_run_backtest_fill_rate_sweep", test_cli_run_backtest_fill_rate_sweep),
     ]
 
     failures = 0
