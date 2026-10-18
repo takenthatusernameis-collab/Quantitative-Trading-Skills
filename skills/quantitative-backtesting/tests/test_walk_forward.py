@@ -3191,6 +3191,11 @@ _COSTS_EXAMPLE_PATH = (
     / "examples" / "trading_costs_robustness_example.py"
 )
 
+_FALSIFIABLE_EXAMPLE_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "examples" / "falsifiable_hypothesis_example.py"
+)
+
 
 def _import_costs_example_module():
     """Import trading_costs_robustness_example.py from its file path.
@@ -3323,6 +3328,79 @@ def test_trading_costs_robustness_example_runs():
     assert "STRUCTURED RESULTS SAVED" in result.stdout.upper(), (
         "JSON summary output message missing from example stdout"
     )
+
+
+def _import_falsifiable_example_module():
+    """Import falsifiable_hypothesis_example.py from its file path.
+
+    Loading via importlib keeps this test isolated: it exercises the example's
+    module-level imports without executing ``main()`` (guarded by
+    ``if __name__ == "__main__"``).
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "falsifiable_hypothesis_example", str(_FALSIFIABLE_EXAMPLE_PATH)
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_falsifiable_hypothesis_example_imports():
+    """The falsifiable-hypothesis example must import cleanly and expose its
+    documented callables and pre-registered hypothesis/criteria."""
+    module = _import_falsifiable_example_module()
+    for name in (
+        "main",
+        "run_hypothesis_test",
+        "HYPOTHESIS",
+        "CRITERIA",
+        "COMMISSION",
+        "SLIPPAGE",
+        "PARAM_GRID",
+    ):
+        assert hasattr(module, name), f"example module missing: {name}"
+    assert callable(module.main), "main should be callable"
+    assert callable(module.run_hypothesis_test), "run_hypothesis_test should be callable"
+    assert isinstance(module.HYPOTHESIS, str) and module.HYPOTHESIS, "HYPOTHESIS must be a non-empty string"
+    assert isinstance(module.CRITERIA, list) and len(module.CRITERIA) == 4, (
+        f"CRITERIA must define 4 pre-registered criteria, got {len(module.CRITERIA)}"
+    )
+    # Criterion tuple shape: (name, description, predicate)
+    for name, desc, pred in module.CRITERIA:
+        assert isinstance(name, str) and name, "criterion name must be non-empty"
+        assert isinstance(desc, str) and desc, "criterion description must be non-empty"
+        assert callable(pred), "criterion predicate must be callable"
+
+
+def test_falsifiable_hypothesis_example_runs():
+    """The falsifiable-hypothesis example must run end-to-end (exit 0) and
+    print a pre-registered verdict.
+
+    The verdict (SUPPORTED / NOT SUPPORTED) is an honest scientific outcome,
+    not a profitability claim: this test guards that the hypothesis-testing
+    machinery (chronological split, PIT validation, walk-forward selection,
+    Deflated Sharpe correction, benchmark alpha, criteria evaluation) executes
+    without error and reports a verdict against its pre-registered criteria."""
+    result = subprocess.run(
+        [sys.executable, str(_FALSIFIABLE_EXAMPLE_PATH)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert result.returncode == 0, (
+        f"example exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-3000:]}\n"
+        f"stderr:\n{result.stderr[-3000:]}"
+    )
+    assert "FALSIFIABLE FINANCIAL HYPOTHESIS TEST" in result.stdout, (
+        "hypothesis header missing from example stdout"
+    )
+    assert "VERDICT:" in result.stdout, "verdict line missing from example stdout"
+    import re
+
+    m = re.search(r"VERDICT:\s*(SUPPORTED|NOT SUPPORTED)", result.stdout)
+    assert m, f"verdict must be SUPPORTED or NOT SUPPORTED, got:\n{result.stdout[-2000:]}"
 
 
 # Need to import patch for mocking
@@ -5299,6 +5377,8 @@ TEST_REGISTRY = [
     ("test_trading_costs_positive_alpha_dar_in_range", test_trading_costs_positive_alpha_dar_in_range),
     ("test_trading_costs_borrow_funding_sweep_exercises_api", test_trading_costs_borrow_funding_sweep_exercises_api),
     ("test_trading_costs_robustness_example_runs", test_trading_costs_robustness_example_runs),
+    ("test_falsifiable_hypothesis_example_imports", test_falsifiable_hypothesis_example_imports),
+    ("test_falsifiable_hypothesis_example_runs", test_falsifiable_hypothesis_example_runs),
     ("test_trading_costs_short_strategy_borrow_cost_effect", test_trading_costs_short_strategy_borrow_cost_effect),
     ("test_trading_costs_levered_strategy_funding_cost_effect", test_trading_costs_levered_strategy_funding_cost_effect),
     ("test_trading_costs_market_neutral_borrow_and_funding_effect", test_trading_costs_market_neutral_borrow_and_funding_effect),
