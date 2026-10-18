@@ -16,6 +16,7 @@ All data comes from the included sample data - no external network access requir
 
 import sys
 import json
+from datetime import datetime, UTC
 from pathlib import Path
 
 import numpy as np
@@ -62,8 +63,17 @@ def run_full_pipeline():
     print(f"  Total return type detected: {prov.total_return_type}")
     print()
     prov_path = out_dir / "data_provenance.json"
+    prov_dict = prov.to_dict()
+    # Make timestamp stable for reproducibility: use source file's mtime
+    try:
+        from datetime import datetime, UTC
+        prov_dict["load_timestamp"] = datetime.fromtimestamp(
+            data_path.stat().st_mtime, UTC
+        ).isoformat().replace("+00:00", "Z")
+    except Exception:
+        pass
     with open(prov_path, "w") as f:
-        f.write(prov.to_json())
+        json.dump(prov_dict, f, indent=2)
     print(f"  Provenance saved to: {prov_path}")
     print()
 
