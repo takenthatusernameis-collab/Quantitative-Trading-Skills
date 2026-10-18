@@ -3994,126 +3994,7 @@ def test_verify_split_separation_empty_split_raises():
 
 
 def main() -> int:
-    tests = [
-        ("test_out_of_sample_validation_benchmark_cost_is_periodic", test_out_of_sample_validation_benchmark_cost_is_periodic),
-        ("test_out_of_sample_validation_benchmark_cost_is_periodic_cpcv", test_out_of_sample_validation_benchmark_cost_is_periodic_cpcv),
-        ("test_cli_out_of_sample_benchmark_cost_is_periodic", test_cli_out_of_sample_benchmark_cost_is_periodic),
-        ("test_cli_out_of_sample_benchmark_cost_is_periodic_false", test_cli_out_of_sample_benchmark_cost_is_periodic_false),
-        ("test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv", test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv),
-        ("test_cli_out_of_sample_persists_separation_check_audit_field", test_cli_out_of_sample_persists_separation_check_audit_field),
-        ("test_load_and_validate_data_runs_pit_by_default", test_load_and_validate_data_runs_pit_by_default),
-        ("test_cli_point_in_time_validation_enabled_by_default", test_cli_point_in_time_validation_enabled_by_default),
-        ("test_cli_point_in_time_validation_can_be_disabled", test_cli_point_in_time_validation_can_be_disabled),
-        ("test_benchmark_stats_with_splits_runs_without_error", test_benchmark_stats_with_splits_runs_without_error),
-        ("test_benchmark_stats_with_splits_uses_adjusted_returns", test_benchmark_stats_with_splits_uses_adjusted_returns),
-        ("test_add_benchmark_to_summary_splits_path", test_add_benchmark_to_summary_splits_path),
-        ("test_out_of_sample_validation_with_splits", test_out_of_sample_validation_with_splits),
-        ("test_calculate_metrics_deflated_alpha_with_benchmark_list", test_calculate_metrics_deflated_alpha_with_benchmark_list),
-        ("test_cli_cpcv_benchmark_cost_is_periodic", test_cli_cpcv_benchmark_cost_is_periodic),
-        ("test_benchmark_list_alpha_correction_deflated_alpha", test_benchmark_list_alpha_correction_deflated_alpha),
-        ("test_cpcv_analysis_multiple_benchmarks_deflated_alpha", test_cpcv_analysis_multiple_benchmarks_deflated_alpha),
-        ("test_walk_forward_analysis_multiple_benchmarks_deflated_alpha", test_walk_forward_analysis_multiple_benchmarks_deflated_alpha),
-        ("test_cli_cpcv_multiple_benchmarks", test_cli_cpcv_multiple_benchmarks),
-        ("test_out_of_sample_validation_multiple_benchmarks_deflated_alpha", test_out_of_sample_validation_multiple_benchmarks_deflated_alpha),
-        ("test_cli_walk_forward_multiple_benchmarks", test_cli_walk_forward_multiple_benchmarks),
-        ("test_cli_walk_forward_constant_benchmarks_defensive_fallback_surfaces_metrics", test_cli_walk_forward_constant_benchmarks_defensive_fallback_surfaces_metrics),
-        ("test_cli_optimize_multiple_benchmarks", test_cli_optimize_multiple_benchmarks),
-        ("test_cli_monte_carlo_multiple_benchmarks", test_cli_monte_carlo_multiple_benchmarks),
-        ("test_cli_monte_carlo_n_trials", test_monte_carlo_n_trials_uses_evaluated_combo_count),
-        ("test_cli_monte_carlo_impact_sweep", test_cli_monte_carlo_impact_sweep),
-        ("test_cli_cpcv_impact_sweep", test_cli_cpcv_impact_sweep),
-        ("test_cli_monte_carlo_borrow_sweep", test_cli_monte_carlo_borrow_sweep),
-        ("test_cli_cpcv_borrow_sweep", test_cli_cpcv_borrow_sweep),
-        ("test_cli_monte_carlo_funding_sweep", test_cli_monte_carlo_funding_sweep),
-        ("test_cli_cpcv_funding_sweep", test_cli_cpcv_funding_sweep),
-        ("test_cli_walk_forward_impact_sweep", test_cli_walk_forward_impact_sweep),
-        ("test_cli_walk_forward_borrow_sweep", test_cli_walk_forward_borrow_sweep),
-        ("test_cli_walk_forward_funding_sweep", test_cli_walk_forward_funding_sweep),
-        ("test_cli_optimize_impact_sweep", test_cli_optimize_impact_sweep),
-        ("test_cli_optimize_borrow_sweep", test_cli_optimize_borrow_sweep),
-        ("test_cli_optimize_funding_sweep", test_cli_optimize_funding_sweep),
-        ("test_optimize_impact_sweep_records_bias_controls_and_deflated_sharpe", test_optimize_impact_sweep_records_bias_controls_and_deflated_sharpe),
-        ("test_optimize_sweep_omits_deflated_sharpe_without_deflate", test_optimize_sweep_omits_deflated_sharpe_without_deflate),
-        ("test_cli_out_of_sample_impact_sweep", test_cli_out_of_sample_impact_sweep),
-        ("test_cli_out_of_sample_borrow_sweep", test_cli_out_of_sample_borrow_sweep),
-        ("test_cli_out_of_sample_funding_sweep", test_cli_out_of_sample_funding_sweep),
-        ("test_cli_walk_forward_commission_sweep", test_cli_walk_forward_commission_sweep),
-        ("test_cli_walk_forward_slippage_sweep", test_cli_walk_forward_slippage_sweep),
-        ("test_cli_optimize_commission_sweep", test_cli_optimize_commission_sweep),
-        ("test_cli_optimize_slippage_sweep", test_cli_optimize_slippage_sweep),
-        ("test_cli_cpcv_commission_sweep", test_cli_cpcv_commission_sweep),
-        ("test_cli_cpcv_slippage_sweep", test_cli_cpcv_slippage_sweep),
-        ("test_cli_monte_carlo_commission_sweep", test_cli_monte_carlo_commission_sweep),
-        ("test_cli_monte_carlo_slippage_sweep", test_cli_monte_carlo_slippage_sweep),
-        ("test_cli_multi_symbol_monte_carlo_commission_sweep_records_survivorship", test_cli_multi_symbol_monte_carlo_commission_sweep_records_survivorship),
-
-        ("test_cli_out_of_sample_commission_sweep", test_cli_out_of_sample_commission_sweep),
-        ("test_cli_out_of_sample_slippage_sweep", test_cli_out_of_sample_slippage_sweep),
-        ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
-        ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
-        ("test_trading_costs_robustness_example_imports", test_trading_costs_robustness_example_imports),
-        ("test_trading_costs_robustness_example_runs", test_trading_costs_robustness_example_runs),
-        ("test_trading_costs_positive_alpha_dar_in_range", test_trading_costs_positive_alpha_dar_in_range),
-        ("test_trading_costs_borrow_funding_sweep_exercises_api", test_trading_costs_borrow_funding_sweep_exercises_api),
-        ("test_trading_costs_short_strategy_borrow_cost_effect", test_trading_costs_short_strategy_borrow_cost_effect),
-        ("test_trading_costs_levered_strategy_funding_cost_effect", test_trading_costs_levered_strategy_funding_cost_effect),
-        ("test_trading_costs_market_neutral_borrow_and_funding_effect", test_trading_costs_market_neutral_borrow_and_funding_effect),
-        ("test_market_impact_cost_reduces_returns_single_asset", test_market_impact_cost_reduces_returns_single_asset),
-        ("test_market_impact_cost_reduces_returns_dict_panel", test_market_impact_cost_reduces_returns_dict_panel),
-        ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
-        ("test_benchmark_list_alpha_correction_handles_splits", test_benchmark_list_alpha_correction_handles_splits),
-        ("test_benchmark_list_alpha_correction_multiple_benchmarks_with_splits", test_benchmark_list_alpha_correction_multiple_benchmarks_with_splits),
-        ("test_benchmark_list_alpha_correction_mixed_splits_backward_compat", test_benchmark_list_alpha_correction_mixed_splits_backward_compat),
-        ("test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model", test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model),
-        ("test_out_of_sample_validation_n_trials_matches_evaluated_combinations", test_out_of_sample_validation_n_trials_matches_evaluated_combinations),
-        ("test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star", test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star),
-        ("test_deflated_sharpe_parity_across_all_four_analysis_paths", test_deflated_sharpe_parity_across_all_four_analysis_paths),
-        ("test_cost_sweep_dsr_parity_across_paths", test_cost_sweep_dsr_parity_across_paths),
-        ("test_non_impact_sweep_dsr_parity_across_paths", test_non_impact_sweep_dsr_parity_across_paths),
-        ("test_optimize_non_impact_sweep_dsr_parity", test_optimize_non_impact_sweep_dsr_parity),
-        ("test_degenerate_constant_return_dsr_consistency", test_degenerate_constant_return_dsr_consistency),
-        ("test_degenerate_constant_return_dar_consistency", test_degenerate_constant_return_dar_consistency),
-        ("test_benchmark_stats_with_splits_produces_finite_inference", test_benchmark_stats_with_splits_produces_finite_inference),
-        ("test_benchmark_stats_with_splits_regression_pins_corrected_values", test_benchmark_stats_with_splits_regression_pins_corrected_values),
-        ("test_cli_walk_forward_commission_sweep", test_cli_walk_forward_commission_sweep),
-        ("test_cli_walk_forward_slippage_sweep", test_cli_walk_forward_slippage_sweep),
-        ("test_cli_optimize_commission_sweep", test_cli_optimize_commission_sweep),
-        ("test_cli_optimize_slippage_sweep", test_cli_optimize_slippage_sweep),
-        ("test_cli_cpcv_commission_sweep", test_cli_cpcv_commission_sweep),
-        ("test_cli_cpcv_slippage_sweep", test_cli_cpcv_slippage_sweep),
-        ("test_cli_monte_carlo_commission_sweep", test_cli_monte_carlo_commission_sweep),
-        ("test_cli_monte_carlo_slippage_sweep", test_cli_monte_carlo_slippage_sweep),
-        ("test_cli_multi_symbol_monte_carlo_commission_sweep_records_survivorship", test_cli_multi_symbol_monte_carlo_commission_sweep_records_survivorship),
-
-        ("test_cli_out_of_sample_commission_sweep", test_cli_out_of_sample_commission_sweep),
-        ("test_cli_out_of_sample_slippage_sweep", test_cli_out_of_sample_slippage_sweep),
-        ("test_cli_multi_symbol_load_and_validate_data_returns_survivorship", test_cli_multi_symbol_load_and_validate_data_returns_survivorship),
-        ("test_cli_multi_symbol_out_of_sample_sets_bias_controls_engaged", test_cli_multi_symbol_out_of_sample_sets_bias_controls_engaged),
-        ("test_cli_multi_symbol_out_of_sample_writes_survivorship_artifact", test_cli_multi_symbol_out_of_sample_writes_survivorship_artifact),
-        ("test_cli_multi_symbol_walk_forward_writes_survivorship_artifact", test_cli_multi_symbol_walk_forward_writes_survivorship_artifact),
-        ("test_cli_multi_symbol_cpcv_writes_survivorship_artifact", test_cli_multi_symbol_cpcv_writes_survivorship_artifact),
-        ("test_cli_multi_symbol_optimize_writes_survivorship_artifact", test_cli_multi_symbol_optimize_writes_survivorship_artifact),
-        ("test_cli_multi_symbol_walk_forward_commission_sweep_records_survivorship", test_cli_multi_symbol_walk_forward_commission_sweep_records_survivorship),
-        ("test_cli_multi_symbol_out_of_sample_commission_sweep_records_survivorship", test_cli_multi_symbol_out_of_sample_commission_sweep_records_survivorship),
-        ("test_cli_multi_symbol_cpcv_commission_sweep_records_survivorship", test_cli_multi_symbol_cpcv_commission_sweep_records_survivorship),
-        ("test_cli_multi_symbol_optimize_commission_sweep_records_survivorship", test_cli_multi_symbol_optimize_commission_sweep_records_survivorship),
-        ("test_cli_walk_forward_no_benchmark_does_not_crash", test_cli_walk_forward_no_benchmark_does_not_crash),
-        ("test_verify_split_separation_clean_splits_pass", test_verify_split_separation_clean_splits_pass),
-        ("test_verify_split_separation_train_val_overlap_raises", test_verify_split_separation_train_val_overlap_raises),
-        ("test_verify_split_separation_val_test_overlap_raises", test_verify_split_separation_val_test_overlap_raises),
-        ("test_verify_split_separation_train_test_overlap_raises", test_verify_split_separation_train_test_overlap_raises),
-        ("test_verify_split_separation_non_strict_returns_diagnostic", test_verify_split_separation_non_strict_returns_diagnostic),
-        ("test_verify_split_separation_empty_split_raises", test_verify_split_separation_empty_split_raises),
-        ("test_calculate_strategy_returns_latency_shifts_entry_by_exact_periods", test_calculate_strategy_returns_latency_shifts_entry_by_exact_periods),
-        ("test_calculate_strategy_returns_fill_rate_scales_short_borrow_cost", test_calculate_strategy_returns_fill_rate_scales_short_borrow_cost),
-        ("test_walk_forward_analysis_default_latency_fill_rate_match_explicit_defaults", test_walk_forward_analysis_default_latency_fill_rate_match_explicit_defaults),
-        ("test_walk_forward_analysis_fill_rate_invalid_raises", test_walk_forward_analysis_fill_rate_invalid_raises),
-        ("test_walk_forward_analysis_negative_latency_clamped_to_zero", test_walk_forward_analysis_negative_latency_clamped_to_zero),
-        ("test_parameter_optimization_default_latency_fill_rate_match_explicit_defaults", test_parameter_optimization_default_latency_fill_rate_match_explicit_defaults),
-        ("test_cli_walk_forward_latency_sweep", test_cli_walk_forward_latency_sweep),
-        ("test_cli_walk_forward_fill_rate_sweep", test_cli_walk_forward_fill_rate_sweep),
-        ("test_cli_walk_forward_invalid_fill_rate_rejected", test_cli_walk_forward_invalid_fill_rate_rejected),
-    ]
+    tests = TEST_REGISTRY
 
     failures = 0
     for name, fn in tests:
@@ -5102,10 +4983,6 @@ def test_cli_walk_forward_invalid_fill_rate_rejected():
                 )
 
 
-if __name__ == "__main__":
-    import sys
-    sys.exit(main())
-
 def test_cpcv_analysis_defaults_preserve_latency_and_fill_rate():
     """cpcv_analysis defaults (latency=0, fill_rate=1.0) are bitwise identical to
     explicitly passing latency=0, fill_rate=1.0, so prior behavior is preserved.
@@ -5221,6 +5098,169 @@ def test_out_of_sample_validation_negative_latency_clamped_to_zero():
 
     assert clamped["summary"] == zero["summary"]
 
+def test_main_registers_every_module_level_test():
+    """main() must register every module-level ``test_*`` function.
+
+    Regression guard for a defect where a test function was defined after
+    the ``if __name__ == "__main__"`` block (and therefore unreachable at
+    runtime) yet omitted from the registry, so the suite reported a lower
+    count than the number of tests actually defined. A test defined but
+    never registered is dead code: it cannot fail, so it provides no
+    coverage of the feature it targets.
+
+    The check is structural: every callable named ``test_*`` at module
+    scope must appear in ``TEST_REGISTRY``, and every registry entry must
+    be a real module-level function. No test is executed here.
+    """
+    import inspect
+
+    module_tests = {
+        obj
+        for name, obj in list(globals().items())
+        if name.startswith("test_")
+        and inspect.isfunction(obj)
+        and obj.__module__ == __name__
+    }
+    registered = {fn for _, fn in TEST_REGISTRY}
+
+    missing = module_tests - registered
+    assert not missing, (
+        f"test functions defined but not registered in TEST_REGISTRY: "
+        f"{sorted(f.__name__ for f in missing)}. A test outside the "
+        "runner is dead code and provides no coverage."
+    )
+    phantom = registered - module_tests
+    assert not phantom, (
+        f"entries in TEST_REGISTRY that are not module-level test_* "
+        f"functions: {sorted(f.__name__ for f in phantom)}"
+    )
+    # Labels must be unique so the runner cannot silently skip a test
+    # (duplicate labels would overwrite each other in a name->fn map).
+    labels = [name for name, _ in TEST_REGISTRY]
+    assert len(labels) == len(set(labels)), (
+        f"TEST_REGISTRY has duplicate labels: "
+        f"{[l for l in labels if labels.count(l) > 1]}"
+    )
+
+
+TEST_REGISTRY = [
+    ("test_out_of_sample_validation_benchmark_cost_is_periodic", test_out_of_sample_validation_benchmark_cost_is_periodic),
+    ("test_out_of_sample_validation_benchmark_cost_is_periodic_cpcv", test_out_of_sample_validation_benchmark_cost_is_periodic_cpcv),
+    ("test_cli_out_of_sample_benchmark_cost_is_periodic", test_cli_out_of_sample_benchmark_cost_is_periodic),
+    ("test_cli_out_of_sample_persists_separation_check_audit_field", test_cli_out_of_sample_persists_separation_check_audit_field),
+    ("test_load_and_validate_data_runs_pit_by_default", test_load_and_validate_data_runs_pit_by_default),
+    ("test_cli_point_in_time_validation_enabled_by_default", test_cli_point_in_time_validation_enabled_by_default),
+    ("test_cli_point_in_time_validation_can_be_disabled", test_cli_point_in_time_validation_can_be_disabled),
+    ("test_out_of_sample_validation_validate_pit_detects_look_ahead", test_out_of_sample_validation_validate_pit_detects_look_ahead),
+    ("test_cli_out_of_sample_benchmark_cost_is_periodic_false", test_cli_out_of_sample_benchmark_cost_is_periodic_false),
+    ("test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv", test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv),
+    ("test_benchmark_stats_with_splits_runs_without_error", test_benchmark_stats_with_splits_runs_without_error),
+    ("test_benchmark_stats_with_splits_uses_adjusted_returns", test_benchmark_stats_with_splits_uses_adjusted_returns),
+    ("test_add_benchmark_to_summary_splits_path", test_add_benchmark_to_summary_splits_path),
+    ("test_out_of_sample_validation_with_splits", test_out_of_sample_validation_with_splits),
+    ("test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model", test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model),
+    ("test_out_of_sample_validation_n_trials_matches_evaluated_combinations", test_out_of_sample_validation_n_trials_matches_evaluated_combinations),
+    ("test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star", test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star),
+    ("test_deflated_sharpe_parity_across_all_four_analysis_paths", test_deflated_sharpe_parity_across_all_four_analysis_paths),
+    ("test_cost_sweep_dsr_parity_across_paths", test_cost_sweep_dsr_parity_across_paths),
+    ("test_non_impact_sweep_dsr_parity_across_paths", test_non_impact_sweep_dsr_parity_across_paths),
+    ("test_optimize_non_impact_sweep_dsr_parity", test_optimize_non_impact_sweep_dsr_parity),
+    ("test_degenerate_constant_return_dsr_consistency", test_degenerate_constant_return_dsr_consistency),
+    ("test_degenerate_constant_return_dar_consistency", test_degenerate_constant_return_dar_consistency),
+    ("test_out_of_sample_validation_multiple_benchmarks_deflated_alpha", test_out_of_sample_validation_multiple_benchmarks_deflated_alpha),
+    ("test_calculate_metrics_deflated_alpha_with_benchmark_list", test_calculate_metrics_deflated_alpha_with_benchmark_list),
+    ("test_cli_cpcv_benchmark_cost_is_periodic", test_cli_cpcv_benchmark_cost_is_periodic),
+    ("test_benchmark_list_alpha_correction_deflated_alpha", test_benchmark_list_alpha_correction_deflated_alpha),
+    ("test_benchmark_list_alpha_correction_per_benchmark_pvalue_is_dar_pvalue", test_benchmark_list_alpha_correction_per_benchmark_pvalue_is_dar_pvalue),
+    ("test_cpcv_analysis_multiple_benchmarks_deflated_alpha", test_cpcv_analysis_multiple_benchmarks_deflated_alpha),
+    ("test_walk_forward_analysis_multiple_benchmarks_deflated_alpha", test_walk_forward_analysis_multiple_benchmarks_deflated_alpha),
+    ("test_cli_cpcv_multiple_benchmarks", test_cli_cpcv_multiple_benchmarks),
+    ("test_cli_walk_forward_multiple_benchmarks", test_cli_walk_forward_multiple_benchmarks),
+    ("test_cli_walk_forward_constant_benchmarks_defensive_fallback_surfaces_metrics", test_cli_walk_forward_constant_benchmarks_defensive_fallback_surfaces_metrics),
+    ("test_cli_optimize_multiple_benchmarks", test_cli_optimize_multiple_benchmarks),
+    ("test_cli_monte_carlo_multiple_benchmarks", test_cli_monte_carlo_multiple_benchmarks),
+    ("test_cli_monte_carlo_impact_sweep", test_cli_monte_carlo_impact_sweep),
+    ("test_monte_carlo_n_trials_uses_evaluated_combo_count", test_monte_carlo_n_trials_uses_evaluated_combo_count),
+    ("test_cli_cpcv_impact_sweep", test_cli_cpcv_impact_sweep),
+    ("test_cli_monte_carlo_borrow_sweep", test_cli_monte_carlo_borrow_sweep),
+    ("test_cli_cpcv_borrow_sweep", test_cli_cpcv_borrow_sweep),
+    ("test_cli_monte_carlo_funding_sweep", test_cli_monte_carlo_funding_sweep),
+    ("test_cli_cpcv_funding_sweep", test_cli_cpcv_funding_sweep),
+    ("test_cli_walk_forward_impact_sweep", test_cli_walk_forward_impact_sweep),
+    ("test_cli_walk_forward_borrow_sweep", test_cli_walk_forward_borrow_sweep),
+    ("test_cli_walk_forward_funding_sweep", test_cli_walk_forward_funding_sweep),
+    ("test_cli_optimize_impact_sweep", test_cli_optimize_impact_sweep),
+    ("test_cli_optimize_borrow_sweep", test_cli_optimize_borrow_sweep),
+    ("test_cli_optimize_funding_sweep", test_cli_optimize_funding_sweep),
+    ("test_cli_out_of_sample_impact_sweep", test_cli_out_of_sample_impact_sweep),
+    ("test_cli_out_of_sample_borrow_sweep", test_cli_out_of_sample_borrow_sweep),
+    ("test_cli_out_of_sample_funding_sweep", test_cli_out_of_sample_funding_sweep),
+    ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
+    ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
+    ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
+    ("test_trading_costs_robustness_example_imports", test_trading_costs_robustness_example_imports),
+    ("test_trading_costs_positive_alpha_dar_in_range", test_trading_costs_positive_alpha_dar_in_range),
+    ("test_trading_costs_borrow_funding_sweep_exercises_api", test_trading_costs_borrow_funding_sweep_exercises_api),
+    ("test_trading_costs_robustness_example_runs", test_trading_costs_robustness_example_runs),
+    ("test_trading_costs_short_strategy_borrow_cost_effect", test_trading_costs_short_strategy_borrow_cost_effect),
+    ("test_trading_costs_levered_strategy_funding_cost_effect", test_trading_costs_levered_strategy_funding_cost_effect),
+    ("test_trading_costs_market_neutral_borrow_and_funding_effect", test_trading_costs_market_neutral_borrow_and_funding_effect),
+    ("test_market_impact_cost_reduces_returns_single_asset", test_market_impact_cost_reduces_returns_single_asset),
+    ("test_market_impact_cost_reduces_returns_dict_panel", test_market_impact_cost_reduces_returns_dict_panel),
+    ("test_cli_walk_forward_commission_sweep", test_cli_walk_forward_commission_sweep),
+    ("test_cli_walk_forward_slippage_sweep", test_cli_walk_forward_slippage_sweep),
+    ("test_cli_optimize_commission_sweep", test_cli_optimize_commission_sweep),
+    ("test_cli_optimize_slippage_sweep", test_cli_optimize_slippage_sweep),
+    ("test_cli_cpcv_commission_sweep", test_cli_cpcv_commission_sweep),
+    ("test_cli_cpcv_slippage_sweep", test_cli_cpcv_slippage_sweep),
+    ("test_cli_monte_carlo_commission_sweep", test_cli_monte_carlo_commission_sweep),
+    ("test_cli_monte_carlo_slippage_sweep", test_cli_monte_carlo_slippage_sweep),
+    ("test_cli_out_of_sample_commission_sweep", test_cli_out_of_sample_commission_sweep),
+    ("test_cli_out_of_sample_slippage_sweep", test_cli_out_of_sample_slippage_sweep),
+    ("test_benchmark_list_alpha_correction_multiple_benchmarks_with_splits", test_benchmark_list_alpha_correction_multiple_benchmarks_with_splits),
+    ("test_benchmark_list_alpha_correction_mixed_splits_backward_compat", test_benchmark_list_alpha_correction_mixed_splits_backward_compat),
+    ("test_benchmark_list_alpha_correction_handles_splits", test_benchmark_list_alpha_correction_handles_splits),
+    ("test_verify_split_separation_clean_splits_pass", test_verify_split_separation_clean_splits_pass),
+    ("test_verify_split_separation_train_val_overlap_raises", test_verify_split_separation_train_val_overlap_raises),
+    ("test_verify_split_separation_val_test_overlap_raises", test_verify_split_separation_val_test_overlap_raises),
+    ("test_verify_split_separation_train_test_overlap_raises", test_verify_split_separation_train_test_overlap_raises),
+    ("test_verify_split_separation_non_strict_returns_diagnostic", test_verify_split_separation_non_strict_returns_diagnostic),
+    ("test_verify_split_separation_empty_split_raises", test_verify_split_separation_empty_split_raises),
+    ("test_benchmark_stats_with_splits_produces_finite_inference", test_benchmark_stats_with_splits_produces_finite_inference),
+    ("test_benchmark_stats_with_splits_regression_pins_corrected_values", test_benchmark_stats_with_splits_regression_pins_corrected_values),
+    ("test_optimize_impact_sweep_records_bias_controls_and_deflated_sharpe", test_optimize_impact_sweep_records_bias_controls_and_deflated_sharpe),
+    ("test_optimize_sweep_omits_deflated_sharpe_without_deflate", test_optimize_sweep_omits_deflated_sharpe_without_deflate),
+    ("test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance", test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance),
+    ("test_cli_oos_tear_sheet_carries_provenance", test_cli_oos_tear_sheet_carries_provenance),
+    ("test_cli_multi_symbol_load_and_validate_data_returns_survivorship", test_cli_multi_symbol_load_and_validate_data_returns_survivorship),
+    ("test_cli_multi_symbol_out_of_sample_sets_bias_controls_engaged", test_cli_multi_symbol_out_of_sample_sets_bias_controls_engaged),
+    ("test_cli_multi_symbol_out_of_sample_writes_survivorship_artifact", test_cli_multi_symbol_out_of_sample_writes_survivorship_artifact),
+    ("test_cli_multi_symbol_walk_forward_writes_survivorship_artifact", test_cli_multi_symbol_walk_forward_writes_survivorship_artifact),
+    ("test_cli_multi_symbol_cpcv_writes_survivorship_artifact", test_cli_multi_symbol_cpcv_writes_survivorship_artifact),
+    ("test_cli_multi_symbol_optimize_writes_survivorship_artifact", test_cli_multi_symbol_optimize_writes_survivorship_artifact),
+    ("test_cli_multi_symbol_walk_forward_commission_sweep_records_survivorship", test_cli_multi_symbol_walk_forward_commission_sweep_records_survivorship),
+    ("test_cli_multi_symbol_out_of_sample_commission_sweep_records_survivorship", test_cli_multi_symbol_out_of_sample_commission_sweep_records_survivorship),
+    ("test_cli_multi_symbol_cpcv_commission_sweep_records_survivorship", test_cli_multi_symbol_cpcv_commission_sweep_records_survivorship),
+    ("test_cli_multi_symbol_optimize_commission_sweep_records_survivorship", test_cli_multi_symbol_optimize_commission_sweep_records_survivorship),
+    ("test_cli_multi_symbol_monte_carlo_commission_sweep_records_survivorship", test_cli_multi_symbol_monte_carlo_commission_sweep_records_survivorship),
+    ("test_cli_walk_forward_no_benchmark_does_not_crash", test_cli_walk_forward_no_benchmark_does_not_crash),
+    ("test_calculate_strategy_returns_latency_shifts_entry_by_exact_periods", test_calculate_strategy_returns_latency_shifts_entry_by_exact_periods),
+    ("test_calculate_strategy_returns_fill_rate_scales_short_borrow_cost", test_calculate_strategy_returns_fill_rate_scales_short_borrow_cost),
+    ("test_walk_forward_analysis_default_latency_fill_rate_match_explicit_defaults", test_walk_forward_analysis_default_latency_fill_rate_match_explicit_defaults),
+    ("test_walk_forward_analysis_fill_rate_invalid_raises", test_walk_forward_analysis_fill_rate_invalid_raises),
+    ("test_walk_forward_analysis_negative_latency_clamped_to_zero", test_walk_forward_analysis_negative_latency_clamped_to_zero),
+    ("test_parameter_optimization_default_latency_fill_rate_match_explicit_defaults", test_parameter_optimization_default_latency_fill_rate_match_explicit_defaults),
+    ("test_cli_walk_forward_latency_sweep", test_cli_walk_forward_latency_sweep),
+    ("test_cli_walk_forward_fill_rate_sweep", test_cli_walk_forward_fill_rate_sweep),
+    ("test_cli_walk_forward_invalid_fill_rate_rejected", test_cli_walk_forward_invalid_fill_rate_rejected),
+    ("test_cpcv_analysis_defaults_preserve_latency_and_fill_rate", test_cpcv_analysis_defaults_preserve_latency_and_fill_rate),
+    ("test_cpcv_analysis_fill_rate_invalid_raises", test_cpcv_analysis_fill_rate_invalid_raises),
+    ("test_cpcv_analysis_negative_latency_clamped_to_zero", test_cpcv_analysis_negative_latency_clamped_to_zero),
+    ("test_out_of_sample_validation_defaults_preserve_latency_and_fill_rate", test_out_of_sample_validation_defaults_preserve_latency_and_fill_rate),
+    ("test_out_of_sample_validation_fill_rate_invalid_raises", test_out_of_sample_validation_fill_rate_invalid_raises),
+    ("test_out_of_sample_validation_negative_latency_clamped_to_zero", test_out_of_sample_validation_negative_latency_clamped_to_zero),
+    ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
+]
 
 if __name__ == "__main__":
     import sys

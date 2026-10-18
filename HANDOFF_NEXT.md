@@ -1,58 +1,35 @@
 # HANDOFF_NEXT
 
-## Next task: apply the "register every module-level test" structural guard to
-the other test files in `skills/quantitative-backtesting/tests/`.
+## What changed this session
 
-This session fixed a demonstrated defect in `test_performance.py`: a dead
-duplicate of `test_benchmark_stats_applies_periodic_benchmark_costs` defined
-after the `if __name__ == "__main__"` block, unreachable at runtime and
-unregistered in the runner (30 registered vs 31 defined). The fix extracted the
-test list to a module-level `TEST_REGISTRY` and added
-`test_main_registers_every_module_level_test`, a structural guard that asserts
-every module-level `test_*` function is registered, every registry entry is a
-real module-level function, and labels are unique.
+Applied the "register every module-level test" structural guard (template proven in `test_performance.py`) to the two remaining test files in `skills/quantitative-backtesting/tests/`.
 
-The same defect class exists in two other files, confirmed by static
-introspection (defined vs registered counts):
+### `skills/quantitative-backtesting/tests/test_run_backtest.py`
+- Extracted `main()`'s local `tests = [...]` list to a module-level `TEST_REGISTRY`; `main()` now iterates `TEST_REGISTRY`.
+- Registered the 10 previously unregistered module-level `test_*` functions (e.g. `test_cli_run_backtest_impact_sweep`, `test_cli_run_backtest_borrow_sweep`, `test_cli_run_backtest_funding_sweep`, `test_cli_run_backtest_commission_sweep`, `test_cli_run_backtest_slippage_sweep`, `test_cli_multi_benchmark_provenance_shapes`, `test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance`, `test_cli_benchmark_name_propagates_to_provenance_and_tear_sheet`, `test_cli_benchmark_name_derives_from_filename_stem_when_omitted`, `test_cli_multi_symbol_survivorship_sets_bias_controls_engaged`).
+- Added `test_main_registers_every_module_level_test` structural guard and registered it.
+- Removed the two dead `if __name__ == "__main__"` blocks that sat in the middle of the file (they caused early `sys.exit` before later tests were defined); single final `__main__` remains.
+- Suite: **64/64 pass** (was 53/53; +10 registered +1 guard).
 
-- `skills/quantitative-backtesting/tests/test_run_backtest.py` — 69 defined,
-  53 registered. Tests defined after its `__main__` block and not in the runner
-  include `test_cli_multi_symbol_survivorship_sets_bias_controls_engaged`,
-  `test_cli_run_backtest_impact_sweep`, `test_cli_run_backtest_borrow_sweep`,
-  `test_cli_run_backtest_funding_sweep`, `test_cli_run_backtest_commission_sweep`,
-  `test_cli_run_backtest_slippage_sweep`, `test_cli_multi_benchmark_provenance_shapes`,
-  `test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance`,
-  `test_cli_benchmark_name_propagates_to_provenance_and_tear_sheet`,
-  `test_cli_benchmark_name_derives_from_filename_stem_when_omitted`.
-- `skills/quantitative-backtesting/tests/test_walk_forward.py` — 115 defined,
-  116 registered (the extra registered entry is a duplicate label pointing at
-  the same function, so effective coverage is 115). Tests defined after its
-  `__main__` block and not in the runner include `test_out_of_sample_validation_validate_pit_detects_look_ahead`,
-  `test_benchmark_list_alpha_correction_per_benchmark_pvalue_is_dar_pvalue`,
-  `test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance`,
-  `test_cli_oos_tear_sheet_carries_provenance`,
-  `test_cpcv_analysis_defaults_preserve_latency_and_fill_rate`,
-  `test_cpcv_analysis_fill_rate_invalid_raises`,
-  `test_cpcv_analysis_negative_latency_clamped_to_zero`,
-  `test_out_of_sample_validation_defaults_preserve_latency_and_fill_rate`,
-  `test_out_of_sample_validation_fill_rate_invalid_raises`,
-  `test_out_of_sample_validation_negative_latency_clamped_to_zero`.
+### `skills/quantitative-backtesting/tests/test_walk_forward.py`
+- Same transformation: `TEST_REGISTRY` at module level, `main()` iterates it.
+- Registered the 10 previously unregistered tests (e.g. `test_cpcv_analysis_defaults_preserve_latency_and_fill_rate`, `test_cpcv_analysis_fill_rate_invalid_raises`, `test_cpcv_analysis_negative_latency_clamped_to_zero`, `test_out_of_sample_validation_defaults_preserve_latency_and_fill_rate`, `test_out_of_sample_validation_fill_rate_invalid_raises`, `test_out_of_sample_validation_negative_latency_clamped_to_zero`, `test_out_of_sample_validation_validate_pit_detects_look_ahead`, `test_benchmark_list_alpha_correction_per_benchmark_pvalue_is_dar_pvalue`, `test_cli_oos_tear_sheet_carries_provenance`, `test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance`).
+- Removed 11 duplicate-label entries (labels now unique; label == function name) and fixed the misnamed `test_cli_monte_carlo_n_trials` label → `test_monte_carlo_n_trials_uses_evaluated_combo_count`.
+- Removed the dead mid-file `if __name__ == "__main__"` block; single final `__main__` remains.
+- Added the structural guard.
+- Suite: **116/116 pass** (115 tests + 1 guard; duplicate labels removed).
 
-Some of these "unregistered" tests may be intentional (e.g. imported from
-another module, or executed via a different mechanism). The task is to audit
-each: either register it in the runner, or delete it if it is genuinely dead.
+### Verification
+- Full suite: test_cpcv 16/16, test_data_loader 29/29, test_generate_sample_data 1/1, test_monte_carlo 14/14, test_run_backtest 64/64, test_strategy_builder 27/27, test_walk_forward 116/116.
+- `verify_end_to_end.py` exit 0.
+- `test_reporting.py` exit 0.
+- Each file now has exactly one active `if __name__ == "__main__"` block at EOF; the guard is the same non-vacuous one validated in `test_performance.py` (it asserts every module-level `test_*` is registered, every registry entry is a real module-level function, and labels are unique).
 
-Relevant files:
-- `skills/quantitative-backtesting/tests/test_performance.py` — the fixed
-  template: module-level `TEST_REGISTRY` + the structural guard.
-- `skills/quantitative-backtesting/tests/test_run_backtest.py`
-- `skills/quantitative-backtesting/tests/test_walk_forward.py`
+## What remains unresolved (known, non-blocking)
+- `test_run_backtest.py` still contains triplicate dead definitions of `test_cli_run_backtest_impact_sweep`, `test_cli_run_backtest_borrow_sweep`, and `test_cli_run_backtest_funding_sweep` (the first/registered copy is kept; the 2nd and 3rd copies are redundant text, inert because `TEST_REGISTRY` references each name once and `globals()` collapses duplicates). Removing them is optional cleanup, not a defect.
 
-## Session context
-The previous session completed CLI parity for `--latency`/`--fill-rate` across
-the `walk_forward.py` subcommands (116/116 tests). This session confirmed that
-task was already complete and instead fixed a demonstrated test-runner defect
-in `test_performance.py` (31/31 pass, +1 structural guard), verified with the
-full suite and `verify_end_to_end.py`.
+## Approaches already tried and why (this session)
+- None failed; the introspection → registry → guard transformation was applied directly and verified end-to-end.
 
-(End of the file)
+## Next task (precise, bounded)
+Remove the remaining triplicate dead definitions in `skills/quantitative-backtesting/tests/test_run_backtest.py` for `test_cli_run_backtest_impact_sweep`, `test_cli_run_backtest_borrow_sweep`, and `test_cli_run_backtest_funding_sweep` (keep the first/registered copy of each), then re-verify `test_run_backtest.py` still reports 64/64 and the structural guard passes. Evidence: `grep '^def test_' tests/test_run_backtest.py | sort | uniq -d` currently lists those three; suite is green at 64/64. Constraint: do not remove the registered first copy; keep the single final `if __name__ == "__main__"` block; keep `TEST_REGISTRY` label == function name.

@@ -1202,61 +1202,7 @@ def test_cli_multi_symbol_survivorship_sets_bias_controls_engaged():
 
 
 def main() -> int:
-    tests = [
-        ("signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
-        ("run_backtest_flat_strategy_raises", test_run_backtest_flat_strategy_raises),
-        ("run_backtest_flat_long_lookback_raises", test_run_backtest_flat_long_lookback_raises),
-        ("run_backtest_active_strategy_succeeds", test_run_backtest_active_strategy_succeeds),
-        ("run_backtest_trade_analytics_populated", test_run_backtest_trade_analytics_populated),
-        ("run_backtest_n_trials_surfaces_deflated_sharpe", test_run_backtest_n_trials_surfaces_deflated_sharpe),
-        ("run_backtest_without_n_trials_omits_deflated_sharpe", test_run_backtest_without_n_trials_omits_deflated_sharpe),
-        ("run_backtest_deflated_sharpe_matches_direct_call", test_run_backtest_deflated_sharpe_matches_direct_call),
-        ("parse_args_accepts_n_trials", test_parse_args_accepts_n_trials),
-        ("run_backtest_records_both_legs_of_direct_long_short_flip", test_run_backtest_records_both_legs_of_direct_long_short_flip),
-        ("run_backtest_short_leg_pnl_moves_opposite_to_price", test_run_backtest_short_leg_pnl_moves_opposite_to_price),
-        ("run_backtest_long_leg_pnl_moves_with_price", test_run_backtest_long_leg_pnl_moves_with_price),
-        ("run_backtest_closes_final_open_position_at_end_of_data", test_run_backtest_closes_final_open_position_at_end_of_data),
-        ("run_backtest_trade_ledger_valid_for_all_registered_strategies", test_run_backtest_trade_ledger_valid_for_all_registered_strategies),
-        ("parse_args_requires_data_argument", test_parse_args_requires_data_argument),
-        ("parse_args_accepts_valid_arguments", test_parse_args_accepts_valid_arguments),
-        ("parse_args_custom_values", test_parse_args_custom_values),
-        ("parse_args_invalid_commission_type", test_parse_args_invalid_commission_type),
-        ("parse_args_invalid_initial_capital_type", test_parse_args_invalid_initial_capital_type),
-        ("run_backtest_constant_returns_deflated_sharpe", test_run_backtest_constant_returns_deflated_sharpe),
-        ("run_backtest_borrow_cost_frequency_aware", test_run_backtest_borrow_cost_frequency_aware),
-        ("run_backtest_multi_asset_cross_sectional_momentum", test_run_backtest_multi_asset_cross_sectional_momentum),
-        ("run_backtest_multi_asset_dual_momentum", test_run_backtest_multi_asset_dual_momentum),
-        ("run_backtest_multi_asset_dict_cross_sectional_momentum", test_run_backtest_multi_asset_dict_cross_sectional_momentum),
-        ("run_backtest_multi_asset_dict_dual_momentum", test_run_backtest_multi_asset_dict_dual_momentum),
-        ("run_backtest_serializes_data_provenance_into_results", test_run_backtest_serializes_data_provenance_into_results),
-        ("run_backtest_serializes_panel_provenance_dict", test_run_backtest_serializes_panel_provenance_dict),
-        ("run_backtest_without_provenance_omits_key", test_run_backtest_without_provenance_omits_key),
-        ("run_backtest_point_in_time_validation_recorded", test_run_backtest_point_in_time_validation_recorded),
-        ("run_backtest_point_in_time_detects_duplicate_timestamps", test_run_backtest_point_in_time_detects_duplicate_timestamps),
-        ("handle_point_in_time_results_strictness_matrix", test_handle_point_in_time_results_strictness_matrix),
-        ("run_backtest_point_in_time_panel_validates_each_symbol", test_run_backtest_point_in_time_panel_validates_each_symbol),
-        ("parse_args_accepts_validation_and_multi_symbol_flags", test_parse_args_accepts_validation_and_multi_symbol_flags),
-        ("cli_writes_data_provenance_artifact", test_cli_writes_data_provenance_artifact),
-        ("cli_multi_symbol_writes_survivorship_artifact", test_cli_multi_symbol_writes_survivorship_artifact),
-        ("run_backtest_with_benchmark_attaches_aligned_returns", test_run_backtest_with_benchmark_attaches_aligned_returns),
-        ("run_backtest_without_benchmark_omits_key", test_run_backtest_without_benchmark_omits_key),
-        ("benchmark_superset_aligns_correctly", test_benchmark_superset_aligns_correctly),
-        ("cli_benchmark_writes_artifact_and_metrics", test_cli_benchmark_writes_artifact_and_metrics),
-        ("cli_total_return_benchmark_writes_provenance_and_differs_from_price", test_cli_total_return_benchmark_writes_provenance_and_differs_from_price),
-        ("cli_total_return_benchmark_alpha_differs", test_cli_total_return_benchmark_alpha_differs),
-        ("parse_args_accepts_fill_rate", test_parse_args_accepts_fill_rate),
-        ("run_backtest_fill_rate_default_is_one", test_run_backtest_fill_rate_default_is_one),
-        ("run_backtest_fill_rate_one_identical_to_default", test_run_backtest_fill_rate_one_identical_to_default),
-        ("run_backtest_fill_rate_scales_borrow_cost_with_position", test_run_backtest_fill_rate_scales_borrow_cost_with_position),
-        ("run_backtest_fill_rate_reduces_trading_costs", test_run_backtest_fill_rate_reduces_trading_costs),
-        ("run_backtest_fill_rate_invalid_values_rejected", test_run_backtest_fill_rate_invalid_values_rejected),
-        ("cli_run_backtest_fill_rate_sweep", test_cli_run_backtest_fill_rate_sweep),
-        ("parse_args_accepts_latencies", test_parse_args_accepts_latencies),
-        ("run_backtest_latency_default_is_zero", test_run_backtest_latency_default_is_zero),
-        ("run_backtest_latency_zero_identical_to_default", test_run_backtest_latency_zero_identical_to_default),
-        ("run_backtest_latency_shifts_entry_timing", test_run_backtest_latency_shifts_entry_timing),
-        ("cli_run_backtest_latency_sweep", test_cli_run_backtest_latency_sweep),
-    ]
+    tests = TEST_REGISTRY
 
     failures = 0
     for name, fn in tests:
@@ -1780,9 +1726,6 @@ def test_cli_run_backtest_funding_sweep():
         assert returns[2] <= returns[0]
 
 
-if __name__ == "__main__":
-    sys.exit(main())
-
 def test_cli_run_backtest_impact_sweep():
     """CLI run_backtest --impact-coefficients writes a sweep artifact."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1863,9 +1806,6 @@ def test_cli_run_backtest_funding_sweep():
         returns = [r["total_return"] for r in payload["results"]]
         assert returns[2] <= returns[0]
 
-
-if __name__ == "__main__":
-    sys.exit(main())
 
 def test_cli_run_backtest_impact_sweep():
     """CLI run_backtest --impact-coefficients writes a sweep artifact."""
@@ -2220,3 +2160,119 @@ def test_cli_benchmark_name_derives_from_filename_stem_when_omitted():
         prov = ts.get("benchmark_provenance")
         assert isinstance(prov, dict)
         assert prov["name"] == "custom_benchmark_one"
+
+def test_main_registers_every_module_level_test():
+    """main() must register every module-level ``test_*`` function.
+
+    Regression guard for a defect where a test function was defined after
+    the ``if __name__ == "__main__"`` block (and therefore unreachable at
+    runtime) yet omitted from the registry, so the suite reported a lower
+    count than the number of tests actually defined. A test defined but
+    never registered is dead code: it cannot fail, so it provides no
+    coverage of the feature it targets.
+
+    The check is structural: every callable named ``test_*`` at module
+    scope must appear in ``TEST_REGISTRY``, and every registry entry must
+    be a real module-level function. No test is executed here.
+    """
+    import inspect
+
+    module_tests = {
+        obj
+        for name, obj in list(globals().items())
+        if name.startswith("test_")
+        and inspect.isfunction(obj)
+        and obj.__module__ == __name__
+    }
+    registered = {fn for _, fn in TEST_REGISTRY}
+
+    missing = module_tests - registered
+    assert not missing, (
+        f"test functions defined but not registered in TEST_REGISTRY: "
+        f"{sorted(f.__name__ for f in missing)}. A test outside the "
+        "runner is dead code and provides no coverage."
+    )
+    phantom = registered - module_tests
+    assert not phantom, (
+        f"entries in TEST_REGISTRY that are not module-level test_* "
+        f"functions: {sorted(f.__name__ for f in phantom)}"
+    )
+    # Labels must be unique so the runner cannot silently skip a test
+    # (duplicate labels would overwrite each other in a name->fn map).
+    labels = [name for name, _ in TEST_REGISTRY]
+    assert len(labels) == len(set(labels)), (
+        f"TEST_REGISTRY has duplicate labels: "
+        f"{[l for l in labels if labels.count(l) > 1]}"
+    )
+
+
+TEST_REGISTRY = [
+    ("test_signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
+    ("test_run_backtest_flat_strategy_raises", test_run_backtest_flat_strategy_raises),
+    ("test_run_backtest_flat_long_lookback_raises", test_run_backtest_flat_long_lookback_raises),
+    ("test_run_backtest_active_strategy_succeeds", test_run_backtest_active_strategy_succeeds),
+    ("test_run_backtest_trade_analytics_populated", test_run_backtest_trade_analytics_populated),
+    ("test_run_backtest_n_trials_surfaces_deflated_sharpe", test_run_backtest_n_trials_surfaces_deflated_sharpe),
+    ("test_run_backtest_without_n_trials_omits_deflated_sharpe", test_run_backtest_without_n_trials_omits_deflated_sharpe),
+    ("test_run_backtest_deflated_sharpe_matches_direct_call", test_run_backtest_deflated_sharpe_matches_direct_call),
+    ("test_parse_args_accepts_n_trials", test_parse_args_accepts_n_trials),
+    ("test_run_backtest_records_both_legs_of_direct_long_short_flip", test_run_backtest_records_both_legs_of_direct_long_short_flip),
+    ("test_run_backtest_short_leg_pnl_moves_opposite_to_price", test_run_backtest_short_leg_pnl_moves_opposite_to_price),
+    ("test_run_backtest_long_leg_pnl_moves_with_price", test_run_backtest_long_leg_pnl_moves_with_price),
+    ("test_run_backtest_closes_final_open_position_at_end_of_data", test_run_backtest_closes_final_open_position_at_end_of_data),
+    ("test_run_backtest_trade_ledger_valid_for_all_registered_strategies", test_run_backtest_trade_ledger_valid_for_all_registered_strategies),
+    ("test_parse_args_requires_data_argument", test_parse_args_requires_data_argument),
+    ("test_parse_args_accepts_valid_arguments", test_parse_args_accepts_valid_arguments),
+    ("test_parse_args_custom_values", test_parse_args_custom_values),
+    ("test_parse_args_invalid_commission_type", test_parse_args_invalid_commission_type),
+    ("test_parse_args_invalid_initial_capital_type", test_parse_args_invalid_initial_capital_type),
+    ("test_run_backtest_constant_returns_deflated_sharpe", test_run_backtest_constant_returns_deflated_sharpe),
+    ("test_run_backtest_borrow_cost_frequency_aware", test_run_backtest_borrow_cost_frequency_aware),
+    ("test_parse_args_accepts_fill_rate", test_parse_args_accepts_fill_rate),
+    ("test_run_backtest_fill_rate_default_is_one", test_run_backtest_fill_rate_default_is_one),
+    ("test_run_backtest_fill_rate_one_identical_to_default", test_run_backtest_fill_rate_one_identical_to_default),
+    ("test_run_backtest_fill_rate_scales_borrow_cost_with_position", test_run_backtest_fill_rate_scales_borrow_cost_with_position),
+    ("test_run_backtest_fill_rate_reduces_trading_costs", test_run_backtest_fill_rate_reduces_trading_costs),
+    ("test_run_backtest_fill_rate_invalid_values_rejected", test_run_backtest_fill_rate_invalid_values_rejected),
+    ("test_cli_run_backtest_fill_rate_sweep", test_cli_run_backtest_fill_rate_sweep),
+    ("test_parse_args_accepts_latencies", test_parse_args_accepts_latencies),
+    ("test_run_backtest_latency_default_is_zero", test_run_backtest_latency_default_is_zero),
+    ("test_run_backtest_latency_zero_identical_to_default", test_run_backtest_latency_zero_identical_to_default),
+    ("test_run_backtest_latency_shifts_entry_timing", test_run_backtest_latency_shifts_entry_timing),
+    ("test_cli_run_backtest_latency_sweep", test_cli_run_backtest_latency_sweep),
+    ("test_run_backtest_serializes_data_provenance_into_results", test_run_backtest_serializes_data_provenance_into_results),
+    ("test_run_backtest_serializes_panel_provenance_dict", test_run_backtest_serializes_panel_provenance_dict),
+    ("test_run_backtest_without_provenance_omits_key", test_run_backtest_without_provenance_omits_key),
+    ("test_run_backtest_point_in_time_validation_recorded", test_run_backtest_point_in_time_validation_recorded),
+    ("test_run_backtest_point_in_time_detects_duplicate_timestamps", test_run_backtest_point_in_time_detects_duplicate_timestamps),
+    ("test_handle_point_in_time_results_strictness_matrix", test_handle_point_in_time_results_strictness_matrix),
+    ("test_run_backtest_point_in_time_panel_validates_each_symbol", test_run_backtest_point_in_time_panel_validates_each_symbol),
+    ("test_parse_args_accepts_validation_and_multi_symbol_flags", test_parse_args_accepts_validation_and_multi_symbol_flags),
+    ("test_cli_writes_data_provenance_artifact", test_cli_writes_data_provenance_artifact),
+    ("test_cli_multi_symbol_writes_survivorship_artifact", test_cli_multi_symbol_writes_survivorship_artifact),
+    ("test_cli_multi_symbol_survivorship_sets_bias_controls_engaged", test_cli_multi_symbol_survivorship_sets_bias_controls_engaged),
+    ("test_run_backtest_multi_asset_cross_sectional_momentum", test_run_backtest_multi_asset_cross_sectional_momentum),
+    ("test_run_backtest_multi_asset_dual_momentum", test_run_backtest_multi_asset_dual_momentum),
+    ("test_run_backtest_multi_asset_dict_cross_sectional_momentum", test_run_backtest_multi_asset_dict_cross_sectional_momentum),
+    ("test_run_backtest_multi_asset_dict_dual_momentum", test_run_backtest_multi_asset_dict_dual_momentum),
+    ("test_run_backtest_with_benchmark_attaches_aligned_returns", test_run_backtest_with_benchmark_attaches_aligned_returns),
+    ("test_run_backtest_without_benchmark_omits_key", test_run_backtest_without_benchmark_omits_key),
+    ("test_benchmark_superset_aligns_correctly", test_benchmark_superset_aligns_correctly),
+    ("test_cli_benchmark_writes_artifact_and_metrics", test_cli_benchmark_writes_artifact_and_metrics),
+    ("test_cli_total_return_benchmark_writes_provenance_and_differs_from_price", test_cli_total_return_benchmark_writes_provenance_and_differs_from_price),
+    ("test_cli_total_return_benchmark_alpha_differs", test_cli_total_return_benchmark_alpha_differs),
+    ("test_cli_run_backtest_impact_sweep", test_cli_run_backtest_impact_sweep),
+    ("test_cli_run_backtest_borrow_sweep", test_cli_run_backtest_borrow_sweep),
+    ("test_cli_run_backtest_funding_sweep", test_cli_run_backtest_funding_sweep),
+    ("test_cli_run_backtest_commission_sweep", test_cli_run_backtest_commission_sweep),
+    ("test_cli_run_backtest_slippage_sweep", test_cli_run_backtest_slippage_sweep),
+    ("test_cli_multi_benchmark_provenance_shapes", test_cli_multi_benchmark_provenance_shapes),
+    ("test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance", test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance),
+    ("test_cli_benchmark_name_propagates_to_provenance_and_tear_sheet", test_cli_benchmark_name_propagates_to_provenance_and_tear_sheet),
+    ("test_cli_benchmark_name_derives_from_filename_stem_when_omitted", test_cli_benchmark_name_derives_from_filename_stem_when_omitted),
+    ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
+]
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())
