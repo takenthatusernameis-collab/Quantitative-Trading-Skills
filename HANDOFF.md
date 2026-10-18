@@ -4,27 +4,37 @@
 - Date: 2026-10-18
 - Agent: Kilo (stealth model)
 - Working directory: /home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills
-- Status: Session completed; bounded fix implemented and verified
+- Status: Session completed; bounded test addition implemented and verified
 
 ## What Changed
-- **Aligned `calculate_metrics` single-benchmark path with canonical multiple-testing semantics** (`skills/quantitative-backtesting/scripts/performance.py`): removed the `deflated_alpha` computation for a single benchmark (`n_benchmarks=1`). Deflated Alpha is a multiple-testing correction; with one benchmark there is nothing to correct, so `deflated_alpha` is now intentionally omitted. This matches `_benchmark_list_alpha_correction` in walk_forward.py:3426 (returns `None` when fewer than 2 benchmarks) and the validation pipelines (walk-forward/CPCV/OOS/monte-carlo).
-- **Updated contradicting test** (`tests/test_performance.py::test_calculate_metrics_deflated_alpha_single_benchmark`): now asserts `"deflated_alpha" not in metrics` for a single benchmark instead of asserting presence.
-- **Corrected `IMPLEMENTATION_SUMMARY.md`**: removed inaccurate claims that a single benchmark gets a `deflated_alpha` (n_benchmarks=1); documents the canonical "omitted for n=1" behavior.
+- **Added executable tests for the OOS train/validation/test split-separation invariant** (`skills/quantitative-backtesting/tests/test_walk_forward.py`): `_verify_split_separation` (the guard that the held-out test set has never been used in any selection step) was imported but never directly tested. Added 6 tests:
+  - `test_verify_split_separation_clean_splits_pass` — disjoint, chronological splits pass with all checks green.
+  - `test_verify_split_separation_train_val_overlap_raises` — train/val overlap raises `ValueError` in strict mode.
+  - `test_verify_split_separation_val_test_overlap_raises` — val/test overlap raises `ValueError` in strict mode.
+  - `test_verify_split_separation_train_test_overlap_raises` — train/test overlap raises `ValueError` in strict mode.
+  - `test_verify_split_separation_non_strict_returns_diagnostic` — non-strict mode returns the diagnostic dict (`disjoint=False`, `chronological=False`, overlap counts) without raising.
+  - `test_verify_split_separation_empty_split_raises` — an empty split raises `ValueError` in strict mode.
+- Registered all 6 in the runner's `tests` list so they execute with `python3 test_walk_forward.py`.
 
 ## What Was Verified
-- Full quant-backtesting suite: **310 passed, 0 failed, ~56s**. No regressions.
-- Affected files pass standalone: test_performance, test_walk_forward, test_reporting, test_run_backtest (221 passed).
-- Multi-benchmark (`benchmark_list` 2+) `deflated_alpha` emission is unchanged and still tested (`test_calculate_metrics_deflated_alpha_multiple_benchmarks`, `test_benchmark_list_alpha_correction_deflated_alpha`).
+- Full quant-backtesting suite: **all suites pass, 0 failures**:
+  - test_walk_forward: 104/104 (incl. the 6 new tests; was 98/98 before this session)
+  - test_data_loader: 29/29; test_performance: 30/30; test_run_backtest: 41/41
+  - test_strategy_builder: 27/27; test_cpcv: 16/16; test_monte_carlo: 14/14; test_generate_sample_data: 1/1
+  - test_reporting: exit 0 (unittest-based)
+- No regressions; change is purely additive to the test file.
 
 ## What Remains Unresolved
 - No concrete research need has arisen for further panel/multi-asset extensions; hold unless one emerges.
-- The established survivorship pattern remains in place across all five walk-forward modes and run_backtest cost sweeps (unchanged by this session).
+- The established survivorship and deflated-alpha patterns remain in place across all five walk-forward modes and run_backtest cost sweeps (unchanged by this session).
 
 ## Approaches That Have Already Been Tried/Verified
 - Survivorship-bias recording in `--multi-symbol` cost sweeps: implemented/verified across all modes (prior sessions).
-- Deflated Alpha multiple-testing correction: implemented across walk-forward/performance/reporting/run_backtest/CPCV/monte-carlo; single-benchmark `deflated_alpha` now canonically omitted (this session).
+- Deflated Alpha multiple-testing correction: implemented across walk-forward/performance/reporting/run_backtest/CPCV/monte-carlo; single-benchmark `deflated_alpha` canonically omitted (prior session).
+- DSR parity invariant across all four analysis paths: executable-guarded (prior session).
+- OOS split-separation invariant (`_verify_split_separation`): implemented in `walk_forward.py`; now directly tested (this session).
 
 ## Next Recommended Task
-Hold unless a concrete quant research need emerges. If one does, the survivorship and deflated-alpha patterns are in place. A concrete, bounded verification task for the next session: re-run the 5 network-independent example scripts (`deflated_alpha_example`, `multiple_benchmarks_example`, `trading_costs_robustness_example`, `full_pipeline_example`) plus `verify_end_to_end.py` to confirm nothing regressed after this change, then confirm single-benchmark tear sheets no longer render a (misleading) Deflated Alpha section.
+Hold unless a concrete quant research need emerges. If one does, the survivorship, deflated-alpha, and split-separation patterns are in place and tested.
 
 (End of file)

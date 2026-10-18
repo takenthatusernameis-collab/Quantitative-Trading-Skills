@@ -3702,6 +3702,91 @@ def test_benchmark_list_alpha_correction_handles_splits():
         assert k in stats
 
 
+def _make_indexed_df(dates) -> pd.DataFrame:
+    """Build a DataFrame carrying only a DatetimeIndex (used to exercise
+    `_verify_split_separation`, which reads only the index)."""
+    return pd.DataFrame(index=pd.DatetimeIndex(dates))
+
+
+def test_verify_split_separation_clean_splits_pass():
+    """Clean, disjoint, chronological splits pass with all checks green."""
+    train = _make_indexed_df(pd.date_range("2020-01-01", periods=10, freq="B"))
+    val = _make_indexed_df(pd.date_range("2020-01-16", periods=5, freq="B"))
+    test = _make_indexed_df(pd.date_range("2020-01-23", periods=5, freq="B"))
+    result = _verify_split_separation(train, val, test, strict=False)
+    assert result["disjoint"] is True
+    assert result["chronological"] is True
+    assert result["train_val_overlap"] == 0
+    assert result["val_test_overlap"] == 0
+    assert result["train_test_overlap"] == 0
+    assert result["train_size"] == 10
+    assert result["val_size"] == 5
+    assert result["test_size"] == 5
+
+
+def test_verify_split_separation_train_val_overlap_raises():
+    """Train/validation overlap must raise ValueError in strict mode."""
+    train = _make_indexed_df(pd.date_range("2020-01-01", periods=10, freq="B"))
+    val = _make_indexed_df(pd.date_range("2020-01-08", periods=8, freq="B"))
+    test = _make_indexed_df(pd.date_range("2020-01-20", periods=5, freq="B"))
+    raised = False
+    try:
+        _verify_split_separation(train, val, test, strict=True)
+    except ValueError:
+        raised = True
+    assert raised, "expected ValueError for train/validation overlap"
+
+
+def test_verify_split_separation_val_test_overlap_raises():
+    """Validation/test overlap must raise ValueError in strict mode."""
+    train = _make_indexed_df(pd.date_range("2020-01-01", periods=5, freq="B"))
+    val = _make_indexed_df(pd.date_range("2020-01-08", periods=5, freq="B"))
+    test = _make_indexed_df(pd.date_range("2020-01-10", periods=8, freq="B"))
+    raised = False
+    try:
+        _verify_split_separation(train, val, test, strict=True)
+    except ValueError:
+        raised = True
+    assert raised, "expected ValueError for validation/test overlap"
+
+
+def test_verify_split_separation_train_test_overlap_raises():
+    """Train/test overlap must raise ValueError in strict mode."""
+    train = _make_indexed_df(pd.date_range("2020-01-01", periods=10, freq="B"))
+    val = _make_indexed_df(pd.date_range("2020-01-16", periods=5, freq="B"))
+    test = _make_indexed_df(pd.date_range("2020-01-08", periods=10, freq="B"))
+    raised = False
+    try:
+        _verify_split_separation(train, val, test, strict=True)
+    except ValueError:
+        raised = True
+    assert raised, "expected ValueError for train/test overlap"
+
+
+def test_verify_split_separation_non_strict_returns_diagnostic():
+    """Non-strict mode returns the diagnostic dict without raising on overlap."""
+    train = _make_indexed_df(pd.date_range("2020-01-01", periods=10, freq="B"))
+    val = _make_indexed_df(pd.date_range("2020-01-08", periods=8, freq="B"))
+    test = _make_indexed_df(pd.date_range("2020-01-20", periods=5, freq="B"))
+    result = _verify_split_separation(train, val, test, strict=False)
+    assert result["disjoint"] is False
+    assert result["chronological"] is False
+    assert result["train_val_overlap"] > 0
+
+
+def test_verify_split_separation_empty_split_raises():
+    """An empty split raises ValueError in strict mode."""
+    train = _make_indexed_df(pd.DatetimeIndex([]))
+    val = _make_indexed_df(pd.date_range("2020-01-08", periods=5, freq="B"))
+    test = _make_indexed_df(pd.date_range("2020-01-15", periods=5, freq="B"))
+    raised = False
+    try:
+        _verify_split_separation(train, val, test, strict=True)
+    except ValueError:
+        raised = True
+    assert raised, "expected ValueError for empty train split"
+
+
 def main() -> int:
     tests = [
         ("test_out_of_sample_validation_benchmark_cost_is_periodic", test_out_of_sample_validation_benchmark_cost_is_periodic),
@@ -3804,6 +3889,12 @@ def main() -> int:
         ("test_cli_multi_symbol_cpcv_commission_sweep_records_survivorship", test_cli_multi_symbol_cpcv_commission_sweep_records_survivorship),
         ("test_cli_multi_symbol_optimize_commission_sweep_records_survivorship", test_cli_multi_symbol_optimize_commission_sweep_records_survivorship),
         ("test_cli_walk_forward_no_benchmark_does_not_crash", test_cli_walk_forward_no_benchmark_does_not_crash),
+        ("test_verify_split_separation_clean_splits_pass", test_verify_split_separation_clean_splits_pass),
+        ("test_verify_split_separation_train_val_overlap_raises", test_verify_split_separation_train_val_overlap_raises),
+        ("test_verify_split_separation_val_test_overlap_raises", test_verify_split_separation_val_test_overlap_raises),
+        ("test_verify_split_separation_train_test_overlap_raises", test_verify_split_separation_train_test_overlap_raises),
+        ("test_verify_split_separation_non_strict_returns_diagnostic", test_verify_split_separation_non_strict_returns_diagnostic),
+        ("test_verify_split_separation_empty_split_raises", test_verify_split_separation_empty_split_raises),
     ]
 
     failures = 0
