@@ -5,41 +5,41 @@ Symbol: SPY
 Strategy: SMA Crossover (20/50)
 
 --- Return Metrics ---
-Total Return:          7.43%
-Annualized Return:     3.65%
-Annualized Volatility: 18.22%
+Total Return:          -10.72%
+Annualized Return:     -5.51%
+Annualized Volatility: 15.87%
 
 --- Risk-Adjusted Returns ---
-Sharpe Ratio:          0.18
-Sortino Ratio:         0.26
+Sharpe Ratio:          -0.40
+Sortino Ratio:         -0.54
 Calmar Ratio:          0.00
 
 --- Risk Metrics ---
 Max Drawdown:          0.00%
 Avg Drawdown:          0.00%
-VaR (95%):             -2.00%
-CVaR (95%):            -2.47%
-Skewness:              0.38
-Kurtosis:              2.78
+VaR (95%):             -1.84%
+CVaR (95%):            -2.56%
+Skewness:              -0.16
+Kurtosis:              2.68
 
 --- Benchmark Comparison ---
-Benchmark Total Return:      38.45%
-Benchmark Annualized Return: 17.70%
+Benchmark Total Return:      16.07%
+Benchmark Annualized Return: 7.75%
 Benchmark Return Type:       price
 Benchmark Commission:        0.0000
 Benchmark Slippage:          0.0000
-Correlation:                 0.78
-Alpha:                       -6.22%
-Beta:                        0.60
-Alpha t-stat:                -0.7612681530778472
-Alpha p-value:               0.4468550881983212
-R-squared:                   0.6012251549082526
+Correlation:                 0.69
+Alpha:                       -9.26%
+Beta:                        0.48
+Alpha t-stat:                -1.1406594987293857
+Alpha p-value:               0.2545566160525111
+R-squared:                   0.48032704283834526
 
 --- Deflated Alpha Ratio (Multiple-Testing Correction) ---
 Deflated Alpha Ratio:        0.0000
 P-Value:                     1.0000
 Expected Max Alpha:          0.0000
-Z-Score:                     -6.800321535403373
+Z-Score:                     -11.44440972397737
 Number of Benchmarks:        1
 Observations:                504
 
