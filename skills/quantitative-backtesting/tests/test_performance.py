@@ -410,21 +410,18 @@ def test_calculate_metrics_no_deflated_alpha_without_benchmark():
 
 
 def test_calculate_metrics_deflated_alpha_single_benchmark():
-    """With a single benchmark, deflated_alpha is still computed (n_benchmarks=1).
+    """With a single benchmark, no deflated_alpha is emitted (n_benchmarks=1).
 
-    With N=1 there is no multiple-testing correction, so the deflated alpha
-    approaches the regular alpha; the DAR must still be a valid probability in
-    [0, 1].
+    With N=1 there is no multiple-testing problem to correct, so calculate_metrics
+    intentionally omits deflated_alpha. This matches the canonical behavior of
+    _benchmark_list_alpha_correction in walk_forward.py, which returns
+    deflated_alpha=None when fewer than 2 benchmarks are tested.
     """
     returns = _make_returns(60, seed=11)
     bench = returns.rolling(5).mean().bfill() * 1.1 + _make_returns(60, seed=22) * 0.2
     bench = bench.iloc[: len(returns)]
     metrics = calculate_metrics({"returns": returns, "benchmark": bench})
-    assert "deflated_alpha" in metrics
-    da = metrics["deflated_alpha"]
-    assert da["n_benchmarks"] == 1
-    assert 0.0 <= da["deflated_alpha_ratio"] <= 1.0
-    assert np.isfinite(da["alpha"])
+    assert "deflated_alpha" not in metrics
 
 
 def test_benchmark_stats_drops_leading_nan_from_pct_change():

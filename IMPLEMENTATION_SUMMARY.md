@@ -27,8 +27,11 @@ This implementation addresses the first high-value task from the HANDOFF.md:
    - Process each benchmark in the list, calculating individual benchmark statistics
    - Collect alpha values from all benchmarks for multiple-testing correction
    - Apply Deflated Alpha Ratio correction when 2+ benchmarks are present
-   - Maintain backward compatibility for single benchmark cases
-   - Apply Deflated Alpha Ratio correction for single benchmark (n_benchmarks=1) for consistency
+    - Maintain backward compatibility for single benchmark cases
+    - No Deflated Alpha Ratio for a single benchmark (n_benchmarks=1): with only one
+      benchmark there is no multiple-testing problem to correct, so ``deflated_alpha``
+      is intentionally omitted, matching the canonical behavior of
+      ``_benchmark_list_alpha_correction`` in walk_forward.py
 
 3. **Deflated Alpha Ratio Import Protection** (local imports):
    - Followed same pattern as `deflated_sharpe_ratio` to avoid circular imports
@@ -57,9 +60,10 @@ When multiple benchmarks are provided (e.g., via `--benchmark SPY QQQ IWM` in th
 ### Single Benchmark Case:
 When a single benchmark is provided:
 1. Backward compatibility is maintained for existing alpha, alpha_tstat, alpha_pvalue metrics
-2. Deflated Alpha Ratio is additionally computed (with n_benchmarks=1)
-3. For n_benchmarks=1, the deflated alpha approaches the regular alpha as expected
-4. Provides consistency in the metrics structure
+2. No Deflated Alpha Ratio is computed (n_benchmarks=1): with a single benchmark there
+   is no multiple-testing problem to correct, so ``deflated_alpha`` is intentionally
+   omitted, consistent with the validation pipelines (walk-forward/CPCV/OOS/monte-carlo)
+3. Provides a consistent interface across single- and multi-benchmark paths
 
 ## Benefits
 1. **Addresses Multiple-Testing Problem**: Corrects for the inflated likelihood of finding significant alpha by chance when testing multiple benchmarks

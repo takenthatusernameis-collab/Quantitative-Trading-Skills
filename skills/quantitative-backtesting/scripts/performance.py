@@ -561,28 +561,10 @@ def calculate_metrics(
             benchmark_expense_ratio=config.get("benchmark_expense_ratio", 0.0),
             benchmark_cost_is_periodic=config.get("benchmark_cost_is_periodic", False),
         ))
-        # Apply Deflated Alpha Ratio correction for single benchmark (n_benchmarks=1)
-        # With n_benchmarks=1, the deflated alpha should equal the regular alpha
-        # (no multiple-testing correction needed), but we'll compute it anyway for consistency
-        if "alpha" in metrics and len(returns) >= 2:
-            try:
-                # Import deflated_alpha_ratio with circular import protection
-                try:
-                    from walk_forward import deflated_alpha_ratio  # noqa: E402
-                except ImportError:
-                    from scripts.walk_forward import deflated_alpha_ratio  # noqa: E402
-
-                da_result = deflated_alpha_ratio(
-                    alpha=metrics["alpha"],
-                    returns=returns,
-                    benchmark_returns=benchmark_returns,
-                    n_benchmarks=1,
-                    trial_alphas=[metrics["alpha"]],
-                )
-                metrics["deflated_alpha"] = da_result
-            except Exception:
-                # If deflated alpha calculation fails, continue without it
-                pass
+        # Single benchmark: no multiple-testing correction applies (n_benchmarks=1),
+        # so deflated_alpha is intentionally not emitted here. This matches the
+        # canonical behavior of _benchmark_list_alpha_correction in walk_forward.py,
+        # which returns deflated_alpha=None when fewer than 2 benchmarks are tested.
 
     # --- Additional Ratios ---
     if returns.std() > 0:
