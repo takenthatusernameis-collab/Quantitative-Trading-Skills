@@ -2,40 +2,33 @@
 
 ## Session Summary
 - Date: 2026-10-18
-- Agent: Kilo (stealth model)
+- Agent: Kilo
 - Working directory: /home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills
-- Status: Session completed; bounded test addition implemented and verified
+- Status: Session completed; matplotlib gap closed and audit-field test added and verified
 
 ## What Changed
-- **Added executable tests for the OOS train/validation/test split-separation invariant** (`skills/quantitative-backtesting/tests/test_walk_forward.py`): `_verify_split_separation` (the guard that the held-out test set has never been used in any selection step) was imported but never directly tested. Added 6 tests:
-  - `test_verify_split_separation_clean_splits_pass` — disjoint, chronological splits pass with all checks green.
-  - `test_verify_split_separation_train_val_overlap_raises` — train/val overlap raises `ValueError` in strict mode.
-  - `test_verify_split_separation_val_test_overlap_raises` — val/test overlap raises `ValueError` in strict mode.
-  - `test_verify_split_separation_train_test_overlap_raises` — train/test overlap raises `ValueError` in strict mode.
-  - `test_verify_split_separation_non_strict_returns_diagnostic` — non-strict mode returns the diagnostic dict (`disjoint=False`, `chronological=False`, overlap counts) without raising.
-  - `test_verify_split_separation_empty_split_raises` — an empty split raises `ValueError` in strict mode.
-- **Added a direct unit test for the Deflated Alpha Ratio degenerate contract** (`skills/quantitative-backtesting/tests/test_walk_forward.py`): `test_degenerate_constant_return_dar_consistency` guards that zero-variance returns emit the conservative DAR (DAR = 0, p_value = 1, z_score = None), that non-constant returns stay on the finite-z path with DAR in [0, 1] and p_value = 1 - DAR, and that invalid inputs (`n_benchmarks < 1`, < 2 observations) raise `ValueError`. Registered it in the runner's `tests` list.
-- Registered all 6 in the runner's `tests` list so they execute with `python3 test_walk_forward.py`.
+1. **Installed `matplotlib`** (was declared in `skills/quantitative-backtesting/requirements.txt` but missing from the environment). This closed the only remaining environment gap.
+2. **Verified all 5 example workflows run end-to-end** with tear sheets and PNG figures now actually generated (previously skipped gracefully): `full_pipeline_example.py`, `deflated_alpha_example.py`, `multiple_benchmarks_example.py`, `real_data_pipeline_example.py`, `trading_costs_robustness_example.py` — all exit 0. `example_output/` now contains `tear_sheet.html`, `equity_curve.png`, `returns_distribution.png`, etc.
+3. **Added one bounded test** to `skills/quantitative-backtesting/tests/test_walk_forward.py`:
+   - `test_cli_out_of_sample_persists_separation_check_audit_field` — verifies the documented audit claim in `references/validation_methods.md` ("the check result is recorded in `train_val_test_split.separation_check`") against the actual CLI JSON artifact: the field must be present, expose `disjoint`/`chronological`/the three pairwise overlap counts, and be green on a clean chronological split.
 
 ## What Was Verified
 - Full quant-backtesting suite: **all suites pass, 0 failures**:
-  - test_walk_forward: 105/105 (incl. the 6 new split-separation tests and the new Deflated Alpha degenerate-contract test; was 98/98 two sessions ago)
+  - test_walk_forward: **106/106** (was 105; +1 new test)
   - test_data_loader: 29/29; test_performance: 30/30; test_run_backtest: 41/41
-  - test_strategy_builder: 27/27; test_cpcv: 16/16; test_monte_carlo: 14/14; test_generate_sample_data: 1/1
-  - test_reporting: exit 0 (unittest-based)
-- No regressions; change is purely additive to the test file.
+  - test_strategy_builder: 27/27; test_cpcv: 16/16; test_monte_carlo: 14/14
+  - test_generate_sample_data: 1/1; test_reporting: exit 0 (49 tests, OK)
+- No regressions; the only file change is the additive test (+56 lines). Regenerated `example_output/*` artifacts were restored to keep the diff focused.
+- Coverage re-measured after changes: **87% overall** (walk_forward 88%, performance 83%, monte_carlo 90%, reporting 90%, strategy_builder 90%, data_loader 79%, generate_sample_data 71%).
 
 ## What Remains Unresolved
-- No concrete research need has arisen for further panel/multi-asset extensions; hold unless one emerges.
-- The established survivorship and deflated-alpha patterns remain in place across all five walk-forward modes and run_backtest cost sweeps (unchanged by this session).
+- No concrete quant research need has emerged beyond the audit-field verification.
 
-## Approaches That Have Already Been Tried/Verified
-- Survivorship-bias recording in `--multi-symbol` cost sweeps: implemented/verified across all modes (prior sessions).
-- Deflated Alpha multiple-testing correction: implemented across walk-forward/performance/reporting/run_backtest/CPCV/monte-carlo; single-benchmark `deflated_alpha` canonically omitted (prior session).
-- DSR parity invariant across all four analysis paths: executable-guarded (prior session).
-- OOS split-separation invariant (`_verify_split_separation`): implemented in `walk_forward.py`; now directly tested (this session).
+## Approaches That Have Already Been Tried/Verified (this session)
+- **Annualization-factor divergence (false positive):** three copies of `_annualization_factor` exist (`walk_forward.py:1277`, `performance.py:20`, `monte_carlo.py:24`). Verified empirically they agree on every frequency pandas can actually infer (`B`/`D`/`W`/`M`/`Q`/`Y`). The only literal difference is a dead `"H"` entry in `performance.py` — modern pandas infers lowercase `'h'`, which falls through to 252 everywhere. Not a real defect; left untouched.
+- **DAR→Bonferroni fallback in `performance.py:513-529` (false positive):** documented as a correctness fallback but verified **unreachable via the public API** — `deflated_alpha_ratio` (`walk_forward.py:1060-1065`) guards `n_benchmarks < 1` and `len(returns) < 2` internally and never raises on valid input, and `calculate_metrics` only enters the loop when `len(benchmark_alphas) >= 2 and len(returns) >= 2`. A candidate test was written and then removed; `test_performance` stays at 30/30 (net zero).
 
 ## Next Recommended Task
-Hold unless a concrete quant research need emerges. If one does, the survivorship, deflated-alpha, and split-separation patterns are in place and tested.
+Hold unless a concrete quant research need emerges. The survivorship, deflated-alpha, split-separation, and cost-model invariants are all in place and tested. If a need emerges, the natural next gap is the multiple-benchmark **degenerate-OOS defensive fallback** at `walk_forward.py:3761-3771` (the `_benchmark_list_alpha_correction` call that only runs when `walk_forward_analysis` returned `deflated_alpha is None` on degenerate OOS returns) — currently uncovered and untested.
 
 (End of file)

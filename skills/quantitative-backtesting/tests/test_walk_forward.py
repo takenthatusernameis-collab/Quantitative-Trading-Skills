@@ -414,6 +414,61 @@ def test_cli_out_of_sample_benchmark_cost_is_periodic():
             f"Expected benchmark_cost_is_periodic=True in config, got {summary['config']['benchmark_cost_is_periodic']}"
 
 
+def test_cli_out_of_sample_persists_separation_check_audit_field():
+    """CLI out-of-sample persists the split-separation audit field to JSON.
+
+    validation_methods.md documents that the held-out test set must never
+    have been used in any selection step and that the check result is
+    recorded in ``train_val_test_split.separation_check`` for audit. This
+    end-to-end test verifies that claim against the actual CLI artifact:
+    the field must be present, report the disjoint/chronological booleans,
+    and be green on a clean chronological split.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=500)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5], "slow_period": [8, 10]}',
+            "--output", out_dir,
+            "--wf-train-months", "6",
+            "--wf-test-months", "2",
+            "--wf-step-months", "2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, "out-of-sample CLI should exit 0 on a clean split"
+
+        summary_path = os.path.join(out_dir, "out_of_sample_summary.json")
+        assert os.path.exists(summary_path), "out_of_sample_summary.json not written"
+        with open(summary_path) as f:
+            summary = json.load(f)
+
+        split = summary["train_val_test_split"]
+        assert "separation_check" in split, (
+            "train_val_test_split.separation_check missing from CLI artifact; "
+            "the split-separation invariant is not persisted for audit"
+        )
+        check = split["separation_check"]
+        for key in ("disjoint", "chronological", "train_val_overlap",
+                    "val_test_overlap", "train_test_overlap"):
+            assert key in check, f"separation_check missing field {key}"
+        assert check["disjoint"] is True, (
+            f"clean chronological split should be disjoint, got {check}"
+        )
+        assert check["chronological"] is True, (
+            f"clean chronological split should be chronological, got {check}"
+        )
+        assert check["train_val_overlap"] == 0
+        assert check["val_test_overlap"] == 0
+        assert check["train_test_overlap"] == 0
+
+
 def test_load_and_validate_data_runs_pit_by_default():
     """_load_and_validate_data runs point-in-time validation by default."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -3867,6 +3922,7 @@ def main() -> int:
         ("test_cli_out_of_sample_benchmark_cost_is_periodic", test_cli_out_of_sample_benchmark_cost_is_periodic),
         ("test_cli_out_of_sample_benchmark_cost_is_periodic_false", test_cli_out_of_sample_benchmark_cost_is_periodic_false),
         ("test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv", test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv),
+        ("test_cli_out_of_sample_persists_separation_check_audit_field", test_cli_out_of_sample_persists_separation_check_audit_field),
         ("test_load_and_validate_data_runs_pit_by_default", test_load_and_validate_data_runs_pit_by_default),
         ("test_cli_point_in_time_validation_enabled_by_default", test_cli_point_in_time_validation_enabled_by_default),
         ("test_cli_point_in_time_validation_can_be_disabled", test_cli_point_in_time_validation_can_be_disabled),
