@@ -3044,6 +3044,56 @@ def test_deflated_alpha_ratio_frequency_invariant():
         )
 
 
+def test_deflated_alpha_ratio_weakens_with_more_benchmarks():
+    """The Deflated Alpha Ratio must weaken (and its p-value strengthen) as the
+    number of benchmarks tested grows, for the same signal.
+
+    Testing more benchmarks is a multiple-testing problem: with enough
+    benchmarks, luck alone produces an attractive alpha.  The Deflated Alpha
+    Ratio corrects for this selection bias, so for a fixed alpha and returns
+    the DAR must be non-increasing (p-value non-decreasing) in N.  A regression
+    that drops the N-dependence would show a flat DAR across N values.
+    """
+    rng = np.random.default_rng(5)
+    dates = pd.date_range("2020-01-01", periods=500, freq="B")
+    rets = pd.Series(rng.normal(0.0003, 0.015, 500), index=dates)
+    bench = pd.Series(rng.normal(0.0002, 0.015, 500), index=dates)
+    alpha = 0.05
+    trial_alphas = [0.05, 0.03, 0.08, -0.01, 0.02, 0.04, 0.01, 0.06, -0.02, 0.03]
+
+    dars, pvals = [], []
+    for n in (1, 2, 3, 5, 10):
+        da = deflated_alpha_ratio(
+            alpha=alpha,
+            returns=rets,
+            benchmark_returns=bench,
+            n_benchmarks=n,
+            trial_alphas=trial_alphas[:n],
+        )
+        dars.append(da["deflated_alpha_ratio"])
+        pvals.append(da["p_value"])
+
+    # DAR must not increase as more benchmarks are tested (correction strengthens).
+    for i in range(len(dars) - 1):
+        assert dars[i] >= dars[i + 1], (
+            f"DAR should be non-increasing in N: N={i+1}={dars[i]:.4f} "
+            f"N={i+2}={dars[i+1]:.4f}"
+        )
+    # p-value complement must not decrease.
+    for i in range(len(pvals) - 1):
+        assert pvals[i] <= pvals[i + 1], (
+            f"p-value should be non-decreasing in N: N={i+1}={pvals[i]:.4f} "
+            f"N={i+2}={pvals[i+1]:.4f}"
+        )
+    # Endpoints must bracket: a single benchmark corrects minimally (~1.0),
+    # many benchmarks correct strongly (< 1).
+    assert dars[0] > dars[-1], (
+        f"Single-benchmark DAR {dars[0]:.4f} should exceed multi-benchmark "
+        f"DAR {dars[-1]:.4f}"
+    )
+    assert 0.0 <= dars[-1] <= 1.0 and 0.0 <= pvals[-1] <= 1.0
+
+
 def test_real_data_pipeline_example_imports():
     """The real-data integration example must import cleanly and expose its
     documented callables.
@@ -5196,6 +5246,7 @@ TEST_REGISTRY = [
     ("test_cli_out_of_sample_borrow_sweep", test_cli_out_of_sample_borrow_sweep),
     ("test_cli_out_of_sample_funding_sweep", test_cli_out_of_sample_funding_sweep),
     ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
+    ("test_deflated_alpha_ratio_weakens_with_more_benchmarks", test_deflated_alpha_ratio_weakens_with_more_benchmarks),
     ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
     ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
     ("test_trading_costs_robustness_example_imports", test_trading_costs_robustness_example_imports),
