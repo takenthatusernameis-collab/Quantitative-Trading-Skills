@@ -14,11 +14,12 @@
   - `test_verify_split_separation_train_test_overlap_raises` — train/test overlap raises `ValueError` in strict mode.
   - `test_verify_split_separation_non_strict_returns_diagnostic` — non-strict mode returns the diagnostic dict (`disjoint=False`, `chronological=False`, overlap counts) without raising.
   - `test_verify_split_separation_empty_split_raises` — an empty split raises `ValueError` in strict mode.
+- **Added a direct unit test for the Deflated Alpha Ratio degenerate contract** (`skills/quantitative-backtesting/tests/test_walk_forward.py`): `test_degenerate_constant_return_dar_consistency` guards that zero-variance returns emit the conservative DAR (DAR = 0, p_value = 1, z_score = None), that non-constant returns stay on the finite-z path with DAR in [0, 1] and p_value = 1 - DAR, and that invalid inputs (`n_benchmarks < 1`, < 2 observations) raise `ValueError`. Registered it in the runner's `tests` list.
 - Registered all 6 in the runner's `tests` list so they execute with `python3 test_walk_forward.py`.
 
 ## What Was Verified
 - Full quant-backtesting suite: **all suites pass, 0 failures**:
-  - test_walk_forward: 104/104 (incl. the 6 new tests; was 98/98 before this session)
+  - test_walk_forward: 105/105 (incl. the 6 new split-separation tests and the new Deflated Alpha degenerate-contract test; was 98/98 two sessions ago)
   - test_data_loader: 29/29; test_performance: 30/30; test_run_backtest: 41/41
   - test_strategy_builder: 27/27; test_cpcv: 16/16; test_monte_carlo: 14/14; test_generate_sample_data: 1/1
   - test_reporting: exit 0 (unittest-based)

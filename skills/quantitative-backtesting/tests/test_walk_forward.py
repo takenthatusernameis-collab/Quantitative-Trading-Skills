@@ -1519,6 +1519,79 @@ def test_degenerate_constant_return_dsr_consistency():
     assert wf["summary"]["n_periods"] >= 1
 
 
+def test_degenerate_constant_return_dar_consistency():
+    """Zero-variance returns must emit the conservative degenerate Deflated
+    Alpha Ratio (DAR = 0, p_value = 1, z_score = None), mirroring the DSR
+    degenerate contract, and non-constant returns must stay on the finite-z
+    path with DAR in [0, 1] and p_value = 1 - DAR.
+
+    Covers:
+      1. deflated_alpha_ratio unit contract on exactly-constant returns.
+      2. Non-constant returns stay on the finite-z path and respect the
+         DAR / p_value complement invariant.
+      3. Input validation: n_benchmarks < 1 raises ValueError and fewer than
+         2 return observations raises ValueError.
+    """
+    dates = pd.date_range("2020-01-01", periods=100, freq="B")
+    constant = pd.Series(np.full(100, 0.001), index=dates)
+
+    # --- 1: unit contract on constant returns -----------------------------
+    degenerate = deflated_alpha_ratio(
+        alpha=0.02,
+        returns=constant,
+        benchmark_returns=constant,
+        n_benchmarks=3,
+    )
+    assert degenerate["deflated_alpha_ratio"] == 0.0
+    assert degenerate["p_value"] == 1.0
+    assert degenerate["z_score"] is None
+    assert degenerate["alpha"] == 0.02
+    assert abs(degenerate["expected_max_alpha"]) < 1e-9
+    assert degenerate["n_benchmarks"] == 3
+    assert degenerate["n_observations"] == 100
+
+    # --- 2: non-constant returns stay on the finite-z path ----------------
+    noisy = pd.Series(
+        np.random.default_rng(3).normal(0.001, 0.01, 100), index=dates
+    )
+    sane = deflated_alpha_ratio(
+        alpha=0.02,
+        returns=noisy,
+        benchmark_returns=noisy,
+        n_benchmarks=3,
+    )
+    assert 0.0 <= sane["deflated_alpha_ratio"] <= 1.0
+    assert sane["z_score"] is not None
+    assert abs(sane["p_value"] - (1.0 - sane["deflated_alpha_ratio"])) < 1e-12
+
+    # --- 3: input validation ----------------------------------------------
+    for bad_n in (0, -1):
+        try:
+            deflated_alpha_ratio(
+                alpha=0.02,
+                returns=noisy,
+                benchmark_returns=noisy,
+                n_benchmarks=bad_n,
+            )
+        except ValueError:
+            continue
+        raise AssertionError(f"n_benchmarks={bad_n} did not raise ValueError")
+
+    try:
+        deflated_alpha_ratio(
+            alpha=0.02,
+            returns=pd.Series([0.001], index=dates[:1]),
+            benchmark_returns=pd.Series([0.001], index=dates[:1]),
+            n_benchmarks=3,
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            "single-observation returns did not raise ValueError"
+        )
+
+
 def test_out_of_sample_validation_multiple_benchmarks_deflated_alpha():
     """out_of_sample_validation with multiple benchmarks surfaces Deflated Alpha
     in the summary and preserves backward compatibility with deflated_alphas list.
@@ -3864,6 +3937,7 @@ def main() -> int:
         ("test_non_impact_sweep_dsr_parity_across_paths", test_non_impact_sweep_dsr_parity_across_paths),
         ("test_optimize_non_impact_sweep_dsr_parity", test_optimize_non_impact_sweep_dsr_parity),
         ("test_degenerate_constant_return_dsr_consistency", test_degenerate_constant_return_dsr_consistency),
+        ("test_degenerate_constant_return_dar_consistency", test_degenerate_constant_return_dar_consistency),
         ("test_benchmark_stats_with_splits_produces_finite_inference", test_benchmark_stats_with_splits_produces_finite_inference),
         ("test_benchmark_stats_with_splits_regression_pins_corrected_values", test_benchmark_stats_with_splits_regression_pins_corrected_values),
         ("test_cli_walk_forward_commission_sweep", test_cli_walk_forward_commission_sweep),
