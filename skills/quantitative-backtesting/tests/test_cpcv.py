@@ -469,40 +469,6 @@ def test_cpcv_deflation():
     assert all("deflated_sharpe" not in f for f in default["folds"])
 
 
-def main() -> int:
-    tests = [
-        ("cpcv_basic_structure", test_cpcv_basic_structure),
-        ("cpcv_purge_embargo", test_cpcv_purge_embargo),
-        ("cpcv_param_stability", test_cpcv_param_stability),
-        ("cpcv_summary_calculation", test_cpcv_summary_calculation),
-        ("cpcv_empty_results", test_cpcv_empty_results),
-        ("cpcv_invalid_n_splits", test_cpcv_invalid_n_splits),
-        ("cpcv_non_datetime_index", test_cpcv_non_datetime_index),
-        ("signals_active_helper", test_signals_active_helper),
-        ("cpcv_different_strategies", test_cpcv_different_strategies),
-        ("cpcv_cli_help", test_cpcv_cli_help),
-        ("cpcv_deflation", test_cpcv_deflation),
-        ("cpcv_aggregate_deflation_uses_pooled_trial_sharpes", test_cpcv_aggregate_deflation_uses_pooled_trial_sharpes),
-        ("cpcv_multi_asset_cross_sectional_momentum", test_cpcv_multi_asset_cross_sectional_momentum),
-        ("cpcv_multi_asset_dual_momentum", test_cpcv_multi_asset_dual_momentum),
-        ("cpcv_multi_asset_dict_cross_sectional_momentum", test_cpcv_multi_asset_dict_cross_sectional_momentum),
-        ("cpcv_multi_asset_dict_dual_momentum", test_cpcv_multi_asset_dict_dual_momentum),
-    ]
-
-    failures = 0
-    for name, fn in tests:
-        try:
-            fn()
-            print(f"PASS  {name}")
-        except Exception:
-            failures += 1
-            print(f"FAIL  {name}")
-            traceback.print_exc()
-
-    print(f"\n{len(tests) - failures}/{len(tests)} tests passed")
-    return 1 if failures else 0
-
-
 def test_cpcv_multi_asset_cross_sectional_momentum():
     """CPCV works with multi-asset panel data."""
     data = _make_multiasset_multiindex(n=500, n_assets=5, seed=42)
@@ -587,6 +553,93 @@ def test_cpcv_multi_asset_dict_dual_momentum():
     )
     assert len(results["folds"]) > 0
     assert len(results["oos_returns"]) > 0
+
+
+def test_main_registers_every_module_level_test():
+    """main() must register every module-level ``test_*`` function.
+
+    Regression guard for a defect where a test function was defined after
+    the ``if __name__ == "__main__"`` block (and therefore unreachable at
+    runtime) yet omitted from the registry, so the suite reported a lower
+    count than the number of tests actually defined. A test defined but
+    never registered is dead code: it cannot fail, so it provides no
+    coverage of the feature it targets.
+
+    The check is structural: every callable named ``test_*`` at module
+    scope must appear in ``TEST_REGISTRY``, and every registry entry must
+    be a real module-level function. No test is executed here.
+    """
+    import inspect
+
+    module_tests = {
+        obj
+        for name, obj in list(globals().items())
+        if name.startswith("test_")
+        and inspect.isfunction(obj)
+        and obj.__module__ == __name__
+    }
+    registered = {fn for _, fn in TEST_REGISTRY}
+
+    missing = module_tests - registered
+    assert not missing, (
+        f"test functions defined but not registered in TEST_REGISTRY: "
+        f"{sorted(f.__name__ for f in missing)}. A test outside the "
+        "runner is dead code and provides no coverage."
+    )
+    phantom = registered - module_tests
+    assert not phantom, (
+        f"entries in TEST_REGISTRY that are not module-level test_* "
+        f"functions: {sorted(f.__name__ for f in phantom)}"
+    )
+    # Labels must be unique so the runner cannot silently skip a test
+    # (duplicate labels would overwrite each other in a name->fn map).
+    labels = [name for name, _ in TEST_REGISTRY]
+    assert len(labels) == len(set(labels)), (
+        f"TEST_REGISTRY has duplicate labels: "
+        f"{[l for l in labels if labels.count(l) > 1]}"
+    )
+
+
+# Module-level registry of (label, callable) pairs. Kept at module scope
+# (rather than a local inside main()) so structural checks like
+# ``test_main_registers_every_module_level_test`` can introspect it
+# without executing the suite.
+TEST_REGISTRY = [
+    ("cpcv_basic_structure", test_cpcv_basic_structure),
+    ("cpcv_purge_embargo", test_cpcv_purge_embargo),
+    ("cpcv_param_stability", test_cpcv_param_stability),
+    ("cpcv_summary_calculation", test_cpcv_summary_calculation),
+    ("cpcv_empty_results", test_cpcv_empty_results),
+    ("cpcv_invalid_n_splits", test_cpcv_invalid_n_splits),
+    ("cpcv_non_datetime_index", test_cpcv_non_datetime_index),
+    ("signals_active_helper", test_signals_active_helper),
+    ("cpcv_different_strategies", test_cpcv_different_strategies),
+    ("cpcv_cli_help", test_cpcv_cli_help),
+    ("cpcv_deflation", test_cpcv_deflation),
+    ("cpcv_aggregate_deflation_uses_pooled_trial_sharpes", test_cpcv_aggregate_deflation_uses_pooled_trial_sharpes),
+    ("cpcv_multi_asset_cross_sectional_momentum", test_cpcv_multi_asset_cross_sectional_momentum),
+    ("cpcv_multi_asset_dual_momentum", test_cpcv_multi_asset_dual_momentum),
+    ("cpcv_multi_asset_dict_cross_sectional_momentum", test_cpcv_multi_asset_dict_cross_sectional_momentum),
+    ("cpcv_multi_asset_dict_dual_momentum", test_cpcv_multi_asset_dict_dual_momentum),
+    ("main_registers_every_module_level_test", test_main_registers_every_module_level_test),
+]
+
+
+def main() -> int:
+    tests = TEST_REGISTRY
+
+    failures = 0
+    for name, fn in tests:
+        try:
+            fn()
+            print(f"PASS  {name}")
+        except Exception:
+            failures += 1
+            print(f"FAIL  {name}")
+            traceback.print_exc()
+
+    print(f"\n{len(tests) - failures}/{len(tests)} tests passed")
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
