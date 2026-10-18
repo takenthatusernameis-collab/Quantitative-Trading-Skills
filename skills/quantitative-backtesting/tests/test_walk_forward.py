@@ -4104,6 +4104,12 @@ def main() -> int:
         ("test_verify_split_separation_train_test_overlap_raises", test_verify_split_separation_train_test_overlap_raises),
         ("test_verify_split_separation_non_strict_returns_diagnostic", test_verify_split_separation_non_strict_returns_diagnostic),
         ("test_verify_split_separation_empty_split_raises", test_verify_split_separation_empty_split_raises),
+        ("test_calculate_strategy_returns_latency_shifts_entry_by_exact_periods", test_calculate_strategy_returns_latency_shifts_entry_by_exact_periods),
+        ("test_calculate_strategy_returns_fill_rate_scales_short_borrow_cost", test_calculate_strategy_returns_fill_rate_scales_short_borrow_cost),
+        ("test_walk_forward_analysis_default_latency_fill_rate_match_explicit_defaults", test_walk_forward_analysis_default_latency_fill_rate_match_explicit_defaults),
+        ("test_walk_forward_analysis_fill_rate_invalid_raises", test_walk_forward_analysis_fill_rate_invalid_raises),
+        ("test_walk_forward_analysis_negative_latency_clamped_to_zero", test_walk_forward_analysis_negative_latency_clamped_to_zero),
+        ("test_parameter_optimization_default_latency_fill_rate_match_explicit_defaults", test_parameter_optimization_default_latency_fill_rate_match_explicit_defaults),
     ]
 
     failures = 0
@@ -4840,6 +4846,151 @@ def test_cli_walk_forward_no_benchmark_does_not_crash():
         assert rc == 0, f"CLI walk-forward without benchmark should exit 0, got {rc}"
         assert os.path.exists(os.path.join(out_dir, "walk_forward_summary.json"))
         assert os.path.exists(os.path.join(out_dir, "tear_sheet_summary.json"))
+
+
+def _first_nonzero_series(series: pd.Series) -> pd.Series:
+    """Subset of `series` at non-zero values (empty if all zero)."""
+    return series[series != 0]
+
+
+def test_calculate_strategy_returns_latency_shifts_entry_by_exact_periods():
+    """Execution latency shifts the first position entry by exactly `latency` periods.
+
+    Uses constant non-zero returns so strategy_returns is non-zero exactly
+    where the achieved position is non-zero, making entry timing directly
+    observable from the returned series. This is the per-latency entry-timing
+    shift that walk-forward / out-of-sample returns now reflect.
+    """
+    data = _make_constant_return_ohlcv_data(periods=200, daily_return=0.001)
+    signals = pd.Series(0.0, index=data.index)
+    signals.iloc[30:] = 1.0  # enter long at period 30
+
+    base = _calculate_strategy_returns(
+        data, signals, commission=0.0, slippage=0.0,
+        borrow_cost=0.0, funding_cost=0.0, latency=0, fill_rate=1.0,
+    )
+    base_entry = data.index.get_loc(_first_nonzero_series(base).index[0])
+    # Signal enters at position 30; shift(1) places the first position at 31.
+    assert base_entry == 31, f"latency=0 entry at {base_entry}, expected 31"
+
+    for latency in (1, 2, 3):
+        delayed = _calculate_strategy_returns(
+            data, signals, commission=0.0, slippage=0.0,
+            borrow_cost=0.0, funding_cost=0.0, latency=latency, fill_rate=1.0,
+        )
+        entry = data.index.get_loc(_first_nonzero_series(delayed).index[0])
+        # Each added latency period delays the first entry by exactly one period.
+        assert entry == base_entry + latency, (
+            f"latency={latency}: entry at {entry}, expected {base_entry + latency}"
+        )
+
+
+def test_calculate_strategy_returns_fill_rate_scales_short_borrow_cost():
+    """Halving the fill rate halves the per-period borrow cost on a constant short.
+
+    With exactly zero asset returns, borrow cost is the only P&L component, so
+    fill_rate=0.5 must produce exactly half the (negative) borrow drag of
+    fill_rate=1.0. This is the per-fill-rate borrow-cost scaling that
+    walk-forward / out-of-sample returns now reflect.
+    """
+    data = _make_constant_return_ohlcv_data(periods=200, daily_return=0.0)
+    signals = pd.Series(-1.0, index=data.index)  # constant short
+    borrow_cost = 0.03  # 3% per year
+
+    full = _calculate_strategy_returns(
+        data, signals, commission=0.0, slippage=0.0,
+        borrow_cost=borrow_cost, funding_cost=0.0, latency=0, fill_rate=1.0,
+    )
+    half = _calculate_strategy_returns(
+        data, signals, commission=0.0, slippage=0.0,
+        borrow_cost=borrow_cost, funding_cost=0.0, latency=0, fill_rate=0.5,
+    )
+
+    assert len(full) == len(half) and len(full) > 0
+    assert abs(half.sum() - 0.5 * full.sum()) < 1e-9, (
+        f"fill_rate=0.5 borrow drag should be exactly half of fill_rate=1.0: "
+        f"{half.sum():.10f} vs {0.5 * full.sum():.10f}"
+    )
+    assert half.sum() > full.sum()  # less negative drag
+
+
+def test_walk_forward_analysis_default_latency_fill_rate_match_explicit_defaults():
+    """walk_forward_Analysis defaults (latency=0, fill_rate=1.0) are bitwise
+    identical to explicitly passing latency=0, fill_rate=1.0, so the change is
+    backward compatible and prior behavior is preserved.
+    """
+    data = _make_ohlcv_data(periods=400, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [5, 10], "slow_period": [20, 30]}
+    common = dict(
+        data=data, strategy_factory=factory, param_grid=param_grid,
+        train_months=6, test_months=2, step_months=2,
+        initial_capital=100000, commission=0.0002, slippage=0.0001,
+    )
+
+    defaults = walk_forward_analysis(**common)
+    explicit = walk_forward_analysis(latency=0, fill_rate=1.0, **common)
+
+    pd.testing.assert_series_equal(defaults["oos_returns"], explicit["oos_returns"])
+    assert defaults["summary"] == explicit["summary"]
+
+
+def test_walk_forward_analysis_fill_rate_invalid_raises():
+    """fill_rate outside (0, 1] raises ValueError before execution."""
+    data = _make_ohlcv_data(periods=200, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [5], "slow_period": [10]}
+
+    for bad_fill_rate in (0.0, -0.5, 1.5):
+        try:
+            walk_forward_analysis(
+                data=data, strategy_factory=factory, param_grid=param_grid,
+                train_months=6, test_months=2, step_months=2,
+                initial_capital=100000, commission=0.0, slippage=0.0,
+                latency=0, fill_rate=bad_fill_rate,
+            )
+        except ValueError:
+            continue
+        else:
+            raise AssertionError(
+                f"walk_forward_analysis should raise ValueError for fill_rate={bad_fill_rate}"
+            )
+
+
+def test_walk_forward_analysis_negative_latency_clamped_to_zero():
+    """Negative latency is clamped to 0 (no accidental look-ahead), so it
+    reproduces the latency=0 result exactly."""
+    data = _make_ohlcv_data(periods=300, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [5], "slow_period": [10]}
+    common = dict(
+        data=data, strategy_factory=factory, param_grid=param_grid,
+        train_months=6, test_months=2, step_months=2,
+        initial_capital=100000, commission=0.0, slippage=0.0,
+    )
+
+    clamped = walk_forward_analysis(latency=-3, fill_rate=1.0, **common)
+    zero = walk_forward_analysis(latency=0, fill_rate=1.0, **common)
+
+    pd.testing.assert_series_equal(clamped["oos_returns"], zero["oos_returns"])
+    assert clamped["summary"] == zero["summary"]
+
+
+def test_parameter_optimization_default_latency_fill_rate_match_explicit_defaults():
+    """parameter_optimization defaults (latency=0, fill_rate=1.0) are bitwise
+    identical to explicitly passing latency=0, fill_rate=1.0."""
+    data = _make_ohlcv_data(periods=300, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [5, 10], "slow_period": [20, 30]}
+    common = dict(
+        data=data, strategy_factory=factory, param_grid=param_grid,
+        initial_capital=100000, commission=0.0002, slippage=0.0001,
+    )
+
+    defaults = parameter_optimization(**common)
+    explicit = parameter_optimization(latency=0, fill_rate=1.0, **common)
+
+    assert defaults == explicit
 
 
 if __name__ == "__main__":

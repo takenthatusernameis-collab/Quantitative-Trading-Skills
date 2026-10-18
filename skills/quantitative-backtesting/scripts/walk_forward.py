@@ -266,6 +266,8 @@ def walk_forward_analysis(
     adv_window: int = 20,
     borrow_cost: float = 0.0,
     funding_cost: float = 0.0,
+    latency: int = 0,
+    fill_rate: float = 1.0,
     apply_deflation: bool = False,
     benchmark: Optional[pd.DataFrame] = None,
     total_return_benchmark: bool = False,
@@ -297,6 +299,11 @@ def walk_forward_analysis(
             e.g., 0.03 = 3% per year). Applied daily on short exposure.
         funding_cost: Annual funding cost rate for leveraged positions (as decimal,
             e.g., 0.02 = 2% per year). Applied daily on gross exposure exceeding 1x.
+        latency: Execution latency in periods passed to _calculate_strategy_returns.
+            Positions are delayed by `1 + latency` periods after signal generation.
+            Default 0 (no added delay beyond the standard next-period fill).
+        fill_rate: Fraction of each targeted position change that is filled,
+            passed to _calculate_strategy_returns. Default 1.0 (full fill).
         apply_deflation: When True, compute the Deflated Sharpe Ratio
             (multiple-testing correction) for each period's in-sample
             parameter selection, plus an aggregate correction on the
@@ -321,6 +328,17 @@ def walk_forward_analysis(
             - 'oos_returns': out-of-sample returns across all periods
             - 'summary': aggregate metrics
     """
+    # Fail fast on invalid execution-realism parameters rather than silently
+    # skipping every grid combination inside the per-combo try/except below.
+    if fill_rate is None:
+        fill_rate = 1.0
+    if fill_rate <= 0 or fill_rate > 1:
+        raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
+    if latency is None:
+        latency = 0
+    if latency < 0:
+        latency = 0
+
     if isinstance(data, dict):
         # Normalize dict panel data (symbol -> OHLCV DataFrame) to a
         # MultiIndex (field, symbol) panel. Strategies and return
@@ -434,6 +452,7 @@ def walk_forward_analysis(
                 train_returns = _calculate_strategy_returns(
                     train_data, train_signals, commission, slippage,
                     impact_coefficient, adv_window, borrow_cost, funding_cost,
+                    latency, fill_rate,
                     initial_capital=initial_capital,
                 )
 
@@ -600,6 +619,8 @@ def parameter_optimization(
     adv_window: int = 20,
     borrow_cost: float = 0.0,
     funding_cost: float = 0.0,
+    latency: int = 0,
+    fill_rate: float = 1.0,
     n_splits: int = 5,
     apply_deflation: bool = False,
     benchmark: Optional[pd.DataFrame] = None,
@@ -628,6 +649,11 @@ def parameter_optimization(
             e.g., 0.03 = 3% per year). Applied daily on short exposure.
         funding_cost: Annual funding cost rate for leveraged positions (as decimal,
             e.g., 0.02 = 2% per year). Applied daily on gross exposure exceeding 1x.
+        latency: Execution latency in periods passed to _calculate_strategy_returns.
+            Positions are delayed by `1 + latency` periods after signal generation.
+            Default 0 (no added delay beyond the standard next-period fill).
+        fill_rate: Fraction of each targeted position change that is filled,
+            passed to _calculate_strategy_returns. Default 1.0 (full fill).
         n_splits: Number of train/test splits
         apply_deflation: When True, compute the Deflated Sharpe Ratio
             (Bailey & Lopez de Prado, 2014) for every combination,
@@ -645,6 +671,17 @@ def parameter_optimization(
     Returns:
         List of result dictionaries sorted by Sharpe ratio (descending)
     """
+    # Fail fast on invalid execution-realism parameters rather than silently
+    # skipping every grid combination inside the per-combo try/except below.
+    if fill_rate is None:
+        fill_rate = 1.0
+    if fill_rate <= 0 or fill_rate > 1:
+        raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
+    if latency is None:
+        latency = 0
+    if latency < 0:
+        latency = 0
+
     if isinstance(data, dict):
         # Normalize dict panel data (symbol -> OHLCV DataFrame) to a
         # MultiIndex (field, symbol) panel. Strategies and return
@@ -696,6 +733,7 @@ def parameter_optimization(
             returns = _calculate_strategy_returns(
                 data, signals, commission, slippage,
                 impact_coefficient, adv_window, borrow_cost, funding_cost,
+                latency, fill_rate,
                 initial_capital=initial_capital,
             )
 
@@ -1154,6 +1192,8 @@ def _calculate_strategy_returns(
     adv_window: int = 20,
     borrow_cost: float = 0.0,
     funding_cost: float = 0.0,
+    latency: int = 0,
+    fill_rate: float = 1.0,
     initial_capital: float = 100000.0,
 ) -> pd.Series:
     """Calculate strategy returns from signals and market data.
@@ -1177,11 +1217,27 @@ def _calculate_strategy_returns(
             decimal, e.g., 0.02 = 2% per year). Applied per period on gross
             exposure exceeding 1x; the per-period rate is funding_cost
             divided by the periods per year inferred from the data's index.
+        latency: Execution latency in periods. Positions are delayed by
+            `1 + latency` periods after signal generation (1 = trade at next
+            period's open, the default look-ahead-safe convention).
+            Negative values are clamped to 0 to prevent accidental look-ahead.
+        fill_rate: Fraction of each targeted position change that is filled,
+            in (0, 1]. Scales achieved positions and all position-change-based
+            costs (commission, slippage, impact) and borrow/funding exposure.
+            Default 1.0 (full fill) is bitwise identical to no fill modeling.
         initial_capital: Starting portfolio value used to scale the position
             notional for market-impact calculation. The notional at risk is
             |position_change| * equity, where equity is approximated by
             initial_capital * cumprod(1 + raw_returns). Default 100000.
     """
+    if fill_rate is None:
+        fill_rate = 1.0
+    if fill_rate <= 0 or fill_rate > 1:
+        raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
+    if latency is None:
+        latency = 0
+    if latency < 0:
+        latency = 0
     if isinstance(data, dict):
         # For dict of dataframes, compute equal-weighted portfolio returns
         # Use first key's index as reference
@@ -1211,7 +1267,7 @@ def _calculate_strategy_returns(
         raw_returns = close.pct_change()
         volume = data["volume"]
 
-    positions = signals.shift(1)  # Trade at next period's open
+    positions = signals.shift(1 + latency) * fill_rate  # Trade at next period's open, delayed by execution latency; partial fills scale achieved exposure
 
     # Transaction costs: apply on position changes
     position_changes = positions.diff().abs()

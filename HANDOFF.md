@@ -4,36 +4,43 @@
 - Date: 2026-10-18
 - Agent: Kilo
 - Working directory: /home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills
-- Status: Added execution latency sweep (`--latencies`) to run_backtest; verified all suites green; end-to-end verification passes
+- Status: Threaded execution latency and partial-fill rate through the walk-forward / parameter-optimization OOS path; all suites green.
 
 ## What Changed
-1. **Added latency sweep to execution model** (`skills/quantitative-backtesting/scripts/run_backtest.py`):
-   - Added `--latencies` CLI argument (list of int, default None). Sweeps execution latency the same way `--commissions`/`--slippages`/`--fill-rates` do.
-   - `_run_backtest_sweep_coefficient` gained a `latency` kwarg (falls back to `args.latency`), threads it into `SweepArgs`, and records `"latency"` in each sweep result dict.
-   - New sweep block in `main()` writes `run_backtest_latency_sweep.json` when `--latencies` has 2+ values; single latency or default (`--latency`=0) runs unchanged.
-   - Additive and backward compatible: default latency=0 is bitwise identical to prior behavior.
-2. **Tests** (`skills/quantitative-backtesting/tests/test_run_backtest.py`):
-   - `_Args` gained `latency=0`.
-   - New tests: `parse_args_accepts_latencies`, `run_backtest_latency_default_is_zero`, `run_backtest_latency_zero_identical_to_default`, `run_backtest_latency_shifts_entry_timing`, `cli_run_backtest_latency_sweep`. All registered in the runner.
+1. **`skills/quantitative-backtesting/scripts/walk_forward.py`**:
+   - `_calculate_strategy_returns` (walk_forward.py:1192): added `latency: int = 0` and `fill_rate: float = 1.0` params. Validates `fill_rate` in (0, 1] (raises ValueError otherwise), clamps negative `latency` to 0 (prevents accidental look-ahead), and applies `positions = signals.shift(1 + latency) * fill_rate`. Default (0, 1.0) is bitwise identical to the prior `signals.shift(1)`.
+   - `walk_forward_analysis` (walk_forward.py:268): added `latency`/`fill_rate` params (default 0 / 1.0), threaded to both `_calculate_strategy_returns` calls (train + test per period). Fail-fast `fill_rate` validation at the API boundary so invalid config raises instead of being swallowed by the per-combo try/except.
+   - `parameter_optimization` (walk_forward.py:621): same `latency`/`fill_rate` params threaded to its `_calculate_strategy_returns` call, with the same fail-fast validation.
+   - Docstrings updated for all three functions.
+   - Note: deliberately did NOT add `.fillna(0)` to `positions` (unlike run_backtest) because the original walk-forward code relies on NaN at position 0 to drop first-bar costs; adding fillna(0) changed first-bar commission behavior and broke `test_degenerate_constant_return_dsr_consistency` (constant returns must stay degenerate).
+
+2. **`skills/quantitative-backtesting/tests/test_walk_forward.py`**: 6 new tests, all registered in `main()`:
+   - `test_calculate_strategy_returns_latency_shifts_entry_by_exact_periods`: entry delays by exactly `latency` periods (measured via original data-index position; iloc-based detection is confounded because the NaN drop-prefix grows with latency at the same rate).
+   - `test_calculate_strategy_returns_fill_rate_scales_short_borrow_cost`: fill_rate=0.5 yields exactly half the borrow drag of fill_rate=1.0 on a constant short (zero-return data).
+   - `test_walk_forward_analysis_default_latency_fill_rate_match_explicit_defaults`: defaults bitwise identical to explicit latency=0/fill_rate=1.0.
+   - `test_walk_forward_analysis_fill_rate_invalid_raises`: fill_rate in {0.0, -0.5, 1.5} raises ValueError.
+   - `test_walk_forward_analysis_negative_latency_clamped_to_zero`: latency=-3 reproduces latency=0 exactly.
+   - `test_parameter_optimization_default_latency_fill_rate_match_explicit_defaults`: defaults bitwise identical to explicit defaults.
 
 ## What Was Verified
-- Quant backtesting suites all pass, 0 failures:
-  test_walk_forward 107/107; test_data_loader 29/29; test_performance 30/30;
-  test_run_backtest 53/53 (incl. 5 new latency tests); test_strategy_builder 27/27;
-  test_cpcv 16/16; test_monte_carlo 14/14; test_generate_sample_data 1/1;
-  test_reporting passed (no failures).
-- `verify_end_to_end.py` passes (benchmark_cost_is_periodic end-to-end).
-- All Python files in `skills/quantitative-backtesting/scripts/` compile successfully.
+- All quant backtesting suites pass, 0 failures:
+  test_walk_forward 113/113 (107 prior + 6 new); test_cpcv 16/16; test_monte_carlo 14/14;
+  test_run_backtest 53/53; test_performance 30/30; test_data_loader 29/29;
+  test_strategy_builder 27/27; test_generate_sample_data 1/1; test_reporting exit 0.
+- `verify_end_to_end.py` passes (exit 0).
+- `walk_forward.py` imports and compiles cleanly.
+- Default latency=0/fill_rate=1.0 bitwise identical to prior walk-forward output (unit-tested).
 
 ## What Remains Unresolved
-- Execution realism (latency + fill rate) is modeled in `run_backtest` but NOT in the walk-forward / parameter-optimization / CPCV paths: `walk_forward._calculate_strategy_returns` uses `signals.shift(1)` with no latency or fill-rate, so out-of-sample evaluation ignores execution delay and partial fills. This is a methodological gap for execution-robustness analysis in OOS/walk-forward results.
-- No combined latency × fill-rate sweep exists (each sweeps independently).
+- `cpcv_analysis` and `out_of_sample_validation` directly call `_calculate_strategy_returns` but are NOT threaded with `latency`/`fill_rate` (they use defaults, so backward compatible). The out_of_sample_validation val/test confirmation phases therefore still ignore execution delay and partial fills.
+- No combined latency × fill-rate sweep (each sweeps independently in run_backtest only).
+- The walk_forward CLI (`run_walk_forward`/`run_parameter_optimization`/`run_out_of_sample_validation`) has no `--latency`/`--fill-rate` args (run_backtest has them).
 
 ## Approaches That Have Already Been Tried/Verified
-- `fill_rate = getattr(args, 'fill_rate', 1.0) or 1.0` does NOT work for validation: `0.0 or 1.0` evaluates to 1.0, so fill_rate=0.0 evades the (0, 1] check. Fixed with an explicit `if fill_rate is None: fill_rate = 1.0`.
-- Position shift with `1 + latency` preserves look-ahead safety (all shifts are backward in time relative to signal generation). Clamping negative values prevents accidental look-ahead.
+- `.fillna(0)` on `positions` (to mirror run_backtest/handoff formula): REVERTED. It made first-bar commission real (NaN previously dropped first-bar costs), breaking `test_degenerate_constant_return_dsr_consistency` and bitwise-identical output. Kept `signals.shift(1 + latency) * fill_rate` with no fillna.
+- `iloc`-based entry-timing detection: does not reflect latency because the dropped NaN prefix grows by the same amount as the entry shifts. Switched to measuring entry via `data.index.get_loc` against the original data index.
 
 ## Next Recommended Task
-Thread `latency` and `fill_rate` through `walk_forward_analysis` / `parameter_optimization` (via `_calculate_strategy_returns`) so execution delay and partial fills are evaluated in the out-of-sample / walk-forward path, mirroring how commission/slippage are already threaded. Add `latency`/`fill_rate` params to `_calculate_strategy_returns`, defaulting to 0 / 1.0 (backward compatible), plus unit tests verifying per-latency entry-timing shift and per-fill-rate borrow-cost scaling in walk-forward returns. Bounded and directly improves realistic execution assumptions in OOS evaluation.
+Thread `latency` and `fill_rate` through `out_of_sample_validation` (walk_forward.py:1798, its val/test `_calculate_strategy_returns` calls plus the `walk_forward_analysis` call it already makes) and `cpcv_analysis` (walk_forward.py:1318) so the full OOS / walk-forward / CPCV paths reflect execution delay and partial fills. Then consider adding CLI `--latency`/`--fill-rate` parity with `run_backtest` and a combined latency × fill-rate sweep. Keep defaults (0 / 1.0) bitwise backward compatible; do not alter split-separation or deflation logic.
 
 (End of file)
