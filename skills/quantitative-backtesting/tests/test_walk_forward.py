@@ -3094,6 +3094,51 @@ def test_deflated_alpha_ratio_weakens_with_more_benchmarks():
     assert 0.0 <= dars[-1] <= 1.0 and 0.0 <= pvals[-1] <= 1.0
 
 
+def test_deflated_sharpe_ratio_weakens_with_more_trials():
+    """The Deflated Sharpe Ratio must weaken (and its p-value strengthen) as the
+    number of trials tested grows, for the same strategy returns.
+
+    Searching over more configurations is a multiple-testing problem: with
+    enough trials, luck alone produces an attractive Sharpe ratio.  The
+    Deflated Sharpe Ratio corrects for this selection bias, so for a fixed
+    Sharpe ratio and returns the DSR must be non-increasing (p-value
+    non-decreasing) in N.  A regression that drops the N-dependence would
+    show a flat DSR across N values.
+    """
+    rng = np.random.default_rng(7)
+    dates = pd.date_range("2020-01-01", periods=500, freq="B")
+    rets = pd.Series(rng.normal(0.0003, 0.015, 500), index=dates)
+    sharpe = 1.0
+    trial_sharpes = [1.0, 0.8, 1.2, 0.5, 0.9, 1.1, 0.6, 1.3, 0.4, 0.7]
+
+    dsrs, pvals = [], []
+    for n in (1, 2, 3, 5, 10):
+        r = deflated_sharpe_ratio(
+            sharpe_ratio=sharpe,
+            returns=rets,
+            n_trials=n,
+            trial_sharpes=trial_sharpes[:n] if n <= len(trial_sharpes) else trial_sharpes,
+        )
+        dsrs.append(r["deflated_sharpe_ratio"])
+        pvals.append(r["p_value"])
+
+    for i in range(len(dsrs) - 1):
+        assert dsrs[i] >= dsrs[i + 1], (
+            f"DSR should be non-increasing in N: N={i+1}={dsrs[i]:.4f} "
+            f"N={i+2}={dsrs[i+1]:.4f}"
+        )
+    for i in range(len(pvals) - 1):
+        assert pvals[i] <= pvals[i + 1], (
+            f"p-value should be non-decreasing in N: N={i+1}={pvals[i]:.4f} "
+            f"N={i+2}={pvals[i+1]:.4f}"
+        )
+    assert dsrs[0] > dsrs[-1], (
+        f"Single-trial DSR {dsrs[0]:.4f} should exceed multi-trial "
+        f"DSR {dsrs[-1]:.4f}"
+    )
+    assert 0.0 <= dsrs[-1] <= 1.0 and 0.0 <= pvals[-1] <= 1.0
+
+
 def test_real_data_pipeline_example_imports():
     """The real-data integration example must import cleanly and expose its
     documented callables.
@@ -5247,6 +5292,7 @@ TEST_REGISTRY = [
     ("test_cli_out_of_sample_funding_sweep", test_cli_out_of_sample_funding_sweep),
     ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ("test_deflated_alpha_ratio_weakens_with_more_benchmarks", test_deflated_alpha_ratio_weakens_with_more_benchmarks),
+    ("test_deflated_sharpe_ratio_weakens_with_more_trials", test_deflated_sharpe_ratio_weakens_with_more_trials),
     ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
     ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
     ("test_trading_costs_robustness_example_imports", test_trading_costs_robustness_example_imports),
