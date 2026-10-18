@@ -54,7 +54,7 @@ class _Args:
                  borrow_cost=0.0, funding_cost=0.0,
                  validate_point_in_time=False, point_in_time_strict=False,
                  multi_symbol=False, benchmark=None, risk_free_rate=None,
-                 fill_rate=1.0):
+                 fill_rate=1.0, latency=0):
         self.commission = commission
         self.slippage = slippage
         self.initial_capital = initial_capital
@@ -71,6 +71,7 @@ class _Args:
         self.benchmark = benchmark
         self.risk_free_rate = risk_free_rate
         self.fill_rate = fill_rate
+        self.latency = latency
 
 
 def test_signals_active_detects_flat_and_active_series():
@@ -804,6 +805,93 @@ def test_cli_run_backtest_fill_rate_sweep():
                 assert key in r, f"sweep result missing {key}"
 
 
+def test_parse_args_accepts_latencies():
+    """parse_args accepts --latencies and defaults --latency to 0."""
+    from unittest.mock import patch
+
+    with patch.object(sys, "argv", ["prog", "--data", "d.csv", "--latencies", "0", "1", "2"]):
+        args = parse_args()
+    assert args.latencies == [0, 1, 2]
+
+    with patch.object(sys, "argv", ["prog", "--data", "d.csv"]):
+        args = parse_args()
+    assert args.latency == 0
+    assert args.latencies is None
+
+
+def test_run_backtest_latency_default_is_zero():
+    """latency defaults to 0 and is recorded in the results config."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    results = run_backtest(data, strategy, _Args())
+    assert results["config"]["latency"] == 0
+
+
+def test_run_backtest_latency_zero_identical_to_default():
+    """latency=0 must produce results identical to the default run."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    base = run_backtest(data, strategy, _Args())
+    delayed = run_backtest(data, strategy, _Args(latency=0))
+    pd.testing.assert_series_equal(base["returns"], delayed["returns"])
+    pd.testing.assert_series_equal(base["equity_curve"], delayed["equity_curve"])
+    assert base["trades"] == delayed["trades"]
+
+
+def test_run_backtest_latency_shifts_entry_timing():
+    """Execution latency delays the first position entry by `latency` periods
+    and reduces per-period borrow cost on a constant short position linearly."""
+    data = _make_flat_price_data(periods=60, freq="B")
+    strategy = _AlwaysShort()
+    base = run_backtest(data, strategy, _Args(latency=0, borrow_cost=0.10))
+    delayed = run_backtest(data, strategy, _Args(latency=2, borrow_cost=0.10))
+
+    assert len(base["trades"]) == 1 and len(delayed["trades"]) == 1
+    # First trade entry shifts by exactly `latency` periods (in index position).
+    assert pd.Timestamp(base["trades"][0]["entry_date"]) == data.index[1]
+    assert pd.Timestamp(delayed["trades"][0]["entry_date"]) == data.index[1 + 2]
+
+    # Borrow cost accrues only while short; delaying entry by 2 periods removes
+    # exactly two periods of borrow cost (commission/slippage/impact are zero).
+    period_rate = 0.10 / 252
+    base_cost = -float(base["returns"].sum())
+    delayed_cost = -float(delayed["returns"].sum())
+    assert np.isclose(delayed_cost, base_cost - 2 * period_rate, rtol=1e-6, atol=1e-12), (
+        f"expected borrow cost to drop by 2 periods: {base_cost} -> {delayed_cost}"
+    )
+
+
+def test_cli_run_backtest_latency_sweep():
+    """CLI run_backtest --latencies writes a sweep artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 5, "slow_period": 20}',
+            "--output", out_dir,
+            "--latencies", "0", "1", "2",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+
+        assert rc == 0, f"CLI run_backtest latency sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "run_backtest_latency_sweep.json")
+        assert os.path.exists(sweep_path), "run_backtest_latency_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["latencies"] == [0, 1, 2]
+        assert len(payload["results"]) == 3
+        assert [r["latency"] for r in payload["results"]] == [0, 1, 2]
+        for r in payload["results"]:
+            for key in ("total_return", "annualized_return", "sharpe_ratio", "max_drawdown"):
+                assert key in r, f"sweep result missing {key}"
+
+
 def test_run_backtest_serializes_data_provenance_into_results():
     """run_backtest serializes the DataProvenance captured at load time.
 
@@ -1163,6 +1251,11 @@ def main() -> int:
         ("run_backtest_fill_rate_reduces_trading_costs", test_run_backtest_fill_rate_reduces_trading_costs),
         ("run_backtest_fill_rate_invalid_values_rejected", test_run_backtest_fill_rate_invalid_values_rejected),
         ("cli_run_backtest_fill_rate_sweep", test_cli_run_backtest_fill_rate_sweep),
+        ("parse_args_accepts_latencies", test_parse_args_accepts_latencies),
+        ("run_backtest_latency_default_is_zero", test_run_backtest_latency_default_is_zero),
+        ("run_backtest_latency_zero_identical_to_default", test_run_backtest_latency_zero_identical_to_default),
+        ("run_backtest_latency_shifts_entry_timing", test_run_backtest_latency_shifts_entry_timing),
+        ("cli_run_backtest_latency_sweep", test_cli_run_backtest_latency_sweep),
     ]
 
     failures = 0

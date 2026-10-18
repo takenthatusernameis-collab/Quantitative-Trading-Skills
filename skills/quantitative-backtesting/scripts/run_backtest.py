@@ -68,6 +68,7 @@ def parse_args():
     parser.add_argument("--latency", type=int, default=0, help="Execution latency in periods (0 = no delay, 1 = one period delay). Delays position execution by latency periods after signal generation.")
     parser.add_argument("--fill-rate", type=float, default=1.0, help="Execution fill rate (0 < r <= 1); only this fraction of each targeted position change is filled, scaling the achieved position and all transaction costs proportionally. Default 1.0 (full fill, backward compatible).")
     parser.add_argument("--fill-rates", type=float, nargs="+", default=None, help="List of fill rates to sweep (overrides --fill-rate).")
+    parser.add_argument("--latencies", type=int, nargs="+", default=None, help="List of execution latencies (in periods) to sweep (overrides --latency). Delays position execution by each latency after signal generation.")
     parser.add_argument("--adjust-splits", action="store_true", help="Adjust prices for stock splits using the splits column if present.")
     return parser.parse_args()
 
@@ -478,6 +479,7 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
                                    impact_coefficient=None, borrow_cost=None,
                                    funding_cost=None, commission=None,
                                    slippage=None, fill_rate=None,
+                                   latency=None,
                                    survivorship=None):
     """Run backtest for a single cost coefficient.
 
@@ -495,6 +497,8 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
         slippage = args.slippage
     if fill_rate is None:
         fill_rate = args.fill_rate
+    if latency is None:
+        latency = args.latency
 
     class SweepArgs:
         def __init__(self, base):
@@ -506,6 +510,7 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
             self.commission = commission
             self.slippage = slippage
             self.fill_rate = fill_rate
+            self.latency = latency
 
     sweep_args = SweepArgs(args)
     results = run_backtest(data, strategy, sweep_args,
@@ -521,6 +526,7 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
         "commission": commission,
         "slippage": slippage,
         "fill_rate": fill_rate,
+        "latency": latency,
         "total_return": metrics.get("total_return", 0.0),
         "annualized_return": metrics.get("annualized_return", 0.0),
         "sharpe_ratio": metrics.get("sharpe_ratio", 0.0),
@@ -761,6 +767,26 @@ def main():
             print("rate\treturn\tann_ret\tSharpe\tmaxDD")
             for r in sweep_results:
                 print(f"{r['fill_rate']:.4f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
+        return 0
+
+    if getattr(args, "latencies", None) is not None and len(args.latencies) > 1:
+        sweep_results = []
+        for lat in args.latencies:
+            sweep_results.append(
+                _run_backtest_sweep_coefficient(
+                    args, data, strategy, provenance, benchmark, latency=lat,
+                    survivorship=survivorship,
+                )
+            )
+        sweep_path = output_dir / "run_backtest_latency_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump({"latencies": args.latencies, "results": sweep_results}, f, indent=2)
+        print(f"Sweep results saved to: {sweep_path}")
+        if sweep_results:
+            print("\nLatency sweep:")
+            print("lat\treturn\tann_ret\tSharpe\tmaxDD")
+            for r in sweep_results:
+                print(f"{r['latency']}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
         return 0
 
     print("Running backtest...")
