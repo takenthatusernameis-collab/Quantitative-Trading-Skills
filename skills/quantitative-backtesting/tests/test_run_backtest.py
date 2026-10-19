@@ -2042,6 +2042,35 @@ def test_main_registers_every_module_level_test():
     )
 
 
+
+
+def test_cli_data_provenance_reproducible_across_runs():
+    """Running the CLI twice with identical inputs yields byte-identical
+    data_provenance.json (load_timestamp sanitized to source mtime)."""
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path)
+        out1 = os.path.join(tmpdir, "out1")
+        out2 = os.path.join(tmpdir, "out2")
+        argv1 = ["run_backtest", "--data", csv_path, "--strategy", "sma_crossover",
+                 "--params", '{"fast_period": 10, "slow_period": 30}',
+                 "--output", out1, "--validate-point-in-time"]
+        with patch.object(sys, "argv", argv1), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            assert run_backtest_main() == 0
+        argv2 = ["run_backtest", "--data", csv_path, "--strategy", "sma_crossover",
+                 "--params", '{"fast_period": 10, "slow_period": 30}',
+                 "--output", out2, "--validate-point-in-time"]
+        with patch.object(sys, "argv", argv2), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            assert run_backtest_main() == 0
+        with open(os.path.join(out1, "data_provenance.json"), "rb") as f:
+            a = f.read()
+        with open(os.path.join(out2, "data_provenance.json"), "rb") as f:
+            b = f.read()
+        assert a == b, "data_provenance.json not reproducible across runs"
+
+
 TEST_REGISTRY = [
     ("test_signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
     ("test_run_backtest_flat_strategy_raises", test_run_backtest_flat_strategy_raises),
@@ -2106,6 +2135,7 @@ TEST_REGISTRY = [
     ("test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance", test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance),
     ("test_cli_benchmark_name_propagates_to_provenance_and_tear_sheet", test_cli_benchmark_name_propagates_to_provenance_and_tear_sheet),
     ("test_cli_benchmark_name_derives_from_filename_stem_when_omitted", test_cli_benchmark_name_derives_from_filename_stem_when_omitted),
+    ("test_cli_data_provenance_reproducible_across_runs", test_cli_data_provenance_reproducible_across_runs),
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 
