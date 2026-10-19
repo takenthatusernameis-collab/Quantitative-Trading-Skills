@@ -119,7 +119,8 @@ Risk Metrics:
 ## Resources
 
 ### scripts/
-- `run_backtest.py` - Main entry point for running backtests with configurable parameters (supports `--n-trials` to report the Deflated Sharpe Ratio of the final backtest Sharpe; `--validate-point-in-time` / `--point-in-time-strict` to screen for look-ahead bias and data-integrity violations, aborting on violations in strict mode; `--multi-symbol` to load a multi-symbol panel, run survivorship-bias detection, and backtest a panel strategy; `--benchmark` to load a buy-and-hold baseline (e.g. SPY) and report alpha, beta, and correlation vs. the market). When `--impact-coefficient > 0`, it also reports a market-impact-based **strategy capacity** estimate (`results["capacity"]`, in notional, mirrored into `metrics["capacity"]`) by inverting the impact model via `estimate_capacity`; capacity is `None` when impact is disabled or ADV is not estimable, so the key is backward compatible.
+- `run_backtest.py` - Main entry point for running backtests with configurable parameters (supports `--n-trials` to report the Deflated Sharpe Ratio of the final backtest Sharpe; `--validate-point-in-time` / `--point-in-time-strict` to screen for look-ahead bias and data-integrity violations, aborting on violations in strict mode; `--multi-symbol` to load a multi-symbol panel, run survivorship-bias detection, and backtest a panel strategy; `--benchmark` to load a buy-and-hold baseline (e.g. SPY) and report alpha, beta, and correlation vs. the market). When `--impact-coefficient > 0`, it also reports a market-impact-based **strategy capacity** estimate (`results["capacity"]`, in notional, mirrored into `metrics["capacity"]`) by inverting the impact model via `estimate_capacity`; capacity is `None` when impact is disabled or ADV is not estimable, so the key is backward compatible. A **panel** is priced with the same shared convention as the walk-forward / CPCV / out-of-sample paths (see `utils.py`): the portfolio return is the mean of the per-asset returns, the market-impact cost is computed per asset on the equal-weighted basket convention, and the capacity estimate is the least-liquid-binds basket capacity — so panel results from this CLI and from `walk_forward.py` are directly comparable.
+- `utils.py` - Shared helpers used by every backtest path: `_annualization_factor`, plus the two shared market-model definitions that keep `run_backtest.py` and `walk_forward.py` in agreement: `build_market_model` (normalizes a single asset, a MultiIndex panel and a dict panel into one representation; a panel's return is the mean of the per-asset returns) and `market_impact_cost` (per-asset notional `|position_change| * equity / n_assets` measured against each asset's own ADV, with the portfolio cost = the equal-weighted mean of the per-asset impacts).
 - `data_loader.py` - Utilities for loading and validating market data from various sources (includes `DataProvenance` tracking, `validate_point_in_time`, `detect_survivorship_bias`, and `load_multi_symbol` for panel files with a `symbol`/`ticker` column)
 - `strategy_builder.py` - Factory for creating common strategy templates (trend, mean reversion, momentum)
 - `performance.py` - Comprehensive performance analytics and metric calculation.
@@ -299,6 +300,20 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   (surviving/entered/exited symbols, bias score) plus a per-symbol
   provenance artifact with checksums, while the panel backtest runs on
   the overlapping window.
+  Also covers **cross-path parity for panels**: the same panel, strategy and
+  cost assumptions produce identical return values through `run_backtest.py`
+  and through `walk_forward.py`'s return calculator, for both the
+  MultiIndex and the dict panel format
+  (`test_run_backtest_panel_matches_walk_forward_return_calculator`,
+  `test_run_backtest_dict_panel_matches_walk_forward_return_calculator`).
+  The panel return convention is pinned to the mean of the per-asset
+  returns rather than the return of the mean price series
+  (`test_run_backtest_panel_uses_mean_of_per_asset_returns`), the panel
+  impact cost is pinned to the per-asset model rather than an aggregated
+  pseudo-asset ADV
+  (`test_run_backtest_panel_impact_splits_notional_across_assets`), and the
+  panel capacity is pinned to the least-liquid-binds basket estimate
+  (`test_run_backtest_panel_capacity_binds_on_least_liquid_constituent`).
 - `test_strategy_builder.py` - strategy registry, `build_strategy`, defaults,
   binary long/flat signal generation with real crossovers, and multi-asset
   panel signal generation for `CrossSectionalMomentum` and

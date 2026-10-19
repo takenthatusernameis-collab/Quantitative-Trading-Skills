@@ -12,7 +12,6 @@ import sys
 from pathlib import Path
 from typing import Dict, Any
 
-import numpy as np
 import pandas as pd
 
 # Add parent directory to path for imports
@@ -29,7 +28,11 @@ from data_loader import (
 from strategy_builder import build_strategy
 from performance import calculate_metrics, generate_report
 from reporting import generate_tear_sheet
-from utils import _annualization_factor
+from utils import (
+    _annualization_factor,
+    build_market_model,
+    market_impact_cost,
+)
 from walk_forward import estimate_capacity
 
 
@@ -176,29 +179,16 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     pit_result = None
     if getattr(args, "validate_point_in_time", False):
         pit_result = _validate_point_in_time(data, signals)
-    if isinstance(data, dict):
-        common_index = None
-        for df in data.values():
-            if common_index is None:
-                common_index = df.index
-            else:
-                common_index = common_index.intersection(df.index)
-        common_index = common_index.sort_values()
-        close_list = []
-        vol_list = []
-        for df in data.values():
-            aligned = df.reindex(common_index)
-            close_list.append(aligned["close"])
-            if "volume" in aligned.columns:
-                vol_list.append(aligned["volume"])
-        close = pd.concat(close_list, axis=1).mean(axis=1)
-        volume = pd.concat(vol_list, axis=1).mean(axis=1) if vol_list else None
-    elif isinstance(data.columns, pd.MultiIndex):
-        close = data["close"].mean(axis=1)
-        volume = data["volume"].mean(axis=1) if "volume" in data.columns.get_level_values(0) else None
-    else:
-        close = data["close"]
-        volume = data["volume"] if "volume" in data.columns else None
+    # Shared market model: the single definition of how a single asset, a
+    # MultiIndex panel and a dict panel are priced. It is shared with
+    # walk_forward.py so the two entry points return comparable results for
+    # the same panel (see references/cost_models.md, "Cross-path parity").
+    market = build_market_model(data)
+    raw_returns = market["raw_returns"]
+    close = market["close"]
+    volume = market["volume"]
+    price = market["price"]
+    is_panel = market["is_panel"]
 
     # Guard against strategies that never take a position (e.g. a lookback
     # longer than the data window leaves every rolling indicator NaN, so the
@@ -228,7 +218,6 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     positions = signals.shift(1 + latency).fillna(0)
     if fill_rate < 1.0:
         positions = positions * fill_rate
-    raw_returns = close.pct_change()
 
     # Transaction costs: apply on position changes
     position_changes = positions.diff().abs()
@@ -236,24 +225,22 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
 
     # Market impact model: impact = (position_notional / ADV) * impact_coefficient
     # ADV = rolling average of daily volume (in shares) * price
-    if args.impact_coefficient > 0 and volume is not None:
-        # Average Daily Volume in shares (rolling)
-        adv_shares = volume.rolling(window=args.adv_window, min_periods=1).mean()
-        # Average Daily Volume in notional (shares * price)
-        adv_notional = adv_shares * close
-        # Position notional = |position_change| * equity, where equity is the
-        # current portfolio value.  Since this function only sees returns (not
-        # equity), equity is approximated by initial_capital * cumprod(1 +
-        # raw_returns), i.e. the value of a fully-invested buy-and-hold position
-        # in the asset at the current price.  This is the correct scaling: the
-        # original implementation multiplied by the raw asset price (~$100),
-        # understating the notional by ~1000x and making impact_coefficient a
-        # silent no-op.  Mirrors _calculate_strategy_returns in walk_forward.py.
-        equity = args.initial_capital * (1 + raw_returns).cumprod()
-        position_notional = position_changes * equity
-        # Market impact as fraction of notional traded
-        market_impact = (position_notional / adv_notional.replace(0, np.nan)) * args.impact_coefficient
-        market_impact = market_impact.fillna(0)
+    #
+    # The model lives in utils.market_impact_cost so that this path and
+    # walk_forward.py charge the same impact for the same panel. For a
+    # panel the portfolio notional is split equally over the constituents
+    # and every constituent is measured against its own ADV.
+    market_impact = market_impact_cost(
+        position_changes=position_changes,
+        raw_returns=raw_returns,
+        close=close,
+        volume=volume,
+        is_panel=is_panel,
+        impact_coefficient=args.impact_coefficient,
+        adv_window=args.adv_window,
+        initial_capital=args.initial_capital,
+    )
+    if market_impact is not None:
         costs = costs + market_impact
 
     # Borrow and funding costs are annualized rates applied per period.
@@ -262,7 +249,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     # 365 for calendar-daily, 52 for weekly, 12 for monthly), matching
     # the annualization used for the performance metrics. Falls back to
     # 252 when the frequency cannot be inferred.
-    ann_factor = _annualization_factor(close.index)
+    ann_factor = _annualization_factor(raw_returns.index)
 
     # Borrow cost for short positions
     # Applied per period on the absolute value of short positions
@@ -308,9 +295,12 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     # `data`: for dict panel data `len(data)` is the number of
     # symbols (not bars) and `data.index` does not exist, which
     # crashed the extractor or silently dropped every trade.
-    # `positions`, `close` and the trade ledger all share the
+    # `positions`, `price` and the trade ledger all share the
     # common date index for single-asset, MultiIndex and dict
-    # panel formats alike.
+    # panel formats alike. `price` is the market model's representative
+    # price series (the close for a single asset, the equal-weighted mean
+    # of the per-asset closes for a panel), so the ledger is priced on the
+    # same basket the return series is marked against.
     n_bars = len(position_changes_bool)
 
     trades = []
@@ -324,7 +314,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
 
         # Close any currently open position at this bar's price.
         if entry_idx is not None:
-            exit_price = close.iloc[i]
+            exit_price = price.iloc[i]
             exit_date = positions.index[i]
             pnl = (exit_price - entry_price) * entry_direction
             trades.append({
@@ -342,7 +332,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
         new_pos = positions.iloc[i]
         if new_pos != 0:
             entry_idx = i
-            entry_price = close.iloc[i]
+            entry_price = price.iloc[i]
             entry_date = positions.index[i]
             entry_direction = 1 if new_pos > 0 else -1
 
@@ -357,7 +347,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     # `closed_at_end`. A position opened on the very last bar has no
     # later bar to close at and is left unrecorded.
     if entry_idx is not None and entry_idx < n_bars - 1:
-        exit_price = close.iloc[-1]
+        exit_price = price.iloc[-1]
         exit_date = positions.index[-1]
         pnl = (exit_price - entry_price) * entry_direction
         trades.append({
@@ -426,10 +416,30 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     # single-backtest path reports capacity consistently with walk-forward/
     # CPCV/out-of-sample paths. Build a close/volume frame from the aligned
     # series (handles single-asset, MultiIndex and dict-panel inputs).
+    #
+    # For a panel the frame keeps one column per constituent, so
+    # estimate_capacity applies the same equal-weighted basket rule used by
+    # the walk-forward paths: each constituent carries 1/n_assets of the
+    # portfolio notional and the *least liquid* constituent binds the
+    # portfolio capacity. (The previous code collapsed the panel into a
+    # pseudo-asset built from the mean close and the mean volume, which
+    # overstated the panel's liquidity and made the two paths disagree.)
     try:
-        _cap_frame = pd.DataFrame({"close": close, "volume": volume})
-        _cap = estimate_capacity(_cap_frame, args.impact_coefficient, adv_window=args.adv_window)
-        results["capacity"] = _cap.get("estimated_capacity")
+        if is_panel:
+            _cap_frame = (
+                pd.concat({"close": close, "volume": volume}, axis=1)
+                if volume is not None
+                else None
+            )
+        else:
+            _cap_frame = pd.DataFrame({"close": close, "volume": volume})
+        if _cap_frame is None:
+            results["capacity"] = None
+        else:
+            _cap = estimate_capacity(
+                _cap_frame, args.impact_coefficient, adv_window=args.adv_window
+            )
+            results["capacity"] = _cap.get("estimated_capacity")
     except Exception:
         results["capacity"] = None
 

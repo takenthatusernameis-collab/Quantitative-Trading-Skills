@@ -31,7 +31,11 @@ from data_loader import (
     adjust_for_splits,
 )
 from performance import calculate_metrics, generate_report, _benchmark_stats
-from utils import _annualization_factor
+from utils import (
+    _annualization_factor,
+    build_market_model,
+    market_impact_cost,
+)
 from reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
 
@@ -1441,46 +1445,15 @@ def _calculate_strategy_returns(
         latency = 0
     if latency < 0:
         latency = 0
-    is_panel = False
-    if isinstance(data, dict):
-        # For dict of dataframes, compute equal-weighted portfolio returns
-        # Use first key's index as reference
-        common_index = None
-        for df in data.values():
-            if common_index is None:
-                common_index = df.index
-            else:
-                common_index = common_index.intersection(df.index)
-        common_index = common_index.sort_values()
-        rets = []
-        closes = []
-        vols = []
-        for df in data.values():
-            aligned = df.reindex(common_index)
-            rets.append(aligned["close"].pct_change())
-            closes.append(aligned["close"])
-            vols.append(aligned["volume"])
-        raw_returns = pd.concat(rets, axis=1).mean(axis=1)
-        # Per-asset frames drive the market-impact model for a panel (see
-        # the impact block below): each asset carries 1/n_assets of the
-        # portfolio notional, so the impact of each asset is computed
-        # against that asset's own ADV.
-        asset_keys = list(data.keys())
-        close = pd.concat(closes, axis=1)
-        close.columns = asset_keys
-        volume = pd.concat(vols, axis=1)
-        volume.columns = asset_keys
-        is_panel = True
-    elif isinstance(data.columns, pd.MultiIndex):
-        # For panel data, compute equal-weighted portfolio returns
-        close = data["close"]
-        raw_returns = close.pct_change().mean(axis=1)
-        volume = data["volume"]
-        is_panel = True
-    else:
-        close = data["close"]
-        raw_returns = close.pct_change()
-        volume = data["volume"]
+    # Shared market model: the single definition of how a single asset, a
+    # MultiIndex panel and a dict panel are priced. It is shared with
+    # run_backtest.py so the two entry points return comparable results for
+    # the same panel (see references/cost_models.md, "Cross-path parity").
+    market = build_market_model(data)
+    raw_returns = market["raw_returns"]
+    close = market["close"]
+    volume = market["volume"]
+    is_panel = market["is_panel"]
 
     positions = signals.shift(1 + latency) * fill_rate  # Trade at next period's open, delayed by execution latency; partial fills scale achieved exposure
 
@@ -1497,46 +1470,20 @@ def _calculate_strategy_returns(
     # implementation multiplied by the raw asset price (~$100), understating
     # the notional by ~1000x and making impact_coefficient a silent no-op.
     # ADV = rolling average of daily volume (in shares) * price
-    if impact_coefficient > 0 and volume is not None:
-        # Average Daily Volume in shares (rolling)
-        adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
-        # Average Daily Volume in notional (shares * price)
-        adv_notional = adv_shares * close
-        # Equity value of the position at risk, scaled by initial_capital
-        # so that a 100% position change on a $100k account is ~$100k notional
-        equity = initial_capital * (1 + raw_returns).cumprod()
-        position_notional = position_changes * equity
-        if is_panel:
-            # Equal-weighted basket: the portfolio's gross exposure is spread
-            # equally over the n assets (the same convention the panel return
-            # model above uses), so a position change of |d| trades
-            # |d| * equity / n in each asset. Each asset's impact is measured
-            # against its OWN ADV, and the portfolio-level impact cost is the
-            # equal-weighted average of the per-asset impacts (matching the
-            # equal-weighted return convention).
-            #
-            # Regression guard: the previous implementation divided the whole
-            # portfolio notional by a per-asset ADV, which turned `costs` into
-            # a DataFrame, produced an EMPTY return series for MultiIndex
-            # panels, and silently yielded "no signal" for every panel run
-            # with market impact enabled.
-            n_assets = max(close.shape[1], 1)
-            per_asset_notional = position_notional / n_assets
-            # `adv_notional.rdiv(traded, axis=0)` computes traded_notional /
-            # ADV for every (row, asset) pair (a plain Series/DataFrame
-            # division would align the Series to the columns instead). A
-            # zero traded notional means "no trade", so the impact is zero
-            # rather than infinite; a zero ADV is treated as missing.
-            traded = per_asset_notional.replace(0, np.nan)
-            adv_denominator = adv_notional.replace(0, np.nan)
-            market_impact = (
-                adv_denominator.rdiv(traded, axis=0) * impact_coefficient
-            )
-            market_impact = market_impact.fillna(0).mean(axis=1)
-        else:
-            # Market impact as fraction of notional traded
-            market_impact = (position_notional / adv_notional.replace(0, np.nan)) * impact_coefficient
-            market_impact = market_impact.fillna(0)
+    #
+    # The model itself lives in utils.market_impact_cost so that this path
+    # and run_backtest.py charge the same impact for the same panel.
+    market_impact = market_impact_cost(
+        position_changes=position_changes,
+        raw_returns=raw_returns,
+        close=close,
+        volume=volume,
+        is_panel=is_panel,
+        impact_coefficient=impact_coefficient,
+        adv_window=adv_window,
+        initial_capital=initial_capital,
+    )
+    if market_impact is not None:
         costs = costs + market_impact
 
     # Borrow and funding costs are annualized rates applied per period.

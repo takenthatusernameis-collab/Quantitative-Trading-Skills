@@ -119,6 +119,12 @@ notional against a single-asset proxy ADV (overstating the cost by roughly
 `..._panel_impact_degrades_returns_monotonically`,
 `..._dict_and_multiindex_panels_match_with_impact`).
 
+`run_backtest.py` had its own variant of the same defect: it charged the
+whole portfolio notional against an aggregated pseudo-asset ADV (mean close x
+mean volume across the panel), overstating the impact of a panel by roughly
+`n_assets`. It now uses the same per-asset model
+(`test_run_backtest_panel_impact_splits_notional_across_assets`).
+
 **Known limitation.** The panel strategy API exposes a *net* exposure
 (`(n_long - n_short) / n_assets`), not the per-asset weights of the book, so
 the impact cost is computed on an equal-weight book that the actual long/short
@@ -128,15 +134,50 @@ too low. Treat panel capacity and impact numbers as order-of-magnitude
 estimates and verify them against a portfolio with explicit per-asset weights
 before sizing capital.
 
-**Cross-path note.** `run_backtest.py` still models panel impact on an
-aggregated pseudo-asset (mean close x mean volume across the panel), which
-charges the whole portfolio notional against one representative asset and
-therefore overstates the impact by roughly `n_assets` relative to the
-per-asset model above. The two paths also differ in the panel *return*
-convention (`run_backtest` uses the return of the mean price series;
-`walk_forward.py` uses the mean of the per-asset returns), so panel numbers
-are not directly comparable between the two CLIs today. Unifying the two
-panel conventions is open work.
+The trade ledger of `run_backtest.py` has the same limitation: for a panel it
+prices entries and exits on the **mean price** of the constituents, because
+the panel strategy API does not expose per-asset entries. The ledger's
+per-trade P&L is therefore an approximation and does not reconcile exactly
+with the panel equity curve (which is marked on the equal-weighted basket).
+
+### Cross-path parity
+
+`run_backtest.py` (single backtest) and `walk_forward.py` (walk-forward, CPCV
+and out-of-sample validation) now price a panel with **one** convention. The
+shared definitions live in `scripts/utils.py`:
+
+| Model | Shared function | Convention |
+| --- | --- | --- |
+| Market returns | `build_market_model` | panel return = mean of the per-asset returns (`close.pct_change().mean(axis=1)`) |
+| Market impact | `market_impact_cost` | per-asset notional `|d| * equity / n_assets` against each asset's own ADV; portfolio cost = equal-weighted mean |
+| Capacity | `estimate_capacity` | equal-weighted basket; the least liquid constituent binds the portfolio capacity |
+
+The mean-of-returns convention is used instead of the return of the mean price
+series (`close.mean(axis=1).pct_change()`) because the latter prices a
+price-weighted basket whose weights drift with the constituents' relative
+moves — a rebalancing rule the position model does not represent — while the
+former is the equal-weighted basket the impact and capacity models assume.
+
+Consequence: for the same panel, strategy and cost assumptions, the two paths
+produce **identical return values on every bar where both are defined**
+(`test_run_backtest_panel_matches_walk_forward_return_calculator`,
+`test_run_backtest_dict_panel_matches_walk_forward_return_calculator`).
+
+**One remaining difference: the position warmup.** It is a *position*
+convention, not a market-model convention, and it applies to single assets
+too:
+
+- `run_backtest.py` fills the undefined first position with `0`, so the
+  position is opened on the first executable bar and the **entry cost is
+  charged** there.
+- `walk_forward.py` propagates the undefined position as `NaN`, so the first
+  bar of the window is **dropped** from the evaluation (and the entry cost is
+  never charged).
+
+`run_backtest.py` therefore reports exactly one extra leading bar (the
+initial-entry bar). This was left unchanged on purpose: changing it would
+alter the single-asset path and every published walk-forward / CPCV /
+out-of-sample number.
 
 ### Borrow Cost Model
 
@@ -301,7 +342,10 @@ The single-backtest path (`run_backtest.py`) reports the same estimate as
 part of every reported backtest result, not just multi-period validation.
 Volume is optional on this path: when the data has no `volume` column (or
 ADV is otherwise not estimable), `capacity` is `None` and the run proceeds
-without raising.
+without raising. For a panel the estimate uses the same equal-weighted basket
+rule as the walk-forward paths (the least liquid constituent binds), so the
+two CLIs report the same capacity for the same panel
+(`test_run_backtest_panel_capacity_binds_on_least_liquid_constituent`).
 
 ## Configuration
 

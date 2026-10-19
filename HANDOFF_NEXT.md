@@ -2,36 +2,34 @@
 
 ## What changed this session
 
-Executed the prior handoff's next task — **per-regime capacity surfacing in CPCV and out-of-sample validation** — and, while making it work on multi-asset data, found and fixed two defects that silently broke multi-asset research with market impact.
+Executed the prior handoff's next task — **unify the two panel backtest conventions so multi-asset results are comparable across CLIs** — and verified the unification with before/after measurements and regression tests.
 
-### 1. Per-regime capacity (the assigned task)
+### 1. One shared market model (`scripts/utils.py`, new)
 
-- `skills/quantitative-backtesting/scripts/walk_forward.py`
-  - `cpcv_analysis`: every fold now carries `fold["capacity"]` (market-impact capacity of that fold's test window). Capacity is a property of the fold's *market data*, so it is computed for **every** fold, not only folds whose grid search produced returns, and it is `None` when impact is disabled or ADV is not estimable.
-  - `out_of_sample_validation`: `validation_performance["capacity"]` (validation window) and `test_performance["capacity"]` (held-out test window), plus `summary["validation_capacity"]` / `summary["test_capacity"]`.
-  - `walk_forward_analysis`: the existing per-period capacity is now computed for **every** period (previously only when the grid search produced returns), so `period["capacity"]` is always present.
-  - CLI artifacts: `capacity_per_fold` (CPCV summary JSON) and `capacity_per_period` (walk-forward summary JSON); the out-of-sample JSON now carries the per-split `capacity` in `test_performance` and in `summary`.
-- `skills/quantitative-backtesting/scripts/reporting.py`: the tear sheet renders a **"Capacity (Notional)"** column in the "Best Parameters Per Period" and "Best Parameters Per Fold" tables (`N/A` when the estimate is absent), so capacity degradation across regimes is visible instead of only in the aggregate summary.
-- `skills/quantitative-backtesting/references/cost_models.md`, `SKILL.md`: documented the per-regime keys, the CLI artifact keys, the tear-sheet column, and the multi-asset capacity convention.
+Two new shared helpers now define, in one place, how a single asset, a MultiIndex panel and a dict panel are priced:
 
-### 2. `estimate_capacity` crashed on multi-asset panels (fixed)
+- `build_market_model(data)` — normalizes the three input shapes into one representation and returns `raw_returns`, `close`, `volume`, `price` (a representative price series for trade ledgers) and `is_panel`.
+  - **Panel return convention (now unified): the mean of the per-asset returns**, `close.pct_change().mean(axis=1)`. The return of the mean price series (`close.mean(axis=1).pct_change()`) is deliberately **not** used: it prices a price-weighted basket whose weights drift with the constituents' relative moves — a rebalancing rule the position model does not represent — while the mean-of-returns convention is the equal-weighted basket the impact and capacity models assume.
+  - For a dict panel the per-asset volume frame is only built when **every** constituent carries a volume column, so the impact model never mixes a per-asset ADV with a portfolio-level notional.
+- `market_impact_cost(...)` — the linear impact model `(position_notional / ADV_notional) * coefficient`, with the panel rule: a position change of `|d|` trades `|d| * equity / n_assets` in each constituent, each constituent is measured against **its own** ADV, and the portfolio cost is the equal-weighted mean of the per-asset impacts.
 
-`estimate_capacity` called `float()` on the per-asset slices of a MultiIndex panel, raising `TypeError: float() argument must be a string or a real number, not 'Series'`. This aborted **every** multi-asset walk-forward / CPCV / out-of-sample run that enabled market impact (the summary-level capacity call was on that path). The estimator now handles panels explicitly: the basket is equal-weighted, each of the `n_assets` constituents carries `1/n_assets` of the portfolio notional, and the **least liquid constituent binds** the portfolio capacity:
+Both `run_backtest.py` and `walk_forward.py` now call these helpers, so the two entry points cannot drift apart again.
 
-```
-capacity = n_assets * max_impact * min_i(ADV_notional_i) / impact_coefficient
-```
+### 2. `run_backtest.py` aligned to the shared model
 
-The returned dict reports the binding member's `price`/`adv_shares`/`adv_notional` plus `n_assets` and `binding_asset`, so the driver of the estimate is auditable. Single-asset results are unchanged.
+- The panel branch no longer builds a mean-price series for returns and no longer charges the whole portfolio notional against an aggregated pseudo-asset (mean close × mean volume) ADV. Panel impact was overstated by roughly `n_assets` there; it now uses the shared per-asset model.
+- The trade ledger is priced on the market model's representative `price` series (close for a single asset, the equal-weighted mean of the per-asset closes for a panel) — the same values the ledger used before, now sourced from the shared model.
+- The panel **capacity** estimate now passes a per-constituent frame to `estimate_capacity`, so the least-liquid constituent binds the portfolio capacity exactly as in the walk-forward paths. Previously the panel was collapsed into a pseudo-asset, which made the two CLIs report different capacities for the same panel.
+- Removed the now-unused `import numpy as np`.
 
-### 3. Market impact on a multi-asset panel silently produced "no signal" (fixed)
+### 3. `walk_forward.py` refactored onto the shared helpers (bit-for-bit unchanged)
 
-This was the more serious defect, and it was **not** in the assigned task — it surfaced because the new per-fold capacity calls run on panel data.
+`_calculate_strategy_returns` now calls `build_market_model` / `market_impact_cost` instead of its own inline copies. **Its numerical output is unchanged**, verified against a pre-change snapshot over 24 configurations (single asset / MultiIndex panel / dict panel × impact coefficient ∈ {0, 0.5} × latency ∈ {0, 2} × fill_rate ∈ {1.0, 0.5}): all 24 cases identical to the last bit, same index, same dtype.
 
-- Symptom: with `--impact-coefficient > 0`, a MultiIndex-panel CPCV run selected **0 of 4** folds and produced **0** out-of-sample returns. A user reads that as "the strategy has no edge" when the real cause is that the impact model was dropping every configuration.
-- Root cause (`_calculate_strategy_returns`): the impact block divided the *whole* portfolio notional by a per-asset ADV frame, so `costs` became a DataFrame, `strategy_returns` became a DataFrame, and `.dropna()` emptied it.
-- Fix: panels are modeled per asset on the same equal-weighted convention the panel *return* model already uses (`|position_change| * equity / n_assets` traded in each asset, each asset measured against **its own** ADV, portfolio cost = equal-weighted mean of the per-asset impacts). The single-asset path is bit-for-bit unchanged; the dict-panel and MultiIndex-panel formats now produce **identical** results.
-- Side effect: the dict-panel impact cost is now ~`1/n_assets` of the old value (the old code charged the whole portfolio notional against a single-asset proxy ADV, overstating impact by ~`n_assets`). The `trading_costs_robustness_example.py` market-impact sweep therefore now reports **-4.43%** (49.04% → 44.61% at coefficient 5.0) instead of -10.44%; the qualitative conclusion (monotone degradation) is unchanged.
+### 4. Documentation
+
+- `references/cost_models.md`: the old "Cross-path note" (which described the divergence as open work) is replaced by a **Cross-path parity** section — a table of the three shared models, the reason for the mean-of-returns convention, the parity guarantee, and an explicit description of the one remaining difference (the position warmup, below). The panel-impact "Regression history" now also records the `run_backtest.py` pseudo-asset variant, and the capacity section states that the single-backtest path uses the same least-liquid-binds rule.
+- `SKILL.md`: added the `utils.py` script entry, described the shared panel convention on the `run_backtest.py` entry, and listed the five new regression tests.
 
 ## What was actually verified
 
@@ -39,10 +37,10 @@ Test suite (all green; baseline in parentheses):
 
 | Suite | Result |
 | --- | --- |
-| `test_cpcv.py` | 20/20 (18) |
-| `test_walk_forward.py` | 153/153 (145) |
-| `test_reporting.py` | 56/56, `OK` (53) |
-| `test_run_backtest.py` | 68/68 (68) |
+| `test_run_backtest.py` | 73/73 (68) |
+| `test_walk_forward.py` | 153/153 (153) |
+| `test_cpcv.py` | 20/20 (20) |
+| `test_reporting.py` | 56/56, `OK` (56) |
 | `test_data_loader.py` | 32/32 (32) |
 | `test_examples_coverage.py` | 6/6 (6) |
 | `test_falsifiable_hypothesis_example.py` | 3/3 (3) |
@@ -51,64 +49,81 @@ Test suite (all green; baseline in parentheses):
 | `test_performance.py` | 33/33 (33) |
 | `test_strategy_builder.py` | 28/28 (28) |
 
-New regression tests (all registered in the respective `TEST_REGISTRY`):
+New regression tests (all registered in `TEST_REGISTRY` in `tests/test_run_backtest.py`):
 
-- `test_cpcv.py`: `test_cpcv_surfaces_capacity_per_fold`, `test_cpcv_multi_asset_panel_capacity_does_not_raise`.
-- `test_walk_forward.py`: `test_estimate_capacity_multi_asset_panel_binds_on_least_liquid_asset`, `test_estimate_capacity_multi_asset_panel_scales_with_asset_count`, `test_out_of_sample_validation_surfaces_capacity_per_split`, `test_cli_cpcv_writes_capacity_per_fold`, `test_cli_out_of_sample_writes_capacity_per_split`, `test_calculate_strategy_returns_panel_with_impact_is_not_empty`, `test_calculate_strategy_returns_panel_impact_degrades_returns_monotonically`, `test_calculate_strategy_returns_dict_and_multiindex_panels_match_with_impact`.
-- `test_reporting.py`: `test_generate_tear_sheet_surfaces_per_period_capacity`, `test_generate_tear_sheet_surfaces_per_fold_capacity`, `test_generate_tear_sheet_period_capacity_absent_renders_na`.
+- `test_run_backtest_panel_matches_walk_forward_return_calculator` — the same panel, strategy and costs produce **identical return values** through `run_backtest.py` and through `walk_forward.py`'s return calculator (MultiIndex panel; impact 0.0 and 0.5).
+- `test_run_backtest_dict_panel_matches_walk_forward_return_calculator` — same parity for the dict panel format.
+- `test_run_backtest_panel_uses_mean_of_per_asset_returns` — pins the return convention (and asserts it is *not* the mean-price return).
+- `test_run_backtest_panel_impact_splits_notional_across_assets` — the panel impact drag is the per-asset model, not the whole-notional-against-one-ADV model.
+- `test_run_backtest_panel_capacity_binds_on_least_liquid_constituent` — the panel capacity equals `estimate_capacity` on the same panel and equals `n_assets * max_impact * min_i(ADV_notional_i) / coefficient`.
 
-Before/after evidence for the panel-impact defect (same 5-asset panel, `cross_sectional_momentum`, 4 folds; produced by running the identical probe against the stashed baseline and against the current tree):
+Before/after evidence for the cross-path divergence (identical 5-asset, 504-bar panel, `cross_sectional_momentum`; produced by running the identical probe against the stashed baseline and against the current tree):
 
 ```
 --- BEFORE (original code) ---
-impact=0.0: folds_with_params=4/4 oos_len=92
-impact=0.5: RAISED TypeError: float() argument must be a string or a real number, not 'Series'
-capacity-crash-removed impact=0.5: folds_with_params=0/4 oos_len=0     <-- silent "no signal"
+impact=0.0: run_backtest n=503 first=2020-01-02 ann_mean=0.1573 ann_vol=0.0225 total=0.3673
+            walk_forward n=502 first=2020-01-03 ann_mean=0.1405 ann_vol=0.0216 total=0.3224
+            max |diff| on common index = 1.728e-03   corr = 0.947716
+impact=0.5: identical numbers (the pseudo-asset impact drag was too small to show at 4 dp)
 --- AFTER (current code) ---
-impact=0.0: folds_with_params=4/4 oos_len=92
-impact=0.5: folds_with_params=4/4 oos_len=92
+impact=0.0: run_backtest n=503 first=2020-01-02 ann_mean=0.1405 ann_vol=0.0216 total=0.3224
+            walk_forward n=502 first=2020-01-03 ann_mean=0.1405 ann_vol=0.0216 total=0.3224
+            max |diff| on common index = 0.000e+00   corr = 1.000000
+impact=0.5: same (max |diff| = 0.000e+00)
+```
+
+CLI-level capacity parity on the same 5-asset panel (`--impact-coefficient 0.5`):
+
+```
+BEFORE: run_backtest panel capacity = 1620616.8717802505   (pseudo-asset)
+        walk_forward cpcv capacity   = 3513695.2387903403   (per-asset)   -> 2.17x disagreement
+AFTER:  run_backtest panel capacity = 3513695.2387903403
+        walk_forward cpcv capacity   = 3513695.2387903403                  -> parity
 ```
 
 Other verifications:
 
-- CLI smoke test, CPCV (`--impact-coefficient 0.5`): `cpcv_summary.json` carries `capacity_per_fold` (656635 / 590418 / 543386 / 683804 for the four folds) and `summary.capacity` 620692.76; the tear sheet renders the "Capacity (Notional)" column with those values.
-- CLI smoke test, out-of-sample (`--impact-coefficient 0.5`, 1200-bar sample): `summary.validation_capacity` 1321713.29, `summary.test_capacity` 967579.51, `test_performance.capacity` present.
-- `examples/falsifiable_hypothesis_example.py` output is **byte-identical** to the pre-change baseline (`diff` clean), verdict still **NOT SUPPORTED** (pre-existing; the hypothesis is falsified by its own criteria — not a regression).
-- `examples/trading_costs_robustness_example.py` still runs end-to-end and still shows monotone impact degradation (numbers changed, see above).
+- `walk_forward._calculate_strategy_returns` is **bit-for-bit identical** to the pre-change baseline over 24 configurations (snapshot taken before the refactor, compared after).
+- `examples/falsifiable_hypothesis_example.py` stdout is **byte-identical** to the pre-change baseline (`diff` clean); verdict still **NOT SUPPORTED** (pre-existing: the hypothesis is falsified by its own criteria, not a regression).
+- `examples/trading_costs_robustness_example.py` stdout is byte-identical apart from its random temp-directory path.
+- All six examples in `examples/` run to completion (exit 0).
+- CLI panel CPCV smoke test: `run_backtest.py --multi-symbol` and `walk_forward.py cpcv --multi-symbol` on the same panel CSV now report the same aggregate capacity and the same fold-level results (identical before and after this change).
 - `test_import.py` and `verify_end_to_end.py` at the repo root still pass.
-- `git diff --stat`: 7 files, ~758 insertions / 31 deletions, plus this handoff pair. The `examples/example_output/data_provenance.json` timestamp-only churn produced by the example runs was reverted.
+- The `examples/example_output/data_provenance.json` timestamp-only churn produced by the example runs was reverted.
+- `git diff --stat`: 6 files, ~591 insertions / ~144 deletions, plus this handoff pair.
 
 ## What remains unresolved
 
-- **The two panel backtest paths still disagree with each other.** `run_backtest.py` models a panel as the *return of the mean price* series (`close.mean(axis=1).pct_change()`), while `walk_forward.py` models it as the *mean of the per-asset returns* (`close.pct_change().mean(axis=1)`). Measured on one 5-asset, 504-bar panel: annualized mean 0.685 vs 0.549, annualized vol 0.091 vs 0.084, correlation of the two daily series 0.893, maximum daily difference 1.2%. `run_backtest.py` also still charges panel impact against an aggregated pseudo-asset (mean close x mean volume) instead of the per-asset model now used in `walk_forward.py`. Panel numbers are therefore **not comparable across the two CLIs**; this is documented in `references/cost_models.md` ("Cross-path note").
-- **Panel impact uses net exposure, not book weights.** The panel strategy API exposes `(n_long - n_short) / n_assets`, not per-asset weights, so the impact cost is computed on an equal-weight book that does not match a real long/short book. A strategy whose gross exposure exceeds `|net exposure|` has a modelled impact cost that is, if anything, too low. Documented as a known limitation.
+- **One cross-path difference remains: the position warmup.** It is a *position* convention, not a market-model convention, and it applies to single assets too. `run_backtest.py` fills the undefined first position with `0`, so the position is opened on the first executable bar and the **entry cost is charged**; `walk_forward.py` propagates it as `NaN`, so the first bar of the window is **dropped** from the evaluation and the entry cost is never charged. `run_backtest.py` therefore reports exactly one extra leading bar. This was left unchanged on purpose: changing it would alter the single-asset path and every published walk-forward / CPCV / out-of-sample number. It is now documented in `references/cost_models.md` ("Cross-path parity") and asserted by the parity tests.
+- **Panel impact still uses net exposure, not book weights.** The panel strategy API exposes `(n_long - n_short) / n_assets`, not the per-asset weights of the book, so the impact cost is computed on an equal-weight book that the actual long/short composition does not match. A strategy whose gross exposure exceeds `|net exposure|` has a modelled impact cost that is, if anything, too low. Documented as a known limitation.
+- **The panel trade ledger is an approximation.** For a panel it prices entries and exits on the mean price of the constituents, because the panel strategy API does not expose per-asset entries. The ledger's per-trade P&L therefore does not reconcile exactly with the panel equity curve (which is marked on the equal-weighted basket). Now documented in `references/cost_models.md`.
 - **Capacity is a point-in-time reading, not a trend.** The estimator uses the *last* ADV in each window, so per-regime capacity shows the liquidity available at the end of a window; a capacity *degradation trend* (e.g. minimum or median ADV over the window) is not derived.
-- The 9 matplotlib-dependent `test_reporting.py` tests that failed in the previous sandbox **pass in this sandbox** (matplotlib is installed here). They were not re-verified anywhere else.
+- **A "no position was ever taken" run still reports `total_oos_return: 0.0`** in the CPCV / walk-forward summary JSON (see the next task).
 
 ## Approaches already failed / why
 
-- First panel-impact attempt used `position_notional / adv_notional` (Series over DataFrame). pandas aligns a Series operand to the DataFrame's **columns**, not its rows, so the result was a 60x62 frame instead of 60x2 and the impact silently contributed nothing. Fixed by using `adv_denominator.rdiv(traded, axis=0)` (row-wise) — recorded here because the same trap applies to any future row-wise Series/DataFrame arithmetic here.
-- Second attempt divided by the traded notional directly, so rows with no trade produced `inf` and the return series went to `-inf`. Fixed by replacing zero traded notional with `NaN` (no trade -> zero impact) and zero ADV with `NaN`.
-- The dict-panel branch initially produced duplicate `"close"` column labels from `pd.concat`, which made the later division fail with `cannot reindex on an axis with duplicate labels`. Fixed by renaming the concatenated columns to the asset keys.
-- `git stash`-based before/after comparison of the falsifiable-hypothesis example was run twice (before and after the impact-model change) to prove the example's output is unchanged; both diffs were clean.
+- The first attempt at unifying the panel impact in `run_backtest.py` was to reuse the old pseudo-asset shape; it is not equivalent to the per-asset model and was rejected in favour of sharing `market_impact_cost` verbatim.
+- Making the two paths *fully* identical (same index set, not just the same values) would have required changing `walk_forward.py`'s `NaN` position warmup to a `fillna(0)` warmup. That changes the **single-asset** path and every published walk-forward / CPCV / out-of-sample number, which the prior handoff's constraints forbid; it was therefore not attempted. The residual one-bar difference is documented and asserted instead.
+- `git stash`-based before/after comparisons were run three times (falsifiable-hypothesis example, trading-costs example, CPCV panel CLI) to prove the unchanged behaviour; all diffs were as expected.
 
 ## Next task (precise, bounded, evidence-based)
 
-**Unify the two panel backtest conventions so multi-asset results are comparable across CLIs.**
+**Make "the strategy never took a position" distinguishable from "the strategy made no money" in the CPCV / walk-forward summaries.**
 
-- Problem (measured, see "What remains unresolved"): `run_backtest.py` and `walk_forward.py` use different panel return conventions and different panel impact conventions. A researcher who runs `run_backtest.py --multi-symbol` and `walk_forward.py cpcv --multi-symbol` on the same panel cannot compare the two results.
+- Problem (measured, see below): when no parameter configuration produces an active signal in a fold's test window, the fold is silently skipped and the summary reports `total_oos_return: 0.0` — indistinguishable from a strategy that traded and lost everything. A downstream reader (or a JSON consumer) would read "0.0% OOS return" as "no edge" when the truth is "no position was ever taken".
+- Measured evidence: a 5-asset panel, `cross_sectional_momentum`, CPCV with 4 folds, `--param-grid '{"lookback": [15, 20, 30]}'` (the **default** `top_quantile = bottom_quantile = 0.2`) selects **0 of 4** folds and reports `total_oos_return: 0.0`, `avg_param_stability: 0.0`, `overfitting_risk: "high"`. The CLI text does print `OOS Sharpe Ratio: N/A` and the strategy emits a `UserWarning` about the flat signal (the warning is in stderr), but the JSON summary still says `total_oos_return: 0.0`. With asymmetric quantiles (`top_quantile 0.4 / bottom_quantile 0.2`) the same run selects 4/4 folds and reports `total_oos_return: 0.00048668575163635097`. This behaviour is **identical before and after this session's change** (verified with the stashed baseline), i.e. it is pre-existing, not a regression.
 - Work items:
-  1. Pick one panel return convention and apply it in both paths (recommendation: the mean of per-asset returns, `close.pct_change().mean(axis=1)`, because it is the convention already used by the walk-forward/CPCV/out-of-sample paths and it does not imply a rebalanced basket that the position model does not represent). Change `run_backtest.py`'s panel branch accordingly.
-  2. Apply the same per-asset impact model in `run_backtest.py` that now lives in `walk_forward.py::_calculate_strategy_returns` (per-asset notional `|d| * equity / n`, per-asset ADV, portfolio cost = equal-weighted mean), so panel impact is not overstated by ~`n_assets`.
-  3. Add a parity regression test: the same panel + strategy + costs must produce the same return series through `run_backtest.py` and through `walk_forward.py`'s return calculator (there is already a dict-vs-MultiIndex parity test in `tests/test_walk_forward.py` to mirror).
-  4. Re-verify the full suite and re-run `examples/trading_costs_robustness_example.py`; update the "Cross-path note" in `references/cost_models.md`.
-- Constraints: keep the single-asset path bit-for-bit unchanged; no new dependencies; do not change the falsifiable-hypothesis example's verdict (it must stay `NOT SUPPORTED`).
-- Acceptance evidence: parity test passes, full suite green, and the documented cross-path difference disappears (re-run the measurement above and record before/after numbers).
+  1. In `walk_forward.py`, report `total_oos_return` as `None` (not `0.0`) when no fold produced an out-of-sample return, and add an explicit count of folds that actually produced a position (e.g. `folds_with_position`) to the CPCV and walk-forward summaries. The relevant code is `walk_forward.py:1684` (walk-forward) and `walk_forward.py:2159` (CPCV): `float((1 + oos_returns).prod() - 1) if len(oos_returns) > 0 else 0.0`.
+  2. Check the consumers before changing the type: `walk_forward.py:2890`, `:3222` and the sweep writers at `:3310`, `:3416` coerce the value with `float(summary.get("total_oos_return", 0.0))` and format it with `:.2%` / `:.4f` — these must tolerate `None` (render `N/A`) instead of raising or silently printing `0.0000`.
+  3. Apply the same treatment to `out_of_sample_validation` if it has the same pattern, and make the CPCV/walk-forward tear-sheet rows show the new count.
+  4. Add regression tests: a CPCV run in which every parameter set is skipped must report `total_oos_return is None` (not `0.0`) and `folds_with_position == 0`; a normal run must keep the current numbers.
+- Constraints: do not change the strategy's signal generation or the `_validate_quantiles` warning (they are correct); do not change the numbers of runs that *do* select parameters; keep the JSON keys backward compatible where possible (add keys rather than rename).
+- Acceptance evidence: the failing case reports `None` / `0` instead of `0.0`; a healthy run's summary is byte-identical to its pre-change value; the full suite stays green; `references/validation_methods.md` and `SKILL.md` document the new keys.
 
 ## Relevant files
 
-- `skills/quantitative-backtesting/scripts/walk_forward.py` — `estimate_capacity` (~line 1590), `_calculate_strategy_returns` panel impact block (~lines 1440-1540), `cpcv_analysis` fold loop, `out_of_sample_validation` split blocks, `run_cpcv` / `run_walk_forward` / `run_out_of_sample_validation` summary writers.
-- `skills/quantitative-backtesting/scripts/run_backtest.py` — panel branch at lines ~180-201 and the impact block at lines ~237-257 (the next task's target).
-- `skills/quantitative-backtesting/scripts/reporting.py` — per-period / per-fold capacity columns (~lines 555-750).
-- `skills/quantitative-backtesting/tests/test_walk_forward.py`, `tests/test_cpcv.py`, `tests/test_reporting.py` — new capacity and panel-impact regression tests.
-- `skills/quantitative-backtesting/references/cost_models.md` — market-impact model, per-regime capacity, multi-asset capacity convention, and the cross-path note.
+- `skills/quantitative-backtesting/scripts/utils.py` — the new shared `build_market_model` and `market_impact_cost` (the single definition of the panel convention).
+- `skills/quantitative-backtesting/scripts/run_backtest.py` — panel branch now uses the shared model (~line 180), impact block (~line 226), trade ledger priced on `price` (~lines 300-350), panel capacity frame (~line 417).
+- `skills/quantitative-backtesting/scripts/walk_forward.py` — `_calculate_strategy_returns` now calls the shared helpers (~lines 1444-1520); `estimate_capacity` panel rule (~line 1576); the `total_oos_return` sites for the next task (~lines 1684, 2159, 2890, 3222).
+- `skills/quantitative-backtesting/tests/test_run_backtest.py` — the five new cross-path parity / convention tests (registered in `TEST_REGISTRY`).
+- `skills/quantitative-backtesting/references/cost_models.md` — the market-impact model, the per-regime capacity, and the new "Cross-path parity" section.

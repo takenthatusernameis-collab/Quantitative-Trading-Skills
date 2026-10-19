@@ -1360,6 +1360,248 @@ def test_run_backtest_multi_asset_dict_dual_momentum():
 
 
 # ---------------------------------------------------------------------------
+# Cross-path parity with the walk-forward / CPCV / out-of-sample paths
+# ---------------------------------------------------------------------------
+#
+# A researcher who runs `run_backtest.py --multi-symbol` and
+# `walk_forward.py cpcv --multi-symbol` on the same panel must be able to
+# compare the two results. That requires a single shared market model
+# (utils.build_market_model) and a single shared impact model
+# (utils.market_impact_cost).
+#
+# The one remaining difference is the *position warmup*, not the market
+# model: run_backtest.py opens the position on the first executable bar and
+# charges the entry cost there, while walk_forward.py propagates the
+# undefined first position as NaN and therefore drops that bar from the
+# evaluation window. The two series are identical on every bar where both
+# are defined.
+
+
+def _panel_parity_returns(data, strategy, args):
+    """Return (run_backtest returns, walk_forward returns) for the same panel."""
+    from walk_forward import _calculate_strategy_returns
+
+    results = run_backtest(data, strategy, args)
+    signals = strategy.generate_signals(data)
+    wf = _calculate_strategy_returns(
+        data, signals,
+        commission=args.commission,
+        slippage=args.slippage,
+        impact_coefficient=args.impact_coefficient,
+        adv_window=args.adv_window,
+        borrow_cost=args.borrow_cost,
+        funding_cost=args.funding_cost,
+        latency=args.latency,
+        fill_rate=args.fill_rate,
+        initial_capital=args.initial_capital,
+    )
+    return results["returns"], wf
+
+
+def test_run_backtest_panel_matches_walk_forward_return_calculator():
+    """The same panel, strategy and costs must produce the same return series
+    through run_backtest.py and through walk_forward.py's return calculator.
+
+    Regression guard: the two paths used different panel return conventions
+    (the return of the mean price vs the mean of the per-asset returns) and
+    different panel impact conventions (the whole portfolio notional against an
+    aggregated pseudo-asset vs a per-asset notional against each asset's own
+    ADV), so panel results were not comparable across the two CLIs.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    strategy = build_strategy(
+        "cross_sectional_momentum",
+        '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}',
+    )
+
+    for impact in (0.0, 0.5):
+        args = _Args(impact_coefficient=impact)
+        rb, wf = _panel_parity_returns(data, strategy, args)
+
+        common = rb.index.intersection(wf.index)
+        assert len(common) > 0, "the two paths must share an evaluation window"
+        np.testing.assert_array_equal(
+            rb.reindex(common).to_numpy(),
+            wf.reindex(common).to_numpy(),
+            err_msg=(
+                f"panel returns diverged between run_backtest.py and "
+                f"walk_forward.py at impact_coefficient={impact}"
+            ),
+        )
+
+        # The only difference is the warmup bar: run_backtest.py keeps the
+        # bar on which the position is opened (and charges the entry cost),
+        # walk_forward.py drops it.
+        assert len(rb) - len(wf) == 1, (
+            f"expected exactly one warmup bar of difference, got "
+            f"{len(rb)} (run_backtest) vs {len(wf)} (walk_forward)"
+        )
+        assert rb.index[0] < wf.index[0]
+
+
+def test_run_backtest_dict_panel_matches_walk_forward_return_calculator():
+    """The dict panel format must reach the same cross-path parity."""
+    data = _make_multiasset_dict(n=300, n_assets=5, seed=42)
+    strategy = build_strategy(
+        "cross_sectional_momentum",
+        '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}',
+    )
+
+    for impact in (0.0, 0.5):
+        args = _Args(impact_coefficient=impact)
+        rb, wf = _panel_parity_returns(data, strategy, args)
+        common = rb.index.intersection(wf.index)
+        assert len(common) > 0
+        np.testing.assert_array_equal(
+            rb.reindex(common).to_numpy(),
+            wf.reindex(common).to_numpy(),
+            err_msg=(
+                f"dict panel returns diverged between run_backtest.py and "
+                f"walk_forward.py at impact_coefficient={impact}"
+            ),
+        )
+
+
+def test_run_backtest_panel_uses_mean_of_per_asset_returns():
+    """A panel is priced as the mean of the per-asset returns, not as the
+    return of the mean price series.
+
+    The mean-price convention prices a price-weighted basket whose weights
+    drift with the constituents' relative moves -- a rebalancing rule the
+    position model does not represent -- while the mean-of-returns
+    convention is the equal-weighted basket the impact model assumes.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    strategy = build_strategy(
+        "cross_sectional_momentum",
+        '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}',
+    )
+    # Zero commission/slippage so the return series is exactly
+    # position * market return.
+    args = _Args(commission=0.0, slippage=0.0)
+    rb = run_backtest(data, strategy, args)["returns"]
+
+    positions = strategy.generate_signals(data).shift(1).fillna(0)
+    expected = (positions * data["close"].pct_change().mean(axis=1)).dropna()
+    np.testing.assert_allclose(
+        rb.to_numpy(), expected.reindex(rb.index).to_numpy(), rtol=0, atol=1e-15
+    )
+
+    # ... and it is NOT the return of the mean price series.
+    mean_price = data["close"].mean(axis=1)
+    old_convention = (positions * mean_price.pct_change()).dropna()
+    assert not np.allclose(
+        rb.to_numpy(), old_convention.reindex(rb.index).to_numpy(), rtol=0, atol=1e-12
+    ), "panel returns must differ from the return of the mean price series"
+
+
+def test_run_backtest_panel_impact_splits_notional_across_assets():
+    """A panel's market-impact cost must be the per-asset model: each
+    constituent carries 1/n_assets of the traded notional and is measured
+    against its own ADV.
+
+    Regression guard: the whole portfolio notional was charged against an
+    aggregated pseudo-asset ADV (mean close x mean volume), which overstated
+    the impact of a panel by roughly n_assets.
+    """
+    periods = 300
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    rng = np.random.default_rng(11)
+    prices = 100 * np.exp(np.cumsum(rng.normal(0.0005, 0.012, periods)))
+    volume = rng.integers(1_000_000, 10_000_000, periods)
+
+    n_assets = 4
+    symbols = [f"S{i}" for i in range(n_assets)]
+    cols = pd.MultiIndex.from_product(
+        [["open", "high", "low", "close", "volume"], symbols]
+    )
+    panel = pd.DataFrame(0.0, index=dates, columns=cols)
+    for sym in symbols:
+        panel[("close", sym)] = prices
+        panel[("open", sym)] = prices
+        panel[("high", sym)] = prices
+        panel[("low", sym)] = prices
+        panel[("volume", sym)] = volume
+
+    strategy = build_strategy(
+        "cross_sectional_momentum",
+        '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}',
+    )
+    single = pd.DataFrame(
+        {
+            "open": prices,
+            "high": prices,
+            "low": prices,
+            "close": prices,
+            "volume": volume,
+        },
+        index=dates,
+    )
+    single_strategy = build_strategy(
+        "sma_crossover", '{"fast_period": 5, "slow_period": 20}'
+    )
+
+    def _drag(target, strat, impact):
+        base = run_backtest(
+            target, strat, _Args(impact_coefficient=0.0)
+        )["returns"]
+        with_impact = run_backtest(
+            target, strat, _Args(impact_coefficient=impact)
+        )["returns"]
+        return (base - with_impact).dropna()
+
+    panel_drag = _drag(panel, strategy, 0.5)
+    single_drag = _drag(single, single_strategy, 0.5)
+    assert float(panel_drag.abs().sum()) > 0, "expected a non-zero impact drag"
+    assert float(single_drag.abs().sum()) > 0, "expected a non-zero impact drag"
+
+    # The panel drag must be materially smaller than charging the whole
+    # notional against a single asset's ADV (the old behaviour): each
+    # constituent carries 1/n_assets of the notional.
+    ratio = float(panel_drag.abs().sum() / single_drag.abs().sum())
+    assert ratio < 1.0 / (n_assets - 1), (
+        f"panel impact drag is overstated (ratio {ratio}); expected roughly "
+        f"1/{n_assets} of the single-asset drag"
+    )
+
+
+def test_run_backtest_panel_capacity_binds_on_least_liquid_constituent():
+    """A panel's capacity estimate must use the equal-weighted basket rule
+    (the least liquid constituent binds), matching walk_forward.py.
+
+    Regression guard: the panel was collapsed into a pseudo-asset built from
+    the mean close and the mean volume, which overstated the panel's
+    liquidity and made the two paths report different capacities.
+    """
+    from walk_forward import estimate_capacity
+
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    strategy = build_strategy(
+        "cross_sectional_momentum",
+        '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}',
+    )
+    args = _Args(impact_coefficient=0.5)
+    results = run_backtest(data, strategy, args)
+
+    direct = estimate_capacity(data, 0.5, adv_window=args.adv_window)
+    assert results["capacity"] is not None
+    assert abs(results["capacity"] - direct["estimated_capacity"]) < 1e-9
+
+    # Least liquid constituent binds: capacity = n_assets * max_impact *
+    # min_i(ADV_notional_i) / impact_coefficient.
+    n_assets = int(data["close"].shape[1])
+    adv_notional = (
+        data["volume"].rolling(window=args.adv_window, min_periods=1).mean()
+        * data["close"]
+    ).iloc[-1]
+    expected = n_assets * 0.0005 * float(adv_notional.min()) / 0.5
+    assert abs(results["capacity"] - expected) < 1e-6, (
+        f"panel capacity {results['capacity']} does not match the "
+        f"least-liquid-binds estimate {expected}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Buy-and-hold benchmark baseline tests
 # ---------------------------------------------------------------------------
 
@@ -2191,6 +2433,11 @@ TEST_REGISTRY = [
     ("test_run_backtest_multi_asset_dual_momentum", test_run_backtest_multi_asset_dual_momentum),
     ("test_run_backtest_multi_asset_dict_cross_sectional_momentum", test_run_backtest_multi_asset_dict_cross_sectional_momentum),
     ("test_run_backtest_multi_asset_dict_dual_momentum", test_run_backtest_multi_asset_dict_dual_momentum),
+    ("test_run_backtest_panel_matches_walk_forward_return_calculator", test_run_backtest_panel_matches_walk_forward_return_calculator),
+    ("test_run_backtest_dict_panel_matches_walk_forward_return_calculator", test_run_backtest_dict_panel_matches_walk_forward_return_calculator),
+    ("test_run_backtest_panel_uses_mean_of_per_asset_returns", test_run_backtest_panel_uses_mean_of_per_asset_returns),
+    ("test_run_backtest_panel_impact_splits_notional_across_assets", test_run_backtest_panel_impact_splits_notional_across_assets),
+    ("test_run_backtest_panel_capacity_binds_on_least_liquid_constituent", test_run_backtest_panel_capacity_binds_on_least_liquid_constituent),
     ("test_run_backtest_with_benchmark_attaches_aligned_returns", test_run_backtest_with_benchmark_attaches_aligned_returns),
     ("test_run_backtest_without_benchmark_omits_key", test_run_backtest_without_benchmark_omits_key),
     ("test_benchmark_superset_aligns_correctly", test_benchmark_superset_aligns_correctly),
