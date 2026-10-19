@@ -6038,6 +6038,47 @@ TEST_REGISTRY.extend([
     ("test_estimate_capacity_missing_volume_not_estimable", test_estimate_capacity_missing_volume_not_estimable),
 ])
 
+def test_walk_forward_analysis_surfaces_capacity_in_summary():
+    data = _make_ohlcv_data(periods=500, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
+
+    res_on = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        impact_coefficient=0.5,
+    )
+    assert "capacity" in res_on["summary"]
+    assert res_on["summary"]["capacity"] is not None
+    assert res_on["summary"]["capacity"] > 0
+
+    res_off = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        impact_coefficient=0.0,
+    )
+    assert res_off["summary"].get("capacity") is None
+
+
+TEST_REGISTRY.append(
+    ("test_walk_forward_analysis_surfaces_capacity_in_summary", test_walk_forward_analysis_surfaces_capacity_in_summary)
+)
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(main())

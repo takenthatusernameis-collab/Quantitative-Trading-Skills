@@ -723,6 +723,11 @@ def walk_forward_analysis(
 
     summary["bias_controls_engaged"] = bool(pit_results is not None)
 
+    # Surface market-impact capacity estimate in the summary when impact is
+    # enabled and estimable; keep None (backward compatible) otherwise.
+    _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window)
+    summary["capacity"] = _capacity.get("estimated_capacity")
+
     return {
         "periods": periods,
         "best_params_per_period": best_params_per_period,
