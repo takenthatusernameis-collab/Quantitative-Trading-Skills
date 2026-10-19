@@ -5,35 +5,35 @@ Symbol: SPY
 Strategy: sma_crossover
 
 --- Return Metrics ---
-Total Return:          19.13%
-Annualized Return:     9.17%
-Annualized Volatility: 17.76%
+Total Return:          -20.72%
+Annualized Return:     -10.98%
+Annualized Volatility: 15.89%
 
 --- Risk-Adjusted Returns ---
-Sharpe Ratio:          0.47
-Sortino Ratio:         0.68
-Calmar Ratio:          0.58
+Sharpe Ratio:          -0.78
+Sortino Ratio:         -1.04
+Calmar Ratio:          0.38
 
 --- Risk Metrics ---
-Max Drawdown:          -15.83%
-Avg Drawdown:          -5.70%
-VaR (95%):             -1.91%
+Max Drawdown:          -28.86%
+Avg Drawdown:          -18.27%
+VaR (95%):             -1.85%
 CVaR (95%):            -2.53%
-Skewness:              0.14
-Kurtosis:              2.15
+Skewness:              -0.11
+Kurtosis:              2.57
 
 --- Trade-Level Analytics ---
-Total Trades:          9
-Winning Trades:        5
-Losing Trades:         4
-Win Rate:              55.56%
-Avg Win:               6.05%
-Avg Loss:              3.57%
-Profit Factor:         2.07
-Expectancy:            1.8876
+Total Trades:          11
+Winning Trades:        3
+Losing Trades:         8
+Win Rate:              27.27%
+Avg Win:               1.98%
+Avg Loss:              4.00%
+Profit Factor:         0.18
+Expectancy:            -2.5438
 
 --- End-of-Sample Closes ---
 Trades Closed at End:      1
-% of Trades Closed at End: 11.11%
+% of Trades Closed at End: 9.09%
 
 ============================================================
