@@ -791,6 +791,71 @@ class TestTearSheet(unittest.TestCase):
                 summary = json.load(f)
             self.assertNotIn("capacity", summary["walk_forward"]["summary"])
 
+    def test_generate_tear_sheet_surfaces_per_period_capacity(self):
+        """The walk-forward per-period table renders the per-period market
+        impact capacity, so capacity degradation across regimes is visible in
+        the tear sheet instead of only in the aggregate summary."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            wf = self._make_walk_forward_results()
+            wf["periods"][0]["capacity"] = 4_250_000.0
+            wf["periods"][1]["capacity"] = 1_100_000.0
+            analysis = {"walk_forward": wf}
+
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+                analysis_results=analysis,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Capacity (Notional)", html)
+            self.assertIn("4250000", html.replace(",", ""))
+            self.assertIn("1100000", html.replace(",", ""))
+
+    def test_generate_tear_sheet_surfaces_per_fold_capacity(self):
+        """The CPCV per-fold table renders the per-fold market impact
+        capacity, so capacity degradation across folds/regimes is visible."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            cpcv = self._make_cpcv_results()
+            cpcv["folds"][0]["capacity"] = 3_600_000.0
+            cpcv["folds"][1]["capacity"] = 900_000.0
+            cpcv["folds"][2]["capacity"] = 900_000.0
+            analysis = {"cpcv": cpcv}
+
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+                analysis_results=analysis,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Capacity (Notional)", html)
+            self.assertIn("3600000", html.replace(",", ""))
+            self.assertIn("900000", html.replace(",", ""))
+
+    def test_generate_tear_sheet_period_capacity_absent_renders_na(self):
+        """When a period/fold carries no capacity estimate (impact disabled
+        or ADV not estimable) the cell renders N/A instead of a stale or
+        zero value."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            wf = self._make_walk_forward_results()
+            cpcv = self._make_cpcv_results()
+            analysis = {"walk_forward": wf, "cpcv": cpcv}
+
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+                analysis_results=analysis,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Capacity (Notional)", html)
+            self.assertIn("N/A", html)
+            self.assertNotIn("Strategy Capacity", html)
+
     def test_generate_tear_sheet_surfaces_capacity_in_summary_metrics(self):
         """The tear sheet renders a Strategy Capacity row in the Summary Metrics
         table and surfaces it in the JSON summary when the metrics dict carries

@@ -87,6 +87,57 @@ For more sophisticated models, consider:
 - Order book depth-based models
 - Time-varying impact coefficients by regime
 
+#### Multi-asset panels
+
+For a panel (MultiIndex columns or a dict of per-asset frames) the portfolio is
+an **equal-weighted basket**, which is the same convention the panel *return*
+model uses (`raw_returns = mean_i(per-asset return)`, i.e. the portfolio's
+gross exposure is spread equally over the `n` assets). A position change of
+`|d|` therefore trades `|d| * equity / n` in each asset, and each asset's
+impact is measured against **its own** ADV:
+
+```
+per_asset_notional = |position_change| * equity / n_assets
+impact_i           = (per_asset_notional_i / ADV_notional_i) * impact_coefficient
+market_impact      = mean_i(impact_i)          # equal-weighted portfolio cost
+```
+
+This is the same weighting the panel return model uses, so the impact cost and
+the portfolio return are on one consistent footing, and the dict and MultiIndex
+panel formats produce identical results.
+
+**Regression history.** The previous implementation divided the *whole*
+portfolio notional by a per-asset ADV frame. That turned the cost series into
+a DataFrame, produced an **empty** return series for MultiIndex panels, and
+silently dropped every parameter configuration in the grid search — a panel
+run with market impact enabled reported "no signal" (0 of N folds selected,
+empty out-of-sample returns) instead of modelling impact. It was also
+inconsistent with the dict-panel path, which charged the total portfolio
+notional against a single-asset proxy ADV (overstating the cost by roughly
+`n_assets`). Both are covered by regression tests
+(`test_calculate_strategy_returns_panel_with_impact_is_not_empty`,
+`..._panel_impact_degrades_returns_monotonically`,
+`..._dict_and_multiindex_panels_match_with_impact`).
+
+**Known limitation.** The panel strategy API exposes a *net* exposure
+(`(n_long - n_short) / n_assets`), not the per-asset weights of the book, so
+the impact cost is computed on an equal-weight book that the actual long/short
+composition does not match. A strategy whose gross exposure exceeds
+`|net exposure|` therefore has a modelled impact cost that is, if anything,
+too low. Treat panel capacity and impact numbers as order-of-magnitude
+estimates and verify them against a portfolio with explicit per-asset weights
+before sizing capital.
+
+**Cross-path note.** `run_backtest.py` still models panel impact on an
+aggregated pseudo-asset (mean close x mean volume across the panel), which
+charges the whole portfolio notional against one representative asset and
+therefore overstates the impact by roughly `n_assets` relative to the
+per-asset model above. The two paths also differ in the panel *return*
+convention (`run_backtest` uses the return of the mean price series;
+`walk_forward.py` uses the mean of the per-asset returns), so panel numbers
+are not directly comparable between the two CLIs today. Unifying the two
+panel conventions is open work.
+
 ### Borrow Cost Model
 
 Borrow cost models the fee paid to borrow shares for short selling. It is
@@ -199,8 +250,50 @@ disabled (`impact_coefficient <= 0`) or when ADV cannot be computed
 (missing `close`/`volume`, empty data, or non-positive ADV), so the key is
 backward compatible: consumers may omit it when absent.
 
-The tear sheet renders the capacity as a "Strategy Capacity (Notional)"
-row in the Walk-Forward / CPCV analysis tables and surfaces it in
+### Capacity per regime (fold / period / window)
+
+The aggregate `summary["capacity"]` is computed on the whole sample, so it
+hides capacity decay inside the sample. Every analysis path therefore also
+reports the capacity of each regime it evaluates:
+
+| Path                     | Key                                                        |
+| ------------------------ | ---------------------------------------------------------- |
+| `walk_forward_analysis`  | `periods[i]["capacity"]` (each out-of-sample test window)  |
+| `cpcv_analysis`          | `folds[i]["capacity"]` (each fold's test window)           |
+| `out_of_sample_validation` | `validation_performance["capacity"]` (validation window) and `test_performance["capacity"]` (held-out test window) |
+
+The out-of-sample summary also exposes them as `summary["validation_capacity"]`
+and `summary["test_capacity"]`. The CLI artifacts persist them as
+`capacity_per_period` (walk-forward) and `capacity_per_fold` (CPCV), and the
+tear sheet renders a "Capacity (Notional)" column in the per-period and
+per-fold tables. Capacity is `None` (never a stale or zero value) when impact
+is disabled or ADV is not estimable, so a regime with no estimate is
+distinguishable from a regime with a small one.
+
+Note the estimator uses the **latest** ADV in each window, so a per-regime
+value is a point-in-time liquidity reading, not a trend; a capacity
+*degradation trend* across regimes is not yet derived.
+
+### Multi-asset panels
+
+For a panel (MultiIndex columns) the basket is treated as equal-weighted: each
+of the `n_assets` constituents carries `1 / n_assets` of the portfolio
+notional, so the *least liquid* constituent sets the portfolio capacity:
+
+```
+capacity = n_assets * max_impact * min_i(ADV_notional_i) / impact_coefficient
+```
+
+This is the binding constraint — a basket can only grow until its least
+liquid member exceeds the impact threshold. The returned dict reports the
+binding member's `price` / `adv_shares` / `adv_notional`, plus `n_assets` and
+`binding_asset` so the driver of the estimate is auditable. For a single
+asset, `n_assets` is 1 and the formula reduces to the single-asset case.
+
+### Reporting
+
+The tear sheet renders the aggregate capacity as a "Strategy Capacity
+(Notional)" row in the Walk-Forward / CPCV analysis tables and surfaces it in
 `tear_sheet_summary.json` under the corresponding analysis summary.
 
 The single-backtest path (`run_backtest.py`) reports the same estimate as

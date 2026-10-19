@@ -555,11 +555,23 @@ def generate_tear_sheet(
         periods = wf_results.get("periods", [])
         if periods:
             html_parts.append("<h3>Best Parameters Per Period</h3>")
-            html_parts.append("<table><tr><th>Period</th><th>Best Params</th><th>In-Sample Sharpe</th></tr>")
+            html_parts.append(
+                "<table><tr><th>Period</th><th>Best Params</th>"
+                "<th>In-Sample Sharpe</th><th>Capacity (Notional)</th></tr>"
+            )
             for i, p in enumerate(periods):
                 params_str = _format_params(p.get("best_params"))
                 sharpe_str = _fmt_sharpe(p.get("best_sharpe"))
-                html_parts.append(f"<tr><td>{i + 1}</td><td>{params_str}</td><td class='metric'>{sharpe_str}</td></tr>")
+                # Per-period capacity makes capacity degradation across
+                # regimes visible; omitted (N/A) when impact is disabled or
+                # ADV is not estimable.
+                cap = p.get("capacity")
+                cap_str = fmt_num(cap) if cap is not None else "N/A"
+                html_parts.append(
+                    f"<tr><td>{i + 1}</td><td>{params_str}</td>"
+                    f"<td class='metric'>{sharpe_str}</td>"
+                    f"<td class='metric'>{cap_str}</td></tr>"
+                )
             html_parts.append("</table>")
 
         wf_dsr = wf_summary.get("deflated_sharpe")
@@ -716,11 +728,23 @@ def generate_tear_sheet(
         folds = cpcv_results.get("folds", [])
         if folds:
             html_parts.append("<h3>Best Parameters Per Fold</h3>")
-            html_parts.append("<table><tr><th>Fold</th><th>Best Params</th><th>Best Sharpe</th></tr>")
+            html_parts.append(
+                "<table><tr><th>Fold</th><th>Best Params</th>"
+                "<th>Best Sharpe</th><th>Capacity (Notional)</th></tr>"
+            )
             for f in folds:
                 params_str = _format_params(f.get("best_params"))
                 sharpe_str = _fmt_sharpe(f.get("best_sharpe"))
-                html_parts.append(f"<tr><td>{f.get('fold', '?')}</td><td>{params_str}</td><td class='metric'>{sharpe_str}</td></tr>")
+                # Per-fold capacity makes capacity degradation across
+                # folds/regimes visible; omitted (N/A) when impact is
+                # disabled or ADV is not estimable.
+                cap = f.get("capacity")
+                cap_str = fmt_num(cap) if cap is not None else "N/A"
+                html_parts.append(
+                    f"<tr><td>{f.get('fold', '?')}</td><td>{params_str}</td>"
+                    f"<td class='metric'>{sharpe_str}</td>"
+                    f"<td class='metric'>{cap_str}</td></tr>"
+                )
             html_parts.append("</table>")
 
         cpcv_dsr = cpcv_summary.get("deflated_sharpe")

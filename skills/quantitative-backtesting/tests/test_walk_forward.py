@@ -2791,6 +2791,78 @@ def test_cli_cpcv_impact_sweep():
         )
 
 
+def test_cli_cpcv_writes_capacity_per_fold():
+    """CLI cpcv writes a per-fold market-impact capacity list so capacity
+    degradation across folds/regimes is observable from the saved artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "cpcv",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--n-splits", "4",
+            "--test-size", "0.2",
+            "--impact-coefficient", "0.5",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI cpcv should exit 0, got {rc}"
+        summary_path = os.path.join(out_dir, "cpcv_summary.json")
+        assert os.path.exists(summary_path), "cpcv_summary.json not written"
+        with open(summary_path) as f:
+            payload = json.load(f)
+
+        per_fold = payload.get("capacity_per_fold")
+        assert per_fold, "cpcv_summary.json must carry a per-fold capacity list"
+        assert len(per_fold) == payload["summary"]["n_folds"]
+        for row in per_fold:
+            assert row["capacity"] is not None and row["capacity"] > 0, row
+        assert payload["summary"]["capacity"] is not None
+        assert payload["summary"]["capacity"] > 0
+
+
+def test_cli_out_of_sample_writes_capacity_per_split():
+    """CLI out-of-sample records the validation-window and held-out
+    test-window capacity separately, so a capacity collapse in the unseen
+    window is visible in the saved artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--impact-coefficient", "0.5",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI out-of-sample should exit 0, got {rc}"
+        summary_path = os.path.join(out_dir, "out_of_sample_summary.json")
+        assert os.path.exists(summary_path), "out_of_sample_summary.json not written"
+        with open(summary_path) as f:
+            payload = json.load(f)
+
+        val_cap = payload["validation_performance"]["capacity"]
+        test_cap = payload["test_performance"]["capacity"]
+        assert val_cap is not None and val_cap > 0
+        assert test_cap is not None and test_cap > 0
+        assert payload["summary"]["validation_capacity"] == val_cap
+        assert payload["summary"]["test_capacity"] == test_cap
+
+
 def test_cli_monte_carlo_borrow_sweep():
     """CLI monte-carlo --borrow-costs writes a sweep artifact whose returns
     degrade as the short-position borrow cost rises (MACD goes short)."""
@@ -6103,6 +6175,218 @@ TEST_REGISTRY.append(
 )
 TEST_REGISTRY.append(
     ("test_walk_forward_analysis_surfaces_capacity_per_period", test_walk_forward_analysis_surfaces_capacity_per_period)
+)
+
+
+def _make_panel_returns_data(periods: int = 200, n_assets: int = 2, seed: int = 3):
+    """MultiIndex panel OHLCV plus a long/flat signal series."""
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    symbols = [f"S{i}" for i in range(n_assets)]
+    cols = pd.MultiIndex.from_product(
+        [["open", "high", "low", "close", "volume"], symbols]
+    )
+    data = pd.DataFrame(0.0, index=dates, columns=cols)
+    rng = np.random.default_rng(seed)
+    for i, sym in enumerate(symbols):
+        prices = 100 * np.exp(np.cumsum(rng.normal(0.0005 * (i + 1), 0.01, periods)))
+        data[("open", sym)] = prices
+        data[("high", sym)] = prices
+        data[("low", sym)] = prices
+        data[("close", sym)] = prices
+        data[("volume", sym)] = rng.integers(1_000_000, 10_000_000, periods)
+    signal = pd.Series(
+        np.where(np.arange(periods) % 10 < 5, 1.0, 0.0), index=dates
+    )
+    return data, signal
+
+
+def test_calculate_strategy_returns_panel_with_impact_is_not_empty():
+    """A multi-asset panel must still produce returns when market impact is
+    enabled.
+
+    Regression guard: the impact model divided the whole portfolio notional
+    by a per-asset ADV frame, which turned the cost series into a DataFrame
+    and produced an EMPTY return series for MultiIndex panels. The visible
+    effect was that every panel run with market impact silently reported
+    "no signal" (no selected parameters, empty out-of-sample returns).
+    """
+    data, signal = _make_panel_returns_data()
+
+    r = _calculate_strategy_returns(
+        data, signal, commission=0.0002, slippage=0.0001,
+        impact_coefficient=0.5, adv_window=20,
+    )
+    assert isinstance(r, pd.Series), f"expected a Series, got {type(r).__name__}"
+    assert len(r) > 0, "panel returns must not be empty with impact enabled"
+    assert np.isfinite(r.to_numpy()).all(), "panel returns must stay finite"
+
+
+def test_calculate_strategy_returns_panel_impact_degrades_returns_monotonically():
+    """Higher market-impact coefficients must reduce panel returns."""
+    data, signal = _make_panel_returns_data()
+
+    totals = []
+    for coeff in (0.0, 0.5, 2.0, 5.0):
+        r = _calculate_strategy_returns(
+            data, signal, commission=0.0002, slippage=0.0001,
+            impact_coefficient=coeff, adv_window=20,
+        )
+        totals.append(float((1 + r).prod() - 1))
+    assert totals == sorted(totals, reverse=True), (
+        f"expected panel returns to degrade with impact, got {totals}"
+    )
+    assert totals[-1] < totals[0], (
+        f"expected a material impact drag on panel returns, got {totals}"
+    )
+
+
+def test_calculate_strategy_returns_dict_and_multiindex_panels_match_with_impact():
+    """The dict and MultiIndex panel formats must produce identical returns
+    when market impact is enabled (format parity invariant)."""
+    data, signal = _make_panel_returns_data()
+    symbols = [f"S{i}" for i in range(2)]
+    dict_panel = {sym: data.xs(sym, axis=1, level=1) for sym in symbols}
+
+    for coeff in (0.0, 0.5, 2.0):
+        mi = _calculate_strategy_returns(
+            data, signal, commission=0.0002, slippage=0.0001,
+            impact_coefficient=coeff, adv_window=20,
+        )
+        dc = _calculate_strategy_returns(
+            dict_panel, signal, commission=0.0002, slippage=0.0001,
+            impact_coefficient=coeff, adv_window=20,
+        )
+        assert mi.equals(dc), (
+            f"dict and MultiIndex panels diverged at impact_coefficient={coeff}"
+        )
+
+
+def test_estimate_capacity_multi_asset_panel_binds_on_least_liquid_asset():
+    """A multi-asset panel is treated as an equal-weighted basket: the least
+    liquid constituent sets the portfolio capacity.
+
+    Regression guard: the panel path used to call ``float()`` on the
+    per-asset slices of a MultiIndex frame, raising
+    ``TypeError: float() argument must be a string or a real number, not
+    'Series'`` instead of returning an estimate.
+    """
+    dates = pd.date_range("2020-01-01", periods=30, freq="B")
+    symbols = ["LIQ", "ILLIQ"]
+    cols = pd.MultiIndex.from_product([["close", "volume"], symbols])
+    data = pd.DataFrame(index=dates, columns=cols, dtype=float)
+    data[("close", "LIQ")] = 100.0
+    data[("close", "ILLIQ")] = 100.0
+    data[("volume", "LIQ")] = 1_000_000.0
+    data[("volume", "ILLIQ")] = 100_000.0
+
+    cap = estimate_capacity(data, impact_coefficient=0.5)
+    assert cap["estimable"] is True
+    assert cap["unconstrained"] is False
+    assert cap["n_assets"] == 2
+    assert cap["binding_asset"] == "ILLIQ"
+    # Binding asset ADV notional = 100_000 shares * 100 price.
+    expected_adv_notional = 100_000.0 * 100.0
+    assert abs(cap["adv_notional"] - expected_adv_notional) < 1e-6
+    # Portfolio capacity = n_assets * max_impact * binding ADV / coefficient.
+    expected_capacity = 2 * 0.0005 * expected_adv_notional / 0.5
+    assert abs(cap["estimated_capacity"] - expected_capacity) < 1e-6
+    assert cap["estimated_capacity"] == cap["max_notional_per_trade"]
+
+
+def test_estimate_capacity_multi_asset_panel_scales_with_asset_count():
+    """Identical constituents: the equal-weighted basket capacity is
+    ``n_assets`` times the single-asset capacity (each asset carries
+    1/n_assets of the portfolio notional, and every asset binds equally)."""
+    dates = pd.date_range("2020-01-01", periods=30, freq="B")
+    for n_assets in (1, 3):
+        symbols = [f"S{i}" for i in range(n_assets)]
+        cols = pd.MultiIndex.from_product([["close", "volume"], symbols])
+        panel = pd.DataFrame(index=dates, columns=cols, dtype=float)
+        for sym in symbols:
+            panel[("close", sym)] = 100.0
+            panel[("volume", sym)] = 1_000_000.0
+
+        flat = pd.DataFrame(
+            {"close": 100.0, "volume": 1_000_000.0}, index=dates
+        )
+        panel_cap = estimate_capacity(panel, impact_coefficient=0.5)
+        flat_cap = estimate_capacity(flat, impact_coefficient=0.5)
+        assert panel_cap["estimable"] is True
+        assert panel_cap["n_assets"] == n_assets
+        assert abs(
+            panel_cap["estimated_capacity"]
+            - n_assets * flat_cap["estimated_capacity"]
+        ) < 1e-6
+
+
+def test_out_of_sample_validation_surfaces_capacity_per_split():
+    """The out-of-sample path reports the market-impact capacity of the
+    validation window and of the held-out test window separately, so a
+    capacity collapse in the unseen window stays visible. Both are None when
+    impact is disabled (backward compatible)."""
+    data = _make_ohlcv_data(periods=600, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [5, 10], "slow_period": [15, 20]}
+
+    res_on = out_of_sample_validation(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        validation_method="walk_forward",
+        impact_coefficient=0.5,
+        validate_pit=False,
+    )
+    val_cap = res_on["validation_performance"]["capacity"]
+    test_cap = res_on["test_performance"]["capacity"]
+    assert val_cap is not None and val_cap > 0
+    assert test_cap is not None and test_cap > 0
+    assert res_on["summary"]["validation_capacity"] == val_cap
+    assert res_on["summary"]["test_capacity"] == test_cap
+
+    res_off = out_of_sample_validation(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        validation_method="walk_forward",
+        impact_coefficient=0.0,
+        validate_pit=False,
+    )
+    assert res_off["validation_performance"]["capacity"] is None
+    assert res_off["test_performance"]["capacity"] is None
+    assert res_off["summary"]["validation_capacity"] is None
+    assert res_off["summary"]["test_capacity"] is None
+
+
+TEST_REGISTRY.append(
+    ("test_estimate_capacity_multi_asset_panel_binds_on_least_liquid_asset",
+     test_estimate_capacity_multi_asset_panel_binds_on_least_liquid_asset)
+)
+TEST_REGISTRY.append(
+    ("test_estimate_capacity_multi_asset_panel_scales_with_asset_count",
+     test_estimate_capacity_multi_asset_panel_scales_with_asset_count)
+)
+TEST_REGISTRY.append(
+    ("test_out_of_sample_validation_surfaces_capacity_per_split",
+     test_out_of_sample_validation_surfaces_capacity_per_split)
+)
+TEST_REGISTRY.append(
+    ("test_cli_cpcv_writes_capacity_per_fold", test_cli_cpcv_writes_capacity_per_fold)
+)
+TEST_REGISTRY.append(
+    ("test_cli_out_of_sample_writes_capacity_per_split",
+     test_cli_out_of_sample_writes_capacity_per_split)
+)
+TEST_REGISTRY.append(
+    ("test_calculate_strategy_returns_panel_with_impact_is_not_empty",
+     test_calculate_strategy_returns_panel_with_impact_is_not_empty)
+)
+TEST_REGISTRY.append(
+    ("test_calculate_strategy_returns_panel_impact_degrades_returns_monotonically",
+     test_calculate_strategy_returns_panel_impact_degrades_returns_monotonically)
+)
+TEST_REGISTRY.append(
+    ("test_calculate_strategy_returns_dict_and_multiindex_panels_match_with_impact",
+     test_calculate_strategy_returns_dict_and_multiindex_panels_match_with_impact)
 )
 
 

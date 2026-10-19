@@ -633,6 +633,84 @@ def test_cpcv_surfaces_capacity_in_summary():
     assert res_off["summary"].get("capacity") is None
 
 
+def test_cpcv_surfaces_capacity_per_fold():
+    """CPCV surfaces a per-fold market-impact capacity estimate so capacity
+    degradation across folds/regimes is observable, mirroring the per-period
+    capacity that the walk-forward path records.
+
+    The key is present on every fold (capacity is a property of the fold's
+    market data) and is None when impact is disabled (backward compatible).
+    """
+    data = _make_sample_data(600)
+    strategy_factory = _make_strategy_factory("sma_crossover")
+    param_grid = {"fast_period": [5, 10], "slow_period": [15, 20]}
+
+    res_on = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+        impact_coefficient=0.5,
+    )
+    folds = res_on["folds"]
+    assert len(folds) > 0
+    evaluated = 0
+    for f in folds:
+        assert "capacity" in f, (
+            f"Missing per-fold capacity key on fold {f.get('fold')}"
+        )
+        cap = f["capacity"]
+        if len(f.get("test_returns", pd.Series(dtype=float))) > 0:
+            evaluated += 1
+            assert cap is not None, (
+                f"Expected a capacity estimate on evaluated fold {f.get('fold')}"
+            )
+            assert cap > 0
+    assert evaluated > 0, "Expected at least one evaluated fold"
+
+    res_off = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+        impact_coefficient=0.0,
+    )
+    for f in res_off["folds"]:
+        assert "capacity" in f
+        assert f["capacity"] is None
+
+
+def test_cpcv_multi_asset_panel_capacity_does_not_raise():
+    """A multi-asset panel must not break the capacity path.
+
+    Regression guard: `estimate_capacity` used to call `float()` on the
+    per-asset `close`/`volume` slices of a MultiIndex panel, which raised
+    `TypeError: float() argument must be ... not 'Series'` and aborted the
+    whole CPCV run (including the summary-level capacity estimate) whenever
+    market impact was enabled on panel data.
+    """
+    data = _make_multiasset_multiindex(n=400, n_assets=3, seed=42)
+    strategy_factory = _make_strategy_factory("cross_sectional_momentum")
+    param_grid = {"lookback": [10, 20], "top_quantile": [0.4], "bottom_quantile": [0.2]}
+
+    res = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=3,
+        test_size=0.2,
+        impact_coefficient=0.5,
+        validate_pit=False,
+    )
+    assert res["summary"]["capacity"] is not None
+    assert res["summary"]["capacity"] > 0
+    for f in res["folds"]:
+        assert "capacity" in f
+        assert f["capacity"] is not None and f["capacity"] > 0
+
+
 # Module-level registry of (label, callable) pairs. Kept at module scope
 # (rather than a local inside main()) so structural checks like
 # ``test_main_registers_every_module_level_test`` can introspect it
@@ -655,6 +733,8 @@ TEST_REGISTRY = [
     ("cpcv_multi_asset_dict_cross_sectional_momentum", test_cpcv_multi_asset_dict_cross_sectional_momentum),
     ("cpcv_multi_asset_dict_dual_momentum", test_cpcv_multi_asset_dict_dual_momentum),
     ("cpcv_surfaces_capacity_in_summary", test_cpcv_surfaces_capacity_in_summary),
+    ("cpcv_surfaces_capacity_per_fold", test_cpcv_surfaces_capacity_per_fold),
+    ("cpcv_multi_asset_panel_capacity_does_not_raise", test_cpcv_multi_asset_panel_capacity_does_not_raise),
     ("main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 

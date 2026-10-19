@@ -609,13 +609,6 @@ def walk_forward_analysis(
             # to pick on out-of-sample quality must read this key, not
             # `best_sharpe` (which would select on in-sample fit).
             period["test_sharpe"] = _period_sharpe(best_test_returns)
-            # Surface per-period market-impact capacity estimate so capacity
-            # degradation across regimes is observable. Keep None/omitted when
-            # impact is disabled or ADV not estimable (backward compatible).
-            _period_capacity = estimate_capacity(
-                period["test_data"], impact_coefficient, adv_window=adv_window
-            )
-            period["capacity"] = _period_capacity.get("estimated_capacity")
             # Compute benchmark stats for this period
             if benchmark is not None:
                 if isinstance(benchmark, list) and len(benchmark) > 1:
@@ -667,6 +660,16 @@ def walk_forward_analysis(
             period["best_params"] = None
             period["best_sharpe"] = None
             period["test_returns"] = pd.Series(dtype=float)
+
+        # Surface a per-period market-impact capacity estimate so capacity
+        # degradation across regimes is observable. Capacity is a property of
+        # the period's market data, so it is computed for every period (not
+        # only periods whose grid search produced returns) and is None when
+        # impact is disabled or ADV is not estimable.
+        _period_capacity = estimate_capacity(
+            period["test_data"], impact_coefficient, adv_window=adv_window
+        )
+        period["capacity"] = _period_capacity.get("estimated_capacity")
 
     # Combine all out-of-sample returns
     if oos_returns_list:
@@ -1438,6 +1441,7 @@ def _calculate_strategy_returns(
         latency = 0
     if latency < 0:
         latency = 0
+    is_panel = False
     if isinstance(data, dict):
         # For dict of dataframes, compute equal-weighted portfolio returns
         # Use first key's index as reference
@@ -1449,19 +1453,30 @@ def _calculate_strategy_returns(
                 common_index = common_index.intersection(df.index)
         common_index = common_index.sort_values()
         rets = []
+        closes = []
         vols = []
         for df in data.values():
             aligned = df.reindex(common_index)
             rets.append(aligned["close"].pct_change())
+            closes.append(aligned["close"])
             vols.append(aligned["volume"])
         raw_returns = pd.concat(rets, axis=1).mean(axis=1)
-        volume = pd.concat(vols, axis=1).mean(axis=1)
-        close = data[list(data.keys())[0]].reindex(common_index)["close"]
+        # Per-asset frames drive the market-impact model for a panel (see
+        # the impact block below): each asset carries 1/n_assets of the
+        # portfolio notional, so the impact of each asset is computed
+        # against that asset's own ADV.
+        asset_keys = list(data.keys())
+        close = pd.concat(closes, axis=1)
+        close.columns = asset_keys
+        volume = pd.concat(vols, axis=1)
+        volume.columns = asset_keys
+        is_panel = True
     elif isinstance(data.columns, pd.MultiIndex):
         # For panel data, compute equal-weighted portfolio returns
         close = data["close"]
         raw_returns = close.pct_change().mean(axis=1)
-        volume = data["volume"].mean(axis=1)
+        volume = data["volume"]
+        is_panel = True
     else:
         close = data["close"]
         raw_returns = close.pct_change()
@@ -1491,9 +1506,37 @@ def _calculate_strategy_returns(
         # so that a 100% position change on a $100k account is ~$100k notional
         equity = initial_capital * (1 + raw_returns).cumprod()
         position_notional = position_changes * equity
-        # Market impact as fraction of notional traded
-        market_impact = (position_notional / adv_notional.replace(0, np.nan)) * impact_coefficient
-        market_impact = market_impact.fillna(0)
+        if is_panel:
+            # Equal-weighted basket: the portfolio's gross exposure is spread
+            # equally over the n assets (the same convention the panel return
+            # model above uses), so a position change of |d| trades
+            # |d| * equity / n in each asset. Each asset's impact is measured
+            # against its OWN ADV, and the portfolio-level impact cost is the
+            # equal-weighted average of the per-asset impacts (matching the
+            # equal-weighted return convention).
+            #
+            # Regression guard: the previous implementation divided the whole
+            # portfolio notional by a per-asset ADV, which turned `costs` into
+            # a DataFrame, produced an EMPTY return series for MultiIndex
+            # panels, and silently yielded "no signal" for every panel run
+            # with market impact enabled.
+            n_assets = max(close.shape[1], 1)
+            per_asset_notional = position_notional / n_assets
+            # `adv_notional.rdiv(traded, axis=0)` computes traded_notional /
+            # ADV for every (row, asset) pair (a plain Series/DataFrame
+            # division would align the Series to the columns instead). A
+            # zero traded notional means "no trade", so the impact is zero
+            # rather than infinite; a zero ADV is treated as missing.
+            traded = per_asset_notional.replace(0, np.nan)
+            adv_denominator = adv_notional.replace(0, np.nan)
+            market_impact = (
+                adv_denominator.rdiv(traded, axis=0) * impact_coefficient
+            )
+            market_impact = market_impact.fillna(0).mean(axis=1)
+        else:
+            # Market impact as fraction of notional traded
+            market_impact = (position_notional / adv_notional.replace(0, np.nan)) * impact_coefficient
+            market_impact = market_impact.fillna(0)
         costs = costs + market_impact
 
     # Borrow and funding costs are annualized rates applied per period.
@@ -1550,8 +1593,22 @@ def estimate_capacity(
     ``max_impact`` per trade. Capacity scales inversely with the impact
     coefficient and directly with the target impact and average daily volume.
 
+    Multi-asset panels (MultiIndex columns) are treated as an equal-weighted
+    basket: each of the ``n_assets`` constituents carries ``1 / n_assets`` of
+    the portfolio notional, so the *least liquid* constituent sets the
+    portfolio capacity:
+
+        capacity = n_assets * max_impact * min_i(ADV_notional_i) / impact_coefficient
+
+    This is the binding constraint: a basket can only grow until its least
+    liquid member exceeds the impact threshold. For a panel the reported
+    ``price`` / ``adv_shares`` / ``adv_notional`` describe that binding
+    (least liquid) member, and ``binding_asset`` / ``n_assets`` identify it.
+
     Args:
-        data: OHLCV DataFrame (must contain ``close`` and ``volume``).
+        data: OHLCV DataFrame (must contain ``close`` and ``volume``). For a
+            multi-asset panel the columns are a MultiIndex whose levels carry
+            the field names and the symbols (either order is accepted).
         impact_coefficient: Linear market-impact coefficient. A value of 0
             means impact is disabled and capacity is unconstrained.
         max_impact: Maximum acceptable market impact per trade, as a fraction
@@ -1561,7 +1618,8 @@ def estimate_capacity(
     Returns:
         Dictionary with keys: impact_coefficient, max_impact, adv_window,
         price, adv_shares, adv_notional, periods_per_year,
-        max_notional_per_trade, estimated_capacity, unconstrained, estimable.
+        max_notional_per_trade, estimated_capacity, unconstrained, estimable,
+        n_assets, binding_asset.
         ``unconstrained`` is True when impact is disabled. ``estimable`` is
         False when ADV cannot be computed (missing columns or empty data).
     """
@@ -1577,29 +1635,83 @@ def estimate_capacity(
         "estimated_capacity": None,
         "unconstrained": False,
         "estimable": False,
+        "n_assets": None,
+        "binding_asset": None,
     }
 
     if impact_coefficient <= 0:
         result["unconstrained"] = True
         return result
 
-    if "close" not in data.columns or "volume" not in data.columns:
-        return result
+    is_panel = isinstance(data.columns, pd.MultiIndex)
+    if is_panel:
+        # Panel columns are a MultiIndex; the field names ("close",
+        # "volume") live on one of the two levels. Accept either ordering.
+        level0 = set(data.columns.get_level_values(0))
+        level1 = set(data.columns.get_level_values(1))
+        if {"close", "volume"} <= level0:
+            close = data["close"]
+            volume = data["volume"]
+        elif {"close", "volume"} <= level1:
+            close = data.xs("close", axis=1, level=1)
+            volume = data.xs("volume", axis=1, level=1)
+        else:
+            return result
+    else:
+        if "close" not in data.columns or "volume" not in data.columns:
+            return result
+        close = data["close"]
+        volume = data["volume"]
 
-    close = data["close"]
-    volume = data["volume"]
     if len(close) == 0 or len(volume) == 0:
         return result
 
-    price = float(close.iloc[-1])
+    ann_factor = _annualization_factor(data.index)
     adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
     adv_notional = adv_shares * close
+
+    if is_panel:
+        # Equal-weighted basket: every asset carries 1/n_assets of the
+        # portfolio notional, so the least liquid asset binds the portfolio
+        # capacity (per-asset capacity x n_assets).
+        adv_notional_last = adv_notional.iloc[-1]
+        if not isinstance(adv_notional_last, pd.Series):
+            adv_notional_last = pd.Series([adv_notional_last])
+        valid = adv_notional_last[
+            np.isfinite(adv_notional_last) & (adv_notional_last > 0)
+        ]
+        if len(valid) == 0:
+            return result
+
+        n_assets = int(len(close.columns))
+        binding_asset = valid.idxmin()
+        binding_adv_notional = float(valid.min())
+        binding_adv_shares = float(adv_shares.iloc[-1][binding_asset])
+        binding_price = float(close.iloc[-1][binding_asset])
+        per_asset_capacity = (
+            max_impact * binding_adv_notional / float(impact_coefficient)
+        )
+        portfolio_capacity = n_assets * per_asset_capacity
+
+        result.update(
+            price=binding_price,
+            adv_shares=binding_adv_shares,
+            adv_notional=binding_adv_notional,
+            periods_per_year=float(ann_factor),
+            max_notional_per_trade=float(portfolio_capacity),
+            estimated_capacity=float(portfolio_capacity),
+            estimable=True,
+            n_assets=n_assets,
+            binding_asset=str(binding_asset),
+        )
+        return result
+
+    price = float(close.iloc[-1])
     last_adv_notional = float(adv_notional.iloc[-1])
 
     if not np.isfinite(last_adv_notional) or last_adv_notional <= 0:
         return result
 
-    ann_factor = _annualization_factor(data.index)
     max_notional_per_trade = max_impact * last_adv_notional / float(impact_coefficient)
 
     result.update(
@@ -1610,6 +1722,7 @@ def estimate_capacity(
         max_notional_per_trade=float(max_notional_per_trade),
         estimated_capacity=float(max_notional_per_trade),
         estimable=True,
+        n_assets=1,
     )
     return result
 
@@ -1981,6 +2094,17 @@ def cpcv_analysis(
             fold["best_sharpe"] = None
             fold["test_returns"] = pd.Series(dtype=float)
             fold_benchmark_stats.append(None)
+
+        # Surface a per-fold market-impact capacity estimate so capacity
+        # degradation across folds/regimes is observable, mirroring the
+        # per-period capacity that `walk_forward_analysis` records. Capacity
+        # is a property of the fold's market data, so it is computed for
+        # every fold (not only folds whose grid search produced returns) and
+        # is None when impact is disabled or ADV is not estimable.
+        _fold_capacity = estimate_capacity(
+            fold["test_data"], impact_coefficient, adv_window=adv_window
+        )
+        fold["capacity"] = _fold_capacity.get("estimated_capacity")
 
     # Combine all out-of-sample returns
     if oos_returns_list:
@@ -2371,12 +2495,22 @@ def out_of_sample_validation(
     val_sharpe = float(excess.mean() / excess.std() * np.sqrt(ann_factor)) if len(val_returns) > 1 and not _is_constant_returns(val_returns) else 0.0
     val_total_return = float((1 + val_returns).prod() - 1) if len(val_returns) > 0 else 0.0
 
+    # Per-split market-impact capacity estimates. The validation and test
+    # windows are separate market regimes, so the capacity that the strategy
+    # could have supported in each window is reported separately (mirroring
+    # the per-period capacity that `walk_forward_analysis` records). None
+    # when impact is disabled or ADV is not estimable.
+    val_capacity = estimate_capacity(
+        val_data, impact_coefficient, adv_window=adv_window
+    ).get("estimated_capacity")
+
     validation_performance = {
         "selected_params": selected_params,
         "val_total_return": val_total_return,
         "val_sharpe": val_sharpe,
         "val_volatility": float(val_returns.std() * np.sqrt(ann_factor)) if len(val_returns) > 1 else 0.0,
         "val_n_periods": len(val_returns),
+        "capacity": val_capacity,
     }
 
     # Phase 4: FINAL TEST - Evaluate on held-out test data
@@ -2394,12 +2528,17 @@ def out_of_sample_validation(
     test_sharpe = float(excess_test.mean() / excess_test.std() * np.sqrt(ann_factor_test)) if len(test_returns) > 1 and not _is_constant_returns(test_returns) else 0.0
     test_total_return = float((1 + test_returns).prod() - 1) if len(test_returns) > 0 else 0.0
 
+    test_capacity = estimate_capacity(
+        test_data, impact_coefficient, adv_window=adv_window
+    ).get("estimated_capacity")
+
     test_performance = {
      "test_total_return": test_total_return,
          "test_sharpe": test_sharpe,
          "test_volatility": float(test_returns.std() * np.sqrt(ann_factor_test)) if len(test_returns) > 1 else 0.0,
          "test_n_periods": len(test_returns),
          "test_returns": test_returns,
+         "capacity": test_capacity,
      }
 
     # Benchmark comparison on test set
@@ -2450,6 +2589,12 @@ def out_of_sample_validation(
         "selected_params": selected_params,
         "validation_total_return": val_total_return,
         "validation_sharpe": val_sharpe,
+        # Per-window market-impact capacity estimates. The aggregate
+        # `capacity` key below is computed on the full sample; these two are
+        # computed on the validation and held-out test windows only, so a
+        # capacity collapse in the unseen test window stays visible.
+        "validation_capacity": val_capacity,
+        "test_capacity": test_capacity,
         "test_total_return": test_total_return,
         "test_sharpe": test_sharpe,
         "test_volatility": test_performance["test_volatility"],
@@ -3522,6 +3667,17 @@ def run_cpcv(args) -> int:
         "summary": results["summary"],
         "param_stability": results["param_stability"],
         "best_params_per_fold": results["best_params_per_fold"],
+        # Per-fold market-impact capacity so capacity degradation across
+        # folds/regimes is observable from the saved artifact alone.
+        "capacity_per_fold": [
+            {
+                "fold": f.get("fold"),
+                "test_start": f.get("test_start"),
+                "test_end": f.get("test_end"),
+                "capacity": f.get("capacity"),
+            }
+            for f in results.get("folds", [])
+        ],
         "config": {
             "strategy": args.strategy,
             "symbol": args.symbol,
@@ -4407,6 +4563,17 @@ def run_walk_forward(args) -> int:
         "summary": results["summary"],
         "diagnostics": diagnostics,
         "best_params_per_period": results["best_params_per_period"],
+        # Per-period market-impact capacity so capacity degradation across
+        # periods/regimes is observable from the saved artifact alone.
+        "capacity_per_period": [
+            {
+                "period": i,
+                "test_start": p.get("test_start"),
+                "test_end": p.get("test_end"),
+                "capacity": p.get("capacity"),
+            }
+            for i, p in enumerate(results.get("periods", []))
+        ],
         "config": {
             "strategy": args.strategy,
             "symbol": args.symbol,
@@ -5993,6 +6160,7 @@ def run_out_of_sample_validation(args) -> int:
             "test_sharpe": results["test_performance"]["test_sharpe"],
             "test_volatility": results["test_performance"]["test_volatility"],
             "test_n_periods": results["test_performance"]["test_n_periods"],
+            "capacity": results["test_performance"].get("capacity"),
         },
         "test_benchmark": results["test_benchmark"],
         "config": {

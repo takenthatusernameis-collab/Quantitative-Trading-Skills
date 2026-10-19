@@ -130,7 +130,7 @@ Risk Metrics:
   Ratio when `--n-trials` is reported. `generate_report` writes `metrics.json`
   and a text `report.txt` that mirrors the tear sheet, including the aggregate
   and per-benchmark Deflated Alpha sections.
-- `walk_forward.py` - Walk-forward analysis, parameter optimization, CPCV, Monte Carlo simulation CLI, and Deflated Sharpe Ratio multiple-testing correction. Accepts `--multi-symbol` on every subcommand (`walk-forward`, `optimize`, `cpcv`, `monte-carlo`, `out-of-sample`): when set, loads the symbol panel via `load_multi_symbol()`, runs `detect_survivorship_bias()`, prints the survivorship report, persists `survivorship_bias.json`, and threads `survivorship_bias` + `bias_controls_engaged=True` into the summary JSON and tear sheet. When `--impact-coefficient > 0`, each analysis path also reports a market-impact-based **strategy capacity** estimate (`summary["capacity"]`, in notional) by inverting the impact model (`capacity = max_impact * ADV_notional / impact_coefficient`); the tear sheet renders it as a "Strategy Capacity (Notional)" row. Capacity is `None` when impact is disabled or ADV is not estimable, so the key is backward compatible.
+- `walk_forward.py` - Walk-forward analysis, parameter optimization, CPCV, Monte Carlo simulation CLI, and Deflated Sharpe Ratio multiple-testing correction. Accepts `--multi-symbol` on every subcommand (`walk-forward`, `optimize`, `cpcv`, `monte-carlo`, `out-of-sample`): when set, loads the symbol panel via `load_multi_symbol()`, runs `detect_survivorship_bias()`, prints the survivorship report, persists `survivorship_bias.json`, and threads `survivorship_bias` + `bias_controls_engaged=True` into the summary JSON and tear sheet. When `--impact-coefficient > 0`, each analysis path also reports a market-impact-based **strategy capacity** estimate (`summary["capacity"]`, in notional) by inverting the impact model (`capacity = max_impact * ADV_notional / impact_coefficient`); the tear sheet renders it as a "Strategy Capacity (Notional)" row. Capacity is `None` when impact is disabled or ADV is not estimable, so the key is backward compatible. Capacity is also reported **per regime**: `period["capacity"]` (walk-forward), `fold["capacity"]` (CPCV), and `validation_performance["capacity"]` / `test_performance["capacity"]` (out-of-sample), so capacity degradation across folds/periods/windows is observable; the CLI artifacts persist them as `capacity_per_period` / `capacity_per_fold`, and the tear sheet renders a "Capacity (Notional)" column in the per-period and per-fold tables. For a multi-asset panel the basket is treated as equal-weighted, so the least liquid constituent binds the portfolio capacity (`capacity = n_assets * max_impact * min_i(ADV_notional_i) / impact_coefficient`). Market impact on a **multi-asset panel** is modeled per asset on the same equal-weighted convention (`|position_change| * equity / n_assets` traded in each asset, each asset measured against its own ADV, portfolio cost = mean of the per-asset impacts), which keeps the dict and MultiIndex panel formats identical; previously the panel path produced an **empty** return series, which silently dropped every grid configuration and made panel runs with impact report "no signal" (regression-guarded in `tests/test_walk_forward.py`).
 - `monte_carlo.py` - Standalone Monte Carlo simulation (block bootstrap resampling, metric distributions, confidence intervals, probability of ruin). Re-exported from `walk_forward` for backward compatibility. On simulated paths where equity is wiped out (growth <= 0), the annualized return is recorded as -100% (a total loss) rather than NaN, so the metric distribution, summary statistics, and confidence intervals stay finite and interpretable; the true cumulative loss is preserved in `total_return`.
 - `reporting.py` - Automated tear sheet and report generation
 - `generate_sample_data.py` - Generates a sample OHLCV dataset for testing
@@ -224,7 +224,9 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
 - `test_reporting.py` - `generate_report` file/header/trade-section output and
   `generate_tear_sheet` HTML + JSON summary generation (matplotlib optional).
   Covers capacity surfacing (row rendered + JSON key present when capacity is
-  in the walk-forward/CPCV summary; row and key omitted when absent).
+  in the walk-forward/CPCV summary; row and key omitted when absent) and
+  per-period / per-fold capacity rendering (a "Capacity (Notional)" column in
+  the per-period and per-fold tables, "N/A" when the estimate is absent).
   Also covers the **multiple-testing correction** reporting: `generate_report`
   prints a "Multiple-Testing Correction" section and `generate_tear_sheet`
   renders a table plus a top-level `deflated_sharpe` key in the JSON summary
@@ -355,11 +357,22 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
       `test_cli_walk_forward_no_benchmark_does_not_crash`, a regression for an
       `UnboundLocalError` on `benchmark_returns_list` in the benchmark-less
       walk-forward report path.
+      **Capacity surfacing**: `estimate_capacity` on a single asset, on a
+      multi-asset panel (equal-weighted basket whose least liquid member binds
+      the portfolio capacity), and on the per-regime keys
+      (`period["capacity"]`, `fold["capacity"]`,
+      `validation_performance["capacity"]`, `test_performance["capacity"]`),
+      plus the CLI artifacts `capacity_per_period` / `capacity_per_fold` and
+      the out-of-sample `validation_capacity` / `test_capacity` summary keys.
   - `test_cpcv.py` - CPCV fold structure, purge/embargo behavior, parameter
     stability calculation, summary metrics, **Deflated Sharpe Ratio
     correction** (`apply_deflation` on `cpcv_analysis`), CLI integration,
-    and multi-asset panel (dict and MultiIndex) CPCV integration with
-    `CrossSectionalMomentum` and `DualMomentumStrategy`.
+    multi-asset panel (dict and MultiIndex) CPCV integration with
+    `CrossSectionalMomentum` and `DualMomentumStrategy`, and **capacity
+    surfacing**: the aggregate `summary["capacity"]`, the per-fold
+    `fold["capacity"]` (present on every fold, `None` when impact is
+    disabled), and a regression guard that a multi-asset panel no longer
+    raises when market impact is enabled.
   - `test_generate_sample_data.py` - Sample data generation creates valid OHLCV
   CSV with expected shape and constraints.
 
