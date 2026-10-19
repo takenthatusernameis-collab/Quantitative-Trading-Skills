@@ -830,26 +830,77 @@ def main():
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
     prov_path = output_dir / "data_provenance.json"
+    prov_data = results.get("data_provenance")
+    # Sanitize load_timestamp for reproducibility (use source file mtime if available)
+    try:
+        from datetime import datetime, UTC
+        if isinstance(prov_data, dict):
+            # Single symbol case or multi-symbol dict
+            if all(isinstance(v, dict) for v in prov_data.values()) and len(prov_data) > 0:
+                for k, v in prov_data.items():
+                    sp = v.get("source_path") or v.get("source")
+                    if sp and "load_timestamp" in v:
+                        try:
+                            v["load_timestamp"] = datetime.fromtimestamp(
+                                Path(sp).stat().st_mtime, UTC
+                            ).isoformat().replace("+00:00", "Z")
+                        except Exception:
+                            pass
+            elif "source_path" in prov_data:
+                sp = prov_data.get("source_path")
+                if sp and "load_timestamp" in prov_data:
+                    try:
+                        prov_data["load_timestamp"] = datetime.fromtimestamp(
+                            Path(sp).stat().st_mtime, UTC
+                        ).isoformat().replace("+00:00", "Z")
+                    except Exception:
+                        pass
+    except Exception:
+        pass
     with open(prov_path, "w") as f:
-        json.dump(results.get("data_provenance"), f, indent=2, default=str)
+        json.dump(prov_data, f, indent=2, default=str)
     print(f"Data provenance saved to: {prov_path}")
 
     if benchmark_provenance is not None or len(benchmark_provenances) > 0:
         bench_prov_path = output_dir / "benchmark_provenance.json"
-        with open(bench_prov_path, "w") as f:
-            if len(benchmark_provenances) == 1:
-                json.dump(benchmark_provenances[0].to_dict(), f, indent=2, default=str)
-            elif len(benchmark_provenances) > 1:
-                json.dump([p.to_dict() for p in benchmark_provenances], f, indent=2, default=str)
-            elif isinstance(benchmark_provenance, list):
-                if len(benchmark_provenance) == 1:
-                    p = benchmark_provenance[0]
-                    json.dump(p.to_dict() if hasattr(p, 'to_dict') else p, f, indent=2, default=str)
-                else:
-                    json.dump([p.to_dict() if hasattr(p, 'to_dict') else p for p in benchmark_provenance], f, indent=2, default=str)
+        # Build the data
+        bench_data = None
+        if len(benchmark_provenances) == 1:
+            bench_data = benchmark_provenances[0].to_dict()
+        elif len(benchmark_provenances) > 1:
+            bench_data = [p.to_dict() for p in benchmark_provenances]
+        elif isinstance(benchmark_provenance, list):
+            if len(benchmark_provenance) == 1:
+                p = benchmark_provenance[0]
+                bench_data = p.to_dict() if hasattr(p, 'to_dict') else p
             else:
-                bp = benchmark_provenance
-                json.dump(bp.to_dict() if hasattr(bp, 'to_dict') else bp, f, indent=2, default=str)
+                bench_data = [p.to_dict() if hasattr(p, 'to_dict') else p for p in benchmark_provenance]
+        else:
+            bp = benchmark_provenance
+            bench_data = bp.to_dict() if hasattr(bp, 'to_dict') else bp
+        # Sanitize
+        try:
+            from datetime import datetime, UTC
+            def sanitize_b(d):
+                if isinstance(d, dict):
+                    sp = d.get("source_path")
+                    if sp and "load_timestamp" in d:
+                        try:
+                            d["load_timestamp"] = datetime.fromtimestamp(
+                                Path(sp).stat().st_mtime, UTC
+                            ).isoformat().replace("+00:00", "Z")
+                        except Exception:
+                            pass
+                return d
+            if isinstance(bench_data, list):
+                for b in bench_data:
+                    sanitize_b(b)
+            else:
+                sanitize_b(bench_data)
+        except Exception:
+            pass
+        with open(bench_prov_path, "w") as f:
+            json.dump(bench_data, f, indent=2, default=str)
         print(f"Benchmark provenance saved to: {bench_prov_path}")
 
     if survivorship is not None:

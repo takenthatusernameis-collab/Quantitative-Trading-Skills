@@ -2,23 +2,26 @@
 
 ## What changed this session
 
-Made the full_pipeline_example.py produce stable (byte-identical across runs) data_provenance.json. In the example, after loading with return_provenance=True, we serialize prov.to_dict() but replace load_timestamp with the source file's mtime (ISO8601 Z) so that re-running the example twice yields identical data_provenance.json. This addresses the reproducibility defect noted in the prior handoff without changing the runtime DataProvenance field in data_loader.py (still records actual load time). Also updated HANDOFF.md from prior content.
+Applied the same stable-timestamp treatment from the full_pipeline_example to scripts/run_backtest.py. When saving data_provenance.json and benchmark_provenance.json, we now sanitize load_timestamp to use the source file's mtime (ISO8601 Z) when source_path is available. This ensures CLI-generated artifacts are reproducible across runs, consistent with the existing example behavior. The change handles both single-symbol and multi-symbol (dict) provenance cases, and both single and multiple benchmark provenances (dict/list forms).
+
+Also the run_backtest.py now normalizes/serializes benchmark provenance with the same sanitization logic. This is a small, bounded, reversible change.
 
 ## What was verified
 
-- Ran full_pipeline_example twice: data_provenance.json identical both times (load_timestamp is mtime-stable). Committed example output remains unchanged in git (we didn't commit regenerated artifact).
-- All tests in the quantitative-backtesting skill pass: 358 passed, 26 warnings (full test suite).
-- verify_end_to_end.py: exits 0 (verified).
-- All worked examples run cleanly: full_pipeline, multiple_benchmarks, deflated_alpha, falsifiable_hypothesis.
+- All existing tests in the quantitative-backtesting skill continue to pass: 358 passed, 26 warnings.
+- verify_end_to_end.py exits 0 with all checks passing (benchmark cost model propagation verified).
+- All worked examples run cleanly and produce deterministic outputs (running all examples left only the run_backtest.py change in the working tree; example output files are unchanged).
+- The sanitization logic handles both data_provenance and benchmark_provenance in single/multi-symbol cases.
 
 ## What remains unresolved
 
-- None identified. The quant backtesting methodology library is stable with reproducible examples. The only non-reproducible element in example artifacts (volatile load_timestamp) is now handled in the example serialization path.
+- None identified. The quant backtesting methodology library remains stable with all verification passing.
 
 ## Approaches already tried and why
 
-- Considered changing data_loader.DataProvenance to accept optional load_timestamp for tests; but better to keep runtime honest and sanitize only at serialization points for committed artifacts. Modifying the example (and potentially run_backtest CLI if we want committed artifacts stable) is minimal and reversible. Chose example-only change as requested.
+- Mirrored the exact approach used in full_pipeline_example.py: for each provenance dict with source_path and load_timestamp, replace load_timestamp with datetime.fromtimestamp(Path(sp).stat().st_mtime, UTC).isoformat().replace("+00:00", "Z").
+- Chose to sanitize at serialization time (write path) in run_backtest.py rather than changing DataProvenance behavior, preserving runtime honesty while making committed artifacts reproducible. This matches the prior session's rationale.
 
-## Next task (precise, bounded)
+## Next task (precise, bounded, evidence-based)
 
-If desired, extend the same stable-timestamp treatment to scripts/run_backtest.py when it writes data_provenance.json for CLI runs that might be committed as artifacts (optional). Alternatively, add a small regression test: run full_pipeline_example twice and assert data_provenance.json is identical bytewise. But neither is strictly necessary given current state. No commit requested.
+Consider adding a small regression test that verifies data_provenance.json written by run_backtest.py is reproducible when run twice with the same inputs/args (byte-identical). Evidence for need: CLI runs that commit artifacts should remain deterministic; we already have the same guarantee in examples but not a CLI-level regression test. Constraints: use existing test fixtures/sample data, keep test small and isolated, don't modify production behavior beyond what's already done. Alternatively, if artifacts are never committed from CLI in practice, this is low priority. No commit requested.
