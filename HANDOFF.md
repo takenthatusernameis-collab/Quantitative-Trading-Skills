@@ -259,9 +259,6 @@ convention, with the capacity rule that is consistent with it — and compare.**
 `tests/test_walk_forward.py`, `tests/test_reporting.py`, plus `HANDOFF.md` /
 `HANDOFF_NEXT.md` at the repo root.
 
-**Git state**: the work is in the working tree and is NOT committed (mutating git
-commands need a separate confirmation). `git status` shows 10 modified files under
-`skills/quantitative-backtesting/` plus the two handoff files, nothing untracked, no
-unrelated edits. The next session should review the diff and commit it as one
-checkpoint, e.g.
-`git add -A && git commit -m "Measure the participation dilution of the panel impact model"`.
+**Git state**: the work is **committed** as `289366a` ("Measure the participation
+dilution of the panel impact model"). `git status` is clean; the commit contains
+only the files listed above. The next session starts from that commit.
