@@ -585,6 +585,12 @@ def walk_forward_analysis(
             period["best_sharpe"] = best_sharpe
             period["test_returns"] = best_test_returns
             period["trial_sharpes"] = list(period_trial_sharpes)
+            # Per-period OUT-OF-SAMPLE test Sharpe of the selected combo.
+            # Distinct from `best_sharpe`, which is the IN-SAMPLE training
+            # Sharpe used by the grid search. Selection criteria that claim
+            # to pick on out-of-sample quality must read this key, not
+            # `best_sharpe` (which would select on in-sample fit).
+            period["test_sharpe"] = _period_sharpe(best_test_returns)
             # Compute benchmark stats for this period
             if benchmark is not None:
                 if isinstance(benchmark, list) and len(benchmark) > 1:
@@ -1009,6 +1015,60 @@ def _is_constant_returns(returns: pd.Series) -> bool:
     non-degenerate path, where it belongs.
     """
     return bool(returns.nunique(dropna=False) == 1)
+
+
+def _period_sharpe(returns: pd.Series) -> Optional[float]:
+    """Annualized Sharpe of a single period's OUT-OF-SAMPLE test returns.
+
+    Mirrors the in-sample Sharpe computed inline in the walk-forward grid
+    search (``excess = returns - 0.02/ann_factor``; Sharpe = mean/std *
+    sqrt(ann_factor)) but evaluated on the *test* window of the selected
+    combo. Returns ``None`` when the series is too short or degenerate,
+    so callers can distinguish "no OOS Sharpe available" from "Sharpe 0".
+    """
+    if returns is None or len(returns) <= 1:
+        return None
+    if _is_constant_returns(returns):
+        return 0.0
+    ann_factor = _annualization_factor(returns.index)
+    excess = returns - 0.02 / ann_factor
+    std = excess.std()
+    if std == 0 or not np.isfinite(std):
+        return 0.0
+    return float(excess.mean() / std * np.sqrt(ann_factor))
+
+
+def _selected_params_avg_test_sharpe(
+    validation_results: Dict[str, Any],
+    validation_method: str,
+    selected_params: Optional[Dict[str, Any]],
+) -> Optional[float]:
+    """Mean OUT-OF-SAMPLE test Sharpe of `selected_params` across the
+    validation periods/folds where the grid search chose it.
+
+    Computed from each period/fold's ``test_sharpe`` (OOS), never from
+    ``best_sharpe`` (in-sample training fit). Returns ``None`` when the
+    selected combo was never chosen, or when no period that chose it
+    carries a finite ``test_sharpe`` (e.g. all such test windows were
+    degenerate/empty). Excludes periods with ``test_sharpe is None``
+    rather than treating them as 0, so a degenerate test window cannot
+    drag the average to zero.
+    """
+    if selected_params is None:
+        return None
+    key = tuple(sorted(selected_params.items()))
+    items_key = "periods" if validation_method == "walk_forward" else "folds"
+    items = validation_results.get(items_key, [])
+    sharpes = [
+        p.get("test_sharpe")
+        for p in items
+        if p.get("best_params") is not None
+        and tuple(sorted(p["best_params"].items())) == key
+        and p.get("test_sharpe") is not None
+    ]
+    if not sharpes:
+        return None
+    return float(np.mean(sharpes))
 
 
 def deflated_sharpe_ratio(
@@ -1753,6 +1813,12 @@ def cpcv_analysis(
             fold["best_sharpe"] = best_sharpe
             fold["test_returns"] = best_test_returns
             fold["trial_sharpes"] = list(fold_trial_sharpes)
+            # Per-fold OUT-OF-SAMPLE test Sharpe of the selected combo.
+            # Distinct from `best_sharpe`, which is the IN-SAMPLE training
+            # Sharpe used by the grid search. Selection criteria that claim
+            # to pick on out-of-sample quality must read this key, not
+            # `best_sharpe` (which would select on in-sample fit).
+            fold["test_sharpe"] = _period_sharpe(best_test_returns)
             # Compute benchmark stats for this fold
             if benchmark is not None:
                 if isinstance(benchmark, list) and len(benchmark) > 1:
@@ -2272,6 +2338,16 @@ def out_of_sample_validation(
         "test_total_return": test_total_return,
         "test_sharpe": test_sharpe,
         "test_volatility": test_performance["test_volatility"],
+        # Average OUT-OF-SAMPLE test Sharpe of the selected parameter set
+        # across the validation periods/folds where it was chosen. This is
+        # the out-of-sample analogue of the old in-sample "best_avg_sharpe"
+        # selection criterion and is computed from `test_sharpe` (OOS), never
+        # from `best_sharpe` (in-sample training fit). None when the selected
+        # combo was never chosen in any period/fold, or when every such
+        # period's test_sharpe is None (degenerate test windows).
+        "selected_params_avg_test_sharpe": _selected_params_avg_test_sharpe(
+            validation_results, validation_method, selected_params
+        ),
     }
 
     # Add multiple benchmark information to summary if applicable
@@ -2414,7 +2490,20 @@ def _select_parameters(
     validation_method: str,
     criterion: str = "best_oos_sharpe",
 ) -> Optional[Dict[str, Any]]:
-    """Select optimal parameters from validation results based on criterion."""
+    """Select optimal parameters from validation results based on criterion.
+
+    Selection criteria that claim to optimize *out-of-sample* quality
+    ("best_oos_sharpe", "best_avg_sharpe") must read each period/fold's
+    OUT-OF-SAMPLE test Sharpe (``test_sharpe``), never the IN-SAMPLE
+    training Sharpe stored under ``best_sharpe``. The grid search ranks
+    combos by in-sample fit, so ranking *periods* by ``best_sharpe``
+    would select the combo that overfit its training window — the exact
+    selection bias the out-of-sample framework exists to avoid.
+
+    "most_stable" is unaffected: it counts how often each combo was
+    selected by the in-sample grid search, which is a property of the
+    optimizer, not of the test data.
+    """
     if validation_method == "walk_forward":
         periods = validation_results.get("periods", [])
         valid_periods = [p for p in periods if p.get("best_params") is not None]
@@ -2423,8 +2512,11 @@ def _select_parameters(
             return None
 
         if criterion == "best_oos_sharpe":
-            # Select params from period with best test Sharpe
-            best_period = max(valid_periods, key=lambda p: p.get("best_sharpe", -np.inf))
+            # Select params from period with best OUT-OF-SAMPLE test Sharpe.
+            def _oos_key(p):
+                s = p.get("test_sharpe")
+                return s if s is not None else -np.inf
+            best_period = max(valid_periods, key=_oos_key)
             return best_period["best_params"]
 
         elif criterion == "most_stable":
@@ -2437,13 +2529,20 @@ def _select_parameters(
             return None
 
         elif criterion == "best_avg_sharpe":
-            # Params with best average Sharpe across periods where they were selected
+            # Params with best AVERAGE OUT-OF-SAMPLE test Sharpe across the
+            # periods where they were selected. Averages only periods that
+            # carry a finite test_sharpe; periods where it is None (e.g. a
+            # degenerate test window) are excluded rather than treated as 0.
             from collections import defaultdict
             param_sharpes = defaultdict(list)
             for p in valid_periods:
                 key = tuple(sorted(p["best_params"].items()))
-                param_sharpes[key].append(p["best_sharpe"])
+                s = p.get("test_sharpe")
+                if s is not None:
+                    param_sharpes[key].append(s)
 
+            if not param_sharpes:
+                return None
             best_key = max(param_sharpes.keys(), key=lambda k: np.mean(param_sharpes[k]))
             return dict(best_key)
 
@@ -2455,7 +2554,10 @@ def _select_parameters(
             return None
 
         if criterion == "best_oos_sharpe":
-            best_fold = max(valid_folds, key=lambda f: f.get("best_sharpe", -np.inf))
+            def _oos_key(f):
+                s = f.get("test_sharpe")
+                return s if s is not None else -np.inf
+            best_fold = max(valid_folds, key=_oos_key)
             return best_fold["best_params"]
 
         elif criterion == "most_stable":
@@ -2471,8 +2573,12 @@ def _select_parameters(
             param_sharpes = defaultdict(list)
             for f in valid_folds:
                 key = tuple(sorted(f["best_params"].items()))
-                param_sharpes[key].append(f["best_sharpe"])
+                s = f.get("test_sharpe")
+                if s is not None:
+                    param_sharpes[key].append(s)
 
+            if not param_sharpes:
+                return None
             best_key = max(param_sharpes.keys(), key=lambda k: np.mean(param_sharpes[k]))
             return dict(best_key)
 

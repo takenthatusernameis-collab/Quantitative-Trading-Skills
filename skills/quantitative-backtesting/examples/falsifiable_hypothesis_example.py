@@ -122,6 +122,13 @@ def run_hypothesis_test(data_path, bench_path, symbol="SPY"):
 
     # --- Run out-of-sample validation ---
     print("\n2. OUT-OF-SAMPLE VALIDATION (chronological train/val/test)")
+    # selection_criterion="best_avg_sharpe" selects the parameter set with the
+    # best AVERAGE OUT-OF-SAMPLE test Sharpe across the walk-forward periods
+    # where it was chosen. It is OOS-aware: it reads each period's
+    # `test_sharpe`, never `best_sharpe` (the in-sample training Sharpe the
+    # grid search ranked by). Selecting on in-sample fit would pick the combo
+    # that overfit its training window — the selection bias this framework
+    # exists to avoid.
     results = out_of_sample_validation(
         data=df,
         strategy_factory=lambda params: build_strategy("sma_crossover", __import__("json").dumps(params)),
@@ -143,6 +150,7 @@ def run_hypothesis_test(data_path, bench_path, symbol="SPY"):
         benchmark_expense_ratio=0.0,
         benchmark_cost_is_periodic=False,
         apply_deflation=True,
+        selection_criterion="best_avg_sharpe",
         validate_pit=True,
     )
 
@@ -191,6 +199,7 @@ def run_hypothesis_test(data_path, bench_path, symbol="SPY"):
         "benchmark_alpha_pvalue": bench_alpha_pvalue,
         "benchmark_total_return": bench_total_return,
         "selected_params": summary.get("selected_params"),
+        "selected_params_avg_test_sharpe": summary.get("selected_params_avg_test_sharpe"),
         "test_n_periods": test_n_periods,
     }
 

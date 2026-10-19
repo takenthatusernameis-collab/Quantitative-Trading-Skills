@@ -390,6 +390,48 @@ produce an in-sample-optimistic result that is indistinguishable from a
 genuine out-of-sample one, so the check is a correctness guard, not a
 cosmetic one.
 
+### Per-Period / Per-Fold `test_sharpe` (Out-of-Sample Test Sharpe)
+
+Every walk-forward period and CPCV fold whose grid search selected a combo now
+carries a `test_sharpe` key: the **annualized out-of-sample Sharpe of the
+selected combo on that period/fold's test window** (net of the same cost model
+used in the grid search; risk-free 2% annual; `None` when the test window is
+too short or degenerate). This is distinct from `best_sharpe`, which is the
+**in-sample training Sharpe** the grid search ranked by.
+
+`_select_parameters` uses `test_sharpe` for the `best_oos_sharpe` and
+`best_avg_sharpe` criteria, and the OOS summary exposes
+`selected_params_avg_test_sharpe` (mean OOS test Sharpe of the selected combo
+across the periods/folds that chose it). Selection on `best_sharpe` would pick
+the combo that overfit its training window — the selection bias this framework
+exists to avoid — so `best_sharpe` is deliberately not used for selection.
+
+### Selection Criteria (`--selection-criterion`)
+
+`out_of_sample_validation` selects the final parameters from the validation
+phase via `--selection-criterion`, one of `best_oos_sharpe` (default),
+`most_stable`, or `best_avg_sharpe`. The choice matters because it determines
+what the selection is optimizing:
+
+- **`most_stable`** selects on **in-sample** behavior: the combo the grid
+  search most often selected across periods/folds. This is a property of the
+  optimizer, not of the test data, so it is the only criterion that legitimately
+  reads in-sample information.
+- **`best_oos_sharpe`** selects the period/fold with the best **out-of-sample**
+  test Sharpe.
+- **`best_avg_sharpe`** selects the combo with the best **average out-of-sample**
+  test Sharpe across the periods/folds where it was chosen.
+
+`best_oos_sharpe` and `best_avg_sharpe` read each period/fold's
+**`test_sharpe`** key (the OOS test Sharpe of the combo selected in that
+period/fold), **never `best_sharpe`**, which is the **in-sample training
+Sharpe** the grid search ranked by. Selecting on `best_sharpe` would pick the
+combo that overfit its training window — the exact selection bias the
+out-of-sample framework exists to avoid. Each walk-forward period and CPCV
+fold now carries `test_sharpe` (`None` on degenerate/empty test windows), and
+the OOS summary carries `selected_params_avg_test_sharpe` (mean OOS test Sharpe
+of the selected combo across the periods/folds that chose it).
+
 ## Overfitting Detection
 
 `overfitting_check` analyzes walk-forward results to flag overfitting risk:
