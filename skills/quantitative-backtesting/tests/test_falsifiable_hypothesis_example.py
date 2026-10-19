@@ -38,7 +38,7 @@ def test_falsifiable_hypothesis_example_runs_end_to_end():
     """The pre-registered hypothesis test executes on the shipped sample data."""
     data_path, bench_path = _sample_paths()
     assert data_path.exists() and bench_path.exists(), "sample data fixtures missing"
-    result = run_hypothesis_test(data_path, bench_path)
+    result = run_hypothesis_test(data_path)
 
     assert isinstance(result, dict)
     assert result["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
@@ -51,18 +51,26 @@ def test_falsifiable_hypothesis_example_runs_end_to_end():
     obs = result["observed"]
     for key in ("oos_sharpe", "oos_total_return", "deflated_sharpe_pvalue",
                 "benchmark_alpha", "benchmark_alpha_pvalue",
-                "benchmark_total_return", "selected_params", "test_n_periods"):
+                "benchmark_total_return", "deflated_alpha_ratio",
+                "deflated_alpha_pvalue", "n_benchmarks",
+                "selected_params", "test_n_periods"):
         assert key in obs, f"observed metrics missing {key}"
     assert obs["test_n_periods"] and obs["test_n_periods"] > 0
+    # The strategy is tested against a set of benchmarks (N >= 2), so the
+    # Deflated Alpha Ratio data-mining control is engaged.
+    assert obs["n_benchmarks"] and obs["n_benchmarks"] >= 2
+    assert obs["deflated_alpha_ratio"] is not None
+    assert obs["deflated_alpha_pvalue"] is not None
 
     criteria = result["criteria"]
-    assert len(criteria) == 4
+    assert len(criteria) == 5
     names = {c["name"] for c in criteria}
     assert names == {
         "oos_sharpe_gt_zero",
         "deflated_sharpe_pvalue_lt_0.10",
         "benchmark_alpha_pvalue_lt_0.05",
         "oos_total_return_gt_benchmark",
+        "deflated_alpha_ratio_gt_0.90",
     }
     for c in criteria:
         assert isinstance(c["passed"], bool)
@@ -81,7 +89,7 @@ def test_falsifiable_hypothesis_criteria_are_explicit_and_evaluated():
     a boolean pass/fail, so the verdict is attributable to explicit criteria
     rather than an opaque outcome."""
     data_path, bench_path = _sample_paths()
-    result = run_hypothesis_test(data_path, bench_path)
+    result = run_hypothesis_test(data_path)
 
     for c in result["criteria"]:
         assert c["passed"] in (True, False)
@@ -94,7 +102,7 @@ def test_falsifiable_hypothesis_out_of_sample_split_is_chronological():
     """The held-out test set is disjoint from train/val and never used in
     selection (chronological 0.6/0.2/0.2 split)."""
     data_path, bench_path = _sample_paths()
-    result = run_hypothesis_test(data_path, bench_path)
+    result = run_hypothesis_test(data_path)
     sep = result["separation_check"]
     assert sep.get("disjoint") is True
     assert sep.get("chronological") is True

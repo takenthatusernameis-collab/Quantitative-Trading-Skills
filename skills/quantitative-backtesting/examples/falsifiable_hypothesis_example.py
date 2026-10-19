@@ -17,8 +17,14 @@ FALSIFICATION CRITERIA (reject H / declare "NOT SUPPORTED" if ANY fails):
        from zero vs buy-and-hold).
     4. Out-of-sample total return (net of costs) must exceed benchmark total
        return.
+    5. Deflated Alpha Ratio (multiple-testing corrected benchmark alpha across
+       the benchmark set) must be > 0.90, i.e. the corrected p-value < 0.10.
+       This is the benchmark-side data-mining control: testing against
+       multiple benchmarks is itself a multiple-testing problem, and this
+       criterion requires the alpha to survive the correction for the number
+       of benchmarks tested (N = 2 here).
 
-The hypothesis is SUPPORTED only when ALL four criteria pass. Otherwise it is
+The hypothesis is SUPPORTED only when ALL five criteria pass. Otherwise it is
 NOT SUPPORTED. No claim of profitability is made: this is a test verdict
 against pre-registered criteria, not a performance endorsement.
 
@@ -31,6 +37,8 @@ Methodology controls:
     - Walk-forward parameter selection on training data only.
     - Deflated Sharpe Ratio for multiple-testing correction across the
       parameter grid (selection bias).
+    - Multiple benchmarks with Deflated Alpha Ratio correction for benchmark
+      selection bias (data-mining control).
     - Benchmark alpha vs buy-and-hold, net of the same trading costs
       (2 bps commission + 1 bps slippage per trade).
     - All figures are net of trading costs.
@@ -70,11 +78,34 @@ CRITERIA = [
      lambda v: v is not None and v < 0.05),
     ("oos_total_return_gt_benchmark", "oos_total_return > benchmark_total_return",
      lambda v: v is not None),
+    # Data-mining control for benchmark selection: the strategy is tested
+    # against MULTIPLE benchmarks, which is itself a multiple-testing
+    # problem (the more benchmarks you try, the more likely one yields a
+    # spurious "significant" alpha by luck). The Deflated Alpha Ratio (DAR)
+    # corrects the benchmark alpha for the number of benchmarks tested, so
+    # this criterion requires the corrected alpha to survive the correction
+    # (DAR > 0.90, i.e. corrected p-value < 0.10). It is the benchmark-side
+    # analogue of criterion 2 (the Deflated Sharpe Ratio), which corrects
+    # the parameter-grid selection bias.
+    ("deflated_alpha_ratio_gt_0.90", "deflated_alpha_ratio > 0.90",
+     lambda v: v is not None and v > 0.90),
 ]
 
 COMMISSION = 0.0002   # 2 bps per trade
 SLIPPAGE = 0.0001     # 1 bps per trade
 PARAM_GRID = {"fast_period": [5, 10, 15, 20], "slow_period": [20, 30, 40, 50]}
+
+# Benchmarks tested against. Testing multiple benchmarks is a
+# multiple-testing problem; the Deflated Alpha Ratio (criterion 5) corrects
+# the benchmark alpha for the number of benchmarks tested (N = len(BENCHMARKS)).
+# The primary benchmark is the first entry; the remainder are alternative
+# buy-and-hold universes that the strategy might have "cherry-picked" alpha
+# against. All are net of the same commission/slippage as the strategy.
+# Paths are relative to the strategy data file's directory (assets/example_data).
+BENCHMARK_FILES = [
+    "sample_ohlcv.csv",     # primary (same universe)
+    "sample_benchmark.csv",  # alternative benchmark
+]
 
 
 def _fmt_pct(v):
@@ -89,12 +120,17 @@ def _fmt_num(v, nd=4):
     return f"{v:.{nd}f}"
 
 
-def run_hypothesis_test(data_path, bench_path, symbol="SPY"):
+def run_hypothesis_test(data_path, symbol="SPY"):
     """Run the pre-registered falsifiable hypothesis test.
 
     Returns a dict with the observed metrics, per-criterion pass/fail, and the
     overall verdict ("SUPPORTED" / "NOT SUPPORTED" / "ERROR").
+
+    The benchmark set is resolved from BENCHMARK_FILES relative to this
+    example's assets directory (the same directory as `data_path`), so the
+    test exercises the multiple-benchmark Deflated Alpha Ratio path by default.
     """
+    base_dir = Path(data_path).resolve().parent
     print("=" * 80)
     print("FALSIFIABLE FINANCIAL HYPOTHESIS TEST")
     print("=" * 80)
@@ -108,17 +144,25 @@ def run_hypothesis_test(data_path, bench_path, symbol="SPY"):
     print()
     print("Methodology controls: chronological 0.6/0.2/0.2 train/val/test split,")
     print("  point-in-time validation, walk-forward parameter selection on training")
-    print("  data only, Deflated Sharpe multiple-testing correction, benchmark alpha")
-    print(f"  vs buy-and-hold, all figures net of {COMMISSION*1e4:.0f}bps commission +")
+    print("  data only, Deflated Sharpe multiple-testing correction, Deflated Alpha")
+    print("  Ratio benchmark-selection correction, benchmark alpha vs buy-and-hold,")
+    print(f"  all figures net of {COMMISSION*1e4:.0f}bps commission +")
     print(f"  {SLIPPAGE*1e4:.0f}bps slippage per trade.")
     print("-" * 80)
 
     # --- Load data (point-in-time validation runs inside out_of_sample_validation) ---
     print("\n1. LOADING DATA")
     df = load_data(str(data_path), symbol=symbol)
-    bench = load_data(str(bench_path), symbol=symbol)
+    # Multiple benchmarks: the strategy is tested against N=2 buy-and-hold
+    # universes. Testing multiple benchmarks is itself a multiple-testing
+    # problem — with enough benchmarks, luck alone yields a spurious
+    # "significant" alpha — so criterion 5 (Deflated Alpha Ratio) corrects the
+    # benchmark alpha for the number of benchmarks tested. The primary
+    # benchmark is the first entry; the remainder are alternative universes
+    # the strategy might have "cherry-picked" alpha against.
+    benchmarks = [load_data(str(base_dir / p), symbol=symbol) for p in BENCHMARK_FILES]
     print(f"  Strategy data: {len(df)} rows ({df.index.min().date()} -> {df.index.max().date()})")
-    print(f"  Benchmark data: {len(bench)} rows")
+    print(f"  Benchmarks: {len(benchmarks)} ({[len(b) for b in benchmarks]} rows each)")
 
     # --- Run out-of-sample validation ---
     print("\n2. OUT-OF-SAMPLE VALIDATION (chronological train/val/test)")
@@ -136,14 +180,14 @@ def run_hypothesis_test(data_path, bench_path, symbol="SPY"):
         train_frac=0.6,
         val_frac=0.2,
         test_frac=0.2,
-    validation_method="walk_forward",
-    walk_forward_train_months=6,
-    walk_forward_test_months=2,
-    walk_forward_step_months=2,
-    initial_capital=100000,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+        initial_capital=100000,
         commission=COMMISSION,
         slippage=SLIPPAGE,
-        benchmark=bench,
+        benchmark=benchmarks,
         total_return_benchmark=False,
         benchmark_commission=COMMISSION,
         benchmark_slippage=SLIPPAGE,
@@ -175,21 +219,38 @@ def run_hypothesis_test(data_path, bench_path, symbol="SPY"):
     dsr_pvalue = deflated_sharpe.get("p_value") if isinstance(deflated_sharpe, dict) else None
     test_n_periods = test_perf.get("test_n_periods")
 
-    # Single-benchmark path: alpha / alpha_pvalue live in test_performance (merged
-    # from test_benchmark) and in test_benchmark itself.
+    # Multiple-benchmark path: alpha / alpha_pvalue / benchmark_total_return
+    # come from the primary (first) benchmark in the per-benchmark list; the
+    # Deflated Alpha Ratio (criterion 5) is the multiple-testing corrected
+    # benchmark alpha across the whole benchmark set.
     bench_alpha = None
     bench_alpha_pvalue = None
     bench_total_return = None
+    if isinstance(test_bench, list) and test_bench:
+        primary = test_bench[0]
+        if isinstance(primary, dict):
+            bench_alpha = primary.get("alpha")
+            bench_alpha_pvalue = primary.get("alpha_pvalue")
+            bench_total_return = primary.get("benchmark_total_return")
     if isinstance(test_bench, dict):
-        bench_alpha = test_bench.get("alpha")
-        bench_alpha_pvalue = test_bench.get("alpha_pvalue")
-        bench_total_return = test_bench.get("benchmark_total_return")
+        bench_alpha = bench_alpha or test_bench.get("alpha")
+        bench_alpha_pvalue = bench_alpha_pvalue or test_bench.get("alpha_pvalue")
+        bench_total_return = bench_total_return or test_bench.get("benchmark_total_return")
     if bench_alpha is None:
         bench_alpha = test_perf.get("alpha")
     if bench_alpha_pvalue is None:
         bench_alpha_pvalue = test_perf.get("alpha_pvalue")
     if bench_total_return is None:
         bench_total_return = test_perf.get("benchmark_total_return")
+
+    # Deflated Alpha Ratio (multiple-testing corrected benchmark alpha across
+    # the benchmark set). Sourced from the canonical aggregate
+    # `deflated_alpha` in the summary, which carries the corrected p-value
+    # (and DAR) for the primary benchmark across all N benchmarks.
+    deflated_alpha = summary.get("deflated_alpha")
+    dar = deflated_alpha.get("deflated_alpha_ratio") if isinstance(deflated_alpha, dict) else None
+    dar_pvalue = deflated_alpha.get("p_value") if isinstance(deflated_alpha, dict) else None
+    n_benchmarks = deflated_alpha.get("n_benchmarks") if isinstance(deflated_alpha, dict) else len(benchmarks)
 
     observed = {
         "oos_sharpe": oos_sharpe,
@@ -198,6 +259,9 @@ def run_hypothesis_test(data_path, bench_path, symbol="SPY"):
         "benchmark_alpha": bench_alpha,
         "benchmark_alpha_pvalue": bench_alpha_pvalue,
         "benchmark_total_return": bench_total_return,
+        "deflated_alpha_ratio": dar,
+        "deflated_alpha_pvalue": dar_pvalue,
+        "n_benchmarks": n_benchmarks,
         "selected_params": summary.get("selected_params"),
         "selected_params_avg_test_sharpe": summary.get("selected_params_avg_test_sharpe"),
         "test_n_periods": test_n_periods,
@@ -211,6 +275,9 @@ def run_hypothesis_test(data_path, bench_path, symbol="SPY"):
     print(f"  Benchmark alpha:         {_fmt_pct(bench_alpha)}")
     print(f"  Benchmark alpha p-value: {_fmt_num(bench_alpha_pvalue)}")
     print(f"  Deflated Sharpe p-value: {_fmt_num(dsr_pvalue)}")
+    print(f"  Deflated Alpha Ratio:     {_fmt_num(dar)}")
+    print(f"  Deflated Alpha p-value:  {_fmt_num(dar_pvalue)}")
+    print(f"  Benchmarks tested (N):   {n_benchmarks}")
     print(f"  Selected params:         {observed['selected_params']}")
     print(f"  Test periods:            {observed['test_n_periods']}")
 
@@ -238,6 +305,7 @@ def run_hypothesis_test(data_path, bench_path, symbol="SPY"):
             oos_total_return is not None and bench_total_return is not None
             and oos_total_return > bench_total_return
         ),
+        "deflated_alpha_ratio_gt_0.90": CRITERIA[4][2](dar),
     }
     for name, desc, _ in CRITERIA:
         ok = passes[name]
@@ -267,8 +335,7 @@ def run_hypothesis_test(data_path, bench_path, symbol="SPY"):
 
 def main():
     data_path = Path(__file__).resolve().parent.parent / "assets" / "example_data" / "sample_ohlcv.csv"
-    bench_path = Path(__file__).resolve().parent.parent / "assets" / "example_data" / "sample_benchmark.csv"
-    result = run_hypothesis_test(data_path, bench_path)
+    result = run_hypothesis_test(data_path)
     # Exit 0 when the test runs successfully; the verdict (SUPPORTED / NOT
     # SUPPORTED) is carried by the printed output, not the exit code. A
     # falsified hypothesis is a valid scientific outcome, not a script failure.

@@ -3412,8 +3412,8 @@ def test_falsifiable_hypothesis_example_imports():
     assert callable(module.main), "main should be callable"
     assert callable(module.run_hypothesis_test), "run_hypothesis_test should be callable"
     assert isinstance(module.HYPOTHESIS, str) and module.HYPOTHESIS, "HYPOTHESIS must be a non-empty string"
-    assert isinstance(module.CRITERIA, list) and len(module.CRITERIA) == 4, (
-        f"CRITERIA must define 4 pre-registered criteria, got {len(module.CRITERIA)}"
+    assert isinstance(module.CRITERIA, list) and len(module.CRITERIA) == 5, (
+        f"CRITERIA must define 5 pre-registered criteria, got {len(module.CRITERIA)}"
     )
     # Criterion tuple shape: (name, description, predicate)
     for name, desc, pred in module.CRITERIA:
