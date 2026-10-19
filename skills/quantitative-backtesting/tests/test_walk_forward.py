@@ -40,6 +40,7 @@ from walk_forward import (  # noqa: E402
     _make_strategy_factory,
     _parse_param_grid,
     _annualization_factor,
+    _calculate_walk_forward_summary,
     _calculate_strategy_returns,
     _split_train_val_test,
     _verify_split_separation,
@@ -5510,6 +5511,44 @@ def test_annualization_factor_non_datetime_index():
     assert _annualization_factor(pd.Index(range(10))) == 252
 
 
+def test_annualization_scales_oos_risk_metrics_hourly_vs_daily():
+    """_annualization_factor propagates into walk-forward OOS risk metrics.
+
+    Regression test for the pandas 3.x fix: identical per-period returns on a
+    "B" (daily) vs "h" (hourly) index must produce OOS volatility in the exact
+    sqrt(1638/252) ratio via _calculate_walk_forward_summary, proving the
+    walk_forward.py copy of _annualization_factor propagates into the actual
+    out-of-sample volatility rather than being unit-tested in isolation.
+    _calculate_walk_forward_summary hardcodes a 2% annual risk-free rate, so
+    the Sharpe ratio carries a frequency-dependent risk-free offset and is
+    checked directionally (hourly Sharpe exceeds daily Sharpe for identical
+    positive per-period mean returns) while volatility is checked exactly.
+    """
+    rng = np.random.default_rng(7)
+    period_returns = rng.normal(0.0005, 0.01, 2000)
+
+    daily_returns = pd.Series(
+        period_returns,
+        index=pd.date_range("2020-01-01", periods=len(period_returns), freq="B"),
+    )
+    hourly_returns = pd.Series(
+        period_returns,
+        index=pd.date_range("2020-01-01", periods=len(period_returns), freq="h"),
+    )
+
+    daily_summary = _calculate_walk_forward_summary(daily_returns, [])
+    hourly_summary = _calculate_walk_forward_summary(hourly_returns, [])
+
+    expected_ratio = np.sqrt(1638 / 252)
+    vol_ratio = (
+        hourly_summary["oos_volatility"]
+        / daily_summary["oos_volatility"]
+    )
+
+    assert abs(vol_ratio - expected_ratio) < 1e-9
+    assert hourly_summary["oos_sharpe"] > daily_summary["oos_sharpe"]
+
+
 def test_main_registers_every_module_level_test():
     """main() must register every module-level ``test_*`` function.
 
@@ -5681,6 +5720,7 @@ TEST_REGISTRY = [
     ("annualization_factor_known_frequencies", test_annualization_factor_known_frequencies),
     ("annualization_factor_minute_does_not_collide_with_month", test_annualization_factor_minute_does_not_collide_with_month),
     ("annualization_factor_non_datetime_index", test_annualization_factor_non_datetime_index),
+    ("annualization_scales_oos_risk_metrics_hourly_vs_daily", test_annualization_scales_oos_risk_metrics_hourly_vs_daily),
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 
