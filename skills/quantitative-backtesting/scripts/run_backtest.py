@@ -29,7 +29,7 @@ from data_loader import (
 from strategy_builder import build_strategy
 from performance import calculate_metrics, generate_report
 from reporting import generate_tear_sheet
-from scripts.utils import _annualization_factor
+from utils import _annualization_factor
 
 
 def parse_args():

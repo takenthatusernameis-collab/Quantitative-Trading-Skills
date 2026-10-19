@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 from typing import Any, Dict, List, Optional, Union
 
-from scripts.utils import _annualization_factor
+from utils import _annualization_factor
 
 
 def estimate_optimal_block_size(

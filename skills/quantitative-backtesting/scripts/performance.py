@@ -13,7 +13,7 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, Any, Optional, Union, List
 
-from scripts.utils import _annualization_factor
+from utils import _annualization_factor
 
 
 RISK_FREE_RATE = 0.02  # Annual risk-free rate (2%)
@@ -478,7 +478,7 @@ def calculate_metrics(
                         try:
                             from walk_forward import deflated_alpha_ratio  # noqa: E402
                         except ImportError:
-                            from scripts.walk_forward import deflated_alpha_ratio  # noqa: E402
+                            from walk_forward import deflated_alpha_ratio  # noqa: E402
 
                         bench_returns = (
                             benchmark_list[i] if benchmark_list[i] is not None else pd.Series()
@@ -518,7 +518,7 @@ def calculate_metrics(
                     try:
                         from walk_forward import deflated_alpha_ratio  # noqa: E402
                     except ImportError:
-                        from scripts.walk_forward import deflated_alpha_ratio  # noqa: E402
+                        from walk_forward import deflated_alpha_ratio  # noqa: E402
 
                     # Apply Deflated Alpha Ratio correction
                     da_result = deflated_alpha_ratio(
@@ -587,7 +587,7 @@ def calculate_metrics(
         try:
             from walk_forward import deflated_sharpe_ratio  # noqa: E402
         except ImportError:
-            from scripts.walk_forward import deflated_sharpe_ratio  # noqa: E402
+            from walk_forward import deflated_sharpe_ratio  # noqa: E402
 
         metrics["deflated_sharpe"] = deflated_sharpe_ratio(
             sharpe_ratio=metrics["sharpe_ratio"],
@@ -601,7 +601,7 @@ def calculate_metrics(
         try:
             from walk_forward import deflated_sharpe_ratio  # noqa: E402
         except ImportError:
-            from scripts.walk_forward import deflated_sharpe_ratio  # noqa: E402
+            from walk_forward import deflated_sharpe_ratio  # noqa: E402
         metrics["deflated_sharpe"] = deflated_sharpe_ratio(
             sharpe_ratio=metrics["sharpe_ratio"],
             returns=returns,

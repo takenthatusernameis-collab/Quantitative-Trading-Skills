@@ -20,8 +20,8 @@ from itertools import product
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from scripts.strategy_builder import build_strategy
-from scripts.data_loader import (
+from strategy_builder import build_strategy
+from data_loader import (
     load_data,
     validate_data,
     validate_point_in_time,
@@ -30,9 +30,9 @@ from scripts.data_loader import (
     _compute_benchmark_total_return,
     adjust_for_splits,
 )
-from scripts.performance import calculate_metrics, generate_report, _benchmark_stats
-from scripts.utils import _annualization_factor
-from scripts.reporting import generate_tear_sheet
+from performance import calculate_metrics, generate_report, _benchmark_stats
+from utils import _annualization_factor
+from reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
 
 
