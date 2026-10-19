@@ -1141,6 +1141,35 @@ def test_walk_forward_analysis_oos_record_has_no_duplicated_bars():
         )
 
 
+def test_walk_forward_analysis_periods_have_disjoint_train_test_windows():
+    data = _make_ohlcv_data(periods=500, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
+
+    res = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+    )
+
+    assert len(res["periods"]) >= 1
+    for i, p in enumerate(res["periods"]):
+        train_idx = set(p["train_data"].index)
+        test_idx = set(p["test_data"].index)
+        assert train_idx.isdisjoint(test_idx), (
+            f"period {i}: train and test index sets overlap"
+        )
+        assert p["train_end"] <= p["test_start"], (
+            f"period {i}: train_end {p['train_end']} > test_start {p['test_start']}"
+        )
+
+
 def test_out_of_sample_validation_n_trials_matches_evaluated_combinations():
     """out_of_sample_validation's aggregate deflated_sharpe n_trials must equal
     the count of actually-evaluated (finite-Sharpe) combinations across
@@ -5774,6 +5803,7 @@ TEST_REGISTRY = [
     ("test_split_train_val_test_boundaries_are_chronological_and_non_overlapping", test_split_train_val_test_boundaries_are_chronological_and_non_overlapping),
     ("test_walk_forward_analysis_rejects_overlapping_oos_test_windows", test_walk_forward_analysis_rejects_overlapping_oos_test_windows),
     ("test_walk_forward_analysis_oos_record_has_no_duplicated_bars", test_walk_forward_analysis_oos_record_has_no_duplicated_bars),
+    ("test_walk_forward_analysis_periods_have_disjoint_train_test_windows", test_walk_forward_analysis_periods_have_disjoint_train_test_windows),
     ("test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star", test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star),
     ("test_deflated_sharpe_parity_across_all_four_analysis_paths", test_deflated_sharpe_parity_across_all_four_analysis_paths),
     ("test_cost_sweep_dsr_parity_across_paths", test_cost_sweep_dsr_parity_across_paths),
