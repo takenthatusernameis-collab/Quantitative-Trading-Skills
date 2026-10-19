@@ -191,9 +191,14 @@ def run_full_pipeline():
         print(f"  Correlation w/ Benchmark: {metrics['correlation_with_benchmark']:.3f}")
         print(f"  Alpha (annualized): {metrics['alpha']:.2%}")
         print(f"  Beta: {metrics['beta']:.3f}")
-        if metrics.get('alpha_t_stat') is not None:
-            print(f"  Alpha t-stat: {metrics['alpha_t_stat']:.3f}")
-            print(f"  Alpha p-value: {metrics['alpha_p_value']:.4f}")
+        # Canonical key names from performance._benchmark_stats:
+        # ``alpha_tstat`` and ``alpha_pvalue`` (no underscore between
+        # "alpha" and "tstat").  These are the same keys the tear sheet and
+        # text report render under, so a single-benchmark run surfaces them
+        # here too.
+        if metrics.get('alpha_tstat') is not None:
+            print(f"  Alpha t-stat: {metrics['alpha_tstat']:.3f}")
+            print(f"  Alpha p-value: {metrics['alpha_pvalue']:.4f}")
     print()
 
     # 8. GENERATE REPORTS AND TEAR SHEETS

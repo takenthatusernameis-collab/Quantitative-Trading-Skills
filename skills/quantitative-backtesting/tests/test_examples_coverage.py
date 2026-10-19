@@ -137,6 +137,31 @@ def test_full_pipeline_example_runs():
         assert stage in result.stdout, f"pipeline stage missing: {stage}"
 
 
+def test_full_pipeline_example_surfaces_single_benchmark_significance():
+    """Stage 7 prints the alpha t-stat / p-value from the canonical keys.
+
+    Regression guard for a defect where the example read ``alpha_t_stat``
+    (with an underscore) while ``performance._benchmark_stats`` emits
+    ``alpha_tstat`` -- the same key the tear sheet and text report render
+    under -- so the significance block silently never fired and the
+    pipeline claimed a stage it did not actually print.
+    """
+    result = subprocess.run(
+        [sys.executable, str(_FULL_PIPELINE_PATH)],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == 0, (
+        f"full_pipeline_example exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-3000:]}\nstderr:\n{result.stderr[-3000:]}"
+    )
+    assert "Alpha t-stat:" in result.stdout, (
+        "stage 7 must print the alpha t-statistic for the single-benchmark case"
+    )
+    assert "Alpha p-value:" in result.stdout, (
+        "stage 7 must print the alpha p-value for the single-benchmark case"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Test registry
 # ---------------------------------------------------------------------------
@@ -148,6 +173,7 @@ TEST_REGISTRY = [
     ("test_multiple_benchmarks_example_runs", test_multiple_benchmarks_example_runs),
     ("test_full_pipeline_example_imports", test_full_pipeline_example_imports),
     ("test_full_pipeline_example_runs", test_full_pipeline_example_runs),
+    ("test_full_pipeline_example_surfaces_single_benchmark_significance", test_full_pipeline_example_surfaces_single_benchmark_significance),
 ]
 
 
