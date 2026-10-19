@@ -1696,6 +1696,69 @@ def test_deflated_alpha_ratio_fallback_units_are_period_consistent():
     assert abs(res["z_score"] - z_expected) < 1e-9
 
 
+def test_deflated_alpha_ratio_cross_sectional_units_are_period_consistent():
+    """The cross-sectional estimator (trial_alphas provided) must annualize
+    expected_max_alpha consistently with the i.i.d.-null fallback path.
+
+    Both paths compute sr_star in per-period Sharpe-like units and report
+    expected_max_alpha = sr_star * strat_vol_ann * sqrt(ann_factor), i.e. the
+    per-period expected max alpha (sr_star * per-period vol) annualized by the
+    full annualization factor. This regression guard pins each path, and the two
+    paths to each other, to an independent per-period recomputation so any future
+    unit mismatch (e.g. a missing sqrt(ann_factor) on one branch) is caught.
+    """
+    dates = pd.date_range("2020-01-01", periods=500, freq="B")
+    ann_factor = _annualization_factor(dates)
+    rng = np.random.default_rng(7)
+    rets = pd.Series(rng.normal(0.0012, 0.015, 500), index=dates)
+    bench = pd.Series(rng.normal(0.0004, 0.012, 500), index=dates)
+    alpha_ann = float((rets.mean() - bench.mean()) * ann_factor)
+    strat_vol_ann = float(rets.std() * np.sqrt(ann_factor))
+    t_obs = int(len(rets.dropna()))
+    n_bench = 3
+
+    def independent_expected_max_alpha(sr_star_per: float) -> float:
+        return sr_star_per * float(rets.std()) * ann_factor
+
+    # Cross-sectional path: dispersion of the trial alphas estimates sr*.
+    trial_alphas = [alpha_ann * f for f in (0.8, 1.0, 1.2)]
+    trial_sr = np.asarray(
+        [a / strat_vol_ann / np.sqrt(ann_factor) for a in trial_alphas], dtype=float
+    )
+    sr_star_cs = float(np.std(trial_sr, ddof=1)) * np.sqrt(2.0 * np.log(n_bench))
+    res_cs = deflated_alpha_ratio(
+        alpha=alpha_ann,
+        returns=rets,
+        benchmark_returns=bench,
+        n_benchmarks=n_bench,
+        trial_alphas=trial_alphas,
+    )
+    assert res_cs["z_score"] is not None
+    assert np.isfinite(res_cs["z_score"])
+    assert 0.0 <= res_cs["deflated_alpha_ratio"] <= 1.0
+    assert abs(res_cs["expected_max_alpha"] - independent_expected_max_alpha(sr_star_cs)) < 1e-9
+
+    # Fallback path: i.i.d.-null approximation estimates sr*.
+    sr_star_fb = float(np.sqrt(2.0 * np.log(n_bench) / t_obs))
+    res_fb = deflated_alpha_ratio(
+        alpha=alpha_ann,
+        returns=rets,
+        benchmark_returns=bench,
+        n_benchmarks=n_bench,
+        trial_alphas=None,
+    )
+    assert res_fb["z_score"] is not None
+    assert np.isfinite(res_fb["z_score"])
+    assert 0.0 <= res_fb["deflated_alpha_ratio"] <= 1.0
+    assert abs(res_fb["expected_max_alpha"] - independent_expected_max_alpha(sr_star_fb)) < 1e-9
+
+    # The two estimators use the same annualization: expected_max_alpha /
+    # (strat_vol_ann * sqrt(ann_factor)) must recover the internal per-period sr_star.
+    denom = strat_vol_ann * np.sqrt(ann_factor)
+    assert abs(res_cs["expected_max_alpha"] / denom - sr_star_cs) < 1e-9
+    assert abs(res_fb["expected_max_alpha"] / denom - sr_star_fb) < 1e-9
+
+
 def test_out_of_sample_validation_multiple_benchmarks_deflated_alpha():
     """out_of_sample_validation with multiple benchmarks surfaces Deflated Alpha
     in the summary and preserves backward compatibility with deflated_alphas list.
@@ -5390,6 +5453,7 @@ TEST_REGISTRY = [
     ("test_degenerate_constant_return_dsr_consistency", test_degenerate_constant_return_dsr_consistency),
     ("test_degenerate_constant_return_dar_consistency", test_degenerate_constant_return_dar_consistency),
     ("test_deflated_alpha_ratio_fallback_units_are_period_consistent", test_deflated_alpha_ratio_fallback_units_are_period_consistent),
+    ("test_deflated_alpha_ratio_cross_sectional_units_are_period_consistent", test_deflated_alpha_ratio_cross_sectional_units_are_period_consistent),
     ("test_out_of_sample_validation_multiple_benchmarks_deflated_alpha", test_out_of_sample_validation_multiple_benchmarks_deflated_alpha),
     ("test_calculate_metrics_deflated_alpha_with_benchmark_list", test_calculate_metrics_deflated_alpha_with_benchmark_list),
     ("test_cli_cpcv_benchmark_cost_is_periodic", test_cli_cpcv_benchmark_cost_is_periodic),
