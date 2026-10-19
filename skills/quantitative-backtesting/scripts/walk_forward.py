@@ -480,6 +480,23 @@ def walk_forward_analysis(
     start_date = data.index.min()
     end_date = data.index.max()
 
+    # Enforce non-overlapping out-of-sample test windows. When
+    # step_months < test_months, consecutive test windows overlap and the
+    # concatenated OOS record (built by pd.concat below) double-counts bars,
+    # which silently biases the aggregate Sharpe / Deflated Sharpe Ratio
+    # (duplicate entries distort the mean, variance, and the independence
+    # assumption behind the SR* estimator). Reject the configuration up front
+    # rather than emitting a misleading aggregate metric.
+    if step_months < test_months:
+        raise ValueError(
+            f"step_months ({step_months}) must be >= test_months "
+            f"({test_months}) so consecutive out-of-sample test windows do "
+            f"not overlap. Overlapping windows double-count bars in the "
+            f"concatenated oos_returns record and bias aggregate metrics. "
+            f"Use step_months >= test_months, or evaluate each period's OOS "
+            f"return independently instead of concatenating them."
+        )
+
     # Generate walk-forward periods
     periods = []
     train_end = start_date + pd.DateOffset(months=train_months)

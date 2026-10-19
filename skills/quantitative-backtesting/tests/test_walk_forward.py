@@ -1030,6 +1030,117 @@ def test_split_train_val_test_boundaries_are_chronological_and_non_overlapping()
     assert check["train_test_overlap"] == 0
 
 
+def test_walk_forward_analysis_rejects_overlapping_oos_test_windows():
+    """walk_forward_analysis must refuse step_months < test_months.
+
+    When step_months < test_months, consecutive out-of-sample test windows
+    overlap and the concatenated oos_returns record double-counts bars,
+    silently biasing the aggregate Sharpe / Deflated Sharpe Ratio. The
+    contract is to reject such configurations with ValueError rather than
+    emit a misleading aggregate metric (walk_forward.py:490).
+    """
+    data = _make_ohlcv_data(periods=500, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
+
+    # The overlapping configuration that previously produced 60 duplicated
+    # bars in the concatenated OOS record (step_months=2, test_months=3).
+    raised = False
+    try:
+        walk_forward_analysis(
+            data=data,
+            strategy_factory=factory,
+            param_grid=param_grid,
+            train_months=12,
+            test_months=3,
+            step_months=2,
+            initial_capital=100000,
+            commission=0.0002,
+            slippage=0.0001,
+        )
+    except ValueError as exc:
+        raised = True
+        assert "step_months" in str(exc) and "test_months" in str(exc), str(exc)
+    assert raised, (
+        "walk_forward_analysis(step_months=2, test_months=3) must raise "
+        "ValueError: overlapping OOS test windows double-count bars in the "
+        "concatenated oos_returns record."
+    )
+
+    # step_months == test_months is the minimal non-overlapping step and
+    # must NOT raise.
+    res = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+    )
+    assert len(res["periods"]) >= 1
+
+
+def test_walk_forward_analysis_oos_record_has_no_duplicated_bars():
+    """The concatenated OOS record must never double-count a trading bar.
+
+    Even with step_months >= test_months, guard against a regression that
+    reintroduces overlapping test windows: every timestamp in oos_returns
+    must be unique, and the number of OOS bars must equal the sum of the
+    per-period test-window lengths (walk_forward.py:505-521, 647-651).
+    """
+    data = _make_ohlcv_data(periods=500, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
+
+    res = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+    )
+
+    oos = res["oos_returns"]
+    assert len(oos) > 0
+    assert oos.index.is_unique, (
+        f"oos_returns has {oos.index.duplicated().sum()} duplicated bars "
+        f"({len(oos)} rows, {oos.index.nunique()} unique dates); "
+        "overlapping test windows bias aggregate Sharpe/DSR."
+    )
+
+    # Every OOS bar must come from a period's test window, and no OOS bar may
+    # fall outside the union of the per-period test windows. (oos_returns is
+    # built from best_test_returns, which _calculate_strategy_returns may
+    # trim relative to test_data due to latency/NaN fill, so the count is
+    # not asserted equal -- only containment and uniqueness matter.)
+    test_index_union = set()
+    for p in res["periods"]:
+        if p.get("test_data") is not None:
+            test_index_union |= set(p["test_data"].index)
+    assert set(oos.index) <= test_index_union, (
+        f"oos_returns contains bars outside every period's test window: "
+        f"{sorted(set(oos.index) - test_index_union)[:5]}"
+    )
+
+    # Consecutive test windows must be strictly ordered with no overlap:
+    test_periods = [
+        (p["test_start"], p["test_end"])
+        for p in res["periods"] if p.get("test_start") is not None
+    ]
+    for i in range(len(test_periods) - 1):
+        assert test_periods[i][1] <= test_periods[i + 1][0], (
+            f"test windows overlap at index {i}: {test_periods[i]} vs "
+            f"{test_periods[i + 1]}"
+        )
+
+
 def test_out_of_sample_validation_n_trials_matches_evaluated_combinations():
     """out_of_sample_validation's aggregate deflated_sharpe n_trials must equal
     the count of actually-evaluated (finite-Sharpe) combinations across
@@ -2210,7 +2321,7 @@ def test_walk_forward_analysis_multiple_benchmarks_deflated_alpha():
         param_grid=param_grid,
         train_months=12,
         test_months=3,
-        step_months=2,
+        step_months=3,  # >= test_months: non-overlapping OOS test windows
         initial_capital=100000,
         commission=0.0002,
         slippage=0.0001,
@@ -2317,7 +2428,7 @@ def test_cli_walk_forward_multiple_benchmarks():
             "--benchmark-cost-is-periodic",
             "--train-months", "12",
             "--test-months", "3",
-            "--step-months", "2",
+            "--step-months", "3",
         ]
         with patch.object(sys, "argv", argv), \
                 redirect_stdout(StringIO()), redirect_stderr(StringIO()):
@@ -2374,7 +2485,7 @@ def test_cli_walk_forward_constant_benchmarks_defensive_fallback_surfaces_metric
             "--benchmark-slippage", "0.001",
             "--train-months", "12",
             "--test-months", "3",
-            "--step-months", "2",
+            "--step-months", "3",
         ]
         series_lengths = []
 
@@ -4577,7 +4688,7 @@ def test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance():
     # remaining multi-benchmark CLI paths all render a tear sheet.
     cases = [
         ("cpcv", ["--n-splits", "5", "--test-size", "0.2"]),
-        ("walk-forward", ["--train-months", "12", "--test-months", "3", "--step-months", "2"]),
+        ("walk-forward", ["--train-months", "12", "--test-months", "3", "--step-months", "3"]),
         ("monte-carlo", ["--n-simulations", "30"]),
     ]
 
@@ -5661,6 +5772,8 @@ TEST_REGISTRY = [
     ("test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model", test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model),
     ("test_out_of_sample_validation_n_trials_matches_evaluated_combinations", test_out_of_sample_validation_n_trials_matches_evaluated_combinations),
     ("test_split_train_val_test_boundaries_are_chronological_and_non_overlapping", test_split_train_val_test_boundaries_are_chronological_and_non_overlapping),
+    ("test_walk_forward_analysis_rejects_overlapping_oos_test_windows", test_walk_forward_analysis_rejects_overlapping_oos_test_windows),
+    ("test_walk_forward_analysis_oos_record_has_no_duplicated_bars", test_walk_forward_analysis_oos_record_has_no_duplicated_bars),
     ("test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star", test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star),
     ("test_deflated_sharpe_parity_across_all_four_analysis_paths", test_deflated_sharpe_parity_across_all_four_analysis_paths),
     ("test_cost_sweep_dsr_parity_across_paths", test_cost_sweep_dsr_parity_across_paths),
