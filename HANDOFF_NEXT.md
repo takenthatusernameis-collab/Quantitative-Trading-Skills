@@ -2,29 +2,28 @@
 
 ## What changed this session
 
-No production code was changed. The pending worked-example reproducibility task from the prior handoff was executed and verified:
+Added `skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py` (3 regression tests) for the falsifiable financial hypothesis worked example. No production code was changed. The pending provenance-reproducibility task from the prior handoff is already implemented and committed (test_cli_data_provenance_reproducible_across_runs passes).
 
-1. `python3 skills/quantitative-backtesting/examples/deflated_alpha_example.py` (repo root) — runs cleanly, prints only, no file writes. DAR weakens as N grows: N=1: 1.0000/p=0.0000; N=5: 0.1806/p=0.8194; N=10 fallback: 0.9894/p=0.0106. Matches prior claims.
-2. `python3 skills/quantitative-backtesting/examples/multiple_benchmarks_example.py` (repo root) — runs cleanly, writes `skills/quantitative-backtesting/examples/example_output/multiple_benchmarks_metrics.json`.
-3. `git diff skills/quantitative-backtesting/examples/example_output/multiple_benchmarks_metrics.json` — empty (regenerated file is byte-identical to the committed version). Reproducibility confirmed.
-4. `git status` — clean; no unintended changes. Nothing committed (per constraint, not asked to commit).
+1. `python3 skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py` — 3/3 tests pass standalone.
+2. `python3 -m pytest skills/quantitative-backtesting/tests/ -q` — 362 passed, 26 warnings (full suite).
+3. `python3 verify_end_to_end.py` — exits 0.
+4. `git status` — clean apart from the new untracked test file; nothing committed (not asked to commit).
 
 ## What was verified
 
-- Both worked examples run without error from the repo root.
-- Committed `example_output/multiple_benchmarks_metrics.json` is deterministic/reproducible (identical diff).
-- Working tree clean after verification.
+- Falsifiable hypothesis example runs end-to-end on shipped sample fixtures and returns a well-formed verdict dict (SUPPORTED / NOT SUPPORTED, explicit per-criterion pass/fail, chronological train/val/test split audit, PIT and bias-control flags).
+- Full suite green with no regressions; end-to-end verification passes.
 
 ## What remains unresolved
 
-- None identified. The quant backtesting library is complete: all major methodology features implemented, wired, and tested; full suite passes (355 passed, 26 warnings); `verify_end_to_end.py` exits 0.
+- None identified.
 
 ## Approaches already tried and why
 
-- Prior sessions inspected run_backtest.py benchmark provenance, performance.py, walk_forward.py, reporting.py: no defects; multiple-benchmark deflated alpha already tested at out_of_sample_validation/cpcv/walk_forward levels; added regression test `test_deflated_alpha_ratio_weakens_with_more_benchmarks` (PASS). No further gaps identified.
+- Regression-tested the existing falsifiable_hypothesis_example.py instead of adding new methodology code: the library is complete, and the demonstrable gap was executable test coverage for the worked example, verified against shipped fixtures.
 
 ## Next task (precise, bounded)
 
-None currently identified — the library is complete and all verification passes. If the next agent wishes to extend quant research, a bounded high-value candidate would be adding a worked example or test for a specific falsifiable financial hypothesis with explicit out-of-sample evaluation, but no such task is assigned. Do not commit anything unless explicitly asked.
+None currently identified — all verification passes. If the next agent wishes to extend quant research, a bounded high-value candidate would be a test/worked example for a falsifiable financial hypothesis with explicit out-of-sample evaluation, realistic costs, and data-mining controls. Do not commit anything unless explicitly asked.
 
 (End of file)
