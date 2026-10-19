@@ -470,6 +470,61 @@ def book_market_impact_cost(
     return market_impact.fillna(0).mean(axis=1)
 
 
+def impact_participation_dilution(
+    held_book,
+    raw_returns,
+    close,
+    volume,
+    impact_coefficient,
+    adv_window=20,
+    initial_capital=100000.0,
+):
+    """Measure how much the panel impact model dilutes participation.
+
+    The charged impact (``book_market_impact_cost``) is the equal-weighted
+    mean over **all** panel names, including names that did not trade in a
+    period (their impact is zero). The traded-only impact is the same per-asset
+    model but averaged over the names that actually traded. Their difference
+    is the participation dilution: how much less the model charges than the
+    traded names would have paid.
+
+    This is a **measurement only**: it does not change any charged cost,
+    return, capacity or Sharpe number.
+
+    Returns a dict with ``charged`` and ``traded_only`` (per-period Series),
+    ``difference_bps`` (per-period Series, charged - traded_only in bps) and
+    ``mean_difference_bps``, or ``None`` when impact is disabled.
+    """
+    if impact_coefficient <= 0 or volume is None:
+        return None
+    if held_book is None or not isinstance(held_book, pd.DataFrame) or held_book.empty:
+        return None
+    charged = book_market_impact_cost(
+        held_book, raw_returns, close, volume, impact_coefficient,
+        adv_window=adv_window, initial_capital=initial_capital,
+    )
+    if charged is None:
+        return None
+
+    adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
+    adv_notional = adv_shares * close
+    equity = initial_capital * (1 + raw_returns).cumprod()
+    traded_weight = held_book.diff().abs()
+    traded_notional = traded_weight.mul(equity, axis=0)
+    traded = traded_notional.replace(0, np.nan)
+    adv_denominator = adv_notional.replace(0, np.nan)
+    per_asset = adv_denominator.rdiv(traded, axis=0) * impact_coefficient
+    # traded-only mean: average over names that actually traded
+    traded_only = per_asset.where(per_asset.notna() & (traded_notional != 0)).mean(axis=1, skipna=True).fillna(0.0)
+    difference_bps = (charged - traded_only) * 1e4
+    return {
+        "charged": charged,
+        "traded_only": traded_only,
+        "difference_bps": difference_bps,
+        "mean_difference_bps": float(difference_bps.mean()),
+    }
+
+
 def book_trade_ledger(held_book, close):
     """Per-asset round trips of a book, priced at each asset's own close.
 
