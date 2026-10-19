@@ -61,7 +61,8 @@ class _Args:
                  borrow_cost=0.0, funding_cost=0.0,
                  validate_point_in_time=False, point_in_time_strict=False,
                  multi_symbol=False, benchmark=None, risk_free_rate=None,
-                 fill_rate=1.0, latency=0, panel_pricing="net-exposure"):
+                 fill_rate=1.0, latency=0, panel_pricing="net-exposure",
+                 impact_aggregation="panel"):
         self.commission = commission
         self.slippage = slippage
         self.initial_capital = initial_capital
@@ -80,6 +81,7 @@ class _Args:
         self.fill_rate = fill_rate
         self.latency = latency
         self.panel_pricing = panel_pricing
+        self.impact_aggregation = impact_aggregation
 
 
 def test_signals_active_detects_flat_and_active_series():
@@ -3392,6 +3394,122 @@ def test_impact_participation_is_reported_in_both_pricing_modes():
     assert net_diag["impact_dilution_bps"] < book_diag["impact_dilution_bps"]
 
 
+def test_notional_weighted_charges_the_notional_weighted_measurement():
+    """In ``notional-weighted`` mode the charged impact IS the measurement.
+
+    The measurement (impact_notional_weighted_bps) is convention-independent:
+    it is the impact the traded names would have paid under the same per-asset
+    model. Under the ``panel`` convention the run charges the panel mean
+    (different from the measurement when the book is concentrated). Under
+    ``notional-weighted`` the run charges the measurement itself, so the two
+    readings coincide exactly -- which is the oracle the implementation is
+    checked against.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    params = '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}'
+    coefficient = 0.5
+
+    panel = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(impact_coefficient=coefficient, panel_pricing="book"),
+    )
+    nw = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(
+            impact_coefficient=coefficient,
+            panel_pricing="book",
+            impact_aggregation="notional-weighted",
+        ),
+    )
+    p_diag = panel["book_diagnostic"]
+    nw_diag = nw["book_diagnostic"]
+
+    # The two conventions charge different amounts.
+    assert abs(p_diag["impact_charged_bps"] - nw_diag["impact_charged_bps"]) > 1e-9
+    # The notional-weighted reading itself is convention-independent.
+    assert abs(
+        p_diag["impact_notional_weighted_bps"]
+        - nw_diag["impact_notional_weighted_bps"]
+    ) < 1e-9
+    # In notional-weighted mode the charged impact equals that reading.
+    assert abs(
+        nw_diag["impact_charged_bps"] - nw_diag["impact_notional_weighted_bps"]
+    ) < 1e-9
+
+
+def test_notional_weighted_capacity_is_the_dw2_inverse():
+    """The notional-weighted capacity is the exact inverse of the charge.
+
+    The drag of asset ``i`` under the notional-weighted aggregation is::
+
+        coefficient * dw_i^2 * equity / ADV_i
+
+    so the equity at which asset ``i`` hits ``max_impact`` is
+    ``max_impact * ADV_i / (coefficient * dw_i^2)`` and the book capacity is
+    the minimum over the traded constituents. Recomputed by hand from the
+    strategy's own weights, it must match the reported number exactly.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    params = '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}'
+    coefficient, max_impact, adv_window = 0.5, 0.0005, 20
+
+    results = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(
+            impact_coefficient=coefficient,
+            panel_pricing="book",
+            impact_aggregation="notional-weighted",
+        ),
+    )
+    strategy = build_strategy("cross_sectional_momentum", params)
+    market, held = _held_book_of(strategy, data)
+    close, volume = market["close"], market["volume"]
+
+    adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
+    adv_notional = adv_shares * close
+    dw = held.diff().abs()
+    per_asset = (max_impact * adv_notional) / (coefficient * dw * dw)
+    per_asset = per_asset.where(np.isfinite(per_asset) & (per_asset > 0))
+    capacity_series = per_asset.min(axis=1, skipna=True)
+    valid = capacity_series.replace([np.inf, -np.inf], np.nan).dropna()
+    valid = valid[np.isfinite(valid)]
+    hand_capacity = float(valid.iloc[-1])
+
+    reported = results["capacity_notional_weighted"]
+    assert reported is not None
+    assert abs(reported - hand_capacity) < 1e-6 * max(1.0, abs(hand_capacity))
+
+
+def test_default_impact_aggregation_is_panel():
+    """The default aggregation is ``panel`` and publishes unchanged numbers."""
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    params = '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}'
+    coefficient = 0.5
+
+    default_run = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(impact_coefficient=coefficient, panel_pricing="book"),
+    )
+    explicit_panel = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(
+            impact_coefficient=coefficient,
+            panel_pricing="book",
+            impact_aggregation="panel",
+        ),
+    )
+    assert default_run["returns"].equals(explicit_panel["returns"])
+    assert abs(
+        default_run["book_diagnostic"]["impact_charged_bps"]
+        - explicit_panel["book_diagnostic"]["impact_charged_bps"]
+    ) < 1e-12
+
+
 def test_impact_participation_is_absent_when_impact_is_disabled():
     """Without an impact model there is nothing to measure."""
     data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
@@ -3599,6 +3717,9 @@ TEST_REGISTRY = [
     ("test_impact_participation_is_reported_in_both_pricing_modes", test_impact_participation_is_reported_in_both_pricing_modes),
     ("test_impact_participation_is_absent_when_impact_is_disabled", test_impact_participation_is_absent_when_impact_is_disabled),
     ("test_impact_participation_does_not_move_any_charged_number", test_impact_participation_does_not_move_any_charged_number),
+    ("test_notional_weighted_charges_the_notional_weighted_measurement", test_notional_weighted_charges_the_notional_weighted_measurement),
+    ("test_notional_weighted_capacity_is_the_dw2_inverse", test_notional_weighted_capacity_is_the_dw2_inverse),
+    ("test_default_impact_aggregation_is_panel", test_default_impact_aggregation_is_panel),
 ]
 
 if __name__ == "__main__":

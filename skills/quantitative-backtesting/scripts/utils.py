@@ -19,6 +19,46 @@ PANEL_PRICING_MODES = ("net-exposure", "book")
 DEFAULT_PANEL_PRICING = "net-exposure"
 
 
+# Market-impact aggregation conventions.
+#
+# "panel" (the default) charges the equal-weighted mean of the per-asset
+# impact rates -- the convention every published number in this skill was
+# produced under. "notional-weighted" charges the dollar-consistent
+# aggregation of a linear impact model: the impact rate of each name applied
+# to the notional traded in that name (``sum_i rate_i * notional_i /
+# equity``). For books that trade ``1 / n`` of the equity in every name they
+# touch the two agree (``panel == notional-weighted``); for a concentrated
+# book the panel convention undercharges by up to a factor ``n`` while the
+# notional-weighted reading stays correct. The default is unchanged so no
+# published number moves.
+IMPACT_AGGREGATION_MODES = ("panel", "notional-weighted")
+DEFAULT_IMPACT_AGGREGATION = "panel"
+
+
+def resolve_impact_aggregation(mode) -> str:
+    """Normalize and validate a market-impact aggregation convention.
+
+    Args:
+        mode: ``"panel"``, ``"notional-weighted"``, or ``None`` (which means
+            the default, ``"panel"``).
+
+    Returns:
+        The canonical convention string.
+
+    Raises:
+        ValueError: when the mode is not one of :data:`IMPACT_AGGREGATION_MODES`.
+    """
+    if mode is None:
+        return DEFAULT_IMPACT_AGGREGATION
+    normalized = str(mode).strip().lower()
+    if normalized not in IMPACT_AGGREGATION_MODES:
+        raise ValueError(
+            f"Unknown impact aggregation convention: {mode!r}. "
+            f"Use one of: {', '.join(IMPACT_AGGREGATION_MODES)}."
+        )
+    return normalized
+
+
 def resolve_panel_pricing(mode) -> str:
     """Normalize and validate a panel pricing mode.
 
@@ -151,6 +191,7 @@ def market_impact_cost(
     impact_coefficient,
     adv_window=20,
     initial_capital=100000.0,
+    impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
 ):
     """Per-period market-impact cost, expressed as a fraction of the
     portfolio notional traded.
@@ -183,14 +224,20 @@ def market_impact_cost(
         close: close prices -- ``pd.Series`` (single asset) or ``pd.DataFrame``
             with one column per asset (panel).
         volume: volumes, same shape as ``close``, or ``None``.
-        is_panel: whether ``close``/``volume`` are per-asset frames.
-        impact_coefficient: linear impact coefficient; ``0`` disables impact.
-        adv_window: rolling window (in periods) for the ADV.
-        initial_capital: starting portfolio value used to scale notional.
+    is_panel: whether ``close``/``volume`` are per-asset frames.
+    impact_coefficient: linear impact coefficient; ``0`` disables impact.
+    adv_window: rolling window (in periods) for the ADV.
+    initial_capital: starting portfolio value used to scale notional.
+    impact_aggregation: ``"panel"`` (the default) charges the equal-weighted
+        mean of the per-asset impact rates; ``"notional-weighted"`` charges
+        the dollar-consistent aggregation ``sum_i rate_i * notional_i /
+        equity`` (the impact rate of each name applied to the notional
+        traded in that name). Default ``"panel"`` keeps every published
+        number unchanged.
 
-    Returns:
-        ``pd.Series`` of impact cost per period, or ``None`` when impact is
-        disabled (no volume, or a zero coefficient).
+Returns:
+    ``pd.Series`` of impact cost per period, or ``None`` when impact is
+    disabled (no volume, or a zero coefficient).
     """
     if impact_coefficient <= 0 or volume is None:
         return None
@@ -214,14 +261,33 @@ def market_impact_cost(
         # than infinite; a zero ADV is treated as missing.
         traded = per_asset_notional.replace(0, np.nan)
         adv_denominator = adv_notional.replace(0, np.nan)
-        market_impact = adv_denominator.rdiv(traded, axis=0) * impact_coefficient
-        market_impact = market_impact.fillna(0).mean(axis=1)
+        rate = adv_denominator.rdiv(traded, axis=0) * impact_coefficient
+        rate = rate.fillna(0)
+        if impact_aggregation == "notional-weighted":
+            # Dollar-consistent: the impact rate of each name applied to the
+            # notional traded in that name, summed and divided by equity.
+            # Every constituent carries the same notional here
+            # (position_notional / n_assets), so this reduces to
+            # position_notional / equity * mean(rate) = |d| * mean(rate).
+            market_impact = (rate * per_asset_notional).sum(axis=1) / equity
+        else:
+            # Panel convention: the equal-weighted mean of the per-asset
+            # impact rates (the convention every published number was
+            # produced under).
+            market_impact = rate.mean(axis=1)
     else:
         # Market impact as fraction of notional traded
-        market_impact = (
+        rate = (
             position_notional / adv_notional.replace(0, np.nan)
         ) * impact_coefficient
-        market_impact = market_impact.fillna(0)
+        rate = rate.fillna(0)
+        if impact_aggregation == "notional-weighted":
+            # Cost as a fraction of equity: the price concession rate times
+            # the fraction of equity traded (|d|).
+            market_impact = rate * position_changes
+        else:
+            # Panel convention: the price concession rate itself.
+            market_impact = rate
     return market_impact
 
 
@@ -406,6 +472,7 @@ def book_market_impact_cost(
     impact_coefficient,
     adv_window=20,
     initial_capital=100000.0,
+    impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
 ):
     """Per-period market-impact cost of trading a per-asset book.
 
@@ -440,6 +507,12 @@ def book_market_impact_cost(
         impact_coefficient: linear impact coefficient; ``0`` disables impact.
         adv_window: rolling window (in periods) for the ADV.
         initial_capital: starting portfolio value used to scale notional.
+        impact_aggregation: ``"panel"`` (the default) charges the equal-weighted
+            mean of the per-asset impact rates; ``"notional-weighted"``
+            charges the dollar-consistent aggregation ``sum_i rate_i *
+            |dw_i|`` (the impact rate of each name applied to the weight
+            change of that name). Default ``"panel"`` keeps every published
+            number unchanged.
 
     Returns:
         A ``pd.Series`` of impact cost per period, or ``None`` when impact is
@@ -466,8 +539,19 @@ def book_market_impact_cost(
     # than infinite; a zero ADV is treated as missing.
     traded = traded_notional.replace(0, np.nan)
     adv_denominator = adv_notional.replace(0, np.nan)
-    market_impact = adv_denominator.rdiv(traded, axis=0) * impact_coefficient
-    return market_impact.fillna(0).mean(axis=1)
+    rate = adv_denominator.rdiv(traded, axis=0) * impact_coefficient
+    rate = rate.fillna(0)
+    if impact_aggregation == "notional-weighted":
+        # Dollar-consistent: the impact rate of each name applied to the
+        # weight change of that name, summed over the panel
+        # (sum_i rate_i * |dw_i| = cost as a fraction of equity).
+        market_impact = (rate * traded_weight).sum(axis=1)
+    else:
+        # Panel convention: the equal-weighted mean of the per-asset
+        # impact rates (the convention every published number was
+        # produced under).
+        market_impact = rate.mean(axis=1)
+    return market_impact
 
 
 def impact_participation_dilution(
@@ -607,6 +691,7 @@ def _impact_dilution_keys(
     impact_coefficient=0.0,
     adv_window=20,
     initial_capital=100000.0,
+    impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
 ):
     """The impact-dilution scalars of the panel book diagnostic.
 
@@ -617,10 +702,12 @@ def _impact_dilution_keys(
     The charged impact depends on the pricing convention:
 
     * ``book``: the panel mean of the book's own per-asset impacts (the
-      convention :func:`book_market_impact_cost` charges);
+      convention :func:`book_market_impact_cost` charges) under the
+      ``"panel"`` aggregation, or the notional-weighted aggregation under
+      ``"notional-weighted"``;
     * ``net-exposure``: the model the default path charges, i.e. the
       ``|d net exposure|`` of the scalar position series split equally over
-      the panel.
+      the panel (aggregated the same way).
 
     Args:
         held_book: the book actually held, on the market model's index.
@@ -634,6 +721,9 @@ def _impact_dilution_keys(
             measurement.
         adv_window: rolling window (in periods) for the ADV.
         initial_capital: starting portfolio value used to scale notional.
+        impact_aggregation: ``"panel"`` (the default) or ``"notional-weighted"``;
+            selects which per-asset aggregation is treated as the charged
+            impact in ``book`` mode (and in ``net-exposure`` mode).
 
     Returns:
         A dict of scalars, or an empty dict when the measurement does not
@@ -672,8 +762,14 @@ def _impact_dilution_keys(
         return keys
 
     if pricing_mode == "book":
-        # The book convention: the panel mean of the book's own impacts.
-        charged = measurement["panel"]
+        # The book convention: the panel mean of the book's own per-asset
+        # impacts under the "panel" aggregation, or the notional-weighted
+        # aggregation under "notional-weighted" -- the impact the run
+        # actually charged.
+        if impact_aggregation == "notional-weighted":
+            charged = measurement["notional_weighted"]
+        else:
+            charged = measurement["panel"]
     else:
         # The net-exposure convention: the scalar position series split
         # equally over the panel, exactly as `market_impact_cost` charges it.
@@ -687,6 +783,7 @@ def _impact_dilution_keys(
             impact_coefficient=impact_coefficient,
             adv_window=adv_window,
             initial_capital=initial_capital,
+            impact_aggregation=impact_aggregation,
         )
         if charged is None:
             return keys
@@ -948,6 +1045,7 @@ def compute_book_diagnostic(
     impact_coefficient: float = 0.0,
     adv_window: int = 20,
     initial_capital: float = 100000.0,
+    impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
 ):
     """Measure the per-asset book against the framework's net-exposure pricing.
 
@@ -990,6 +1088,10 @@ def compute_book_diagnostic(
             disables the market-impact measurement.
         adv_window: rolling window (in periods) for the ADV.
         initial_capital: starting portfolio value used to scale notional.
+        impact_aggregation: ``"panel"`` (the default) or ``"notional-weighted"``;
+            selects the impact aggregation the diagnostic reports as the
+            charged impact (``impact_charged_bps``) next to the measured
+            notional-weighted reading (``impact_notional_weighted_bps``).
 
     Returns:
         A dict of diagnostics, or ``None`` when there is no book to measure
@@ -1082,6 +1184,7 @@ def compute_book_diagnostic(
         impact_coefficient=impact_coefficient,
         adv_window=adv_window,
         initial_capital=initial_capital,
+        impact_aggregation=impact_aggregation,
     )
 
     return {
@@ -1373,6 +1476,7 @@ def book_capacity_estimate(
     impact_coefficient: float,
     max_impact: float = 0.0005,
     adv_window: int = 20,
+    impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
 ):
     """Capacity implied by the strategy's own rebalance pattern.
 
@@ -1386,8 +1490,8 @@ def book_capacity_estimate(
     trades *less* per period (a cross-sectional book that only rotates when
     its constituent set changes) supports more.
 
-    This estimator uses the strategy's own trade sizes. The impact model
-    charges asset ``i`` with::
+    This estimator uses the strategy's own trade sizes. The panel impact
+    model charges asset ``i`` with::
 
         impact_i = (|dw_i| * equity / ADV_i) * impact_coefficient
 
@@ -1405,20 +1509,49 @@ def book_capacity_estimate(
     per constituent every period (the basket rule is that special case);
     they differ for every other book.
 
+    With the ``notional-weighted`` aggregation the drag of asset ``i`` is::
+
+        coefficient * dw_i^2 * equity / ADV_i
+
+    so the equity at which that trade hits ``max_impact`` is::
+
+        equity_i = max_impact * ADV_i / (coefficient * dw_i^2)
+
+    and the notional-weighted capacity is::
+
+        capacity = min_i ( max_impact * ADV_i / (coefficient * dw_i^2) )
+
+    This is a *different* capacity rule from the panel (``|dw_i|``) rule:
+    for the same trade the notional-weighted threshold is lower whenever
+    ``|dw_i| < 1`` (a fractional position change), because a linear impact
+    model charges the notional traded, not the whole equity.
+
     The estimate is reported per period (each period's own trade sizes
     against that period's own ADV), so a liquidity squeeze inside the
     window is visible instead of being hidden behind a single reading:
 
-        estimated_capacity  the point-in-time reading: the capacity of the
-                            most recent bar on which the book actually
-                            traded. Bars on which the book did not trade
-                            impose no constraint, so the reading is the
-                            last *defined* one.
-        capacity_trend      the distribution of the per-period readings
-                            (see :func:`_capacity_trend_from_series`).
-        capacity_series     the per-period readings themselves, so a
-                            caller can merge the series of several windows
-                            without recomputing them.
+        estimated_capacity              the point-in-time reading: the
+                                        capacity of the most recent bar on
+                                        which the book actually traded.
+                                        Bars on which the book did not trade
+                                        impose no constraint, so the reading
+                                        is the last *defined* one.
+        estimated_capacity_notional_weighted
+                                        the point-in-time reading under the
+                                        notional-weighted aggregation.
+        capacity_trend                  the distribution of the per-period
+                                        panel-rule readings (see
+                                        :func:`_capacity_trend_from_series`).
+        capacity_notional_weighted_trend
+                                        the distribution of the per-period
+                                        notional-weighted readings.
+        capacity_series                 the per-period panel-rule readings,
+                                        so a caller can merge the series of
+                                        several windows without recomputing
+                                        them.
+        capacity_notional_weighted_series
+                                        the per-period notional-weighted
+                                        readings.
 
     Args:
         held_book: held per-asset weights (rows = dates, columns = symbols).
@@ -1428,19 +1561,30 @@ def book_capacity_estimate(
         max_impact: maximum acceptable market impact per trade (default
             0.0005 = 5 bps), the same threshold the basket rule uses.
         adv_window: rolling window (in periods) for the ADV.
+        impact_aggregation: ``"panel"`` (the default) uses the
+            ``max_impact * ADV_i / (|dw_i| * coefficient)`` rule;
+            ``"notional-weighted"`` uses
+            ``max_impact * ADV_i / (coefficient * dw_i^2)``.
 
     Returns:
-        A dict with the keys ``estimated_capacity``, ``capacity_trend``,
-        ``capacity_series``, ``n_assets``, ``binding_asset``,
-        ``n_periods_measured``, ``point_in_time_bar``, ``unconstrained``,
-        ``estimable``, ``impact_coefficient``, ``max_impact`` and
-        ``adv_window``. ``estimated_capacity`` is ``None`` when impact is
-        disabled, when the book never traded, or when ADV is not estimable.
+        A dict with the keys ``estimated_capacity``,
+        ``estimated_capacity_notional_weighted``, ``capacity_trend``,
+        ``capacity_notional_weighted_trend``, ``capacity_series``,
+        ``capacity_notional_weighted_series``, ``n_assets``,
+        ``binding_asset``, ``n_periods_measured``, ``point_in_time_bar``,
+        ``unconstrained``, ``estimable``, ``impact_coefficient``,
+        ``max_impact``, ``adv_window`` and ``impact_aggregation``.
+        ``estimated_capacity`` / ``estimated_capacity_notional_weighted``
+        are ``None`` when impact is disabled, when the book never traded,
+        or when ADV is not estimable.
     """
     result = {
         "estimated_capacity": None,
+        "estimated_capacity_notional_weighted": None,
         "capacity_trend": None,
+        "capacity_notional_weighted_trend": None,
         "capacity_series": None,
+        "capacity_notional_weighted_series": None,
         "n_assets": None,
         "binding_asset": None,
         "n_periods_measured": 0,
@@ -1450,6 +1594,7 @@ def book_capacity_estimate(
         "impact_coefficient": float(impact_coefficient),
         "max_impact": float(max_impact),
         "adv_window": int(adv_window),
+        "impact_aggregation": impact_aggregation,
     }
 
     if impact_coefficient <= 0:
@@ -1494,7 +1639,17 @@ def book_capacity_estimate(
         np.isfinite(per_asset_capacity) & (per_asset_capacity > 0)
     )
 
+    # Notional-weighted rule: capacity_i = max_impact * ADV_i /
+    # (coefficient * dw_i^2).
+    per_asset_capacity_nw = (
+        (max_impact * adv_notional) / (traded * traded * float(impact_coefficient))
+    )
+    per_asset_capacity_nw = per_asset_capacity_nw.where(
+        np.isfinite(per_asset_capacity_nw) & (per_asset_capacity_nw > 0)
+    )
+
     capacity_series = per_asset_capacity.min(axis=1, skipna=True)
+    capacity_series_nw = per_asset_capacity_nw.min(axis=1, skipna=True)
     valid = capacity_series.replace([np.inf, -np.inf], np.nan).dropna()
     valid = valid[np.isfinite(valid)]
     if len(valid) == 0:
@@ -1506,6 +1661,7 @@ def book_capacity_estimate(
     result["n_assets"] = int(len(columns))
     result["n_periods_measured"] = int(len(valid))
     result["capacity_series"] = capacity_series
+    result["capacity_notional_weighted_series"] = capacity_series_nw
 
     # The point-in-time reading: the capacity of the most recent bar on
     # which the book actually traded.
@@ -1523,6 +1679,17 @@ def book_capacity_estimate(
     result["capacity_trend"] = _capacity_trend_from_series(
         capacity_series, point_in_time
     )
+
+    # Notional-weighted point-in-time reading: the capacity of the most
+    # recent bar on which the book actually traded under the dw^2 rule.
+    valid_nw = capacity_series_nw.replace([np.inf, -np.inf], np.nan).dropna()
+    valid_nw = valid_nw[np.isfinite(valid_nw)]
+    if len(valid_nw) > 0:
+        point_in_time_nw = float(valid_nw.iloc[-1])
+        result["estimated_capacity_notional_weighted"] = point_in_time_nw
+        result["capacity_notional_weighted_trend"] = _capacity_trend_from_series(
+            capacity_series_nw, point_in_time_nw
+        )
     return result
 
 

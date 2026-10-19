@@ -41,6 +41,7 @@ from utils import (
     format_impact_dilution_lines,
     held_book_weights,
     market_impact_cost,
+    resolve_impact_aggregation,
     resolve_panel_pricing,
     strategy_target_weights,
 )
@@ -60,6 +61,7 @@ def parse_args():
     parser.add_argument("--slippages", type=float, nargs="+", default=None, help="List of slippages to sweep (overrides --slippage)")
     parser.add_argument("--impact-coefficient", type=float, default=0.0, help="Market impact coefficient (position_notional/ADV * coefficient). 0 to disable.")
     parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="List of market impact coefficients to sweep (overrides --impact-coefficient).")
+    parser.add_argument("--impact-aggregation", type=str, default="panel", choices=["panel", "notional-weighted"], help="Market-impact aggregation convention. 'panel' (default) charges the equal-weighted mean of the per-asset impact rates -- the convention every published number was produced under. 'notional-weighted' charges the dollar-consistent aggregation (the impact rate of each name applied to the notional traded in that name); default unchanged so no published number moves.")
     parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
     parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3%% per year)")
     parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="List of annual borrow costs to sweep (overrides --borrow-cost).")
@@ -243,6 +245,12 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     # its short legs, its gross exposure) instead of on the net exposure.
     panel_pricing = resolve_panel_pricing(getattr(args, "panel_pricing", None))
 
+    # Market-impact aggregation convention. "panel" (the default) charges
+    # the equal-weighted mean of the per-asset impact rates; "notional-
+    # weighted" charges the dollar-consistent aggregation. Default unchanged
+    # so no published number moves.
+    impact_aggregation = resolve_impact_aggregation(getattr(args, "impact_aggregation", None))
+
     # Panel book diagnostic (measurement only). The panel path prices the
     # portfolio as `net_exposure x mean(asset returns)` -- one scalar per
     # period -- so a strategy that holds a long/short book cannot be
@@ -365,6 +373,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             impact_coefficient=args.impact_coefficient,
             adv_window=args.adv_window,
             initial_capital=args.initial_capital,
+            impact_aggregation=impact_aggregation,
         )
         if market_impact is not None:
             costs = costs + market_impact
@@ -389,6 +398,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             impact_coefficient=args.impact_coefficient,
             adv_window=args.adv_window,
             initial_capital=args.initial_capital,
+            impact_aggregation=impact_aggregation,
         )
         if market_impact is not None:
             costs = costs + market_impact
@@ -455,6 +465,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             impact_coefficient=args.impact_coefficient,
             adv_window=args.adv_window,
             initial_capital=args.initial_capital,
+            impact_aggregation=impact_aggregation,
         )
 
     # Build equity curve
@@ -566,6 +577,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             "commission": args.commission,
             "slippage": args.slippage,
             "impact_coefficient": args.impact_coefficient,
+            "impact_aggregation": impact_aggregation,
             "adv_window": args.adv_window,
             "borrow_cost": args.borrow_cost,
             "funding_cost": args.funding_cost,
@@ -664,9 +676,14 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     # Reported in the "book" pricing mode only, so the default net-exposure
     # path keeps a single capacity number. None when the mode is not "book",
     # when impact is disabled, when the panel carries no volume, or when
-    # the strategy exposes no book.
+    # the strategy exposes no book. Two book-based capacities are reported
+    # side by side: the panel ("|dw|") rule and the dollar-consistent
+    # "notional-weighted" ("dw^2") rule, which is the capacity consistent
+    # with the notional-weighted impact charge.
     results["capacity_book"] = None
     results["capacity_book_trend"] = None
+    results["capacity_notional_weighted"] = None
+    results["capacity_notional_weighted_trend"] = None
     if held_book is not None:
         try:
             _book_cap = book_capacity_estimate(
@@ -675,12 +692,21 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
                 volume,
                 impact_coefficient=args.impact_coefficient,
                 adv_window=args.adv_window,
+                impact_aggregation=impact_aggregation,
             )
             results["capacity_book"] = _book_cap.get("estimated_capacity")
             results["capacity_book_trend"] = _book_cap.get("capacity_trend")
+            results["capacity_notional_weighted"] = _book_cap.get(
+                "estimated_capacity_notional_weighted"
+            )
+            results["capacity_notional_weighted_trend"] = _book_cap.get(
+                "capacity_notional_weighted_trend"
+            )
         except Exception:
             results["capacity_book"] = None
             results["capacity_book_trend"] = None
+            results["capacity_notional_weighted"] = None
+            results["capacity_notional_weighted_trend"] = None
 
     # Optional buy-and-hold benchmark baseline(s).
     # The benchmark return for period t is the close-to-close return

@@ -45,8 +45,10 @@ from utils import (
     format_impact_dilution_lines,
     held_book_weights,
     market_impact_cost,
+    resolve_impact_aggregation,
     resolve_panel_pricing,
     strategy_target_weights,
+    DEFAULT_IMPACT_AGGREGATION,
 )
 from reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
@@ -393,11 +395,11 @@ def walk_forward_analysis(
     benchmark_cost_is_periodic: bool = False,
     validate_pit: bool = True,
     panel_pricing: str = "net-exposure",
+    impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     **kwargs,
 ) -> Dict[str, Any]:
     """
     Perform walk-forward analysis with expanding training windows.
-
     Args:
         data: DataFrame with OHLCV data indexed by date
         strategy_factory: Function that creates a strategy from params dict
@@ -547,6 +549,7 @@ def walk_forward_analysis(
     period_benchmark_stats = []
     # Per-period book capacity series, merged into the summary trend.
     period_book_capacity_series: List[Any] = []
+    period_book_capacity_nw_series: List[Any] = []
 
     for period in periods:
         train_data = period["train_data"]
@@ -600,6 +603,7 @@ def walk_forward_analysis(
                     latency, fill_rate,
                     initial_capital=initial_capital,
                     panel_pricing=panel_pricing,
+                    impact_aggregation=impact_aggregation,
                     book_weights=test_book_weights,
                 )
 
@@ -610,6 +614,7 @@ def walk_forward_analysis(
                     latency, fill_rate,
                     initial_capital=initial_capital,
                     panel_pricing=panel_pricing,
+                    impact_aggregation=impact_aggregation,
                     book_weights=(
                         strategy_target_weights(strategy, train_data)
                         if panel_pricing == "book"
@@ -738,6 +743,7 @@ def walk_forward_analysis(
                 adv_window=adv_window,
                 latency=latency,
                 fill_rate=fill_rate,
+                impact_aggregation=impact_aggregation,
             )
             if _period_book_capacity is not None:
                 period["capacity_book"] = _period_book_capacity.get(
@@ -746,8 +752,19 @@ def walk_forward_analysis(
                 period["capacity_book_trend"] = _period_book_capacity.get(
                     "capacity_trend"
                 )
+                period["capacity_notional_weighted"] = _period_book_capacity.get(
+                    "estimated_capacity_notional_weighted"
+                )
+                period["capacity_notional_weighted_trend"] = (
+                    _period_book_capacity.get("capacity_notional_weighted_trend")
+                )
         period_book_capacity_series.append(
             _period_book_capacity.get("capacity_series")
+            if _period_book_capacity is not None
+            else None
+        )
+        period_book_capacity_nw_series.append(
+            _period_book_capacity.get("capacity_notional_weighted_series")
             if _period_book_capacity is not None
             else None
         )
@@ -767,6 +784,7 @@ def walk_forward_analysis(
             impact_coefficient=impact_coefficient,
             adv_window=adv_window,
             initial_capital=initial_capital,
+            impact_aggregation=impact_aggregation,
         )
 
     # Combine all out-of-sample returns
@@ -872,6 +890,25 @@ def walk_forward_analysis(
     summary["oos_min_capacity_book"] = _aggregate_oos_capacity(
         [p.get("capacity_book_trend") for p in periods]
     )
+    # Notional-weighted book capacity: the capacity consistent with the
+    # dollar-consistent ("dw^2") impact charge, reported side by side with
+    # the "|dw|" book capacity. Merged across the out-of-sample windows.
+    _book_capacity_nw_series = _merge_capacity_series(period_book_capacity_nw_series)
+    summary["capacity_notional_weighted"] = None
+    summary["capacity_notional_weighted_trend"] = None
+    if _book_capacity_nw_series is not None:
+        _nw_readings = _book_capacity_nw_series.replace(
+            [np.inf, -np.inf], np.nan
+        ).dropna()
+        if len(_nw_readings):
+            _nw_point = float(_nw_readings.iloc[-1])
+            summary["capacity_notional_weighted"] = _nw_point
+            summary["capacity_notional_weighted_trend"] = _capacity_trend_from_series(
+                _book_capacity_nw_series, _nw_point
+            )
+    summary["oos_min_capacity_notional_weighted"] = _aggregate_oos_capacity(
+        [p.get("capacity_notional_weighted_trend") for p in periods]
+    )
     # Panel book diagnostic aggregated over the out-of-sample windows: the
     # book the strategy actually held against the framework's net-exposure
     # pricing. None when no window produced a diagnostic (single asset, or
@@ -883,6 +920,7 @@ def walk_forward_analysis(
     # Recorded so a result can never be read without knowing how the panel
     # was priced.
     summary["panel_pricing"] = panel_pricing
+    summary["impact_aggregation"] = impact_aggregation
 
     return {
         "periods": periods,
@@ -915,6 +953,7 @@ def parameter_optimization(
     benchmark_expense_ratio: float = 0.0,
     benchmark_cost_is_periodic: bool = False,
     panel_pricing: str = "net-exposure",
+    impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     **kwargs,
 ) -> List[Dict[str, Any]]:
     """
@@ -1036,10 +1075,11 @@ def parameter_optimization(
                 data, signals, commission, slippage,
                 impact_coefficient, adv_window, borrow_cost, funding_cost,
                 latency, fill_rate,
-                initial_capital=initial_capital,
-                panel_pricing=panel_pricing,
-                book_weights=book_weights,
-            )
+                    initial_capital=initial_capital,
+                    panel_pricing=panel_pricing,
+                    impact_aggregation=impact_aggregation,
+                    book_weights=book_weights,
+                )
 
             if len(returns) > 1:
                 ann_factor = _annualization_factor(returns.index)
@@ -1599,6 +1639,7 @@ def _calculate_strategy_returns(
     initial_capital: float = 100000.0,
     panel_pricing: str = "net-exposure",
     book_weights: Optional[pd.DataFrame] = None,
+    impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
 ) -> pd.Series:
     """Calculate strategy returns from signals and market data.
 
@@ -1641,6 +1682,10 @@ def _calculate_strategy_returns(
         book_weights: the per-asset target book of the strategy on `data`
             (rows = dates, columns = symbols). Required for the "book"
             pricing mode; ignored otherwise.
+        impact_aggregation: ``"panel"`` (the default) charges the equal-weighted
+            mean of the per-asset impact rates; ``"notional-weighted"``
+            charges the dollar-consistent aggregation. Default ``"panel"``
+            keeps every published number unchanged.
     """
     if fill_rate is None:
         fill_rate = 1.0
@@ -1715,6 +1760,7 @@ def _calculate_strategy_returns(
             impact_coefficient=impact_coefficient,
             adv_window=adv_window,
             initial_capital=initial_capital,
+            impact_aggregation=impact_aggregation,
         )
         if market_impact is not None:
             costs = costs + market_impact
@@ -1744,6 +1790,7 @@ def _calculate_strategy_returns(
             impact_coefficient=impact_coefficient,
             adv_window=adv_window,
             initial_capital=initial_capital,
+            impact_aggregation=impact_aggregation,
         )
         if market_impact is not None:
             costs = costs + market_impact
@@ -2027,6 +2074,7 @@ def _window_book_capacity(
     latency: int = 0,
     fill_rate: float = 1.0,
     max_impact: float = 0.0005,
+    impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
 ) -> Optional[Dict[str, Any]]:
     """The capacity implied by the book's own rebalance pattern in a window.
 
@@ -2035,6 +2083,11 @@ def _window_book_capacity(
     sizes the strategy actually executes, so a concentrated book reports a
     lower capacity than the basket rule. See
     :func:`utils.book_capacity_estimate`.
+
+    Two book-based capacities are returned: the "|dw|" rule (the capacity
+    consistent with the panel impact charge) and the "notional-weighted"
+    ("dw^2") rule (the capacity consistent with the dollar-consistent
+    impact charge).
 
     Returns ``None`` when the window has no book, when the panel carries no
     volume, or when impact is disabled.
@@ -2058,6 +2111,7 @@ def _window_book_capacity(
         impact_coefficient=impact_coefficient,
         max_impact=max_impact,
         adv_window=adv_window,
+        impact_aggregation=impact_aggregation,
     )
 
 
@@ -2098,6 +2152,7 @@ def _window_book_diagnostic(
     impact_coefficient: float = 0.0,
     adv_window: int = 20,
     initial_capital: float = 100000.0,
+    impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
 ) -> Optional[Dict[str, Any]]:
     """Panel book diagnostic for one validation window.
 
@@ -2138,6 +2193,7 @@ def _window_book_diagnostic(
         impact_coefficient=impact_coefficient,
         adv_window=adv_window,
         initial_capital=initial_capital,
+        impact_aggregation=impact_aggregation,
     )
 
 
@@ -2228,6 +2284,7 @@ def cpcv_analysis(
     benchmark_cost_is_periodic: bool = False,
     validate_pit: bool = True,
     panel_pricing: str = "net-exposure",
+    impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -2416,6 +2473,7 @@ def cpcv_analysis(
     fold_benchmark_stats = []
     # Per-fold book capacity series, merged into the summary trend.
     fold_book_capacity_series: List[Any] = []
+    fold_book_capacity_nw_series: List[Any] = []
 
     for fold in folds:
         train_data = fold["train_data"]
@@ -2465,6 +2523,7 @@ def cpcv_analysis(
                     latency, fill_rate,
                     initial_capital=initial_capital,
                     panel_pricing=panel_pricing,
+                    impact_aggregation=impact_aggregation,
                     book_weights=test_book_weights,
                 )
 
@@ -2475,6 +2534,7 @@ def cpcv_analysis(
                     latency, fill_rate,
                     initial_capital=initial_capital,
                     panel_pricing=panel_pricing,
+                    impact_aggregation=impact_aggregation,
                     book_weights=(
                         strategy_target_weights(strategy, train_data)
                         if panel_pricing == "book"
@@ -2601,12 +2661,24 @@ def cpcv_analysis(
                 adv_window=adv_window,
                 latency=latency,
                 fill_rate=fill_rate,
+                impact_aggregation=impact_aggregation,
             )
             if _fold_book_capacity is not None:
                 fold["capacity_book"] = _fold_book_capacity.get("estimated_capacity")
                 fold["capacity_book_trend"] = _fold_book_capacity.get("capacity_trend")
+                fold["capacity_notional_weighted"] = _fold_book_capacity.get(
+                    "estimated_capacity_notional_weighted"
+                )
+                fold["capacity_notional_weighted_trend"] = _fold_book_capacity.get(
+                    "capacity_notional_weighted_trend"
+                )
         fold_book_capacity_series.append(
             _fold_book_capacity.get("capacity_series")
+            if _fold_book_capacity is not None
+            else None
+        )
+        fold_book_capacity_nw_series.append(
+            _fold_book_capacity.get("capacity_notional_weighted_series")
             if _fold_book_capacity is not None
             else None
         )
@@ -2624,6 +2696,7 @@ def cpcv_analysis(
             impact_coefficient=impact_coefficient,
             adv_window=adv_window,
             initial_capital=initial_capital,
+            impact_aggregation=impact_aggregation,
         )
 
     # Combine all out-of-sample returns
@@ -2738,6 +2811,23 @@ def cpcv_analysis(
     summary["oos_min_capacity_book"] = _aggregate_oos_capacity(
         [f.get("capacity_book_trend") for f in folds]
     )
+    # Notional-weighted book capacity (mirrors the walk-forward summary).
+    _book_capacity_nw_series = _merge_capacity_series(fold_book_capacity_nw_series)
+    summary["capacity_notional_weighted"] = None
+    summary["capacity_notional_weighted_trend"] = None
+    if _book_capacity_nw_series is not None:
+        _nw_readings = _book_capacity_nw_series.replace(
+            [np.inf, -np.inf], np.nan
+        ).dropna()
+        if len(_nw_readings):
+            _nw_point = float(_nw_readings.iloc[-1])
+            summary["capacity_notional_weighted"] = _nw_point
+            summary["capacity_notional_weighted_trend"] = _capacity_trend_from_series(
+                _book_capacity_nw_series, _nw_point
+            )
+    summary["oos_min_capacity_notional_weighted"] = _aggregate_oos_capacity(
+        [f.get("capacity_notional_weighted_trend") for f in folds]
+    )
     # Panel book diagnostic aggregated over the out-of-sample folds (see
     # the walk-forward summary for the same key). None when no fold
     # produced a diagnostic.
@@ -2746,6 +2836,7 @@ def cpcv_analysis(
     )
     # The pricing convention that produced the reported out-of-sample P&L.
     summary["panel_pricing"] = panel_pricing
+    summary["impact_aggregation"] = impact_aggregation
 
     return {
         "folds": folds,
@@ -2835,6 +2926,7 @@ def out_of_sample_validation(
     benchmark_cost_is_periodic: bool = False,
     validate_pit: bool = True,
     panel_pricing: str = "net-exposure",
+    impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -3054,10 +3146,11 @@ def out_of_sample_validation(
         val_data, val_signals, commission, slippage,
         impact_coefficient, adv_window, borrow_cost, funding_cost,
         latency, fill_rate,
-        initial_capital=initial_capital,
-        panel_pricing=panel_pricing,
-        book_weights=val_book_weights,
-    )
+                initial_capital=initial_capital,
+                panel_pricing=panel_pricing,
+                impact_aggregation=impact_aggregation,
+                book_weights=val_book_weights,
+            )
 
     ann_factor = _annualization_factor(val_returns.index)
     excess = val_returns - 0.02 / ann_factor
@@ -3079,6 +3172,8 @@ def out_of_sample_validation(
     # basket-based number above. Reported in the "book" pricing mode only.
     val_capacity_book = None
     val_capacity_book_trend = None
+    val_capacity_book_nw = None
+    val_capacity_book_nw_trend = None
     if panel_pricing == "book":
         _val_book_capacity = _window_book_capacity(
             strategy_factory,
@@ -3088,10 +3183,17 @@ def out_of_sample_validation(
             adv_window=adv_window,
             latency=latency,
             fill_rate=fill_rate,
+            impact_aggregation=impact_aggregation,
         )
         if _val_book_capacity is not None:
             val_capacity_book = _val_book_capacity.get("estimated_capacity")
             val_capacity_book_trend = _val_book_capacity.get("capacity_trend")
+            val_capacity_book_nw = _val_book_capacity.get(
+                "estimated_capacity_notional_weighted"
+            )
+            val_capacity_book_nw_trend = _val_book_capacity.get(
+                "capacity_notional_weighted_trend"
+            )
 
     validation_performance = {
         "selected_params": selected_params,
@@ -3104,6 +3206,10 @@ def out_of_sample_validation(
         # Book-based capacity for the validation window (see above).
         "capacity_book": val_capacity_book,
         "capacity_book_trend": val_capacity_book_trend,
+        # Notional-weighted book capacity for the validation window (the
+        # capacity consistent with the dollar-consistent impact charge).
+        "capacity_book_notional_weighted": val_capacity_book_nw,
+        "capacity_book_notional_weighted_trend": val_capacity_book_nw_trend,
         # Panel book diagnostic for the validation window: the per-asset
         # book the selected strategy holds, measured against the
         # framework's net-exposure pricing of the same window. None when
@@ -3119,6 +3225,7 @@ def out_of_sample_validation(
             impact_coefficient=impact_coefficient,
             adv_window=adv_window,
             initial_capital=initial_capital,
+            impact_aggregation=impact_aggregation,
         ),
     }
 
@@ -3135,6 +3242,7 @@ def out_of_sample_validation(
                     latency, fill_rate,
                     initial_capital=initial_capital,
                     panel_pricing=panel_pricing,
+                    impact_aggregation=impact_aggregation,
                     book_weights=test_book_weights,
                 )
 
@@ -3154,6 +3262,8 @@ def out_of_sample_validation(
     # the "book" pricing mode only.
     test_capacity_book = None
     test_capacity_book_trend = None
+    test_capacity_book_nw = None
+    test_capacity_book_nw_trend = None
     if panel_pricing == "book":
         _test_book_capacity = _window_book_capacity(
             strategy_factory,
@@ -3163,10 +3273,17 @@ def out_of_sample_validation(
             adv_window=adv_window,
             latency=latency,
             fill_rate=fill_rate,
+            impact_aggregation=impact_aggregation,
         )
         if _test_book_capacity is not None:
             test_capacity_book = _test_book_capacity.get("estimated_capacity")
             test_capacity_book_trend = _test_book_capacity.get("capacity_trend")
+            test_capacity_book_nw = _test_book_capacity.get(
+                "estimated_capacity_notional_weighted"
+            )
+            test_capacity_book_nw_trend = _test_book_capacity.get(
+                "capacity_notional_weighted_trend"
+            )
 
     test_performance = {
      "test_total_return": test_total_return,
@@ -3179,6 +3296,9 @@ def out_of_sample_validation(
          # Book-based capacity for the held-out test window (see above).
          "capacity_book": test_capacity_book,
          "capacity_book_trend": test_capacity_book_trend,
+         # Notional-weighted book capacity for the held-out test window.
+         "capacity_book_notional_weighted": test_capacity_book_nw,
+         "capacity_book_notional_weighted_trend": test_capacity_book_nw_trend,
          # Panel book diagnostic for the held-out test window. Measurement
          # only -- the reported test performance is unchanged.
          "book_diagnostic": _window_book_diagnostic(
@@ -3192,6 +3312,7 @@ def out_of_sample_validation(
              impact_coefficient=impact_coefficient,
              adv_window=adv_window,
              initial_capital=initial_capital,
+             impact_aggregation=impact_aggregation,
          ),
      }
 
@@ -3249,12 +3370,18 @@ def out_of_sample_validation(
         # capacity collapse in the unseen test window stays visible.
         "validation_capacity": val_capacity_point,
         "test_capacity": test_capacity_point,
+        # Notional-weighted book capacity for the validation and test windows
+        # (the capacity consistent with the dollar-consistent impact charge).
+        "validation_capacity_notional_weighted": val_capacity_book_nw,
+        "test_capacity_notional_weighted": test_capacity_book_nw,
         # Capacity trends for the same two windows: the distribution of the
         # per-period capacity readings inside each window, so a liquidity
         # squeeze *within* a window is visible too (the point-in-time
         # `*_capacity` keys only read the last bar of the window).
         "validation_capacity_trend": val_capacity_trend,
         "test_capacity_trend": test_capacity_trend,
+        "validation_capacity_notional_weighted_trend": val_capacity_book_nw_trend,
+        "test_capacity_notional_weighted_trend": test_capacity_book_nw_trend,
         # Panel book diagnostics for the two windows: the per-asset book
         # the selected strategy holds against the framework's net-exposure
         # pricing. The aggregate below covers both windows; the test window
@@ -3424,6 +3551,7 @@ def out_of_sample_validation(
     # The pricing convention that produced the reported validation and test
     # P&L.
     summary["panel_pricing"] = panel_pricing
+    summary["impact_aggregation"] = impact_aggregation
 
     return {
         "train_val_test_split": split_info,
@@ -3617,6 +3745,7 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
+        impact_aggregation=getattr(args, "impact_aggregation", "panel"),
     )
     summary = results["summary"]
     dsr = summary.get("deflated_sharpe")
@@ -3727,6 +3856,7 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
+        impact_aggregation=getattr(args, "impact_aggregation", "panel"),
     )
     top = results[0] if results else None
     dsr = top.get("deflated_sharpe") if isinstance(top, dict) else None
@@ -3849,6 +3979,7 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
+        impact_aggregation=getattr(args, "impact_aggregation", "panel"),
     )
     test_perf = results.get("test_performance") or {}
     summary = results.get("summary") or {}
@@ -3956,6 +4087,7 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
+        impact_aggregation=getattr(args, "impact_aggregation", "panel"),
     )
     summary = results["summary"]
     dsr = summary.get("deflated_sharpe")
@@ -4282,6 +4414,7 @@ def run_cpcv(args) -> int:
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
+        impact_aggregation=getattr(args, "impact_aggregation", "panel"),
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
@@ -5324,6 +5457,7 @@ def run_walk_forward(args) -> int:
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
+        impact_aggregation=getattr(args, "impact_aggregation", "panel"),
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
@@ -5807,6 +5941,7 @@ def run_parameter_optimization(args) -> int:
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
+        impact_aggregation=getattr(args, "impact_aggregation", "panel"),
     )
 
     if not results:
@@ -6936,6 +7071,7 @@ def run_out_of_sample_validation(args) -> int:
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
+        impact_aggregation=getattr(args, "impact_aggregation", "panel"),
     )
 
     if pit_results is not None:
@@ -7217,6 +7353,7 @@ def main():
     common_parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (as decimal)")
     common_parser.add_argument("--slippages", type=float, nargs="+", default=None, help="List of slippages to sweep (overrides --slippage)")
     common_parser.add_argument("--impact-coefficient", type=float, default=0.0, help="Market impact coefficient (position_notional/ADV * coefficient). 0 to disable.")
+    common_parser.add_argument("--impact-aggregation", type=str, default="panel", choices=["panel", "notional-weighted"], help="Market-impact aggregation convention. 'panel' (default) charges the equal-weighted mean of the per-asset impact rates; 'notional-weighted' charges the dollar-consistent aggregation. Default unchanged so no published number moves.")
     common_parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
     common_parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3%% per year)")
     common_parser.add_argument("--funding-cost", type=float, default=0.0, help="Annual funding cost rate for leveraged positions (as decimal, e.g., 0.02 = 2%% per year)")
