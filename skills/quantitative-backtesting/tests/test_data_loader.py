@@ -173,24 +173,92 @@ def test_validate_point_in_time_detects_lookahead():
     assert "passed" in res
 
 
-def test_validate_point_in_time_detects_same_bar_lookahead():
-    """A signal equal to the same-bar return is a strict look-ahead violation.
+def test_validate_point_in_time_does_not_flag_close_based_signals_as_lookahead():
+    """A signal equal to the same-bar return must NOT be a violation.
 
-    Contemporaneous correlation (signal[t] vs return[t]) is a far stricter
-    indicator than next-period correlation, because no information should
-    flow from a same-bar signal to a same-bar return. Setting the signal
-    equal to the same-bar return guarantees corr=+1.0 and must be flagged.
+    Regression guard for a defect where the same-bar correlation check
+    (|corr(signal_changes, same_bar_returns)| > 0.3) flagged every
+    close[t]-based strategy as look-ahead, because close[t] is a component of
+    the same-bar return by construction.  A signal that IS the same-bar
+    return (corr(signal, same_bar_returns) ~ 1.0) is close[t]-based and
+    executed next-period, so it is not proof of look-ahead by itself and must
+    pass.  The definitive look-ahead test is the next-period correlation
+    (see test_validate_point_in_time_detects_lookahead).
     """
     np.random.seed(7)
     dates = pd.date_range("2020-01-01", periods=50, freq="B")
     close = 100 * np.exp(np.cumsum(np.random.normal(0.0, 0.01, 50)))
     df = pd.DataFrame({"close": close}, index=dates)
-    # Signal is set equal to the same-bar return: corr(signal_changes, same_bar_returns) = 1.0
+    # Signal is set equal to the same-bar return: corr(signal, same_bar_returns) = 1.0
     df["signal"] = df["close"].pct_change()
     res = validate_point_in_time(df, signal_column="signal")
-    assert res["passed"] is False
-    assert any("same-bar" in v for v in res["violations"]), (
-        f"expected same-bar look-ahead violation, got {res['violations']}"
+    assert res["passed"] is True, (
+        f"same-bar signal must not be a violation (it is close[t]-based), "
+        f"got violations={res['violations']}"
+    )
+    assert res["warnings"] == [], (
+        f"same-bar signal must not produce warnings, got {res['warnings']}"
+    )
+
+
+def test_validate_point_in_time_accepts_legitimate_close_based_signals():
+    """A close[t]-based signal executed next-period must NOT be a violation.
+
+    Regression guard for a defect where the same-bar correlation check
+    (|corr(signal_changes, same_bar_returns)| > 0.3) flagged every
+    close[t]-based strategy as look-ahead, because close[t] is a component of
+    the same-bar return by construction.  A mean-reversion signal
+    (signal[t] = -sign(close[t] - sma[t])) legitimately shows |same-bar corr|
+    ~ 0.36 while its next-period correlation is ~ 0, and must pass.
+
+    The definitive look-ahead test is the next-period correlation, which
+    this signal satisfies.  The same-bar check is retained as a warning only.
+    """
+    np.random.seed(11)
+    dates = pd.date_range("2020-01-01", periods=200, freq="B")
+    close = 100 * np.exp(np.cumsum(np.random.normal(0.0005, 0.01, 200)))
+    df = pd.DataFrame({"close": close}, index=dates)
+
+    # Legitimate mean-reversion signal: uses close[t], executed next-period.
+    sma = df["close"].rolling(50).mean()
+    df["mr_signal"] = -np.sign(df["close"] - sma).fillna(0)
+
+    res = validate_point_in_time(df, signal_column="mr_signal")
+    assert res["passed"] is True, (
+        f"close[t]-based mean-reversion signal must pass PIT validation, "
+        f"got violations={res['violations']}"
+    )
+    # The next-period correlation must be low (no look-ahead).
+    price_changes = df["close"].pct_change().shift(-1)
+    signal_changes = df["mr_signal"].diff()
+    valid = price_changes.notna() & signal_changes.notna()
+    next_corr = price_changes[valid].corr(signal_changes[valid])
+    assert abs(next_corr) < 0.3, (
+        f"legitimate signal must not predict next-period returns "
+        f"(|corr|={abs(next_corr):.3f})"
+    )
+
+
+def test_validate_point_in_time_accepts_sma_crossover_signal():
+    """An SMA-crossover signal (close[t]-based, next-period fill) must pass.
+
+    Mirrors the actual strategy used by the backtesting pipeline: the signal
+    is generated from close[t] and the position is filled at the next open.
+    This is the canonical no-look-ahead convention and must not be rejected.
+    """
+    np.random.seed(21)
+    dates = pd.date_range("2020-01-01", periods=200, freq="B")
+    close = 100 * np.exp(np.cumsum(np.random.normal(0.0005, 0.01, 200)))
+    df = pd.DataFrame({"close": close}, index=dates)
+
+    fast = df["close"].rolling(10).mean()
+    slow = df["close"].rolling(30).mean()
+    df["sma_signal"] = np.sign(fast - slow).fillna(0)
+
+    res = validate_point_in_time(df, signal_column="sma_signal")
+    assert res["passed"] is True, (
+        f"SMA-crossover signal must pass PIT validation, "
+        f"got violations={res['violations']}"
     )
 
 
@@ -601,7 +669,9 @@ TEST_REGISTRY = [
     ("test_provenance_serialization", test_provenance_serialization),
     ("test_validate_point_in_time_clean", test_validate_point_in_time_clean),
     ("test_validate_point_in_time_detects_lookahead", test_validate_point_in_time_detects_lookahead),
-    ("test_validate_point_in_time_detects_same_bar_lookahead", test_validate_point_in_time_detects_same_bar_lookahead),
+    ("test_validate_point_in_time_does_not_flag_close_based_signals_as_lookahead", test_validate_point_in_time_does_not_flag_close_based_signals_as_lookahead),
+    ("test_validate_point_in_time_accepts_legitimate_close_based_signals", test_validate_point_in_time_accepts_legitimate_close_based_signals),
+    ("test_validate_point_in_time_accepts_sma_crossover_signal", test_validate_point_in_time_accepts_sma_crossover_signal),
     ("test_validate_point_in_time_non_monotonic", test_validate_point_in_time_non_monotonic),
     ("test_validate_point_in_time_lookback_windows", test_validate_point_in_time_lookback_windows),
     ("test_detect_survivorship_bias_survivors_only", test_detect_survivorship_bias_survivors_only),

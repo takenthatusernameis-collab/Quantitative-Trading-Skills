@@ -451,21 +451,6 @@ def validate_point_in_time(
                         f"(corr={corr:.3f}); potential look-ahead bias"
                     )
 
-            # Contemporaneous (same-bar) correlation: a signal at time t must
-            # not depend on the price move at time t itself. Same-bar
-            # correlation is a stricter look-ahead indicator than next-period
-            # correlation, because no information should flow from a signal to
-            # the return of the same bar.
-            same_bar_changes = df["close"].pct_change()  # No shift: same-bar return
-            valid_sb = same_bar_changes.notna() & signal_changes.notna()
-            if valid_sb.sum() > 10:
-                corr_sb = same_bar_changes[valid_sb].corr(signal_changes[valid_sb])
-                if abs(corr_sb) > 0.3:
-                    violations.append(
-                        f"Signal '{signal_column}' correlates with same-bar returns "
-                        f"(corr={corr_sb:.3f}); potential look-ahead bias"
-                    )
-
     # Check 4: Rolling window calculations - verify no forward-looking windows
     if lookback_windows:
         for window in lookback_windows:
