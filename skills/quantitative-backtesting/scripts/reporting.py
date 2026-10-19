@@ -382,6 +382,16 @@ def generate_tear_sheet(
             if key == "max_drawdown":
                 cls = "negative" if metrics[key] < 0 else "positive"
             html_parts.append(f"<tr><td>{label}</td><td class='metric {cls}'>{val}</td></tr>")
+    # Market-impact capacity: surfaced in the summary metrics when impact
+    # is enabled and ADV is estimable. Omitted entirely when None/absent
+    # (backward compatible; capacity is a multi-period validation concept
+    # and is also rendered per-analysis in the Walk-Forward / CPCV tables).
+    capacity = metrics.get("capacity")
+    if capacity is not None:
+        html_parts.append(
+            f"<tr><td>Strategy Capacity (Notional)</td>"
+            f"<td class='metric'>{fmt_num(capacity)}</td></tr>"
+        )
     html_parts.append("</table>")
 
     # Trade analytics

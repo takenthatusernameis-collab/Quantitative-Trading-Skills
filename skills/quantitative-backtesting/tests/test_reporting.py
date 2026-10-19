@@ -791,6 +791,44 @@ class TestTearSheet(unittest.TestCase):
                 summary = json.load(f)
             self.assertNotIn("capacity", summary["walk_forward"]["summary"])
 
+    def test_generate_tear_sheet_surfaces_capacity_in_summary_metrics(self):
+        """The tear sheet renders a Strategy Capacity row in the Summary Metrics
+        table and surfaces it in the JSON summary when the metrics dict carries
+        a capacity value (single-backtest / run_backtest path)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            metrics = {"total_return": 0.1, "capacity": 4_250_000.0}
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Strategy Capacity", html)
+            self.assertIn("4250000", html.replace(",", ""))
+
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertEqual(summary["metrics"]["capacity"], 4_250_000.0)
+
+    def test_generate_tear_sheet_omits_capacity_in_summary_metrics_when_absent(self):
+        """Without a capacity value in the metrics dict, the Summary Metrics
+        capacity row is omitted (backward compatible)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            metrics = {"total_return": 0.1}
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertNotIn("Strategy Capacity", html)
+
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertNotIn("capacity", summary["metrics"])
+
     def test_generate_tear_sheet_handles_missing_equity(self):
         """Tear sheet does not crash when results lack equity_curve."""
         with tempfile.TemporaryDirectory() as tmpdir:

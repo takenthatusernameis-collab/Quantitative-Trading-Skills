@@ -2080,6 +2080,40 @@ def test_main_registers_every_module_level_test():
 
 
 
+def test_run_backtest_surfaces_capacity_in_results():
+    """run_backtest surfaces a capacity estimate in its results summary.
+
+    Mirrors the walk-forward/CPCV/out-of-sample paths: capacity is present
+    and > 0 when impact is enabled, and None when impact is disabled (or
+    ADV is not estimable).
+    """
+    from walk_forward import estimate_capacity
+
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+
+    enabled = run_backtest(data, strategy, _Args(impact_coefficient=0.5))
+    assert "capacity" in enabled
+    assert enabled["capacity"] is not None
+    assert enabled["capacity"] > 0
+
+    # Cross-check against a direct estimate_capacity call on the same frame.
+    cap_frame = pd.DataFrame({"close": data["close"], "volume": data["volume"]})
+    direct = estimate_capacity(cap_frame, 0.5, adv_window=20)
+    assert abs(enabled["capacity"] - direct["estimated_capacity"]) < 1e-9
+
+    disabled = run_backtest(data, strategy, _Args(impact_coefficient=0.0))
+    assert disabled["capacity"] is None
+
+
+def test_run_backtest_capacity_omits_when_volume_unavailable():
+    """Capacity is None (not an exception) when the data has no volume column."""
+    data = _make_data().drop(columns=["volume"])
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    results = run_backtest(data, strategy, _Args(impact_coefficient=0.5))
+    assert results["capacity"] is None
+
+
 def test_cli_data_provenance_reproducible_across_runs():
     """Running the CLI twice with identical inputs yields byte-identical
     data_provenance.json (load_timestamp sanitized to source mtime)."""
@@ -2174,6 +2208,8 @@ TEST_REGISTRY = [
     ("test_cli_benchmark_name_derives_from_filename_stem_when_omitted", test_cli_benchmark_name_derives_from_filename_stem_when_omitted),
     ("test_cli_data_provenance_reproducible_across_runs", test_cli_data_provenance_reproducible_across_runs),
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
+    ("test_run_backtest_surfaces_capacity_in_results", test_run_backtest_surfaces_capacity_in_results),
+    ("test_run_backtest_capacity_omits_when_volume_unavailable", test_run_backtest_capacity_omits_when_volume_unavailable),
 ]
 
 if __name__ == "__main__":

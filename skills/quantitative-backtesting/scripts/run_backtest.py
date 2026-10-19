@@ -189,15 +189,16 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
         for df in data.values():
             aligned = df.reindex(common_index)
             close_list.append(aligned["close"])
-            vol_list.append(aligned["volume"])
+            if "volume" in aligned.columns:
+                vol_list.append(aligned["volume"])
         close = pd.concat(close_list, axis=1).mean(axis=1)
-        volume = pd.concat(vol_list, axis=1).mean(axis=1)
+        volume = pd.concat(vol_list, axis=1).mean(axis=1) if vol_list else None
     elif isinstance(data.columns, pd.MultiIndex):
         close = data["close"].mean(axis=1)
-        volume = data["volume"].mean(axis=1)
+        volume = data["volume"].mean(axis=1) if "volume" in data.columns.get_level_values(0) else None
     else:
         close = data["close"]
-        volume = data["volume"]
+        volume = data["volume"] if "volume" in data.columns else None
 
     # Guard against strategies that never take a position (e.g. a lookback
     # longer than the data window leaves every rolling indicator NaN, so the

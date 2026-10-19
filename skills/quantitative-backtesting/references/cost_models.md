@@ -203,6 +203,13 @@ The tear sheet renders the capacity as a "Strategy Capacity (Notional)"
 row in the Walk-Forward / CPCV analysis tables and surfaces it in
 `tear_sheet_summary.json` under the corresponding analysis summary.
 
+The single-backtest path (`run_backtest.py`) reports the same estimate as
+`results["capacity"]` (mirrored into `metrics["capacity"]`), so capacity is
+part of every reported backtest result, not just multi-period validation.
+Volume is optional on this path: when the data has no `volume` column (or
+ADV is otherwise not estimable), `capacity` is `None` and the run proceeds
+without raising.
+
 ## Configuration
 
 Costs are passed as decimal fractions (not bps) to the backtest entry points:

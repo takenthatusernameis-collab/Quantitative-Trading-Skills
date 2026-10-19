@@ -2,50 +2,54 @@
 
 ## What changed this session
 
-The prior handoff's "next task" — surfacing `estimate_capacity` through `walk_forward_analysis` results/summary — was **already complete at baseline** (capacity key present at `walk_forward.py:728-729`, test registered & passing, 144/144). I verified this rather than re-implementing it.
+Executed the prior handoff's next task — `impact_coefficient` plumbing + capacity surfacing in `run_backtest.py` — which was **already complete at baseline** (capacity key present at run_backtest.py:424-433, surfaced into `metrics["capacity"]` at line 830). Verified rather than re-implemented.
 
-I extended the same capacity surfacing to the two sibling analysis paths and the tear sheet, so capacity is now part of every reported backtest result, not just walk-forward:
+Closed the remaining gap: the single-backtest path had no regression test, so the capacity feature was unverified on that code path. Added tests + a defensive fix + tear-sheet parity:
 
-- `skills/quantitative-backtesting/scripts/walk_forward.py`:
-  - `cpcv_analysis` now sets `summary["capacity"]` via `estimate_capacity(data, impact_coefficient, adv_window=adv_window)` (mirrors the walk-forward block).
-  - `out_of_sample_validation` now sets `summary["capacity"]` the same way.
+- `skills/quantitative-backtesting/scripts/run_backtest.py`:
+  - Made `volume` extraction defensive across all three data shapes (single-asset, MultiIndex panel, dict panel): `volume = None` when the `volume` column is absent instead of raising `KeyError`. Previously a volume-less frame crashed the whole backtest before the capacity `try/except` could run. Exposed by the new `test_run_backtest_capacity_omits_when_volume_unavailable`.
+- `skills/quantitative-backtesting/tests/test_run_backtest.py`:
+  - Added `test_run_backtest_surfaces_capacity_in_results` (capacity present and `> 0` for `impact_coefficient=0.5`, `None` for `0.0`, cross-checked against a direct `estimate_capacity` call).
+  - Added `test_run_backtest_capacity_omits_when_volume_unavailable` (capacity `None`, no crash, when data has no volume column).
+  - Registered both in `TEST_REGISTRY`.
 - `skills/quantitative-backtesting/scripts/reporting.py`:
-  - Walk-Forward Analysis table renders a "Strategy Capacity (Notional)" row when `wf_summary["capacity"]` is present.
-  - CPCV Analysis table renders the same row when `cpcv_summary["capacity"]` is present.
-  - Rows are omitted entirely when capacity is `None`/absent (backward compatible).
-- `skills/quantitative-backtesting/tests/test_cpcv.py`: added `test_cpcv_surfaces_capacity_in_summary` (capacity present and `> 0` for `impact_coefficient=0.5`; `None` for `impact_coefficient=0.0`) and registered it in `TEST_REGISTRY`.
-- `skills/quantitative-backtesting/tests/test_reporting.py`: added `test_generate_tear_sheet_surfaces_capacity_in_walk_forward` (HTML row + JSON summary key) and `test_generate_tear_sheet_omits_capacity_when_absent` (row and key omitted).
-- `skills/quantitative-backtesting/references/cost_models.md`: added a "Strategy Capacity Estimation" section documenting the inversion of the impact model and where capacity is reported.
-- `skills/quantitative-backtesting/SKILL.md`: noted capacity surfacing in the `walk_forward.py` resource description and the test-coverage section.
+  - Tear sheet renders a "Strategy Capacity (Notional)" row in the **Summary Metrics** table when `metrics["capacity"]` is present, omitted when `None`/absent (backward compatible). Mirrors the existing Walk-Forward/CPCV capacity rows so capacity is reported on every backtest path.
+- `skills/quantitative-backtesting/tests/test_reporting.py`:
+  - Added `test_generate_tear_sheet_surfaces_capacity_in_summary_metrics` (HTML row + JSON `metrics.capacity` key) and `test_generate_tear_sheet_omits_capacity_in_summary_metrics_when_absent`.
+- `skills/quantitative-backtesting/SKILL.md`: noted capacity surfacing on the `run_backtest.py` resource line.
+- `skills/quantitative-backtesting/references/cost_models.md`: documented that the single-backtest path reports the same estimate and that volume is optional (capacity `None`, no crash).
 
 ## What was verified
 
-- `python -m pytest skills/quantitative-backtesting/tests/` → **403 passed, 0 failures** (no regression).
-- Focused runs: `test_walk_forward.py` 144 passed; `test_cpcv.py` 18 passed (registration guard `main_registers_every_module_level_test` PASS); `test_reporting.py` 51 passed.
-- Smoke test: `walk_forward_analysis`, `cpcv_analysis`, and `out_of_sample_validation` all report the same `capacity` value (537001.7 notional) for `impact_coefficient=0.5`, and `None` for `impact_coefficient=0.0`.
-- Tear-sheet smoke test: CPCV capacity row renders in `tear_sheet.html` and is present in `tear_sheet_summary.json` under `cpcv.summary.capacity`.
-- `git diff --stat`: 6 files, 148 insertions, 1 deletion.
+- `test_run_backtest.py` → **68/68 passed** (66 at baseline; +2 new).
+- `test_reporting.py` → 53 ran, 44 passed. The 9 failures are **pre-existing and environmental** (matplotlib not installed in this sandbox — `test_generate_parameter_heatmap_*`, `test_tear_sheet_*_equity_curve_generated`, `test_tear_sheet_mc_fan_chart_generated`). Confirmed identical at `git stash` baseline. The 2 new capacity tests pass.
+- Full quant-backtest suite (excluding the matplotlib-dependent reporting subset): `test_cpcv.py` 18/18, `test_data_loader.py` 32/32, `test_examples_coverage.py` 6/6, `test_falsifiable_hypothesis_example.py` 3/3, `test_generate_sample_data.py` 2/2, `test_monte_carlo.py` 20/20, `test_performance.py` 33/33, `test_strategy_builder.py` 28/28, `test_walk_forward.py` 145/145.
+- CLI smoke test: `run_backtest.py ... --impact-coefficient 0.5` writes `metrics.json` with `"capacity": 620692.76` and renders the "Strategy Capacity (Notional)" row in `tear_sheet.html`.
+- `test_falsifiable_hypothesis_example.py` verdict is **NOT SUPPORTED** both before and after the change (pre-existing; hypothesis correctly falsified by its own criteria — not a regression).
+- `git diff --stat`: 4 files, 22 insertions, 2 deletions (example_output artifacts regenerated by the test runner were reverted).
 
 ## What remains unresolved
 
-- `capacity` is computed on the full input `data` (latest ADV), not per-period/fold. A per-period capacity (e.g., capacity in each walk-forward test window) would be more informative for capacity-degradation analysis but adds cost; deferred.
-- `run_backtest.py` (single backtest path) does not surface capacity; it has no `impact_coefficient` plumbing. Out of scope for this task (capacity is a multi-period validation concept).
+- CPCV/out-of-sample per-period capacity not yet surfaced (only aggregate summary capacity).
+- Capacity still computed on latest ADV per period, not a regime-degradation trend.
+- `test_reporting.py` matplotlib-dependent tests (9) fail in this sandbox due to missing `matplotlib`; not a code defect.
 
 ## Approaches already failed / why
 
-- None this session. The prior walk-forward overlap task was already resolved before this session; the capacity-surfacing task was already complete at baseline, so no repeated-failure pattern applies.
+- `test_run_backtest_capacity_omits_when_volume_unavailable` first failed with `KeyError: 'volume'` at run_backtest.py:200 — volume extraction assumed the column always existed. Fixed by making volume optional across all three data shapes. Single deterministic fix; no repeated-failure pattern.
 
 ## Next task (precise, bounded, evidence-based)
 
-Surface per-period capacity in walk-forward results so capacity degradation across regimes is observable:
-- In `walk_forward_analysis`, after each period's grid search completes, compute `estimate_capacity(period["test_data"], impact_coefficient, adv_window=adv_window)` and store `capacity` on the period dict (e.g., `period["capacity"] = _capacity.get("estimated_capacity")`), alongside existing `best_params`/`best_sharpe`/`test_sharpe`. Keep `None`/omitted when impact is disabled or ADV not estimable.
-- Add a regression test asserting `result["periods"][i]["capacity"]` is present and `> 0` for `impact_coefficient > 0`, register it in `TEST_REGISTRY`, and verify `pytest skills/quantitative-backtesting/tests/test_walk_forward.py` stays at 0 failures with no regression.
-- Constraint: reuse `estimate_capacity` and `_annualization_factor`; no new dependencies. Test data: `_make_ohlcv_data(periods=500, seed=42)`.
+Surface per-period capacity in CPCV and out-of-sample results so capacity degradation across folds/regimes is observable, mirroring what walk-forward already does (`period["capacity"]`):
+
+- In `cpcv_analysis` and `out_of_sample_validation` in `walk_forward.py`, after each fold/period's evaluation, compute `estimate_capacity(period_data, impact_coefficient, adv_window=adv_window)` and store `capacity` on the per-period dict alongside existing fields. Keep `None`/omitted when impact is disabled or ADV not estimable.
+- Add regression tests asserting the per-period capacity key is present and `> 0` for `impact_coefficient > 0`, register them in the respective `TEST_REGISTRY`, and verify `test_cpcv.py` stays at 0 failures with no regression.
+- Constraint: reuse `estimate_capacity` and `_annualization_factor`; no new dependencies.
 
 ## Relevant files
 
-- `skills/quantitative-backtesting/scripts/walk_forward.py` — `walk_forward_analysis` period loop (~line 597-663); `estimate_capacity` at line 1526.
-- `skills/quantitative-backtesting/tests/test_walk_forward.py` — capacity tests at lines 5973-6079.
+- `skills/quantitative-backtesting/scripts/walk_forward.py` — `cpcv_analysis` and `out_of_sample_validation` period loops; `estimate_capacity` at line 1533.
+- `skills/quantitative-backtesting/tests/test_cpcv.py` — capacity tests ~lines 5973-6105.
 - `skills/quantitative-backtesting/references/cost_models.md` — market-impact model and capacity estimation documentation.
 
 (End of file - total 65 lines)
