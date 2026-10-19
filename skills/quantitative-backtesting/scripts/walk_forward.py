@@ -2055,6 +2055,11 @@ def cpcv_analysis(
 
     summary["bias_controls_engaged"] = bool(pit_results is not None)
 
+    # Surface market-impact capacity estimate in the summary when impact is
+    # enabled and estimable; keep None (backward compatible) otherwise.
+    _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window)
+    summary["capacity"] = _capacity.get("estimated_capacity")
+
     return {
         "folds": folds,
         "best_params_per_fold": best_params_per_fold,
@@ -2575,6 +2580,11 @@ def out_of_sample_validation(
         summary.update(test_benchmark)
 
     summary["bias_controls_engaged"] = bool(pit_results is not None)
+
+    # Surface market-impact capacity estimate in the summary when impact is
+    # enabled and estimable; keep None (backward compatible) otherwise.
+    _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window)
+    summary["capacity"] = _capacity.get("estimated_capacity")
 
     return {
         "train_val_test_split": split_info,

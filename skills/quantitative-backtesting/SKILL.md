@@ -130,7 +130,7 @@ Risk Metrics:
   Ratio when `--n-trials` is reported. `generate_report` writes `metrics.json`
   and a text `report.txt` that mirrors the tear sheet, including the aggregate
   and per-benchmark Deflated Alpha sections.
-- `walk_forward.py` - Walk-forward analysis, parameter optimization, CPCV, Monte Carlo simulation CLI, and Deflated Sharpe Ratio multiple-testing correction. Accepts `--multi-symbol` on every subcommand (`walk-forward`, `optimize`, `cpcv`, `monte-carlo`, `out-of-sample`): when set, loads the symbol panel via `load_multi_symbol()`, runs `detect_survivorship_bias()`, prints the survivorship report, persists `survivorship_bias.json`, and threads `survivorship_bias` + `bias_controls_engaged=True` into the summary JSON and tear sheet.
+- `walk_forward.py` - Walk-forward analysis, parameter optimization, CPCV, Monte Carlo simulation CLI, and Deflated Sharpe Ratio multiple-testing correction. Accepts `--multi-symbol` on every subcommand (`walk-forward`, `optimize`, `cpcv`, `monte-carlo`, `out-of-sample`): when set, loads the symbol panel via `load_multi_symbol()`, runs `detect_survivorship_bias()`, prints the survivorship report, persists `survivorship_bias.json`, and threads `survivorship_bias` + `bias_controls_engaged=True` into the summary JSON and tear sheet. When `--impact-coefficient > 0`, each analysis path also reports a market-impact-based **strategy capacity** estimate (`summary["capacity"]`, in notional) by inverting the impact model (`capacity = max_impact * ADV_notional / impact_coefficient`); the tear sheet renders it as a "Strategy Capacity (Notional)" row. Capacity is `None` when impact is disabled or ADV is not estimable, so the key is backward compatible.
 - `monte_carlo.py` - Standalone Monte Carlo simulation (block bootstrap resampling, metric distributions, confidence intervals, probability of ruin). Re-exported from `walk_forward` for backward compatibility. On simulated paths where equity is wiped out (growth <= 0), the annualized return is recorded as -100% (a total loss) rather than NaN, so the metric distribution, summary statistics, and confidence intervals stay finite and interpretable; the true cumulative loss is preserved in `total_return`.
 - `reporting.py` - Automated tear sheet and report generation
 - `generate_sample_data.py` - Generates a sample OHLCV dataset for testing
@@ -223,6 +223,8 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   `profit_factor` follows the documented `sum(pnl>0)/abs(sum(pnl<0))` formula.
 - `test_reporting.py` - `generate_report` file/header/trade-section output and
   `generate_tear_sheet` HTML + JSON summary generation (matplotlib optional).
+  Covers capacity surfacing (row rendered + JSON key present when capacity is
+  in the walk-forward/CPCV summary; row and key omitted when absent).
   Also covers the **multiple-testing correction** reporting: `generate_report`
   prints a "Multiple-Testing Correction" section and `generate_tear_sheet`
   renders a table plus a top-level `deflated_sharpe` key in the JSON summary

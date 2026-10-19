@@ -732,6 +732,65 @@ class TestTearSheet(unittest.TestCase):
                 html = f.read()
             self.assertIn("Survivorship Bias Detection", html)
 
+    def test_generate_tear_sheet_surfaces_capacity_in_walk_forward(self):
+        """The tear sheet renders the market-impact capacity row in the
+        Walk-Forward Analysis table and surfaces it in the JSON summary when
+        the walk-forward summary carries a capacity value."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            analysis = {
+                "walk_forward": {
+                    "summary": {
+                        "n_periods": 3,
+                        "total_oos_return": 0.12,
+                        "capacity": 4_250_000.0,
+                    },
+                    "best_params_per_period": [],
+                },
+            }
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+                analysis_results=analysis,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Strategy Capacity", html)
+            self.assertIn("4250000", html.replace(",", ""))
+
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("walk_forward", summary)
+            self.assertEqual(summary["walk_forward"]["summary"]["capacity"], 4_250_000.0)
+
+    def test_generate_tear_sheet_omits_capacity_when_absent(self):
+        """Without a capacity value in the walk-forward summary, the capacity
+        row is omitted from the HTML and the JSON summary (backward
+        compatible)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            analysis = {
+                "walk_forward": {
+                    "summary": {
+                        "n_periods": 3,
+                        "total_oos_return": 0.12,
+                    },
+                    "best_params_per_period": [],
+                },
+            }
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+                analysis_results=analysis,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertNotIn("Strategy Capacity", html)
+
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertNotIn("capacity", summary["walk_forward"]["summary"])
+
     def test_generate_tear_sheet_handles_missing_equity(self):
         """Tear sheet does not crash when results lack equity_curve."""
         with tempfile.TemporaryDirectory() as tmpdir:

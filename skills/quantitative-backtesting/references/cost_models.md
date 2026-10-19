@@ -179,6 +179,30 @@ Constraints:
 - `fill_rate` must be in (0, 1]; values outside this range are rejected.
 - `fill_rate = 1.0` reproduces the unmodified execution model exactly.
 
+## Strategy Capacity Estimation
+
+When market impact is enabled, each analysis path (`walk_forward_analysis`,
+`cpcv_analysis`, `out_of_sample_validation`) also reports a **strategy
+capacity** estimate in its `summary["capacity"]` key. The estimate is
+computed by `estimate_capacity` in `walk_forward.py` by inverting the
+linear impact model:
+
+```
+impact = (notional / ADV_notional) * impact_coefficient
+=> capacity_notional = max_impact * ADV_notional / impact_coefficient
+```
+
+`max_impact` defaults to 0.0005 (5 bps of notional traded per round trip).
+The capacity is the maximum notional a full-rebalance strategy can hold
+without exceeding that impact threshold. It is `None` when impact is
+disabled (`impact_coefficient <= 0`) or when ADV cannot be computed
+(missing `close`/`volume`, empty data, or non-positive ADV), so the key is
+backward compatible: consumers may omit it when absent.
+
+The tear sheet renders the capacity as a "Strategy Capacity (Notional)"
+row in the Walk-Forward / CPCV analysis tables and surfaces it in
+`tear_sheet_summary.json` under the corresponding analysis summary.
+
 ## Configuration
 
 Costs are passed as decimal fractions (not bps) to the backtest entry points:

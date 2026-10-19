@@ -531,6 +531,15 @@ def generate_tear_sheet(
         for label, key, fmt in wf_metrics:
             if key in wf_summary:
                 html_parts.append(f"<tr><td>{label}</td><td class='metric'>{fmt(wf_summary[key])}</td></tr>")
+        # Market-impact capacity: surfaced in the summary when impact is
+        # enabled and estimable; None/absent when impact is disabled or ADV
+        # is not estimable (backward compatible — row omitted entirely).
+        capacity = wf_summary.get("capacity")
+        if capacity is not None:
+            html_parts.append(
+                f"<tr><td>Strategy Capacity (Notional)</td>"
+                f"<td class='metric'>{fmt_num(capacity)}</td></tr>"
+            )
         html_parts.append("</table>")
 
         periods = wf_results.get("periods", [])
@@ -670,6 +679,15 @@ def generate_tear_sheet(
         for label, key, fmt in cpcv_metrics:
             if key in cpcv_summary:
                 html_parts.append(f"<tr><td>{label}</td><td class='metric'>{fmt(cpcv_summary[key])}</td></tr>")
+        # Market-impact capacity (surfaced in the summary when impact is
+        # enabled and estimable; row omitted when impact is disabled or ADV
+        # is not estimable — backward compatible).
+        cpcv_capacity = cpcv_summary.get("capacity")
+        if cpcv_capacity is not None:
+            html_parts.append(
+                f"<tr><td>Strategy Capacity (Notional)</td>"
+                f"<td class='metric'>{fmt_num(cpcv_capacity)}</td></tr>"
+            )
         html_parts.append("</table>")
 
         param_stability = cpcv_results.get("param_stability", {})

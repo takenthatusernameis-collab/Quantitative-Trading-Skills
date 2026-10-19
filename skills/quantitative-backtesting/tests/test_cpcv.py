@@ -600,6 +600,39 @@ def test_main_registers_every_module_level_test():
     )
 
 
+def test_cpcv_surfaces_capacity_in_summary():
+    """CPCV surfaces market-impact capacity in the summary when impact is
+    enabled and estimable; keeps None when impact is disabled (backward
+    compatible). Mirrors the walk-forward capacity surfacing."""
+    data = _make_sample_data(600)
+    strategy_factory = _make_strategy_factory("sma_crossover")
+    param_grid = {"fast_period": [5, 10], "slow_period": [15, 20]}
+
+    res_on = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+        impact_coefficient=0.5,
+    )
+    assert "capacity" in res_on["summary"], (
+        f"Expected capacity key in summary, got: {list(res_on['summary'].keys())}"
+    )
+    assert res_on["summary"]["capacity"] is not None
+    assert res_on["summary"]["capacity"] > 0
+
+    res_off = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+        impact_coefficient=0.0,
+    )
+    assert res_off["summary"].get("capacity") is None
+
+
 # Module-level registry of (label, callable) pairs. Kept at module scope
 # (rather than a local inside main()) so structural checks like
 # ``test_main_registers_every_module_level_test`` can introspect it
@@ -621,6 +654,7 @@ TEST_REGISTRY = [
     ("cpcv_multi_asset_dual_momentum", test_cpcv_multi_asset_dual_momentum),
     ("cpcv_multi_asset_dict_cross_sectional_momentum", test_cpcv_multi_asset_dict_cross_sectional_momentum),
     ("cpcv_multi_asset_dict_dual_momentum", test_cpcv_multi_asset_dict_dual_momentum),
+    ("cpcv_surfaces_capacity_in_summary", test_cpcv_surfaces_capacity_in_summary),
     ("main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 
