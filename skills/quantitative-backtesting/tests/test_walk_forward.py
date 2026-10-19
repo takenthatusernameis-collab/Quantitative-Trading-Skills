@@ -3156,6 +3156,52 @@ def test_deflated_alpha_ratio_frequency_invariant():
         )
 
 
+def test_deflated_alpha_ratio_cross_sectional_frequency_invariant():
+    """Cross-sectional deflated_alpha_ratio (trial_alphas provided) must be
+    invariant to data frequency when calendar time is held fixed."""
+    rng = np.random.default_rng(11)
+    n_benchmarks = 4
+    alpha_annual = 0.40
+    vol_annual = 0.20
+
+    n_daily = 1260
+    vol_pp = vol_annual / np.sqrt(252)
+    mean_pp = alpha_annual / 252
+    daily = pd.Series(
+        rng.normal(loc=mean_pp, scale=vol_pp, size=n_daily),
+        index=pd.bdate_range("2020-01-01", periods=n_daily),
+    )
+    monthly = daily.resample("MS").sum()
+
+    trial_alphas = [0.05, 0.10, 0.15, 0.20]
+
+    results = {}
+    for name, rets in (("daily", daily), ("monthly", monthly)):
+        ann = _annualization_factor(rets.index)
+        alpha = float(rets.mean() * ann)
+        vol = float(rets.std() * np.sqrt(ann))
+        da = deflated_alpha_ratio(
+            alpha=alpha, returns=rets, benchmark_returns=rets,
+            n_benchmarks=n_benchmarks, trial_alphas=trial_alphas,
+        )
+        results[name] = {"alpha": alpha, "vol": vol, "da": da}
+
+    dar_daily = results["daily"]["da"]["deflated_alpha_ratio"]
+    dar_monthly = results["monthly"]["da"]["deflated_alpha_ratio"]
+    assert dar_daily > 0.99, f"Daily DAR should be ~1, got {dar_daily:.4f}"
+    assert dar_monthly > 0.99, f"Monthly DAR should be ~1, got {dar_monthly:.4f}"
+    assert abs(dar_daily - dar_monthly) < 0.05, (
+        f"DAR should be frequency-invariant: daily={dar_daily:.4f} "
+        f"monthly={dar_monthly:.4f}"
+    )
+    for name in ("daily", "monthly"):
+        da = results[name]["da"]
+        assert da["expected_max_alpha"] < results[name]["alpha"], (
+            f"{name}: expected_max_alpha {da['expected_max_alpha']:.4f} should "
+            f"be below the signal alpha {results[name]['alpha']:.4f}"
+        )
+
+
 def test_deflated_alpha_ratio_weakens_with_more_benchmarks():
     """The Deflated Alpha Ratio must weaken (and its p-value strengthen) as the
     number of benchmarks tested grows, for the same signal.
@@ -5483,6 +5529,7 @@ TEST_REGISTRY = [
     ("test_cli_out_of_sample_borrow_sweep", test_cli_out_of_sample_borrow_sweep),
     ("test_cli_out_of_sample_funding_sweep", test_cli_out_of_sample_funding_sweep),
     ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
+    ("test_deflated_alpha_ratio_cross_sectional_frequency_invariant", test_deflated_alpha_ratio_cross_sectional_frequency_invariant),
     ("test_deflated_alpha_ratio_weakens_with_more_benchmarks", test_deflated_alpha_ratio_weakens_with_more_benchmarks),
     ("test_deflated_sharpe_ratio_weakens_with_more_trials", test_deflated_sharpe_ratio_weakens_with_more_trials),
     ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
