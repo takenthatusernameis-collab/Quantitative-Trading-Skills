@@ -2386,6 +2386,116 @@ def test_run_backtest_surfaces_capacity_trend_in_results():
     assert missing["capacity_trend"] is None
 
 
+def test_run_backtest_surfaces_book_diagnostic_for_a_panel():
+    """A panel backtest reports the book the strategy actually holds.
+
+    The panel path prices a portfolio as `net_exposure x mean(asset
+    returns)`, so the diagnostic reports the gross book, the turnover the
+    cost model charges against the turnover the book really has, and the
+    gap between the framework's P&L and the book P&L. The reported P&L
+    itself is unchanged.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    strategy = build_strategy(
+        "cross_sectional_momentum",
+        '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}',
+    )
+    results = run_backtest(data, strategy, _Args())
+
+    diag = results.get("book_diagnostic")
+    assert diag is not None, "a panel backtest must surface the book diagnostic"
+    for key in (
+        "n_periods",
+        "n_periods_with_book",
+        "gross_book",
+        "net_exposure",
+        "gross_turnover",
+        "framework_turnover",
+        "return_gap_bps",
+        "return_gap_total",
+        "book_total_return",
+        "framework_total_return_after_costs",
+    ):
+        assert key in diag, f"missing diagnostic key: {key}"
+
+    assert diag["n_assets"] == 5
+    assert diag["n_periods_with_book"] > 0
+    assert diag["gross_book"] > 0
+    # The book's net exposure is the scalar signal the framework priced.
+    assert abs(diag["net_exposure"] - diag["framework_net_exposure"]) < 1e-12
+    # The book rotates more than the net exposure does, so the cost model
+    # charges less turnover than the book actually has.
+    assert diag["gross_turnover"] > diag["framework_turnover"]
+    # The diagnostic is consistent with the reported P&L.
+    reported = float((1 + results["returns"]).prod() - 1)
+    assert abs(diag["framework_total_return_after_costs"] - reported) < 1e-12
+
+
+def test_run_backtest_book_diagnostic_book_return_matches_manual_computation():
+    """The book return is the weighted sum of the per-asset returns.
+
+    Recomputed here by hand (one-period execution lag, no costs) so the
+    diagnostic's arithmetic is checked against an independent computation
+    rather than against itself.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=4, seed=99)
+    strategy = build_strategy(
+        "cross_sectional_momentum",
+        '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}',
+    )
+    results = run_backtest(data, strategy, _Args())
+    diag = results["book_diagnostic"]
+    assert diag is not None
+
+    weights = strategy.generate_target_weights(data)
+    assert weights is not None
+    held = weights.shift(1)  # the book is executed with a one-period lag
+    asset_returns = data["close"].pct_change()
+    manual_book_return = (held * asset_returns).sum(axis=1).reindex(
+        results["returns"].index
+    )
+    expected = float((1 + manual_book_return).prod() - 1)
+    assert abs(diag["book_total_return"] - expected) < 1e-12
+
+
+def test_run_backtest_book_diagnostic_absent_for_single_asset():
+    """A single-asset run has no per-asset book, so no diagnostic."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    results = run_backtest(data, strategy, _Args())
+    assert results.get("book_diagnostic") is None
+
+
+def test_run_backtest_book_diagnostic_absent_for_strategy_without_a_book():
+    """A panel run of a strategy that exposes no book has no diagnostic."""
+    data = _make_multiasset_multiindex(n=300, n_assets=2, seed=5)
+    strategy = build_strategy("zscore_mean_reversion", '{"period": 20}')
+    results = run_backtest(data, strategy, _Args())
+    assert results.get("book_diagnostic") is None
+
+
+def test_run_backtest_flat_net_exposure_panel_reports_the_book_it_holds():
+    """A market-neutral book is not a flat book.
+
+    With symmetric quantiles the cross-sectional momentum signal is flat
+    (net exposure 0) and the framework refuses to backtest it. The error
+    now says why: the strategy does hold a book, the net-exposure pricing
+    convention just cannot see it.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    strategy = build_strategy(
+        "cross_sectional_momentum",
+        '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}',
+    )
+    try:
+        run_backtest(data, strategy, _Args())
+        assert False, "expected ValueError for a flat net exposure"
+    except ValueError as exc:
+        message = str(exc)
+        assert "never takes a position" in message
+        assert "does hold a book" in message, message
+
+
 def test_cli_data_provenance_reproducible_across_runs():
     """Running the CLI twice with identical inputs yields byte-identical
     data_provenance.json (load_timestamp sanitized to source mtime)."""
@@ -2488,6 +2598,11 @@ TEST_REGISTRY = [
     ("test_run_backtest_surfaces_capacity_in_results", test_run_backtest_surfaces_capacity_in_results),
     ("test_run_backtest_capacity_omits_when_volume_unavailable", test_run_backtest_capacity_omits_when_volume_unavailable),
     ("test_run_backtest_surfaces_capacity_trend_in_results", test_run_backtest_surfaces_capacity_trend_in_results),
+    ("test_run_backtest_surfaces_book_diagnostic_for_a_panel", test_run_backtest_surfaces_book_diagnostic_for_a_panel),
+    ("test_run_backtest_book_diagnostic_book_return_matches_manual_computation", test_run_backtest_book_diagnostic_book_return_matches_manual_computation),
+    ("test_run_backtest_book_diagnostic_absent_for_single_asset", test_run_backtest_book_diagnostic_absent_for_single_asset),
+    ("test_run_backtest_book_diagnostic_absent_for_strategy_without_a_book", test_run_backtest_book_diagnostic_absent_for_strategy_without_a_book),
+    ("test_run_backtest_flat_net_exposure_panel_reports_the_book_it_holds", test_run_backtest_flat_net_exposure_panel_reports_the_book_it_holds),
 ]
 
 if __name__ == "__main__":

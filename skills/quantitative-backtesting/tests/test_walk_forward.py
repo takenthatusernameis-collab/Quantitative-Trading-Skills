@@ -6691,6 +6691,189 @@ def test_cli_cpcv_writes_capacity_trend_per_fold():
         assert payload["summary"]["oos_min_capacity"] is not None
 
 
+def _make_multiasset_panel(periods: int = 900, n_assets: int = 4, seed: int = 11):
+    """MultiIndex OHLCV panel with cross-sectional dispersion."""
+    dates = pd.date_range("2019-01-01", periods=periods, freq="B")
+    symbols = [f"S{i}" for i in range(n_assets)]
+    cols = pd.MultiIndex.from_product(
+        [["open", "high", "low", "close", "volume"], symbols]
+    )
+    data = pd.DataFrame(0.0, index=dates, columns=cols)
+    rng = np.random.default_rng(seed)
+    for i, sym in enumerate(symbols):
+        prices = 100 * np.exp(np.cumsum(rng.normal(0.0004 * (i + 1), 0.011, periods)))
+        data[("open", sym)] = prices
+        data[("high", sym)] = prices
+        data[("low", sym)] = prices
+        data[("close", sym)] = prices
+        data[("volume", sym)] = rng.integers(1_000_000, 10_000_000, periods)
+    return data
+
+
+def test_walk_forward_surfaces_book_diagnostic_per_period_and_summary():
+    """The walk-forward path reports the book held in every out-of-sample
+    window and the aggregate over those windows.
+
+    The panel path prices a portfolio as `net_exposure x mean(asset
+    returns)`, so a long/short book is invisible to the reported P&L. The
+    diagnostic measures it: gross book, the turnover the cost model charges
+    against the turnover the book really has, and the gap between the
+    framework's P&L and the book P&L. The reported P&L is unchanged.
+    """
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=11)
+    factory = lambda params: build_strategy(
+        "cross_sectional_momentum", json.dumps(params)
+    )
+    param_grid = {"lookback": [20, 40], "top_quantile": [0.4], "bottom_quantile": [0.2]}
+
+    res = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=8,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+    )
+
+    summary_diag = res["summary"].get("book_diagnostic")
+    assert summary_diag is not None, res["summary"].keys()
+    assert summary_diag["n_periods"] > 0
+    assert summary_diag["gross_book"] > 0
+    assert summary_diag["n_periods_with_book"] > 0
+
+    period_diags = []
+    for p in res["periods"]:
+        diag = p.get("book_diagnostic")
+        assert diag is not None, p
+        assert diag["n_periods"] > 0
+        assert diag["gross_book"] > 0
+        # The book's net exposure is the scalar signal the framework priced.
+        assert abs(diag["net_exposure"] - diag["framework_net_exposure"]) < 1e-9
+        period_diags.append(diag)
+
+    # The aggregate covers the same periods as the per-window records.
+    assert summary_diag["n_periods"] == sum(d["n_periods"] for d in period_diags)
+    assert summary_diag["n_periods_with_book"] == sum(
+        d["n_periods_with_book"] for d in period_diags
+    )
+
+
+def test_walk_forward_book_diagnostic_absent_for_single_asset():
+    """A single-asset walk-forward run has no per-asset book."""
+    data = _make_ohlcv_data(periods=500, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    res = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid={"fast_period": [3, 5], "slow_period": [10, 12]},
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+    )
+    assert res["summary"].get("book_diagnostic") is None
+    for p in res["periods"]:
+        assert p.get("book_diagnostic") is None
+
+
+def test_out_of_sample_validation_surfaces_book_diagnostic_per_split():
+    """The out-of-sample path reports the book separately for the validation
+    window and the held-out test window, so a gap that only shows up in the
+    unseen window stays visible."""
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=13)
+    factory = lambda params: build_strategy(
+        "cross_sectional_momentum", json.dumps(params)
+    )
+    param_grid = {"lookback": [20, 40], "top_quantile": [0.4], "bottom_quantile": [0.2]}
+
+    res = out_of_sample_validation(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_frac=0.5,
+        val_frac=0.25,
+        test_frac=0.25,
+        validation_method="walk_forward",
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+    )
+
+    val_diag = res["validation_performance"].get("book_diagnostic")
+    test_diag = res["test_performance"].get("book_diagnostic")
+    assert val_diag is not None
+    assert test_diag is not None
+    assert val_diag["gross_book"] > 0
+    assert test_diag["gross_book"] > 0
+    assert res["summary"]["validation_book_diagnostic"] == val_diag
+    assert res["summary"]["test_book_diagnostic"] == test_diag
+    assert res["summary"]["book_diagnostic"] is not None
+
+
+def _write_multiasset_panel_csv(path: str, periods: int = 900, n_assets: int = 4, seed: int = 17) -> None:
+    """Write a multi-symbol panel CSV (long format) with cross-sectional
+    dispersion, for the --multi-symbol CLI paths."""
+    dates = pd.date_range("2019-01-01", periods=periods, freq="B")
+    rows = []
+    for i in range(n_assets):
+        sym = f"S{i}"
+        rng = np.random.default_rng(seed + i)
+        prices = 100 * np.exp(np.cumsum(rng.normal(0.0004 * (i + 1), 0.011, periods)))
+        for j, d in enumerate(dates):
+            rows.append({
+                "date": d.strftime("%Y-%m-%d"),
+                "symbol": sym,
+                "open": prices[j],
+                "high": prices[j] * 1.01,
+                "low": prices[j] * 0.99,
+                "close": prices[j],
+                "volume": int(rng.integers(1_000_000, 10_000_000)),
+            })
+    pd.DataFrame(rows).to_csv(path, index=False)
+
+
+def test_cli_cpcv_writes_book_diagnostic_per_fold():
+    """CLI cpcv persists the per-fold book diagnostic next to the per-fold
+    capacity, so the saved artifact shows what the net-exposure pricing
+    convention missed in every out-of-sample fold."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_dir = os.path.join(tmpdir, "out")
+        csv_path = os.path.join(tmpdir, "panel.csv")
+        _write_multiasset_panel_csv(csv_path, periods=900, n_assets=4, seed=17)
+        argv = [
+            "walk_forward", "cpcv",
+            "--data", csv_path,
+            "--symbol", "PANEL",
+            "--strategy", "cross_sectional_momentum",
+            "--param-grid", '{"lookback": [20, 40], "top_quantile": [0.4], "bottom_quantile": [0.2]}',
+            "--output", out_dir,
+            "--n-splits", "4",
+            "--test-size", "0.2",
+            "--multi-symbol",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI cpcv should exit 0, got {rc}"
+        summary_path = os.path.join(out_dir, "cpcv_summary.json")
+        with open(summary_path) as f:
+            payload = json.load(f)
+
+        folds = payload.get("capacity_per_fold")
+        assert folds, payload.keys()
+        for row in folds:
+            diag = row.get("book_diagnostic")
+            assert diag is not None, row
+            assert diag["gross_book"] > 0
+        assert payload["summary"]["book_diagnostic"] is not None
+
+
 TEST_REGISTRY.append(
     ("test_estimate_capacity_trend_flat_adv_matches_point_in_time",
      test_estimate_capacity_trend_flat_adv_matches_point_in_time)
@@ -6718,6 +6901,22 @@ TEST_REGISTRY.append(
 TEST_REGISTRY.append(
     ("test_cli_cpcv_writes_capacity_trend_per_fold",
      test_cli_cpcv_writes_capacity_trend_per_fold)
+)
+TEST_REGISTRY.append(
+    ("test_walk_forward_surfaces_book_diagnostic_per_period_and_summary",
+     test_walk_forward_surfaces_book_diagnostic_per_period_and_summary)
+)
+TEST_REGISTRY.append(
+    ("test_walk_forward_book_diagnostic_absent_for_single_asset",
+     test_walk_forward_book_diagnostic_absent_for_single_asset)
+)
+TEST_REGISTRY.append(
+    ("test_out_of_sample_validation_surfaces_book_diagnostic_per_split",
+     test_out_of_sample_validation_surfaces_book_diagnostic_per_split)
+)
+TEST_REGISTRY.append(
+    ("test_cli_cpcv_writes_book_diagnostic_per_fold",
+     test_cli_cpcv_writes_book_diagnostic_per_fold)
 )
 
 

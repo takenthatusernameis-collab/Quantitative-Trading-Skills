@@ -1074,6 +1074,57 @@ class TestTearSheet(unittest.TestCase):
             self.assertNotIn("parameter_heatmap.png", html,
                            "HTML should not reference heatmap when grid is invalid")
 
+    def test_tear_sheet_includes_panel_book_diagnostic_section(self):
+        """The panel book diagnostic is rendered as its own HTML section."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            results["book_diagnostic"] = {
+                "n_periods": 100,
+                "n_periods_with_book": 80,
+                "n_assets": 4,
+                "gross_book": 0.5233,
+                "net_exposure": 0.1748,
+                "framework_net_exposure": 0.1748,
+                "gross_turnover": 0.1694,
+                "framework_turnover": 0.0039,
+                "return_gap_bps": -12.5,
+                "return_gap_total": -0.088,
+                "book_total_return": -0.022,
+                "framework_total_return": 0.066,
+                "framework_total_return_after_costs": 0.065,
+            }
+            metrics = {"total_return": 0.065}
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir, symbol="PANEL", strategy_name="CSM",
+                save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Panel Book Diagnostic", html)
+            self.assertIn("Gross Book (mean sum|w|)", html)
+            self.assertIn("Turnover Charged by Model", html)
+            self.assertIn("Return Gap (framework - book, bps/period)", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("book_diagnostic", summary)
+            self.assertEqual(summary["book_diagnostic"]["gross_book"], 0.5233)
+
+    def test_tear_sheet_omits_panel_book_diagnostic_when_absent(self):
+        """Without a book diagnostic (single asset, or a strategy without a
+        book) the section is omitted entirely."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir, symbol="SPY",
+                save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertNotIn("Panel Book Diagnostic", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertNotIn("book_diagnostic", summary)
+
     def test_tear_sheet_includes_walk_forward_section(self):
         """Walk-forward analysis results are rendered as an HTML section."""
         with tempfile.TemporaryDirectory() as tmpdir:

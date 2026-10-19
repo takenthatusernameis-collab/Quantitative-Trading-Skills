@@ -132,13 +132,76 @@ composition does not match. A strategy whose gross exposure exceeds
 `|net exposure|` therefore has a modelled impact cost that is, if anything,
 too low. Treat panel capacity and impact numbers as order-of-magnitude
 estimates and verify them against a portfolio with explicit per-asset weights
-before sizing capital.
+before sizing capital. The **panel book diagnostic** below measures exactly
+this gap (gross book vs net exposure, book turnover vs charged turnover), so
+the size of the approximation is now visible instead of implied.
 
 The trade ledger of `run_backtest.py` has the same limitation: for a panel it
 prices entries and exits on the **mean price** of the constituents, because
 the panel strategy API does not expose per-asset entries. The ledger's
 per-trade P&L is therefore an approximation and does not reconcile exactly
 with the panel equity curve (which is marked on the equal-weighted basket).
+
+### Panel book diagnostic (measurement only)
+
+The panel path prices a portfolio as **net exposure x mean asset return**:
+one scalar per period (`positions[t] * mean_i(r_i[t])`). A strategy that
+holds an explicit long/short book cannot be represented by that scalar, so
+the engine now *measures* the gap instead of hiding it. The measurement is
+read-only: no return, cost, impact or capacity number changes.
+
+A strategy can describe its book with the optional accessor
+`StrategyBase.generate_target_weights(data)`:
+
+- returns a `DataFrame` of portfolio weights (rows = dates, columns =
+  symbols) whose net exposure matches the scalar signal of
+  `generate_signals`, or
+- returns `None` (the default) when the strategy does not model a book.
+  Single-asset runs and every strategy that does not implement the accessor
+  are therefore unchanged.
+
+`CrossSectionalMomentum` implements it with `+1 / n_assets` per long name
+and `-1 / n_assets` per short name, so the book's net exposure is exactly
+the scalar signal `(n_long - n_short) / n_assets` and the gross book is
+`(n_long + n_short) / n_assets`. `DualMomentumStrategy` implements it with
+`1 / n_selected` per selected name (a fully invested long-only book).
+
+`utils.compute_book_diagnostic` then reports, per window:
+
+| Key | Meaning |
+| --- | --- |
+| `gross_book` | mean `sum_i abs(w_i)` per period: the exposure the strategy actually carries |
+| `net_exposure` | mean `sum_i w_i`: the book's net exposure |
+| `framework_net_exposure` | mean net exposure the engine priced (the scalar signal) |
+| `gross_turnover` | mean `sum_i abs(dw_i)`: the turnover the book really has |
+| `framework_turnover` | mean `abs(d net exposure)`: the turnover the cost/impact model charges |
+| `n_periods_with_book` | periods in which the book is not flat |
+| `return_gap_bps` | mean per-period gap between the engine's pre-cost return and the book return `sum_i w_i r_i` |
+| `return_gap_total` | cumulative gap (engine pre-cost total minus book total) |
+| `book_total_return` | cumulative return of the book |
+| `framework_total_return` | cumulative return the engine priced, before costs |
+| `framework_total_return_after_costs` | cumulative return the engine reported |
+
+The diagnostic is surfaced by `run_backtest.py` (`results["book_diagnostic"]`,
+`metrics["book_diagnostic"]`), by the walk-forward, CPCV and out-of-sample
+paths (`summary["book_diagnostic"]`, plus the per-period / per-fold and
+per-split records), in the CLI stdout, in the summary JSON artifacts and in
+the tear sheet ("Panel Book Diagnostic"). It is `None` for single-asset runs
+and for strategies that do not expose a book.
+
+**What the diagnostic shows.** The gap is not hypothetical. With symmetric
+quantiles the cross-sectional momentum signal is flat by construction, so
+the engine reports "no position" while the strategy holds a market-neutral
+book: `gross_book > 0`, `net_exposure == 0` and `framework_turnover == 0`
+(a full book rotation charged no impact at all). With asymmetric quantiles
+the net exposure is priced correctly, but the *dispersion* the long/short
+composition earns is discarded, and the book still rotates several times
+more than the turnover the model charges.
+
+**Known limitation (unchanged by the diagnostic).** The engine still prices
+the panel with the net-exposure convention, and the impact/capacity models
+still assume an equal-weight book. The diagnostic measures the size of that
+approximation; it does not correct it.
 
 ### Cross-path parity
 

@@ -358,6 +358,52 @@ def generate_tear_sheet(
             return f"{val:.{decimals}f}"
         return str(val)
 
+    def book_diagnostic_section(diag, heading="Panel Book Diagnostic"):
+        """Render the panel book diagnostic as a small table.
+
+        The diagnostic compares the per-asset book a strategy actually holds
+        with the framework's net-exposure pricing of the panel. It is
+        measurement only: the reported returns are unchanged. Omitted
+        entirely when the diagnostic is absent (single asset, or a strategy
+        that does not expose a book).
+        """
+        if not isinstance(diag, dict):
+            return []
+        n_with = diag.get("n_periods_with_book")
+        n_total = diag.get("n_periods")
+        rows = [
+            ("Gross Book (mean sum|w|)", diag.get("gross_book"), fmt_num),
+            ("Net Exposure (book)", diag.get("net_exposure"), fmt_num),
+            ("Net Exposure (framework)", diag.get("framework_net_exposure"), fmt_num),
+            ("Gross Turnover (book)", diag.get("gross_turnover"), fmt_num),
+            ("Turnover Charged by Model", diag.get("framework_turnover"), fmt_num),
+            (
+                "Periods With a Book",
+                None if n_with is None or n_total is None else f"{n_with}/{n_total}",
+                str,
+            ),
+            ("Return Gap (framework - book, bps/period)", diag.get("return_gap_bps"), fmt_num),
+            ("Return Gap (cumulative)", diag.get("return_gap_total"), fmt_pct),
+            ("Book Total Return", diag.get("book_total_return"), fmt_pct),
+            (
+                "Framework Total Return (net of costs)",
+                diag.get("framework_total_return_after_costs"),
+                fmt_pct,
+            ),
+        ]
+        out = [f"<h2>{heading}</h2>", "<table><tr><th>Metric</th><th>Value</th></tr>"]
+        for label, value, fmt in rows:
+            display = fmt(value) if value is not None else "N/A"
+            out.append(f"<tr><td>{label}</td><td class='metric'>{display}</td></tr>")
+        out.append("</table>")
+        out.append(
+            "<p><em>Measurement only: the panel path prices a portfolio as "
+            "net exposure x mean asset return, so a long/short book cannot be "
+            "represented by that scalar. The reported P&amp;L is unchanged by "
+            "this diagnostic.</em></p>"
+        )
+        return out
+
     summary_metrics = [
         ("Total Return", "total_return", fmt_pct),
         ("Annualized Return", "annualized_return", fmt_pct),
@@ -403,6 +449,14 @@ def generate_tear_sheet(
             f"<td class='metric'>{fmt_num(_metrics_min_capacity)}</td></tr>"
         )
     html_parts.append("</table>")
+
+    # Panel book diagnostic: the per-asset book the strategy holds against
+    # the framework's net-exposure pricing. Omitted entirely when absent
+    # (single asset, or a strategy that does not expose a book).
+    _book_diag = results.get("book_diagnostic")
+    if not isinstance(_book_diag, dict):
+        _book_diag = metrics.get("book_diagnostic")
+    html_parts.extend(book_diagnostic_section(_book_diag))
 
     # Trade analytics
     if "total_trades" in metrics:
@@ -571,6 +625,15 @@ def generate_tear_sheet(
                 f"<td class='metric'>{fmt_num(_wf_min_capacity)}</td></tr>"
             )
         html_parts.append("</table>")
+
+        # Panel book diagnostic for the walk-forward sample (aggregated over
+        # the out-of-sample windows). Omitted when absent.
+        html_parts.extend(
+            book_diagnostic_section(
+                wf_summary.get("book_diagnostic"),
+                heading="Panel Book Diagnostic (Walk-Forward)",
+            )
+        )
 
         periods = wf_results.get("periods", [])
         if periods:
@@ -749,6 +812,15 @@ def generate_tear_sheet(
                 f"<td class='metric'>{fmt_num(_cpcv_min_capacity)}</td></tr>"
             )
         html_parts.append("</table>")
+
+        # Panel book diagnostic for the CPCV sample (aggregated over the
+        # out-of-sample folds). Omitted when absent.
+        html_parts.extend(
+            book_diagnostic_section(
+                cpcv_summary.get("book_diagnostic"),
+                heading="Panel Book Diagnostic (CPCV)",
+            )
+        )
 
         param_stability = cpcv_results.get("param_stability", {})
         if param_stability:
@@ -1049,6 +1121,14 @@ def generate_tear_sheet(
     # aggregate correction the walk-forward / CPCV / OOS summaries emit.
     if "deflated_alpha" in metrics:
         summary["deflated_alpha"] = _json_safe(metrics["deflated_alpha"])
+    # Panel book diagnostic: a dict, so it is filtered out of the
+    # scalar-only `metrics` field above; surface it explicitly so the JSON
+    # summary carries the same measurement as the HTML section.
+    _book_diag_json = results.get("book_diagnostic")
+    if not isinstance(_book_diag_json, dict):
+        _book_diag_json = metrics.get("book_diagnostic")
+    if isinstance(_book_diag_json, dict):
+        summary["book_diagnostic"] = _json_safe(_book_diag_json)
 
     # Surface analysis results in the JSON summary (JSON-safe extraction only).
     if analysis:

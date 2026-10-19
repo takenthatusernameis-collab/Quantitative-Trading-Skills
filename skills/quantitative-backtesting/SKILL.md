@@ -119,10 +119,10 @@ Risk Metrics:
 ## Resources
 
 ### scripts/
-- `run_backtest.py` - Main entry point for running backtests with configurable parameters (supports `--n-trials` to report the Deflated Sharpe Ratio of the final backtest Sharpe; `--validate-point-in-time` / `--point-in-time-strict` to screen for look-ahead bias and data-integrity violations, aborting on violations in strict mode; `--multi-symbol` to load a multi-symbol panel, run survivorship-bias detection, and backtest a panel strategy; `--benchmark` to load a buy-and-hold baseline (e.g. SPY) and report alpha, beta, and correlation vs. the market). When `--impact-coefficient > 0`, it also reports a market-impact-based **strategy capacity** estimate (`results["capacity"]`, in notional, mirrored into `metrics["capacity"]`) by inverting the impact model via `estimate_capacity`; capacity is `None` when impact is disabled or ADV is not estimable, so the key is backward compatible. A **panel** is priced with the same shared convention as the walk-forward / CPCV / out-of-sample paths (see `utils.py`): the portfolio return is the mean of the per-asset returns, the market-impact cost is computed per asset on the equal-weighted basket convention, and the capacity estimate is the least-liquid-binds basket capacity — so panel results from this CLI and from `walk_forward.py` are directly comparable.
-- `utils.py` - Shared helpers used by every backtest path: `_annualization_factor`, plus the two shared market-model definitions that keep `run_backtest.py` and `walk_forward.py` in agreement: `build_market_model` (normalizes a single asset, a MultiIndex panel and a dict panel into one representation; a panel's return is the mean of the per-asset returns) and `market_impact_cost` (per-asset notional `|position_change| * equity / n_assets` measured against each asset's own ADV, with the portfolio cost = the equal-weighted mean of the per-asset impacts).
+- `run_backtest.py` - Main entry point for running backtests with configurable parameters (supports `--n-trials` to report the Deflated Sharpe Ratio of the final backtest Sharpe; `--validate-point-in-time` / `--point-in-time-strict` to screen for look-ahead bias and data-integrity violations, aborting on violations in strict mode; `--multi-symbol` to load a multi-symbol panel, run survivorship-bias detection, and backtest a panel strategy; `--benchmark` to load a buy-and-hold baseline (e.g. SPY) and report alpha, beta, and correlation vs. the market). When `--impact-coefficient > 0`, it also reports a market-impact-based **strategy capacity** estimate (`results["capacity"]`, in notional, mirrored into `metrics["capacity"]`) by inverting the impact model via `estimate_capacity`; capacity is `None` when impact is disabled or ADV is not estimable, so the key is backward compatible. A **panel** is priced with the same shared convention as the walk-forward / CPCV / out-of-sample paths (see `utils.py`): the portfolio return is the mean of the per-asset returns, the market-impact cost is computed per asset on the equal-weighted basket convention, and the capacity estimate is the least-liquid-binds basket capacity — so panel results from this CLI and from `walk_forward.py` are directly comparable. A panel run also surfaces a **panel book diagnostic** (`results["book_diagnostic"]`, mirrored into `metrics["book_diagnostic"]`, printed by the CLI and rendered in the tear sheet): the per-asset book the strategy actually holds against the engine's net-exposure pricing of the panel. It is a measurement only — no return, cost, impact or capacity number changes — and it is `None` for a single asset or a strategy that does not expose a book. When the engine refuses to backtest a strategy because its net exposure is flat, the error now states that the strategy does hold a book (gross book, periods with a book) so the net-exposure convention is not mistaken for a flat strategy.
+- `utils.py` - Shared helpers used by every backtest path: `_annualization_factor`, plus the two shared market-model definitions that keep `run_backtest.py` and `walk_forward.py` in agreement: `build_market_model` (normalizes a single asset, a MultiIndex panel and a dict panel into one representation; a panel's return is the mean of the per-asset returns) and `market_impact_cost` (per-asset notional `|position_change| * equity / n_assets` measured against each asset's own ADV, with the portfolio cost = the equal-weighted mean of the per-asset impacts). It also owns the **panel book diagnostic**: `strategy_target_weights` (reads a strategy's optional per-asset book, `None` when it has none), `compute_book_diagnostic` (gross book, book net exposure vs the priced net exposure, book turnover vs the charged turnover, and the return gap between the engine's pricing and the book return `sum_i w_i r_i`) and `aggregate_book_diagnostics` (the per-window aggregate).
 - `data_loader.py` - Utilities for loading and validating market data from various sources (includes `DataProvenance` tracking, `validate_point_in_time`, `detect_survivorship_bias`, and `load_multi_symbol` for panel files with a `symbol`/`ticker` column)
-- `strategy_builder.py` - Factory for creating common strategy templates (trend, mean reversion, momentum)
+- `strategy_builder.py` - Factory for creating common strategy templates (trend, mean reversion, momentum). `StrategyBase.generate_target_weights(data)` is the optional per-asset **book accessor**: it returns a weight frame whose net exposure matches the strategy's scalar signal, or `None` (the default) when the strategy does not model a book. `CrossSectionalMomentum` (long `+1/n_assets` per name, short `-1/n_assets` per name) and `DualMomentumStrategy` (`1/n_selected` per selected name) implement it, so the engine can measure the book it prices.
 - `performance.py` - Comprehensive performance analytics and metric calculation.
   `calculate_metrics` computes risk-adjusted returns, drawdown statistics,
   trade-level analytics, benchmark comparison (single and multi-benchmark,
@@ -131,7 +131,7 @@ Risk Metrics:
   Ratio when `--n-trials` is reported. `generate_report` writes `metrics.json`
   and a text `report.txt` that mirrors the tear sheet, including the aggregate
   and per-benchmark Deflated Alpha sections.
-- `walk_forward.py` - Walk-forward analysis, parameter optimization, CPCV, Monte Carlo simulation CLI, and Deflated Sharpe Ratio multiple-testing correction. Accepts `--multi-symbol` on every subcommand (`walk-forward`, `optimize`, `cpcv`, `monte-carlo`, `out-of-sample`): when set, loads the symbol panel via `load_multi_symbol()`, runs `detect_survivorship_bias()`, prints the survivorship report, persists `survivorship_bias.json`, and threads `survivorship_bias` + `bias_controls_engaged=True` into the summary JSON and tear sheet. When `--impact-coefficient > 0`, each analysis path also reports a market-impact-based **strategy capacity** estimate (`summary["capacity"]`, in notional) by inverting the impact model (`capacity = max_impact * ADV_notional / impact_coefficient`); the tear sheet renders it as a "Strategy Capacity (Notional)" row. Capacity is `None` when impact is disabled or ADV is not estimable, so the key is backward compatible. Capacity is also reported **per regime**: `period["capacity"]` (walk-forward), `fold["capacity"]` (CPCV), and `validation_performance["capacity"]` / `test_performance["capacity"]` (out-of-sample), so capacity degradation across folds/periods/windows is observable; the CLI artifacts persist them as `capacity_per_period` / `capacity_per_fold`, and the tear sheet renders a "Capacity (Notional)" column in the per-period and per-fold tables. Because that reading only sees the *last* bar of a window, each regime also carries a **capacity trend** (`period["capacity_trend"]`, `fold["capacity_trend"]`, `validation_performance["capacity_trend"]`, `test_performance["capacity_trend"]`, `summary["capacity_trend"]`): the distribution of the per-period capacity readings inside the window (`min_capacity`, `median_capacity`, `max_capacity`, `last_capacity`, and the `min_to_median_ratio` / `last_to_median_ratio` degradation ratios). The walk-forward and CPCV summaries also report `summary["oos_min_capacity"]`, the worst capacity seen in any out-of-sample window. The trend is `None` when impact is disabled or ADV is not estimable, and it never changes the existing `estimated_capacity` number. For a multi-asset panel the basket is treated as equal-weighted, so the least liquid constituent binds the portfolio capacity (`capacity = n_assets * max_impact * min_i(ADV_notional_i) / impact_coefficient`). Market impact on a **multi-asset panel** is modeled per asset on the same equal-weighted convention (`|position_change| * equity / n_assets` traded in each asset, each asset measured against its own ADV, portfolio cost = mean of the per-asset impacts), which keeps the dict and MultiIndex panel formats identical; previously the panel path produced an **empty** return series, which silently dropped every grid configuration and made panel runs with impact report "no signal" (regression-guarded in `tests/test_walk_forward.py`).
+- `walk_forward.py` - Walk-forward analysis, parameter optimization, CPCV, Monte Carlo simulation CLI, and Deflated Sharpe Ratio multiple-testing correction. Accepts `--multi-symbol` on every subcommand (`walk-forward`, `optimize`, `cpcv`, `monte-carlo`, `out-of-sample`): when set, loads the symbol panel via `load_multi_symbol()`, runs `detect_survivorship_bias()`, prints the survivorship report, persists `survivorship_bias.json`, and threads `survivorship_bias` + `bias_controls_engaged=True` into the summary JSON and tear sheet. When `--impact-coefficient > 0`, each analysis path also reports a market-impact-based **strategy capacity** estimate (`summary["capacity"]`, in notional) by inverting the impact model (`capacity = max_impact * ADV_notional / impact_coefficient`); the tear sheet renders it as a "Strategy Capacity (Notional)" row. Capacity is `None` when impact is disabled or ADV is not estimable, so the key is backward compatible. Capacity is also reported **per regime**: `period["capacity"]` (walk-forward), `fold["capacity"]` (CPCV), and `validation_performance["capacity"]` / `test_performance["capacity"]` (out-of-sample), so capacity degradation across folds/periods/windows is observable; the CLI artifacts persist them as `capacity_per_period` / `capacity_per_fold`, and the tear sheet renders a "Capacity (Notional)" column in the per-period and per-fold tables. Because that reading only sees the *last* bar of a window, each regime also carries a **capacity trend** (`period["capacity_trend"]`, `fold["capacity_trend"]`, `validation_performance["capacity_trend"]`, `test_performance["capacity_trend"]`, `summary["capacity_trend"]`): the distribution of the per-period capacity readings inside the window (`min_capacity`, `median_capacity`, `max_capacity`, `last_capacity`, and the `min_to_median_ratio` / `last_to_median_ratio` degradation ratios). The walk-forward and CPCV summaries also report `summary["oos_min_capacity"]`, the worst capacity seen in any out-of-sample window. The trend is `None` when impact is disabled or ADV is not estimable, and it never changes the existing `estimated_capacity` number. For a multi-asset panel the basket is treated as equal-weighted, so the least liquid constituent binds the portfolio capacity (`capacity = n_assets * max_impact * min_i(ADV_notional_i) / impact_coefficient`). Every analysis path also reports a **panel book diagnostic** (`period["book_diagnostic"]`, `fold["book_diagnostic"]`, `validation_performance["book_diagnostic"]` / `test_performance["book_diagnostic"]`, `summary["book_diagnostic"]`): the per-asset book the strategy actually holds (gross book, book net exposure vs the priced net exposure, book turnover vs the turnover the cost model charges) against the framework's net-exposure pricing of a panel, plus the return gap between the engine's P&L and the book P&L. It is a measurement only -- no return, cost, impact or capacity number changes -- and it is `None` for a single asset or a strategy that does not expose a book. See `references/cost_models.md`, "Panel book diagnostic (measurement only)". Market impact on a **multi-asset panel** is modeled per asset on the same equal-weighted convention (`|position_change| * equity / n_assets` traded in each asset, each asset measured against its own ADV, portfolio cost = mean of the per-asset impacts), which keeps the dict and MultiIndex panel formats identical; previously the panel path produced an **empty** return series, which silently dropped every grid configuration and made panel runs with impact report "no signal" (regression-guarded in `tests/test_walk_forward.py`).
 - `monte_carlo.py` - Standalone Monte Carlo simulation (block bootstrap resampling, metric distributions, confidence intervals, probability of ruin). Re-exported from `walk_forward` for backward compatibility. On simulated paths where equity is wiped out (growth <= 0), the annualized return is recorded as -100% (a total loss) rather than NaN, so the metric distribution, summary statistics, and confidence intervals stay finite and interpretable; the true cumulative loss is preserved in `total_return`.
 - `reporting.py` - Automated tear sheet and report generation
 - `generate_sample_data.py` - Generates a sample OHLCV dataset for testing
@@ -185,6 +185,20 @@ Risk Metrics:
   point-in-time number, when judging whether a strategy can be scaled.
   Documented in `references/cost_models.md` under "Strategy Capacity
   Estimation".
+- **A panel backtest prices net exposure, not the book**: a multi-asset
+  portfolio is priced as `net_exposure x mean asset return`, one scalar per
+  period, so a long/short book cannot be represented by it. Every panel run
+  therefore carries a **panel book diagnostic** (`book_diagnostic`: gross
+  book, book net exposure vs the priced net exposure, book turnover vs the
+  turnover the cost model charges, and the return gap between the engine's
+  P&L and the book P&L `sum_i w_i r_i`). It is measurement only — no return,
+  cost, impact or capacity number changes — and it is `None` for a single
+  asset or a strategy that does not expose a book. Read it before quoting a
+  panel result: with symmetric quantiles the cross-sectional momentum
+  signal is flat by construction, so the engine reports "no position" while
+  the strategy holds a market-neutral book whose rotation is charged no
+  impact at all. Documented in `references/cost_models.md` under "Panel book
+  diagnostic (measurement only)".
 - Consider regime-dependent performance (bull/bear/sideways markets)
 - Document all assumptions and data sources for reproducibility
 - Run `--validate-point-in-time` on every backtest to screen for temporal-order violations, duplicate timestamps, and signal/next-return correlation (a look-ahead indicator); add `--point-in-time-strict` to make violations fail the run
@@ -276,6 +290,11 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   distributions, probability of ruin) and JSON summary entries are generated.
   A Monte Carlo equity curve fan chart (`monte_carlo_equity_curve.png`) is
   produced when `simulated_equity_curves` and matplotlib are available.
+  Also covers the **panel book diagnostic section**: the tear sheet renders a
+  "Panel Book Diagnostic" table (gross book, book vs priced net exposure,
+  book turnover vs charged turnover, return gap) and a top-level
+  `book_diagnostic` key in the JSON summary when the diagnostic is present,
+  and omits both when it is absent.
 - `test_run_backtest.py` - `run_backtest` end-to-end on synthetic data, the
   `signals_active` flat-strategy guard, `parse_args` CLI behavior, and **trade
   extraction across long/short flips**. Regression coverage for a defect where
@@ -292,13 +311,20 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   parameterized audit runs every registered strategy and asserts each trade
   has finite `pnl`/`return`, `entry_date < exit_date`, and a `pnl` sign
   consistent with the position direction at entry (recomputed independently
-  from the strategy's own shifted signals). Also covers **multi-asset
+  from the strategy's own shifted signals).   Also covers **multi-asset
   panel integration**: `run_backtest` accepts dict-of-DataFrames and
   MultiIndex-column panel data for `CrossSectionalMomentum` and
   `DualMomentumStrategy`, and the trade ledger is validated (non-empty,
   well-formed) for both formats. The extractor iterates the position
   series, not `data`, because `len(data)` is the number of symbols (not
-  bars) for a dict and `data.index` does not exist on dicts. Also covers
+  bars) for a dict and `data.index` does not exist on dicts. Also covers the
+  **panel book diagnostic**: a panel run surfaces
+  `results["book_diagnostic"]` (gross book, book net exposure vs the priced
+  net exposure, book turnover vs the turnover the cost model charges, the
+  return gap against the book return `sum_i w_i r_i` recomputed
+  independently in the test), a single asset or a strategy without a book
+  surfaces `None`, and the flat-net-exposure guard now explains that the
+  strategy does hold a book even though the engine reports no position. Also covers
   **Deflated Sharpe Ratio surfacing in the main backtest path**:
   `--n-trials` threads the number of development trials through the
   results config, `calculate_metrics` deflates the final backtest
@@ -341,7 +367,13 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
   binary long/flat signal generation with real crossovers, and multi-asset
   panel signal generation for `CrossSectionalMomentum` and
   `DualMomentumStrategy` (dict and MultiIndex formats, single-asset
-  fallback warnings, quantile/ranking semantics). Covers `MeanReversionZScore`
+  fallback warnings, quantile/ranking semantics). Also covers the optional
+  **book accessor** `StrategyBase.generate_target_weights`: it returns
+  `None` by default (a strategy without a book is unchanged), the
+  cross-sectional book's net exposure equals the scalar signal exactly, the
+  symmetric-quantile book is open (gross book > 0) while its net exposure is
+  flat, and the dual-momentum book is long-only and equally weighted.
+  Covers `MeanReversionZScore`
   pairs trading on dict and MultiIndex panel data (two-asset entry/exit),
   three-asset rejection, single-asset fallback warning, and the
   `ols_hedge` spread method (rolling OLS hedge-ratio recovery on a known
@@ -409,6 +441,11 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
       keys, and the `oos_min_capacity` aggregate; `None` when impact is
       disabled or ADV is not estimable, and the point-in-time
       `estimated_capacity` number is unchanged.
+      **Panel book diagnostic**: the per-window `period["book_diagnostic"]` /
+      `fold["book_diagnostic"]` records, the aggregated
+      `summary["book_diagnostic"]`, the out-of-sample per-split
+      `validation_book_diagnostic` / `test_book_diagnostic` keys, and the CLI
+      artifact rows; `None` for a single asset or a strategy without a book.
   - `test_cpcv.py` - CPCV fold structure, purge/embargo behavior, parameter
     stability calculation, summary metrics, **Deflated Sharpe Ratio
     correction** (`apply_deflation` on `cpcv_analysis`), CLI integration,
@@ -418,7 +455,11 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
     `fold["capacity"]` (present on every fold, `None` when impact is
     disabled), the per-fold `fold["capacity_trend"]` and the
     `summary["oos_min_capacity"]` aggregate, and a regression guard that a
-    multi-asset panel no longer raises when market impact is enabled.
+    multi-asset panel no longer raises when market impact is enabled. Also
+    covers the **panel book diagnostic**: every fold carries a
+    `fold["book_diagnostic"]` (gross book, book vs priced net exposure) and
+    the summary carries the aggregate `summary["book_diagnostic"]`; a
+    single-asset run has neither.
   - `test_generate_sample_data.py` - Sample data generation creates valid OHLCV
   CSV with expected shape and constraints.
 

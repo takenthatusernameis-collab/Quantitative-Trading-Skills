@@ -808,6 +808,60 @@ def test_cpcv_surfaces_capacity_trend_per_fold():
         assert f.get("capacity_trend") is None
 
 
+def test_cpcv_surfaces_book_diagnostic_per_fold():
+    """CPCV surfaces the book held in every fold's test window.
+
+    The panel path prices a portfolio as `net_exposure x mean(asset
+    returns)`, so a long/short book is invisible to the reported P&L. The
+    diagnostic measures it: gross book, the turnover the cost model charges
+    against the turnover the book really has, and the gap between the
+    framework's P&L and the book P&L. The reported P&L is unchanged.
+    """
+    data = _make_multiasset_multiindex(n=504, n_assets=5, seed=42)
+    strategy_factory = _make_strategy_factory("cross_sectional_momentum")
+
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid={"lookback": [15, 20, 30], "top_quantile": [0.4], "bottom_quantile": [0.2]},
+        n_splits=4,
+        test_size=0.2,
+    )
+
+    fold_diags = []
+    for fold in results["folds"]:
+        diag = fold.get("book_diagnostic")
+        assert diag is not None, f"Missing per-fold book diagnostic on fold {fold.get('fold')}"
+        assert diag["n_periods"] > 0
+        assert diag["gross_book"] > 0
+        # The book's net exposure is the scalar signal the framework priced.
+        assert abs(diag["net_exposure"] - diag["framework_net_exposure"]) < 1e-9
+        fold_diags.append(diag)
+
+    summary_diag = results["summary"].get("book_diagnostic")
+    assert summary_diag is not None
+    assert summary_diag["n_periods"] == sum(d["n_periods"] for d in fold_diags)
+    assert summary_diag["n_periods_with_book"] == sum(
+        d["n_periods_with_book"] for d in fold_diags
+    )
+
+
+def test_cpcv_book_diagnostic_absent_for_single_asset():
+    """A single-asset CPCV run has no per-asset book."""
+    data = _make_sample_data(600)
+    strategy_factory = _make_strategy_factory("sma_crossover")
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid={"fast_period": [5, 10], "slow_period": [15, 20]},
+        n_splits=4,
+        test_size=0.2,
+    )
+    assert results["summary"].get("book_diagnostic") is None
+    for fold in results["folds"]:
+        assert fold.get("book_diagnostic") is None
+
+
 TEST_REGISTRY = [
     ("cpcv_basic_structure", test_cpcv_basic_structure),
     ("cpcv_purge_embargo", test_cpcv_purge_embargo),
@@ -828,6 +882,8 @@ TEST_REGISTRY = [
     ("cpcv_surfaces_capacity_in_summary", test_cpcv_surfaces_capacity_in_summary),
     ("cpcv_surfaces_capacity_per_fold", test_cpcv_surfaces_capacity_per_fold),
     ("cpcv_surfaces_capacity_trend_per_fold", test_cpcv_surfaces_capacity_trend_per_fold),
+    ("cpcv_surfaces_book_diagnostic_per_fold", test_cpcv_surfaces_book_diagnostic_per_fold),
+    ("cpcv_book_diagnostic_absent_for_single_asset", test_cpcv_book_diagnostic_absent_for_single_asset),
     ("cpcv_multi_asset_panel_capacity_does_not_raise", test_cpcv_multi_asset_panel_capacity_does_not_raise),
     ("cpcv_no_active_position_reports_none_and_zero_folds", test_cpcv_no_active_position_reports_none_and_zero_folds),
     ("cpcv_normal_run_keeps_current_numbers", test_cpcv_normal_run_keeps_current_numbers),

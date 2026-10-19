@@ -43,6 +43,34 @@ class StrategyBase(ABC):
         """Default position sizing: full position when signal != 0."""
         return signals.abs()
 
+    def generate_target_weights(self, data) -> Optional[pd.DataFrame]:
+        """Optional per-asset target book for a multi-asset panel.
+
+        The backtest engine prices a panel as ``net_exposure x mean(asset
+        returns)``: one scalar per period. A strategy that holds an explicit
+        long/short book cannot be expressed that way, so this accessor lets a
+        strategy *describe* the book it holds without changing how the
+        engine prices it.
+
+        Contract:
+
+        - returns a ``pd.DataFrame`` of portfolio weights whose rows are the
+          dates of ``data`` and whose columns are the panel's symbols;
+        - ``sum(|w|) <= 1`` per row;
+        - the net exposure ``sum(w)`` should match the scalar signal
+          returned by :meth:`generate_signals`, so the book and the signal
+          describe the same portfolio;
+        - returns ``None`` when the strategy does not model a book. That is
+          the default, so every strategy that does not implement this
+          accessor keeps its current behaviour, and single-asset runs never
+          produce a book.
+
+        The book is used for *measurement* only (see
+        ``utils.compute_book_diagnostic``): the reported returns, costs and
+        impact are unchanged.
+        """
+        return None
+
 
 class SMACrossoverStrategy(StrategyBase):
     """Simple Moving Average Crossover Strategy.
@@ -339,48 +367,21 @@ class CrossSectionalMomentum(StrategyBase):
         if not data_dict:
             return pd.Series(dtype=float)
 
-        # Align all symbols to common date index
-        common_index = None
-        for df in data_dict.values():
-            if common_index is None:
-                common_index = df.index
-            else:
-                common_index = common_index.intersection(df.index)
-
+        common_index, returns_df = self._cross_sectional_returns(
+            data_dict, lookback
+        )
         if common_index is None or len(common_index) == 0:
             return pd.Series(dtype=float)
 
-        common_index = common_index.sort_values()
-
-        # Compute lookback returns for each symbol
-        returns_dict = {}
-        for symbol, df in data_dict.items():
-            df_aligned = df.reindex(common_index)
-            close = df_aligned["close"]
-            returns_dict[symbol] = close.pct_change(lookback)
-
-        returns_df = pd.DataFrame(returns_dict, index=common_index)
-
-        # Rank cross-sectionally each period
+        # For the portfolio-level signal, we return the net position
+        # (number of longs - number of shorts) / n_assets.
+        # This gives a single scalar signal per period for the portfolio.
         signals = pd.Series(0.0, index=common_index, dtype=float)
-
-        for date in common_index[lookback:]:
-            row = returns_df.loc[date].dropna()
-            if len(row) == 0:
-                continue
-
-            n_assets = len(row)
-            n_long = max(1, int(np.ceil(n_assets * top_quantile)))
-            n_short = max(1, int(np.ceil(n_assets * bottom_quantile)))
-
-            # Rank: highest returns = long, lowest returns = short
-            ranked = row.rank(ascending=False, method="first")
-            long_symbols = ranked[ranked <= n_long].index
-            short_symbols = ranked[ranked > n_assets - n_short].index
-
-            # For the portfolio-level signal, we return the net position
-            # (number of longs - number of shorts) / n_assets
-            # This gives a single scalar signal per period for the portfolio
+        for date, n_assets, long_symbols, short_symbols in (
+            self._cross_sectional_selection(
+                returns_df, lookback, top_quantile, bottom_quantile
+            )
+        ):
             signals.loc[date] = (len(long_symbols) - len(short_symbols)) / n_assets
 
         return signals
@@ -401,8 +402,67 @@ class CrossSectionalMomentum(StrategyBase):
         returns_df = close_data.pct_change(lookback)
 
         signals = pd.Series(0.0, index=data.index, dtype=float)
+        for date, n_assets, long_symbols, short_symbols in (
+            self._cross_sectional_selection(
+                returns_df, lookback, top_quantile, bottom_quantile
+            )
+        ):
+            signals.loc[date] = (len(long_symbols) - len(short_symbols)) / n_assets
 
-        for date in data.index[lookback:]:
+        return signals
+
+    def _cross_sectional_returns(
+        self, data_dict: dict, lookback: int
+    ):
+        """Align a dict panel and compute the per-asset lookback returns.
+
+        Returns ``(common_index, returns_df)`` where ``returns_df`` holds
+        the ``lookback``-period return of every symbol on the common date
+        index.
+        """
+        # Align all symbols to common date index
+        common_index = None
+        for df in data_dict.values():
+            if common_index is None:
+                common_index = df.index
+            else:
+                common_index = common_index.intersection(df.index)
+
+        if common_index is None or len(common_index) == 0:
+            return None, None
+
+        common_index = common_index.sort_values()
+
+        # Compute lookback returns for each symbol
+        returns_dict = {}
+        for symbol, df in data_dict.items():
+            df_aligned = df.reindex(common_index)
+            close = df_aligned["close"]
+            returns_dict[symbol] = close.pct_change(lookback)
+
+        returns_df = pd.DataFrame(returns_dict, index=common_index)
+        return common_index, returns_df
+
+    def _cross_sectional_selection(
+        self,
+        returns_df: pd.DataFrame,
+        lookback: int,
+        top_quantile: float,
+        bottom_quantile: float,
+    ):
+        """Long/short selection per date, shared by the signal and the book.
+
+        Returns a list of ``(date, n_assets, long_symbols, short_symbols)``
+        tuples in date order. ``n_assets`` is the number of assets with a
+        defined lookback return on that date (assets that are still warming
+        up are excluded), and the long/short sets are the top and bottom
+        quantiles of the cross-sectional ranking.
+
+        Sharing this selection is what keeps the scalar signal and the
+        per-asset book from ever disagreeing.
+        """
+        selections = []
+        for date in returns_df.index[lookback:]:
             row = returns_df.loc[date].dropna()
             if len(row) == 0:
                 continue
@@ -411,13 +471,96 @@ class CrossSectionalMomentum(StrategyBase):
             n_long = max(1, int(np.ceil(n_assets * top_quantile)))
             n_short = max(1, int(np.ceil(n_assets * bottom_quantile)))
 
+            # Rank: highest returns = long, lowest returns = short
             ranked = row.rank(ascending=False, method="first")
             long_symbols = ranked[ranked <= n_long].index
             short_symbols = ranked[ranked > n_assets - n_short].index
 
-            signals.loc[date] = (len(long_symbols) - len(short_symbols)) / n_assets
+            selections.append((date, n_assets, long_symbols, short_symbols))
+        return selections
 
-        return signals
+    def _cross_sectional_weight_frame(
+        self,
+        returns_df: pd.DataFrame,
+        lookback: int,
+        top_quantile: float,
+        bottom_quantile: float,
+        symbols,
+        index,
+    ) -> pd.DataFrame:
+        """Per-asset book implied by the cross-sectional selection.
+
+        The long book holds ``+1 / n_assets`` per long name and the short
+        book ``-1 / n_assets`` per short name, so the book's net exposure is
+        exactly the scalar signal ``(n_long - n_short) / n_assets`` and the
+        gross book is ``(n_long + n_short) / n_assets``. A name selected on
+        both sides (which the quantile validation already warns about) nets
+        to zero, so the net exposure still matches the signal.
+        """
+        weights = pd.DataFrame(0.0, index=index, columns=list(symbols))
+
+        for date, n_assets, long_symbols, short_symbols in (
+            self._cross_sectional_selection(
+                returns_df, lookback, top_quantile, bottom_quantile
+            )
+        ):
+            weight = 1.0 / n_assets
+            long_set = set(long_symbols)
+            short_set = set(short_symbols)
+            long_only = [s for s in long_symbols if s not in short_set]
+            short_only = [s for s in short_symbols if s not in long_set]
+            if long_only:
+                weights.loc[date, long_only] = weight
+            if short_only:
+                weights.loc[date, short_only] = -weight
+
+        return weights
+
+    def generate_target_weights(self, data) -> Optional[pd.DataFrame]:
+        """Per-asset long/short book implied by the cross-sectional ranking.
+
+        Long book: ``+1 / n_assets`` per long name. Short book:
+        ``-1 / n_assets`` per short name. The net exposure of the book is
+        therefore the scalar signal of :meth:`generate_signals`, while the
+        gross book is non-zero even when that signal is flat (symmetric
+        quantiles), which is exactly the gap the net-exposure pricing
+        convention hides.
+
+        Returns ``None`` for single-asset data (the single-asset fallback is
+        a momentum filter, not a cross-sectional book).
+
+        The quantile validation of :meth:`generate_signals` is deliberately
+        not repeated here: the accessor is a measurement helper, and warning
+        again would report the same problem twice per run.
+        """
+        lookback = self.parameters.get("lookback", 252)
+        top_quantile = self.parameters.get("top_quantile", 0.2)
+        bottom_quantile = self.parameters.get("bottom_quantile", 0.2)
+
+        if isinstance(data, dict):
+            if not data:
+                return None
+            common_index, returns_df = self._cross_sectional_returns(
+                data, lookback
+            )
+            if common_index is None or len(common_index) == 0:
+                return None
+            return self._cross_sectional_weight_frame(
+                returns_df, lookback, top_quantile, bottom_quantile,
+                list(data.keys()), common_index,
+            )
+        if isinstance(data.columns, pd.MultiIndex):
+            if "close" not in data.columns.get_level_values(0):
+                raise ValueError(
+                    "MultiIndex data must have 'close' as first level column"
+                )
+            close_data = data["close"]
+            returns_df = close_data.pct_change(lookback)
+            return self._cross_sectional_weight_frame(
+                returns_df, lookback, top_quantile, bottom_quantile,
+                list(close_data.columns), data.index,
+            )
+        return None
 
     def _generate_single_asset_signals(
         self,
@@ -521,28 +664,9 @@ class DualMomentumStrategy(StrategyBase):
         # Dual momentum logic per period
         signals = pd.Series(0.0, index=common_index, dtype=float)
 
-        for date in common_index[lookback:]:
-            row = returns_df.loc[date].dropna()
-            if len(row) == 0:
-                continue
-
-            n_assets = len(row)
-
-            # Absolute momentum: filter assets with return > risk-free rate
-            abs_momentum = row[row > rf_period]
-
-            if len(abs_momentum) == 0:
-                # No assets with positive absolute momentum -> cash (signal = 0)
-                signals.loc[date] = 0.0
-                continue
-
-            # Relative momentum: rank assets with positive absolute momentum
-            ranked = abs_momentum.rank(ascending=False, method="first")
-
-            # Select top quantile
-            n_select = max(1, int(np.ceil(len(abs_momentum) * top_quantile)))
-            selected_symbols = ranked[ranked <= n_select].index
-
+        for date, n_assets, selected_symbols in self._dual_momentum_selection(
+            returns_df, lookback, top_quantile, rf_period
+        ):
             # Portfolio signal: fraction of capital allocated (long-only)
             # Equal weight among selected assets
             signals.loc[date] = len(selected_symbols) / n_assets
@@ -566,7 +690,31 @@ class DualMomentumStrategy(StrategyBase):
 
         signals = pd.Series(0.0, index=data.index, dtype=float)
 
-        for date in data.index[lookback:]:
+        for date, n_assets, selected_symbols in self._dual_momentum_selection(
+            returns_df, lookback, top_quantile, rf_period
+        ):
+            # Portfolio signal: fraction of capital allocated (long-only)
+            # Equal weight among selected assets
+            signals.loc[date] = len(selected_symbols) / n_assets
+
+        return signals
+
+    def _dual_momentum_selection(
+        self,
+        returns_df: pd.DataFrame,
+        lookback: int,
+        top_quantile: float,
+        rf_period: float,
+    ):
+        """Selected symbols per date, shared by the signal and the book.
+
+        Returns a list of ``(date, n_assets, selected_symbols)`` tuples in
+        date order. ``n_assets`` is the number of assets with a defined
+        lookback return on that date; ``selected_symbols`` is empty when no
+        asset clears the absolute-momentum filter (the portfolio is cash).
+        """
+        selections = []
+        for date in returns_df.index[lookback:]:
             row = returns_df.loc[date].dropna()
             if len(row) == 0:
                 continue
@@ -577,7 +725,8 @@ class DualMomentumStrategy(StrategyBase):
             abs_momentum = row[row > rf_period]
 
             if len(abs_momentum) == 0:
-                signals.loc[date] = 0.0
+                # No assets with positive absolute momentum -> cash (signal = 0)
+                selections.append((date, n_assets, []))
                 continue
 
             # Relative momentum: rank assets with positive absolute momentum
@@ -587,10 +736,70 @@ class DualMomentumStrategy(StrategyBase):
             n_select = max(1, int(np.ceil(len(abs_momentum) * top_quantile)))
             selected_symbols = ranked[ranked <= n_select].index
 
-            # Portfolio signal: fraction of capital allocated (long-only)
-            signals.loc[date] = len(selected_symbols) / n_assets
+            selections.append((date, n_assets, selected_symbols))
+        return selections
 
-        return signals
+    def generate_target_weights(self, data) -> Optional[pd.DataFrame]:
+        """Per-asset long-only book implied by the dual-momentum selection.
+
+        The selected names are held equally: ``1 / n_selected`` each, so the
+        book is fully invested in the selected names (gross exposure 1.0)
+        whenever the absolute-momentum filter leaves at least one asset.
+
+        Note that this book is *more* invested than the scalar signal of
+        :meth:`generate_signals` (which is ``n_selected / n_assets``, the
+        fraction of the equal-weighted basket). The book diagnostic reports
+        both net exposures so the difference is visible instead of hidden.
+
+        Returns ``None`` for single-asset data (the single-asset fallback is
+        an absolute-momentum filter, not a cross-sectional book).
+        """
+        lookback = self.parameters.get("lookback", 12 * 21)  # ~12 months
+        top_quantile = self.parameters.get("top_quantile", 0.2)
+        risk_free_rate = self.parameters.get("risk_free_rate", 0.0)  # Annualized
+
+        # Convert annualized risk-free rate to period rate
+        rf_period = (1 + risk_free_rate) ** (lookback / 252) - 1
+
+        if isinstance(data, dict):
+            if not data:
+                return None
+            common_index = None
+            for df in data.values():
+                if common_index is None:
+                    common_index = df.index
+                else:
+                    common_index = common_index.intersection(df.index)
+            if common_index is None or len(common_index) == 0:
+                return None
+            common_index = common_index.sort_values()
+            returns_dict = {}
+            for symbol, df in data.items():
+                df_aligned = df.reindex(common_index)
+                returns_dict[symbol] = df_aligned["close"].pct_change(lookback)
+            returns_df = pd.DataFrame(returns_dict, index=common_index)
+            symbols = list(data.keys())
+        elif isinstance(data.columns, pd.MultiIndex):
+            if "close" not in data.columns.get_level_values(0):
+                raise ValueError(
+                    "MultiIndex data must have 'close' as first level column"
+                )
+            close_data = data["close"]
+            returns_df = close_data.pct_change(lookback)
+            symbols = list(close_data.columns)
+            common_index = data.index
+        else:
+            return None
+
+        weights = pd.DataFrame(0.0, index=common_index, columns=symbols)
+        for date, _n_assets, selected_symbols in self._dual_momentum_selection(
+            returns_df, lookback, top_quantile, rf_period
+        ):
+            if len(selected_symbols) == 0:
+                continue
+            weights.loc[date, list(selected_symbols)] = 1.0 / len(selected_symbols)
+
+        return weights
 
     def _generate_single_asset_signals(
         self,

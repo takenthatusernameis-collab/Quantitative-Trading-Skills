@@ -31,7 +31,9 @@ from reporting import generate_tear_sheet
 from utils import (
     _annualization_factor,
     build_market_model,
+    compute_book_diagnostic,
     market_impact_cost,
+    strategy_target_weights,
 )
 from walk_forward import estimate_capacity
 
@@ -190,17 +192,6 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     price = market["price"]
     is_panel = market["is_panel"]
 
-    # Guard against strategies that never take a position (e.g. a lookback
-    # longer than the data window leaves every rolling indicator NaN, so the
-    # signal stays flat at 0). Such strategies produce no trades and their
-    # performance metrics are meaningless (division-by-zero Sharpe, etc.).
-    if not signals_active(signals):
-        raise ValueError(
-            "Strategy never takes a position for the given data and "
-            "parameters. Reduce the lookback/period so the indicator is "
-            "defined over at least part of the window."
-        )
-
     # Trade at next period's open (avoid look-ahead bias)
     # Account for execution latency if specified (delay position execution by latency periods)
     latency = getattr(args, 'latency', 0) or 0
@@ -215,6 +206,50 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
         raise ValueError(
             f"--fill-rate must be in (0, 1], got {fill_rate}"
         )
+
+    # Panel book diagnostic (measurement only). The panel path prices the
+    # portfolio as `net_exposure x mean(asset returns)` -- one scalar per
+    # period -- so a strategy that holds a long/short book cannot be
+    # represented by that scalar. The diagnostic measures the book the
+    # strategy actually holds against the framework's pricing; it changes
+    # no return, cost, impact or capacity number.
+    #
+    # The weights are looked up here (the guard below needs them to explain
+    # *why* the framework sees no position when the book is not flat); the
+    # diagnostic itself is computed after the return series exists, so the
+    # return gap is measured on exactly the bars the framework reports.
+    book_weights = strategy_target_weights(strategy, data)
+
+    # Guard against strategies that never take a position (e.g. a lookback
+    # longer than the data window leaves every rolling indicator NaN, so the
+    # signal stays flat at 0). Such strategies produce no trades and their
+    # performance metrics are meaningless (division-by-zero Sharpe, etc.).
+    if not signals_active(signals):
+        _book_note = ""
+        if book_weights is not None:
+            _book_only = compute_book_diagnostic(
+                book_weights,
+                market,
+                positions=signals.shift(1 + latency),
+                framework_returns=None,
+                lag=1 + latency,
+                fill_rate=fill_rate,
+            )
+            if _book_only and _book_only.get("n_periods_with_book"):
+                _book_note = (
+                    " The strategy does hold a book (gross book "
+                    f"{_book_only['gross_book']:.4f} on average, "
+                    f"{_book_only['n_periods_with_book']} of "
+                    f"{_book_only['n_periods']} periods), but its net "
+                    "exposure is flat, so the panel pricing convention "
+                    "reports no position. See the panel book diagnostic."
+                )
+        raise ValueError(
+            "Strategy never takes a position for the given data and "
+            "parameters. Reduce the lookback/period so the indicator is "
+            "defined over at least part of the window." + _book_note
+        )
+
     positions = signals.shift(1 + latency).fillna(0)
     if fill_rate < 1.0:
         positions = positions * fill_rate
@@ -275,6 +310,22 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
 
     strategy_returns = positions * raw_returns - costs
     strategy_returns = strategy_returns.dropna()
+
+    # Panel book diagnostic: the per-asset book the strategy actually holds
+    # against the framework's net-exposure pricing, measured on exactly the
+    # bars the framework reports. None for a single asset or for a strategy
+    # that does not expose a book. This is a measurement only: the returns,
+    # costs, impact and capacity above are unchanged by it.
+    book_diagnostic = None
+    if book_weights is not None:
+        book_diagnostic = compute_book_diagnostic(
+            book_weights,
+            market,
+            positions=positions,
+            framework_returns=strategy_returns,
+            lag=1 + latency,
+            fill_rate=fill_rate,
+        )
 
     # Build equity curve
     equity = (1 + strategy_returns).cumprod() * args.initial_capital
@@ -364,6 +415,10 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
         "data": data,
         "strategy": strategy,
         "trades": trades,
+        # Panel book diagnostic (None for a single asset or a strategy that
+        # does not expose a book). Measurement only -- it does not change
+        # the reported P&L.
+        "book_diagnostic": book_diagnostic,
         "config": {
             "initial_capital": args.initial_capital,
             "commission": args.commission,
@@ -848,6 +903,37 @@ def main():
     metrics = calculate_metrics(results, risk_free_rate=rfr) if rfr is not None else calculate_metrics(results)
     metrics["capacity"] = results.get("capacity")
     metrics["capacity_trend"] = results.get("capacity_trend")
+    # Panel book diagnostic: the per-asset book the strategy holds against
+    # the framework's net-exposure pricing. None for a single asset or a
+    # strategy without a book.
+    metrics["book_diagnostic"] = results.get("book_diagnostic")
+    book_diagnostic = results.get("book_diagnostic")
+    if book_diagnostic:
+        print(
+            "Panel Book Diagnostic (measurement only -- the reported P&L "
+            "is unchanged):"
+        )
+        print(f"  Gross book (mean sum|w|):     {book_diagnostic['gross_book']:.4f}")
+        print(f"  Net exposure (book):          {book_diagnostic['net_exposure']:.4f}")
+        print(f"  Net exposure (framework):      {book_diagnostic['framework_net_exposure']:.4f}")
+        print(f"  Gross turnover (book):         {book_diagnostic['gross_turnover']:.4f}")
+        print(f"  Turnover charged by the model: {book_diagnostic['framework_turnover']:.4f}")
+        print(
+            f"  Periods with a book:           "
+            f"{book_diagnostic['n_periods_with_book']}/{book_diagnostic['n_periods']}"
+        )
+        _gap_bps = book_diagnostic.get("return_gap_bps")
+        _gap_total = book_diagnostic.get("return_gap_total")
+        if _gap_bps is not None:
+            print(
+                f"  Return gap (framework - book): {_gap_bps:.2f} bps/period "
+                f"({_gap_total:.2%} cumulative)"
+            )
+            print(
+                f"  Book total return:            "
+                f"{book_diagnostic['book_total_return']:.2%} vs framework "
+                f"{book_diagnostic['framework_total_return_after_costs']:.2%}"
+            )
 
     # Multiple-testing correction: when the number of development
     # trials was reported (--n-trials), echo the Deflated Sharpe

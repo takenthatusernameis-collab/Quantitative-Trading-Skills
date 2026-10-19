@@ -33,8 +33,11 @@ from data_loader import (
 from performance import calculate_metrics, generate_report, _benchmark_stats
 from utils import (
     _annualization_factor,
+    aggregate_book_diagnostics,
     build_market_model,
+    compute_book_diagnostic,
     market_impact_cost,
+    strategy_target_weights,
 )
 from reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
@@ -680,6 +683,19 @@ def walk_forward_analysis(
         # liquidity squeeze inside the window is invisible to it. None when
         # impact is disabled or ADV is not estimable.
         period["capacity_trend"] = _period_capacity.get("capacity_trend")
+        # Panel book diagnostic for the period's test window: the per-asset
+        # book the selected strategy holds, measured against the
+        # framework's net-exposure pricing of the same window. None when
+        # the strategy exposes no book (or the path is not a panel).
+        # Measurement only -- no return, cost or impact number changes.
+        period["book_diagnostic"] = _window_book_diagnostic(
+            strategy_factory,
+            period.get("best_params"),
+            period["test_data"],
+            period.get("test_returns"),
+            latency=latency,
+            fill_rate=fill_rate,
+        )
 
     # Combine all out-of-sample returns
     if oos_returns_list:
@@ -759,6 +775,13 @@ def walk_forward_analysis(
     # that actually bound the strategy in the regimes it was traded in).
     summary["oos_min_capacity"] = _aggregate_oos_capacity(
         [p.get("capacity_trend") for p in periods]
+    )
+    # Panel book diagnostic aggregated over the out-of-sample windows: the
+    # book the strategy actually held against the framework's net-exposure
+    # pricing. None when no window produced a diagnostic (single asset, or
+    # a strategy that does not expose a book).
+    summary["book_diagnostic"] = aggregate_book_diagnostics(
+        [p.get("book_diagnostic") for p in periods]
     )
 
     return {
@@ -1790,6 +1813,52 @@ def estimate_capacity(
     return result
 
 
+def _window_book_diagnostic(
+    strategy_factory: Callable,
+    best_params: Optional[Dict[str, Any]],
+    window_data,
+    framework_returns,
+    latency: int = 0,
+    fill_rate: float = 1.0,
+) -> Optional[Dict[str, Any]]:
+    """Panel book diagnostic for one validation window.
+
+    The panel path prices a portfolio as ``net_exposure x mean(asset
+    returns)`` -- one scalar per period -- so a strategy that holds a
+    long/short book cannot be represented by that scalar. This measures the
+    book the selected strategy actually holds in the window against the
+    framework's pricing of the same window.
+
+    Measurement only: no return, cost, impact or capacity number is
+    changed. Returns ``None`` when the strategy exposes no book, when the
+    window produced no returns, or when the panel has no per-asset data.
+    """
+    if best_params is None or window_data is None:
+        return None
+    if framework_returns is None or len(framework_returns) == 0:
+        return None
+
+    strategy = strategy_factory(best_params)
+    weights = strategy_target_weights(strategy, window_data)
+    if weights is None:
+        return None
+
+    signals = strategy.generate_signals(window_data)
+    market = build_market_model(window_data)
+    # Same position convention as `_calculate_strategy_returns`: the signal
+    # is executed with a one-period delay (plus the execution latency) and
+    # scaled by the fill rate.
+    positions = signals.shift(1 + latency) * fill_rate
+    return compute_book_diagnostic(
+        weights,
+        market,
+        positions=positions,
+        framework_returns=framework_returns,
+        lag=1 + latency,
+        fill_rate=fill_rate,
+    )
+
+
 def _aggregate_oos_capacity(
     trends: List[Any],
 ) -> Optional[float]:
@@ -2206,6 +2275,17 @@ def cpcv_analysis(
         # trend that `walk_forward_analysis` records). None when impact is
         # disabled or ADV is not estimable.
         fold["capacity_trend"] = _fold_capacity.get("capacity_trend")
+        # Panel book diagnostic for the fold's test window (mirrors the
+        # per-period diagnostic that `walk_forward_analysis` records).
+        # Measurement only -- no return, cost or impact number changes.
+        fold["book_diagnostic"] = _window_book_diagnostic(
+            strategy_factory,
+            fold.get("best_params"),
+            fold["test_data"],
+            fold.get("test_returns"),
+            latency=latency,
+            fill_rate=fill_rate,
+        )
 
     # Combine all out-of-sample returns
     if oos_returns_list:
@@ -2298,6 +2378,12 @@ def cpcv_analysis(
     summary["capacity_trend"] = _capacity.get("capacity_trend")
     summary["oos_min_capacity"] = _aggregate_oos_capacity(
         [f.get("capacity_trend") for f in folds]
+    )
+    # Panel book diagnostic aggregated over the out-of-sample folds (see
+    # the walk-forward summary for the same key). None when no fold
+    # produced a diagnostic.
+    summary["book_diagnostic"] = aggregate_book_diagnostics(
+        [f.get("book_diagnostic") for f in folds]
     )
 
     return {
@@ -2625,6 +2711,18 @@ def out_of_sample_validation(
         "val_n_periods": len(val_returns),
         "capacity": val_capacity_point,
         "capacity_trend": val_capacity_trend,
+        # Panel book diagnostic for the validation window: the per-asset
+        # book the selected strategy holds, measured against the
+        # framework's net-exposure pricing of the same window. None when
+        # the strategy exposes no book. Measurement only.
+        "book_diagnostic": _window_book_diagnostic(
+            strategy_factory,
+            selected_params,
+            val_data,
+            val_returns,
+            latency=latency,
+            fill_rate=fill_rate,
+        ),
     }
 
     # Phase 4: FINAL TEST - Evaluate on held-out test data
@@ -2656,6 +2754,16 @@ def out_of_sample_validation(
          "test_returns": test_returns,
          "capacity": test_capacity_point,
          "capacity_trend": test_capacity_trend,
+         # Panel book diagnostic for the held-out test window. Measurement
+         # only -- the reported test performance is unchanged.
+         "book_diagnostic": _window_book_diagnostic(
+             strategy_factory,
+             selected_params,
+             test_data,
+             test_returns,
+             latency=latency,
+             fill_rate=fill_rate,
+         ),
      }
 
     # Benchmark comparison on test set
@@ -2718,6 +2826,12 @@ def out_of_sample_validation(
         # `*_capacity` keys only read the last bar of the window).
         "validation_capacity_trend": val_capacity_trend,
         "test_capacity_trend": test_capacity_trend,
+        # Panel book diagnostics for the two windows: the per-asset book
+        # the selected strategy holds against the framework's net-exposure
+        # pricing. The aggregate below covers both windows; the test window
+        # is the out-of-sample one. Measurement only.
+        "validation_book_diagnostic": validation_performance.get("book_diagnostic"),
+        "test_book_diagnostic": test_performance.get("book_diagnostic"),
         "test_total_return": test_total_return,
         "test_sharpe": test_sharpe,
         "test_volatility": test_performance["test_volatility"],
@@ -2863,6 +2977,15 @@ def out_of_sample_validation(
     # Capacity trend over the whole sample (the per-period / per-fold
     # records carry the same key for their own window).
     summary["capacity_trend"] = _capacity.get("capacity_trend")
+    # Panel book diagnostic aggregated over the validation and test
+    # windows. None when neither window produced one (single asset, or a
+    # strategy that does not expose a book).
+    summary["book_diagnostic"] = aggregate_book_diagnostics(
+        [
+            validation_performance.get("book_diagnostic"),
+            test_performance.get("book_diagnostic"),
+        ]
+    )
 
     return {
         "train_val_test_split": split_info,
@@ -3785,6 +3908,7 @@ def run_cpcv(args) -> int:
     print(f"OOS Sharpe Ratio: {results['summary'].get('oos_sharpe', 'N/A')}")
     print(f"Avg Parameter Stability: {results['summary'].get('avg_param_stability', 'N/A'):.2f}")
     print(f"Overfitting Risk: {results['summary'].get('overfitting_risk', 'N/A')}")
+    _print_book_diagnostic(results["summary"].get("book_diagnostic"))
 
     dsr = results["summary"].get("deflated_sharpe")
     if dsr is not None:
@@ -3815,6 +3939,10 @@ def run_cpcv(args) -> int:
                 "test_end": f.get("test_end"),
                 "capacity": f.get("capacity"),
                 "capacity_trend": f.get("capacity_trend"),
+                # Panel book diagnostic for the fold's test window: the
+                # per-asset book against the framework's net-exposure
+                # pricing (measurement only).
+                "book_diagnostic": f.get("book_diagnostic"),
             }
             for f in results.get("folds", [])
         ],
@@ -3920,6 +4048,41 @@ def _make_strategy_factory(strategy_type: str):
     def factory(params: Dict[str, Any]):
         return build_strategy(strategy_type, json.dumps(params))
     return factory
+
+
+def _print_book_diagnostic(diag, indent: str = "  ") -> None:
+    """Print the panel book diagnostic (measurement only).
+
+    The panel path prices a portfolio as ``net_exposure x mean(asset
+    returns)``. This prints how much of the strategy's actual book that
+    convention misses: the gross book and the turnover the model charges
+    nothing for, and the gap between the framework's P&L and the book P&L.
+    Nothing about the reported performance changes.
+    """
+    if not isinstance(diag, dict):
+        return
+    print(f"{indent}Panel Book Diagnostic (measurement only -- reported P&L unchanged):")
+    print(f"{indent}  Gross book (mean sum|w|):     {diag.get('gross_book', 0.0):.4f}")
+    print(f"{indent}  Net exposure (book):          {diag.get('net_exposure', 0.0):.4f}")
+    print(f"{indent}  Net exposure (framework):      {diag.get('framework_net_exposure', 0.0):.4f}")
+    print(f"{indent}  Gross turnover (book):         {diag.get('gross_turnover', 0.0):.4f}")
+    print(f"{indent}  Turnover charged by the model: {diag.get('framework_turnover', 0.0):.4f}")
+    print(
+        f"{indent}  Periods with a book:           "
+        f"{diag.get('n_periods_with_book', 0)}/{diag.get('n_periods', 0)}"
+    )
+    gap_bps = diag.get("return_gap_bps")
+    gap_total = diag.get("return_gap_total")
+    if gap_bps is not None and gap_total is not None:
+        print(
+            f"{indent}  Return gap (framework - book): {gap_bps:.2f} bps/period "
+            f"({gap_total:.2%} cumulative)"
+        )
+        print(
+            f"{indent}  Book total return:            "
+            f"{diag.get('book_total_return', 0.0):.2%} vs framework "
+            f"{diag.get('framework_total_return_after_costs', 0.0):.2%}"
+        )
 
 
 def _load_and_validate_data(
@@ -4683,6 +4846,7 @@ def run_walk_forward(args) -> int:
         f"Total OOS Return: {'N/A' if _total_oos_return is None else f'{_total_oos_return:.2%}'}"
     )
     print(f"OOS Sharpe Ratio: {results['summary'].get('oos_sharpe', 'N/A')}")
+    _print_book_diagnostic(results["summary"].get("book_diagnostic"))
 
     dsr = results["summary"].get("deflated_sharpe")
     if dsr is not None:
@@ -4717,6 +4881,10 @@ def run_walk_forward(args) -> int:
                 "test_end": p.get("test_end"),
                 "capacity": p.get("capacity"),
                 "capacity_trend": p.get("capacity_trend"),
+                # Panel book diagnostic for the period's test window: the
+                # per-asset book against the framework's net-exposure
+                # pricing (measurement only).
+                "book_diagnostic": p.get("book_diagnostic"),
             }
             for i, p in enumerate(results.get("periods", []))
         ],
@@ -6221,6 +6389,10 @@ def run_out_of_sample_validation(args) -> int:
     print(f"\nTest Performance (HELD-OUT, never used in selection):")
     print(f"  Total Return: {test_perf['test_total_return']:.2%}")
     print(f"  Sharpe Ratio: {test_perf['test_sharpe']:.4f}")
+    # The held-out window's own diagnostic is printed next to the held-out
+    # performance; the validation window's diagnostic and the aggregate over
+    # both windows are in the summary JSON.
+    _print_book_diagnostic(test_perf.get("book_diagnostic"), indent="  ")
 
     summary = results["summary"]
     dsr = summary.get("deflated_sharpe")
@@ -6307,6 +6479,10 @@ def run_out_of_sample_validation(args) -> int:
             "test_volatility": results["test_performance"]["test_volatility"],
             "test_n_periods": results["test_performance"]["test_n_periods"],
             "capacity": results["test_performance"].get("capacity"),
+            # Panel book diagnostic for the held-out test window: the
+            # per-asset book against the framework's net-exposure pricing
+            # (measurement only).
+            "book_diagnostic": results["test_performance"].get("book_diagnostic"),
         },
         "test_benchmark": results["test_benchmark"],
         "config": {

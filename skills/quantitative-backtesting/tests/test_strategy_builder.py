@@ -250,6 +250,129 @@ def test_cross_sectional_momentum_respects_quantiles():
     assert abs(post_lookback2.mean() - 0.4) < 0.15
 
 
+def test_target_weights_default_is_none_for_strategies_without_a_book():
+    """The optional book accessor is absent by default (None).
+
+    A strategy that does not model a book must keep its current behaviour:
+    the accessor returns None, so no diagnostic is produced for it.
+    """
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    assert strategy.generate_target_weights(_make_data()) is None
+
+
+def test_cross_sectional_momentum_target_weights_match_signal_net_exposure():
+    """The cross-sectional book's net exposure equals the scalar signal.
+
+    The long book holds +1/n_assets per long name and the short book
+    -1/n_assets per short name, so `sum(w)` is exactly the scalar signal
+    `(n_long - n_short) / n_assets`. The book and the signal therefore
+    describe the same portfolio and can never disagree.
+    """
+    import warnings
+
+    data_dict = _make_multi_asset_data(n=150, n_assets=5, seed=7)
+    strategy = build_strategy(
+        "cross_sectional_momentum",
+        '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}',
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        signals = strategy.generate_signals(data_dict)
+        weights = strategy.generate_target_weights(data_dict)
+
+    assert isinstance(weights, pd.DataFrame)
+    assert list(weights.columns) == list(data_dict.keys())
+    assert len(weights) == len(signals)
+
+    net = weights.sum(axis=1)
+    # The net exposure of the book must equal the scalar signal.
+    np.testing.assert_allclose(net.to_numpy(), signals.to_numpy(), atol=1e-12)
+    # Gross exposure is bounded by 1 and non-zero once the book is open.
+    gross = weights.abs().sum(axis=1)
+    assert gross.max() <= 1.0 + 1e-12
+    assert gross.iloc[-1] > 0
+
+
+def test_cross_sectional_momentum_target_weights_symmetric_quantiles_are_not_flat():
+    """Symmetric quantiles: the book is open even though the signal is flat.
+
+    This is the case the net-exposure pricing convention hides: the
+    strategy holds a market-neutral book (gross book > 0) while its net
+    exposure -- and therefore the framework's position -- is exactly zero.
+    """
+    import warnings
+
+    data_dict = _make_multi_asset_data(n=150, n_assets=6, seed=123)
+    strategy = build_strategy(
+        "cross_sectional_momentum",
+        '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}',
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        signals = strategy.generate_signals(data_dict)
+        weights = strategy.generate_target_weights(data_dict)
+
+    assert (signals == 0).all(), "symmetric quantiles must produce a flat signal"
+    gross = weights.abs().sum(axis=1)
+    assert gross.max() > 0, "the book must not be flat"
+    # A market-neutral book: long and short legs of the same size.
+    assert abs(weights.sum(axis=1).abs().max()) < 1e-12
+    # Both legs are present on the last bar.
+    last = weights.iloc[-1]
+    assert (last > 0).any() and (last < 0).any()
+
+
+def test_cross_sectional_momentum_target_weights_single_asset_is_none():
+    """Single-asset data has no cross-sectional book."""
+    import warnings
+
+    strategy = build_strategy(
+        "cross_sectional_momentum",
+        '{"lookback": 20, "top_quantile": 0.3, "bottom_quantile": 0.3}',
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        assert strategy.generate_target_weights(_make_data()) is None
+
+
+def test_dual_momentum_target_weights_are_equally_weighted_long_only():
+    """The dual-momentum book is long-only and equally weighted.
+
+    The selected names are held at 1/n_selected each, so the book is fully
+    invested (gross exposure 1.0) whenever the absolute-momentum filter
+    leaves at least one asset -- which is *more* invested than the scalar
+    signal (n_selected / n_assets) that the panel path prices.
+    """
+    data_dict = _make_multi_asset_data(n=200, n_assets=5, seed=21)
+    strategy = build_strategy(
+        "dual_momentum",
+        '{"lookback": 20, "top_quantile": 0.4, "risk_free_rate": 0.0}',
+    )
+    signals = strategy.generate_signals(data_dict)
+    weights = strategy.generate_target_weights(data_dict)
+
+    assert isinstance(weights, pd.DataFrame)
+    assert list(weights.columns) == list(data_dict.keys())
+
+    gross = weights.abs().sum(axis=1)
+    net = weights.sum(axis=1)
+    # Long-only: net exposure never negative.
+    assert net.min() >= -1e-12
+    # The book is flat exactly when the strategy is in cash.
+    cash = signals == 0
+    assert (gross[cash.to_numpy()] == 0).all()
+    # Where the strategy is invested, the book is fully invested.
+    invested = ~cash.to_numpy()
+    if invested.any():
+        assert np.allclose(gross[invested].to_numpy(), 1.0)
+    # Weights are either 0 or an equal share of the selected names.
+    for _date, row in weights.iterrows():
+        nonzero = row[row != 0]
+        if len(nonzero):
+            assert np.allclose(nonzero.to_numpy(), nonzero.iloc[0])
+            assert abs(float(nonzero.sum()) - 1.0) < 1e-12
+
+
 def test_cross_sectional_momentum_symmetric_quantiles_flat():
     """Symmetric quantiles (incl. defaults) produce a flat signal and warn.
 
@@ -785,6 +908,11 @@ TEST_REGISTRY = [
     ("cross_sectional_momentum_single_asset_fallback", test_cross_sectional_momentum_single_asset_fallback),
     ("cross_sectional_momentum_respects_quantiles", test_cross_sectional_momentum_respects_quantiles),
     ("cross_sectional_momentum_symmetric_quantiles_flat", test_cross_sectional_momentum_symmetric_quantiles_flat),
+    ("test_target_weights_default_is_none_for_strategies_without_a_book", test_target_weights_default_is_none_for_strategies_without_a_book),
+    ("test_cross_sectional_momentum_target_weights_match_signal_net_exposure", test_cross_sectional_momentum_target_weights_match_signal_net_exposure),
+    ("test_cross_sectional_momentum_target_weights_symmetric_quantiles_are_not_flat", test_cross_sectional_momentum_target_weights_symmetric_quantiles_are_not_flat),
+    ("test_cross_sectional_momentum_target_weights_single_asset_is_none", test_cross_sectional_momentum_target_weights_single_asset_is_none),
+    ("test_dual_momentum_target_weights_are_equally_weighted_long_only", test_dual_momentum_target_weights_are_equally_weighted_long_only),
     ("cross_sectional_momentum_overlapping_quantiles_warn", test_cross_sectional_momentum_overlapping_quantiles_warn),
     ("cross_sectional_momentum_asymmetric_no_warning", test_cross_sectional_momentum_asymmetric_no_warning),
     ("dual_momentum_multi_asset_dict", test_dual_momentum_multi_asset_dict),

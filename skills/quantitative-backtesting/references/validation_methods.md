@@ -54,6 +54,15 @@ The result dictionary contains:
   - `oos_min_capacity`: The worst capacity seen in any out-of-sample period
     (the liquidity level that actually bound the strategy in the regimes it
     was traded in). `None` when no period produced a capacity trend.
+  - `book_diagnostic`: The panel book diagnostic aggregated over the
+    out-of-sample periods: the per-asset book the strategy actually held
+    (gross book, book net exposure vs the priced net exposure, book turnover
+    vs the turnover the cost model charges) and the return gap between the
+    engine's net-exposure pricing and the book P&L. Measurement only -- no
+    return, cost, impact or capacity number changes. `None` for a single
+    asset or a strategy that does not expose a book. Each period also carries
+    its own `period["book_diagnostic"]`. See `cost_models.md`, "Panel book
+    diagnostic (measurement only)".
 
 ## Parameter Optimization
 
@@ -626,6 +635,10 @@ The result dictionary contains:
     estimable.
   - `oos_min_capacity`: The worst capacity seen in any out-of-sample fold.
     `None` when no fold produced a capacity trend.
+  - `book_diagnostic`: The panel book diagnostic aggregated over the
+    out-of-sample folds (see the walk-forward `summary` above). Each fold
+    also carries its own `fold["book_diagnostic"]`. `None` for a single asset
+    or a strategy that does not expose a book.
 - `param_stability`: Per-parameter stability analysis with `unique_values`,
   `most_common`, and `stability_ratio`.
 
