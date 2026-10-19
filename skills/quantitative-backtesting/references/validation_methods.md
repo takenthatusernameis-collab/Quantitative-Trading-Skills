@@ -39,6 +39,11 @@ The result dictionary contains:
 - `best_params_per_period`: List of optimal parameters for each period.
 - `oos_returns`: Concatenated out-of-sample returns across all periods.
 - `summary`: Aggregate metrics (total return, Sharpe, volatility, win rate).
+  - `total_oos_return`: Compound OOS return across periods. `None` when no
+    period produced a position (distinct from `0.0`, which means positions
+    were taken but compounded to zero).
+  - `periods_with_position`: Number of periods that produced an out-of-sample
+    return (at least one parameter set took a position in that period).
 
 ## Parameter Optimization
 
@@ -597,6 +602,11 @@ The result dictionary contains:
 - `oos_returns`: Concatenated out-of-sample returns across all folds.
 - `summary`: Aggregate metrics (total return, Sharpe, volatility, win rate,
   parameter stability, overfitting risk).
+  - `total_oos_return`: Compound OOS return across folds. `None` when no fold
+    produced a position (distinct from `0.0`, which means positions were taken
+    but compounded to zero).
+  - `folds_with_position`: Number of folds that produced an out-of-sample
+    return (at least one parameter set took a position in that fold).
 - `param_stability`: Per-parameter stability analysis with `unique_values`,
   `most_common`, and `stability_ratio`.
 

@@ -165,6 +165,16 @@ Risk Metrics:
 - Beware of look-ahead bias: ensure signals only use data available at decision time
 - Correct for multiple testing: a grid search over many parameter combinations inflates in-sample Sharpe; compute the Deflated Sharpe Ratio before trusting a Sharpe estimate. Use `--deflate` for walk-forward/optimization/CPCV, or pass `--n-trials` to `run_backtest.py` or the `monte-carlo` subcommand to deflate a single backtest's final Sharpe by the number of development trials (the `monte-carlo` path also uses the optimization record's trial Sharpes for the cross-sectional estimator)
 - **DSR methodology**: the Deflated Sharpe Ratio's formula, its degenerate (zero-variance) contract, its trial-counting basis per analysis path, and the cross-path parity invariant (the reported DSR p-value must not depend on which analysis path reported it) are documented in `references/validation_methods.md` under "Deflated Sharpe Ratio (Multiple-Testing Correction)" and "DSR Parity Invariant (Cross-Path Consistency)". The parity invariant and the degenerate contract are also executable-guarded in `tests/test_walk_forward.py`; a regression that breaks either fails those tests even while the artifact still looks well-formed.
+- **Empty summaries are explicit, not silent**: when a walk-forward or CPCV run
+  never takes a position in any period/fold, `summary["total_oos_return"]` is
+  `None` (JSON `null`, CLI `N/A`) rather than `0.0`, and
+  `summary["periods_with_position"]` / `summary["folds_with_position"]`
+  reports how many periods/folds actually took a position. `0.0` means
+  positions were taken and compounded to zero; `None` means none were ever
+  taken. The two are distinct outcomes and must not be conflated by consumers
+  (sweep writers, tear sheets, and the CLI render `None` as `N/A`). Documented
+  in `references/validation_methods.md` under the walk-forward and CPCV
+  "Output" sections.
 - Consider regime-dependent performance (bull/bear/sideways markets)
 - Document all assumptions and data sources for reproducibility
 - Run `--validate-point-in-time` on every backtest to screen for temporal-order violations, duplicate timestamps, and signal/next-return correlation (a look-ahead indicator); add `--point-in-time-strict` to make violations fail the run

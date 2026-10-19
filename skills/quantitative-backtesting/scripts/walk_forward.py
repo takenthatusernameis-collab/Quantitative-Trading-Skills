@@ -682,7 +682,9 @@ def walk_forward_analysis(
         oos_returns = pd.Series(dtype=float)
 
     # Summary metrics
-    summary = _calculate_walk_forward_summary(oos_returns, periods)
+    summary = _calculate_walk_forward_summary(
+        oos_returns, periods, periods_with_position=len(oos_returns_list)
+    )
 
     # Benchmark comparison on combined OOS returns
     if benchmark is not None and len(oos_returns) > 0:
@@ -1677,11 +1679,13 @@ def estimate_capacity(
 def _calculate_walk_forward_summary(
     oos_returns: pd.Series,
     periods: List[Dict[str, Any]],
+    periods_with_position: int = 0,
 ) -> Dict[str, Any]:
     """Calculate summary metrics for walk-forward results."""
     summary = {
         "n_periods": len(periods),
-        "total_oos_return": float((1 + oos_returns).prod() - 1) if len(oos_returns) > 0 else 0.0,
+        "periods_with_position": int(periods_with_position),
+        "total_oos_return": None if len(oos_returns) == 0 else float((1 + oos_returns).prod() - 1),
     }
 
     if len(oos_returns) > 1:
@@ -2078,7 +2082,9 @@ def cpcv_analysis(
                 }
 
     # Summary metrics
-    summary = _calculate_cpcv_summary(oos_returns, folds, param_stability)
+    summary = _calculate_cpcv_summary(
+        oos_returns, folds, param_stability, folds_with_position=len(oos_returns_list)
+    )
 
     # Aggregate multiple-testing correction on the combined out-of-sample
     # returns. The conservative interpretation: the OOS record was produced
@@ -2152,11 +2158,13 @@ def _calculate_cpcv_summary(
     oos_returns: pd.Series,
     folds: List[Dict[str, Any]],
     param_stability: Dict[str, Any],
+    folds_with_position: int = 0,
 ) -> Dict[str, Any]:
     """Calculate summary metrics for CPCV results."""
     summary = {
         "n_folds": len(folds),
-        "total_oos_return": float((1 + oos_returns).prod() - 1) if len(oos_returns) > 0 else 0.0,
+        "folds_with_position": int(folds_with_position),
+        "total_oos_return": None if len(oos_returns) == 0 else float((1 + oos_returns).prod() - 1),
     }
 
     if len(oos_returns) > 1:
@@ -2887,7 +2895,11 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         "slippage": float(slippage),
         "latency": int(latency),
         "fill_rate": float(fill_rate),
-        "total_oos_return": float(summary.get("total_oos_return", 0.0)),
+        "total_oos_return": (
+            None
+            if summary.get("total_oos_return") is None
+            else float(summary.get("total_oos_return", 0.0))
+        ),
         "oos_sharpe": (
             float(summary["oos_sharpe"]) if summary.get("oos_sharpe") is not None else None
         ),
@@ -3219,7 +3231,11 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         "slippage": float(slippage),
         "latency": int(latency),
         "fill_rate": float(fill_rate),
-        "total_oos_return": float(summary.get("total_oos_return", 0.0)),
+        "total_oos_return": (
+            None
+            if summary.get("total_oos_return") is None
+            else float(summary.get("total_oos_return", 0.0))
+        ),
         "oos_sharpe": (
             float(summary["oos_sharpe"]) if summary.get("oos_sharpe") is not None else None
         ),
@@ -3307,7 +3323,7 @@ def run_cpcv(args) -> int:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
-                f"{row['impact_coefficient']:>17} | {row['total_oos_return']:>16.4f} | "
+                f"{row['impact_coefficient']:>17} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
                 f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
                 f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
@@ -3346,7 +3362,7 @@ def run_cpcv(args) -> int:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
-                f"{row['borrow_cost']:>13.4f} | {row['total_oos_return']:>16.4f} | "
+                f"{row['borrow_cost']:>13.4f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
                 f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
                 f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
@@ -3382,7 +3398,7 @@ def run_cpcv(args) -> int:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
-                f"{row['funding_cost']:>13.4f} | {row['total_oos_return']:>16.4f} | "
+                f"{row['funding_cost']:>13.4f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
                 f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
                 f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
@@ -3413,7 +3429,7 @@ def run_cpcv(args) -> int:
         fill_rate_header=["Fill Rate", "Total OOS Return", "OOS Sharpe", "Avg Param Stability", "Overfitting Risk", "Deflated Sharpe", "N Folds"],
         row_cells=lambda row, key: [
             str(row[key]),
-            f"{row['total_oos_return']:.4f}",
+            'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:.4f}",
             "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}",
             f"{row['avg_param_stability']:.4f}",
             str(row["overfitting_risk"]),
@@ -3458,7 +3474,7 @@ def run_cpcv(args) -> int:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
-                f"{row['commission']:>13.6f} | {row['total_oos_return']:>16.4f} | "
+                f"{row['commission']:>13.6f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
                 f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
                 f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
@@ -3496,7 +3512,7 @@ def run_cpcv(args) -> int:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
-                f"{row['slippage']:>13.6f} | {row['total_oos_return']:>16.4f} | "
+                f"{row['slippage']:>13.6f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
                 f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
                 f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
@@ -3591,7 +3607,10 @@ def run_cpcv(args) -> int:
                 )
 
     print(f"Number of CPCV folds: {results['summary']['n_folds']}")
-    print(f"Total OOS Return: {results['summary']['total_oos_return']:.2%}")
+    _total_oos_return = results["summary"]["total_oos_return"]
+    print(
+        f"Total OOS Return: {'N/A' if _total_oos_return is None else f'{_total_oos_return:.2%}'}"
+    )
     print(f"OOS Sharpe Ratio: {results['summary'].get('oos_sharpe', 'N/A')}")
     print(f"Avg Parameter Stability: {results['summary'].get('avg_param_stability', 'N/A'):.2f}")
     print(f"Overfitting Risk: {results['summary'].get('overfitting_risk', 'N/A')}")
@@ -4217,7 +4236,7 @@ def run_walk_forward(args) -> int:
         fill_rate_header=["Fill Rate", "Total OOS Return", "OOS Sharpe", "Deflated Sharpe", "N Periods"],
         row_cells=lambda row, key: [
             str(row[key]),
-            f"{row['total_oos_return']:.4f}",
+            'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:.4f}",
             "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}",
             "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}",
             str(row["n_periods"]),
@@ -4254,7 +4273,7 @@ def run_walk_forward(args) -> int:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
-                f"{row['impact_coefficient']:>17} | {row['total_oos_return']:>16.4f} | "
+                f"{row['impact_coefficient']:>17} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
                 f"{oos_sharpe_txt:>10} | {dsr_txt:>15} | {row['n_periods']:>9}"
             )
         return 0
@@ -4286,7 +4305,7 @@ def run_walk_forward(args) -> int:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
-                f"{row['borrow_cost']:>13.4f} | {row['total_oos_return']:>16.4f} | "
+                f"{row['borrow_cost']:>13.4f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
                 f"{oos_sharpe_txt:>10} | {dsr_txt:>15} | {row['n_periods']:>9}"
             )
         return 0
@@ -4318,7 +4337,7 @@ def run_walk_forward(args) -> int:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
-                f"{row['funding_cost']:>13.4f} | {row['total_oos_return']:>16.4f} | "
+                f"{row['funding_cost']:>13.4f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
                 f"{oos_sharpe_txt:>10} | {dsr_txt:>15} | {row['n_periods']:>9}"
             )
         return 0
@@ -4358,7 +4377,7 @@ def run_walk_forward(args) -> int:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
-                f"{row['commission']:>13.6f} | {row['total_oos_return']:>16.4f} | "
+                f"{row['commission']:>13.6f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
                 f"{oos_sharpe_txt:>10} | {dsr_txt:>15} | {row['n_periods']:>9}"
             )
         return 0
@@ -4395,7 +4414,7 @@ def run_walk_forward(args) -> int:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
-                f"{row['slippage']:>13.6f} | {row['total_oos_return']:>16.4f} | "
+                f"{row['slippage']:>13.6f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
                 f"{oos_sharpe_txt:>10} | {dsr_txt:>15} | {row['n_periods']:>9}"
             )
         return 0
@@ -4485,7 +4504,10 @@ def run_walk_forward(args) -> int:
                 )
 
     print(f"Number of walk-forward periods: {results['summary']['n_periods']}")
-    print(f"Total OOS Return: {results['summary']['total_oos_return']:.2%}")
+    _total_oos_return = results["summary"]["total_oos_return"]
+    print(
+        f"Total OOS Return: {'N/A' if _total_oos_return is None else f'{_total_oos_return:.2%}'}"
+    )
     print(f"OOS Sharpe Ratio: {results['summary'].get('oos_sharpe', 'N/A')}")
 
     dsr = results["summary"].get("deflated_sharpe")

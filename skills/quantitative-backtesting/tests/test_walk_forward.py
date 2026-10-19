@@ -6357,6 +6357,61 @@ def test_out_of_sample_validation_surfaces_capacity_per_split():
     assert res_off["summary"]["test_capacity"] is None
 
 
+def test_walk_forward_no_active_position_reports_none_and_zero_periods():
+    """When every period is skipped (no period takes a position),
+    total_oos_return is None -- not 0.0 -- and periods_with_position is 0,
+    so "no position was ever taken" is distinguishable from "traded and lost
+    everything". Symmetric quantiles make cross_sectional_momentum's net
+    exposure exactly zero for every combo, so every period is skipped."""
+    data, _ = _make_panel_returns_data(periods=504, n_assets=5, seed=42)
+    strategy_factory = _make_strategy_factory("cross_sectional_momentum")
+
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid={"lookback": [15, 20, 30]},
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        validate_pit=False,
+    )
+
+    summary = results["summary"]
+    assert summary["periods_with_position"] == 0
+    assert summary["total_oos_return"] is None
+    assert len(results["oos_returns"]) == 0
+
+
+def test_walk_forward_normal_run_keeps_current_numbers():
+    """A walk-forward run that selects parameters keeps its current numbers;
+    only the no-position case changes (0.0 -> None). Deterministic on the
+    seeded panel."""
+    data, _ = _make_panel_returns_data(periods=504, n_assets=5, seed=42)
+    strategy_factory = _make_strategy_factory("cross_sectional_momentum")
+
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid={"lookback": [15, 20, 30], "top_quantile": [0.4], "bottom_quantile": [0.2]},
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        validate_pit=False,
+    )
+
+    summary = results["summary"]
+    assert summary["periods_with_position"] == 3
+    assert summary["total_oos_return"] == 0.042594435108365136
+
+
+TEST_REGISTRY.append(
+    ("test_walk_forward_no_active_position_reports_none_and_zero_periods",
+     test_walk_forward_no_active_position_reports_none_and_zero_periods)
+)
+TEST_REGISTRY.append(
+    ("test_walk_forward_normal_run_keeps_current_numbers",
+     test_walk_forward_normal_run_keeps_current_numbers)
+)
 TEST_REGISTRY.append(
     ("test_estimate_capacity_multi_asset_panel_binds_on_least_liquid_asset",
      test_estimate_capacity_multi_asset_panel_binds_on_least_liquid_asset)

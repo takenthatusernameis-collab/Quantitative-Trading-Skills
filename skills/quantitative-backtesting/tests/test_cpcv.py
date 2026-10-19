@@ -711,10 +711,51 @@ def test_cpcv_multi_asset_panel_capacity_does_not_raise():
         assert f["capacity"] is not None and f["capacity"] > 0
 
 
-# Module-level registry of (label, callable) pairs. Kept at module scope
-# (rather than a local inside main()) so structural checks like
-# ``test_main_registers_every_module_level_test`` can introspect it
-# without executing the suite.
+def test_cpcv_no_active_position_reports_none_and_zero_folds():
+    """When every parameter set is skipped (no fold takes a position),
+    total_oos_return is None -- not 0.0 -- and folds_with_position is 0, so
+    "no position was ever taken" is distinguishable from "traded and lost
+    everything". Symmetric quantiles make cross_sectional_momentum's net
+    exposure exactly zero for every combo, so every fold is skipped."""
+    data = _make_multiasset_multiindex(n=504, n_assets=5, seed=42)
+    strategy_factory = _make_strategy_factory("cross_sectional_momentum")
+
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid={"lookback": [15, 20, 30]},
+        n_splits=4,
+        test_size=0.2,
+    )
+
+    summary = results["summary"]
+    assert summary["n_folds"] == 4
+    assert summary["folds_with_position"] == 0
+    assert summary["total_oos_return"] is None
+    assert len(results["oos_returns"]) == 0
+    assert all(f.get("best_params") is None for f in results["folds"])
+
+
+def test_cpcv_normal_run_keeps_current_numbers():
+    """A run that selects parameters keeps its current numbers; only the
+    no-position case changes (0.0 -> None). Deterministic on the seeded panel."""
+    data = _make_multiasset_multiindex(n=504, n_assets=5, seed=42)
+    strategy_factory = _make_strategy_factory("cross_sectional_momentum")
+
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid={"lookback": [15, 20, 30], "top_quantile": [0.4], "bottom_quantile": [0.2]},
+        n_splits=4,
+        test_size=0.2,
+    )
+
+    summary = results["summary"]
+    assert summary["n_folds"] == 4
+    assert summary["folds_with_position"] == 4
+    assert summary["total_oos_return"] == 0.005399536978800246
+
+
 TEST_REGISTRY = [
     ("cpcv_basic_structure", test_cpcv_basic_structure),
     ("cpcv_purge_embargo", test_cpcv_purge_embargo),
@@ -735,6 +776,8 @@ TEST_REGISTRY = [
     ("cpcv_surfaces_capacity_in_summary", test_cpcv_surfaces_capacity_in_summary),
     ("cpcv_surfaces_capacity_per_fold", test_cpcv_surfaces_capacity_per_fold),
     ("cpcv_multi_asset_panel_capacity_does_not_raise", test_cpcv_multi_asset_panel_capacity_does_not_raise),
+    ("cpcv_no_active_position_reports_none_and_zero_folds", test_cpcv_no_active_position_reports_none_and_zero_folds),
+    ("cpcv_normal_run_keeps_current_numbers", test_cpcv_normal_run_keeps_current_numbers),
     ("main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 
