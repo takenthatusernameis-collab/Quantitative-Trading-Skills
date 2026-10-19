@@ -5439,6 +5439,67 @@ TEST_REGISTRY = [
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 
+# ---------------------------------------------------------------------------
+# Re-exported example-coverage tests (tests/test_examples_coverage.py)
+#
+# The standalone module guards the three worked examples that previously had
+# no executable coverage (deflated_alpha_example, multiple_benchmarks_example,
+# full_pipeline_example).  Re-exporting them here keeps them inside the single
+# canonical suite run (`python3 -m pytest .../tests/`) and the registry audit
+# (`test_main_registers_every_module_level_test`).
+# ---------------------------------------------------------------------------
+
+_EXAMPLES_COVERAGE_PATH = (
+    Path(__file__).resolve().parent / "test_examples_coverage.py"
+)
+
+
+def _load_examples_coverage_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "test_examples_coverage", str(_EXAMPLES_COVERAGE_PATH)
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_ec = _load_examples_coverage_module()
+
+
+def test_examples_coverage_deflated_alpha_imports():
+    _ec.test_deflated_alpha_example_imports()
+
+
+def test_examples_coverage_deflated_alpha_runs():
+    _ec.test_deflated_alpha_example_runs()
+
+
+def test_examples_coverage_multiple_benchmarks_imports():
+    _ec.test_multiple_benchmarks_example_imports()
+
+
+def test_examples_coverage_multiple_benchmarks_runs():
+    _ec.test_multiple_benchmarks_example_runs()
+
+
+def test_examples_coverage_full_pipeline_imports():
+    _ec.test_full_pipeline_example_imports()
+
+
+def test_examples_coverage_full_pipeline_runs():
+    _ec.test_full_pipeline_example_runs()
+
+
+TEST_REGISTRY.extend([
+    ("test_examples_coverage_deflated_alpha_imports", test_examples_coverage_deflated_alpha_imports),
+    ("test_examples_coverage_deflated_alpha_runs", test_examples_coverage_deflated_alpha_runs),
+    ("test_examples_coverage_multiple_benchmarks_imports", test_examples_coverage_multiple_benchmarks_imports),
+    ("test_examples_coverage_multiple_benchmarks_runs", test_examples_coverage_multiple_benchmarks_runs),
+    ("test_examples_coverage_full_pipeline_imports", test_examples_coverage_full_pipeline_imports),
+    ("test_examples_coverage_full_pipeline_runs", test_examples_coverage_full_pipeline_runs),
+])
+
 if __name__ == "__main__":
     import sys
     sys.exit(main())
