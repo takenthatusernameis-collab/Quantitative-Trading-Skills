@@ -28,7 +28,7 @@ def _annualization_factor(index: pd.Index, target_years: float = 1.0) -> float:
         # Business daily = 252, daily = 365, weekly = 52, monthly = 12
         freq_map = {
             "B": 252, "D": 365, "W": 52, "M": 12,
-            "Q": 4, "Y": 1, "H": 252 * 6.5 * 21,
+            "Q": 4, "Y": 1, "H": int(252 * 6.5),
         }
         return freq_map.get(freq[0], 252)
     except Exception:
