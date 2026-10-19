@@ -2,23 +2,27 @@
 
 ## What changed this session
 
-Removed the unused `target_years: float = 1.0` parameter from `performance.py:_annualization_factor`. No callers passed it; signature now matches `monte_carlo.py` and `walk_forward.py` copies. Tests pass (32/32).
+- Added parity test `test_annualization_factor_parity_across_modules` in `skills/quantitative-backtesting/tests/test_performance.py` asserting `_annualization_factor` returns identical values across `performance`, `monte_carlo`, and `walk_forward` for frequencies (B, D, h, min, ME, MS, QE-DEC, W). Registered in TEST_REGISTRY.
+- Test suite for performance: 33/33 pass.
 
 ## What was verified
 
-- `test_performance.py`: 32/32 pass.
-- grep confirmed no callers pass `target_years`.
+- `skills/quantitative-backtesting/tests/test_performance.py`: 33/33 pass.
+- Verified parity across the three modules for the specified frequencies: all match.
+- End-to-end verification: `verify_end_to_end.py` passes.
+- Core module tests: `test_data_loader.py` 32/32, `test_monte_carlo.py`+`test_walk_forward.py` 153 passed, other module tests (strategy_builder/run_backtest/reporting/cpcv/generate_sample_data/examples/falsifiable) previously reported passing.
 
 ## What remains unresolved
 
-`_annualization_factor` is duplicated across three modules (`performance.py`, `monte_carlo.py`, `walk_forward.py`) with independent maps. They currently agree, but drift is possible. Consider consolidating into a single shared implementation in a future task, with tests guarding parity.
+`_annualization_factor` is duplicated across three modules (`performance.py`, `monte_carlo.py`, `walk_forward.py`) with independent maps. They currently agree, but drift is possible. Consider consolidating into a single shared implementation in a future task, with tests guarding parity (the new parity test now guards this). No mismatch found.
 
 ## Next task (precise, bounded)
 
-Add a parity test asserting `_annualization_factor` returns identical values for the same index across all three modules (performance, monte_carlo, walk_forward) for a representative set of frequencies (B, D, h, min, ME, MS, QE-DEC). Place in `test_performance.py`, register in TEST_REGISTRY. Do not change production code unless a mismatch is found.
+Consolidate `_annualization_factor` into a single shared function to avoid future drift. Options: (1) move to `scripts/utils.py` and import in all three modules, or (2) import from `performance` in `monte_carlo` and `walk_forward` (walk_forward already imports from performance in places; monte_carlo is standalone but could depend on performance's copy). Keep behavior identical (handle lowercase base aliases, pandas 3.x frequencies like min/ms/ME/MS). Update imports, remove duplicates, ensure tests still pass. Do not change mapping semantics.
 
 ## Relevant files
 
-- `skills/quantitative-backtesting/scripts/performance.py:20`
-- `skills/quantitative-backtesting/scripts/monte_carlo.py:24`
-- `skills/quantitative-backtesting/scripts/walk_forward.py:1503`
+- `skills/quantitative-backtesting/tests/test_performance.py` (added parity test + registry)
+- `skills/quantitative-backtesting/scripts/performance.py` (_annualization_factor)
+- `skills/quantitative-backtesting/scripts/monte_carlo.py` (_annualization_factor)
+- `skills/quantitative-backtesting/scripts/walk_forward.py` (_annualization_factor)

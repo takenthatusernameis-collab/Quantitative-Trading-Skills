@@ -606,6 +606,28 @@ def test_generate_report_omits_per_benchmark_section_without_benchmarks():
     assert "Benchmark Comparison" not in content
 
 
+
+def test_annualization_factor_parity_across_modules():
+    """Annualization factor must be identical across performance, monte_carlo, and walk_forward."""
+    import pandas as pd
+
+    freqs = ["B", "D", "h", "min", "ME", "MS", "QE-DEC", "W"]
+    for f in freqs:
+        idx = pd.date_range("2020-01-01", periods=5, freq=f)
+        try:
+            from scripts import performance, monte_carlo, walk_forward
+            a1 = performance._annualization_factor(idx)
+            a2 = monte_carlo._annualization_factor(idx)
+            a3 = walk_forward._annualization_factor(idx)
+            assert a1 == a2 == a3, f"parity failed for {f}: {a1} {a2} {a3}"
+        except Exception:
+            from performance import _annualization_factor as a1
+            from monte_carlo import _annualization_factor as a2
+            from walk_forward import _annualization_factor as a3
+            a1v = a1(idx); a2v = a2(idx); a3v = a3(idx)
+            assert a1v == a2v == a3v, f"parity failed for {f}: {a1v} {a2v} {a3v}"
+
+
 def test_main_registers_every_module_level_test():
     """main() must register every module-level ``test_*`` function.
 
@@ -687,6 +709,7 @@ TEST_REGISTRY = [
     ("generate_report_surfaces_per_benchmark_comparison_when_multiple_benchmarks", test_generate_report_surfaces_per_benchmark_comparison_when_multiple_benchmarks),
     ("generate_report_omits_per_benchmark_section_for_single_benchmark", test_generate_report_omits_per_benchmark_section_for_single_benchmark),
     ("generate_report_omits_per_benchmark_section_without_benchmarks", test_generate_report_omits_per_benchmark_section_without_benchmarks),
+    ("annualization_factor_parity_across_modules", test_annualization_factor_parity_across_modules),
     ("main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 
