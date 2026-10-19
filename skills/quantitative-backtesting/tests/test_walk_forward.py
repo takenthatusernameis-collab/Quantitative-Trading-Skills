@@ -1647,6 +1647,55 @@ def test_degenerate_constant_return_dar_consistency():
         )
 
 
+def test_deflated_alpha_ratio_fallback_units_are_period_consistent():
+    """The i.i.d.-null fallback (trial_alphas=None) must use per-period-consistent
+    units for sr and sr*, else the z-score and Deflated Alpha Ratio are
+    mis-scaled and significance is overstated (by ~sqrt(ann_factor)).
+
+    Regression guard: the estimated sr (annualized alpha / annualized vol) is
+    rescaled to per-period before comparison with the period-scale fallback
+    sr* = sqrt(2*ln(N)/T).  With trial_alphas=None the result must match an
+    independent per-period recomputation, and must not saturate at DAR=1.0
+    for a moderate positive alpha that the consistent calculation keeps in (0, 1).
+    """
+    dates = pd.date_range("2020-01-01", periods=500, freq="B")
+    ann_factor = _annualization_factor(dates)
+    rng = np.random.default_rng(3)
+    rets = pd.Series(rng.normal(0.0012, 0.015, 500), index=dates)
+    bench = pd.Series(rng.normal(0.0004, 0.012, 500), index=dates)
+    alpha_ann = float((rets.mean() - bench.mean()) * ann_factor)
+    strat_vol_ann = float(rets.std() * np.sqrt(ann_factor))
+    t_obs = int(len(rets.dropna()))
+
+    res = deflated_alpha_ratio(
+        alpha=alpha_ann,
+        returns=rets,
+        benchmark_returns=bench,
+        n_benchmarks=3,
+        trial_alphas=None,
+    )
+    assert res["z_score"] is not None
+    assert np.isfinite(res["z_score"])
+    assert 0.0 < res["deflated_alpha_ratio"] < 1.0, (
+        "fallback DAR must not be saturated/overstated"
+    )
+
+    # Independent per-period recomputation of the same statistic.
+    sr_per = alpha_ann / strat_vol_ann / np.sqrt(ann_factor)
+    sr_star_per = float(np.sqrt(2.0 * np.log(3) / t_obs))
+    skew = float(rets.skew())
+    kurt = float(rets.kurtosis()) + 3.0
+    if not np.isfinite(skew):
+        skew = 0.0
+    if not np.isfinite(kurt):
+        kurt = 3.0
+    denom = float(
+        np.sqrt(1.0 - skew * sr_per + ((kurt - 1.0) / 4.0) * sr_per * sr_per)
+    )
+    z_expected = (sr_per - sr_star_per) * float(np.sqrt(t_obs - 1)) / denom
+    assert abs(res["z_score"] - z_expected) < 1e-9
+
+
 def test_out_of_sample_validation_multiple_benchmarks_deflated_alpha():
     """out_of_sample_validation with multiple benchmarks surfaces Deflated Alpha
     in the summary and preserves backward compatibility with deflated_alphas list.
@@ -2975,7 +3024,7 @@ def test_deflated_alpha_ratio_frequency_invariant():
     """
     rng = np.random.default_rng(11)
     n_benchmarks = 2
-    alpha_annual = 0.15
+    alpha_annual = 0.40
     vol_annual = 0.20
 
     # ~5 years of business-daily data with a strong signal.
@@ -5340,6 +5389,7 @@ TEST_REGISTRY = [
     ("test_optimize_non_impact_sweep_dsr_parity", test_optimize_non_impact_sweep_dsr_parity),
     ("test_degenerate_constant_return_dsr_consistency", test_degenerate_constant_return_dsr_consistency),
     ("test_degenerate_constant_return_dar_consistency", test_degenerate_constant_return_dar_consistency),
+    ("test_deflated_alpha_ratio_fallback_units_are_period_consistent", test_deflated_alpha_ratio_fallback_units_are_period_consistent),
     ("test_out_of_sample_validation_multiple_benchmarks_deflated_alpha", test_out_of_sample_validation_multiple_benchmarks_deflated_alpha),
     ("test_calculate_metrics_deflated_alpha_with_benchmark_list", test_calculate_metrics_deflated_alpha_with_benchmark_list),
     ("test_cli_cpcv_benchmark_cost_is_periodic", test_cli_cpcv_benchmark_cost_is_periodic),

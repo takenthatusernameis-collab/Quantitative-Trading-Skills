@@ -1277,7 +1277,13 @@ def deflated_alpha_ratio(
         # Degenerate (constant) returns carry no information about skill.
         sr = 0.0
     elif strat_vol_ann > 0:
-        sr = float(alpha) / strat_vol_ann
+        # alpha and strat_vol_ann are both annualized, so their ratio is an
+        # annualized Sharpe-like ratio.  The z-formula below is derived for
+        # PER-PERIOD Sharpe quantities (its sqrt(T - 1) term is the standard
+        # error of a per-period Sharpe estimate), so rescale to per-period
+        # before comparing against sr* (which is period-scale in both the
+        # cross-sectional and i.i.d.-null estimators).
+        sr = float(alpha) / strat_vol_ann / np.sqrt(ann_factor)
     else:
         # Zero observations after dropna (impossible here: the guard
         # above requires len >= 2) — fall back to the degenerate branch.
@@ -1289,8 +1295,9 @@ def deflated_alpha_ratio(
     sr_star = None
     if trial_alphas is not None and len(trial_alphas) >= 2:
         trial_alpha = np.asarray([float(a) for a in trial_alphas], dtype=float)
-        # Convert annualized trial alphas to Sharpe-like ratios for consistency.
-        trial_sr = trial_alpha / strat_vol_ann if strat_vol_ann > 0 else trial_alpha
+        # Convert annualized trial alphas to per-period Sharpe-like ratios for
+        # consistency with `sr` (the z-formula is derived in per-period units).
+        trial_sr = trial_alpha / strat_vol_ann / np.sqrt(ann_factor) if strat_vol_ann > 0 else trial_alpha
         trial_std = float(np.std(trial_sr, ddof=1))
         if trial_std > 0 and np.isfinite(trial_std):
             sr_star = trial_std * np.sqrt(2.0 * ln_benchmarks)
@@ -1328,7 +1335,10 @@ def deflated_alpha_ratio(
     dar = float(min(max(dar, 0.0), 1.0))
 
     # Report expected_max_alpha in annualized alpha units (backward-compat shape).
-    expected_max_alpha = sr_star * strat_vol_ann if strat_vol_ann > 0 else 0.0
+    # sr_star is now per-period; annualize via strat_vol_ann * sqrt(ann_factor)
+    # (= vol_per_period * ann_factor) so expected_max_alpha stays in annualized
+    # alpha units and matches the cross-sectional estimator's pre-fix value.
+    expected_max_alpha = sr_star * strat_vol_ann * np.sqrt(ann_factor) if strat_vol_ann > 0 else 0.0
 
     return {
         "deflated_alpha_ratio": dar,
