@@ -6815,6 +6815,153 @@ def test_out_of_sample_validation_surfaces_book_diagnostic_per_split():
     assert res["summary"]["book_diagnostic"] is not None
 
 
+def test_walk_forward_book_pricing_backtests_a_market_neutral_book():
+    """The walk-forward grid search does not skip a market-neutral book under
+    the book pricing mode.
+
+    With symmetric quantiles the cross-sectional momentum signal is flat, so
+    the net-exposure convention skips every parameter set and the run reports
+    "no position was ever taken". Under the book pricing mode the strategy
+    holds a real long/short book, so the grid search selects parameters and
+    the out-of-sample record is not empty.
+    """
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=11)
+    factory = lambda params: build_strategy(
+        "cross_sectional_momentum", json.dumps(params)
+    )
+    param_grid = {"lookback": [20, 40], "top_quantile": [0.2], "bottom_quantile": [0.2]}
+
+    skipped = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=8,
+        test_months=3,
+        step_months=3,
+    )
+    assert skipped["summary"]["periods_with_position"] == 0
+    assert skipped["summary"]["total_oos_return"] is None
+
+    priced = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=8,
+        test_months=3,
+        step_months=3,
+        panel_pricing="book",
+    )
+    assert priced["summary"]["periods_with_position"] > 0
+    assert priced["summary"]["total_oos_return"] is not None
+    assert priced["summary"]["panel_pricing"] == "book"
+    # The book the run actually held is still reported, and it is open
+    # (gross exposure) even though its net exposure is flat.
+    diag = priced["summary"].get("book_diagnostic")
+    assert diag is not None
+    assert diag["gross_book"] > 0
+    assert abs(diag["net_exposure"]) < 1e-9
+
+
+def test_walk_forward_book_pricing_differs_by_the_measured_return_gap():
+    """The two pricing modes differ by exactly the measured return gap.
+
+    The cost model is identical in both modes (it sees |d net exposure|), so
+    with zero costs the difference between the two out-of-sample records is
+    exactly the gap the panel book diagnostic measures.
+
+    A single parameter combination is used on purpose: the grid search scores
+    candidates under the pricing mode it runs in, so a multi-combination grid
+    could select *different* parameters in the two modes and the difference
+    would no longer be the pricing convention alone.
+    """
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=11)
+    factory = lambda params: build_strategy(
+        "cross_sectional_momentum", json.dumps(params)
+    )
+    param_grid = {"lookback": [20], "top_quantile": [0.4], "bottom_quantile": [0.2]}
+
+    def _run(pricing):
+        return walk_forward_analysis(
+            data=data,
+            strategy_factory=factory,
+            param_grid=param_grid,
+            train_months=8,
+            test_months=3,
+            step_months=3,
+            commission=0.0,
+            slippage=0.0,
+            panel_pricing=pricing,
+        )
+
+    net_exposure = _run("net-exposure")
+    book = _run("book")
+    assert net_exposure["summary"]["panel_pricing"] == "net-exposure"
+    assert book["summary"]["panel_pricing"] == "book"
+
+    ne_total = net_exposure["summary"]["total_oos_return"]
+    book_total = book["summary"]["total_oos_return"]
+    assert ne_total is not None and book_total is not None
+    diag = net_exposure["summary"]["book_diagnostic"]
+    assert diag is not None
+    assert abs((ne_total - book_total) - diag["return_gap_total"]) < 1e-9
+
+
+def test_walk_forward_summary_records_the_panel_pricing_mode():
+    """The summary states the pricing convention that produced the reported
+    out-of-sample P&L, so a number can never be read without it."""
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=11)
+    factory = lambda params: build_strategy(
+        "cross_sectional_momentum", json.dumps(params)
+    )
+    param_grid = {"lookback": [20], "top_quantile": [0.4], "bottom_quantile": [0.2]}
+
+    default = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=8,
+        test_months=3,
+        step_months=3,
+    )
+    assert default["summary"]["panel_pricing"] == "net-exposure"
+
+    book = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=8,
+        test_months=3,
+        step_months=3,
+        panel_pricing="book",
+    )
+    assert book["summary"]["panel_pricing"] == "book"
+
+
+def test_out_of_sample_validation_prices_the_book_on_the_held_out_window():
+    """The out-of-sample path applies the book pricing mode to the held-out
+    test window, and records the mode in its summary."""
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=13)
+    factory = lambda params: build_strategy(
+        "cross_sectional_momentum", json.dumps(params)
+    )
+    param_grid = {"lookback": [20, 40], "top_quantile": [0.4], "bottom_quantile": [0.2]}
+
+    res = out_of_sample_validation(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_frac=0.5,
+        val_frac=0.25,
+        test_frac=0.25,
+        validation_method="walk_forward",
+        panel_pricing="book",
+    )
+    assert res["summary"]["panel_pricing"] == "book"
+    assert res["test_performance"]["test_total_return"] is not None
+    # The held-out window's own diagnostic is still reported.
+    assert res["test_performance"]["book_diagnostic"] is not None
+
+
 def _write_multiasset_panel_csv(path: str, periods: int = 900, n_assets: int = 4, seed: int = 17) -> None:
     """Write a multi-symbol panel CSV (long format) with cross-sectional
     dispersion, for the --multi-symbol CLI paths."""
@@ -6917,6 +7064,22 @@ TEST_REGISTRY.append(
 TEST_REGISTRY.append(
     ("test_cli_cpcv_writes_book_diagnostic_per_fold",
      test_cli_cpcv_writes_book_diagnostic_per_fold)
+)
+TEST_REGISTRY.append(
+    ("test_walk_forward_book_pricing_backtests_a_market_neutral_book",
+     test_walk_forward_book_pricing_backtests_a_market_neutral_book)
+)
+TEST_REGISTRY.append(
+    ("test_walk_forward_book_pricing_differs_by_the_measured_return_gap",
+     test_walk_forward_book_pricing_differs_by_the_measured_return_gap)
+)
+TEST_REGISTRY.append(
+    ("test_walk_forward_summary_records_the_panel_pricing_mode",
+     test_walk_forward_summary_records_the_panel_pricing_mode)
+)
+TEST_REGISTRY.append(
+    ("test_out_of_sample_validation_prices_the_book_on_the_held_out_window",
+     test_out_of_sample_validation_prices_the_book_on_the_held_out_window)
 )
 
 

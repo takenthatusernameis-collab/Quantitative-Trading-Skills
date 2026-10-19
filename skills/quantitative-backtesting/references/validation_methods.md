@@ -63,6 +63,10 @@ The result dictionary contains:
     asset or a strategy that does not expose a book. Each period also carries
     its own `period["book_diagnostic"]`. See `cost_models.md`, "Panel book
     diagnostic (measurement only)".
+  - `panel_pricing`: The pricing convention that produced the reported
+    out-of-sample P&L: `"net-exposure"` (the default) or `"book"`. A panel
+    return is not interpretable without it. See `cost_models.md`, "Panel
+    pricing modes (`--panel-pricing`)".
 
 ## Parameter Optimization
 
@@ -88,10 +92,17 @@ combinations that take no position. The shared check is the module-level
 
 Skipped combos are excluded from the returned results; they are never ranked.
 
+Under the `book` panel pricing mode the check is **book-aware**
+(`_window_takes_position`): a market-neutral book has a flat net exposure but
+a positive gross exposure, so it *is* a position and the combo is not skipped.
+A strategy that exposes no book falls back to the scalar `signals_active`
+test. See `cost_models.md`, "Panel pricing modes (`--panel-pricing`)".
+
 The same guard is applied by the `run_backtest` CLI entry point
 (`scripts/run_backtest.py`), which raises `ValueError` when a strategy
 never takes a position instead of producing a meaningless zero-return
-backtest with a degenerate Sharpe ratio.
+backtest with a degenerate Sharpe ratio. Under the `book` mode the guard
+asks the book (gross exposure) instead of the scalar signal.
 
 ## Deflated Sharpe Ratio (Multiple-Testing Correction)
 
@@ -639,6 +650,9 @@ The result dictionary contains:
     out-of-sample folds (see the walk-forward `summary` above). Each fold
     also carries its own `fold["book_diagnostic"]`. `None` for a single asset
     or a strategy that does not expose a book.
+  - `panel_pricing`: The pricing convention that produced the reported
+    out-of-sample P&L: `"net-exposure"` (the default) or `"book"`. See
+    `cost_models.md`, "Panel pricing modes (`--panel-pricing`)".
 - `param_stability`: Per-parameter stability analysis with `unique_values`,
   `most_common`, and `stability_ratio`.
 

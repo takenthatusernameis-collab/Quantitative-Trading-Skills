@@ -339,7 +339,9 @@ class CrossSectionalMomentum(StrategyBase):
                 "flat (zero) portfolio signal by construction, so the strategy "
                 "never takes a position. Use asymmetric quantiles (e.g. "
                 "top_quantile=0.4, bottom_quantile=0.2) to take a directional "
-                "net position, or model the long and short books separately.",
+                "net position, or price the long and short books separately "
+                "with --panel-pricing book, where the flat-signal book is "
+                "still a non-flat long/short book.",
                 UserWarning,
                 stacklevel=3,
             )

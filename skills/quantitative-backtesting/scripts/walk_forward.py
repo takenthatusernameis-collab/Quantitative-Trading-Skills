@@ -34,9 +34,12 @@ from performance import calculate_metrics, generate_report, _benchmark_stats
 from utils import (
     _annualization_factor,
     aggregate_book_diagnostics,
+    book_is_active,
+    book_return_series,
     build_market_model,
     compute_book_diagnostic,
     market_impact_cost,
+    resolve_panel_pricing,
     strategy_target_weights,
 )
 from reporting import generate_tear_sheet
@@ -383,6 +386,7 @@ def walk_forward_analysis(
     benchmark_expense_ratio: float = 0.0,
     benchmark_cost_is_periodic: bool = False,
     validate_pit: bool = True,
+    panel_pricing: str = "net-exposure",
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -445,6 +449,7 @@ def walk_forward_analysis(
         latency = 0
     if latency < 0:
         latency = 0
+    panel_pricing = resolve_panel_pricing(panel_pricing)
 
     if isinstance(data, dict):
         # Normalize dict panel data (symbol -> OHLCV DataFrame) to a
@@ -562,7 +567,22 @@ def walk_forward_analysis(
                 # rolling indicator NaN, so the strategy stays flat). Without
                 # this guard the grid search silently selects such a combo as
                 # "optimal" and reports a flat (zero) out-of-sample return.
-                if not signals_active(test_signals):
+                # The test is book-aware in the "book" pricing mode: a
+                # market-neutral book is a position, not a flat one.
+                test_book_weights = (
+                    strategy_target_weights(strategy, test_data)
+                    if panel_pricing == "book"
+                    else None
+                )
+                if not _window_takes_position(
+                    strategy,
+                    test_signals,
+                    test_data,
+                    panel_pricing=panel_pricing,
+                    latency=latency,
+                    fill_rate=fill_rate,
+                    book_weights=test_book_weights,
+                ):
                     continue
 
                 # Calculate returns for this parameter set
@@ -571,6 +591,8 @@ def walk_forward_analysis(
                     impact_coefficient, adv_window, borrow_cost, funding_cost,
                     latency, fill_rate,
                     initial_capital=initial_capital,
+                    panel_pricing=panel_pricing,
+                    book_weights=test_book_weights,
                 )
 
                 # Evaluate on training set
@@ -579,6 +601,12 @@ def walk_forward_analysis(
                     impact_coefficient, adv_window, borrow_cost, funding_cost,
                     latency, fill_rate,
                     initial_capital=initial_capital,
+                    panel_pricing=panel_pricing,
+                    book_weights=(
+                        strategy_target_weights(strategy, train_data)
+                        if panel_pricing == "book"
+                        else None
+                    ),
                 )
 
                 if len(train_returns) > 1 and not _is_constant_returns(train_returns):
@@ -783,6 +811,10 @@ def walk_forward_analysis(
     summary["book_diagnostic"] = aggregate_book_diagnostics(
         [p.get("book_diagnostic") for p in periods]
     )
+    # The pricing convention that produced the reported out-of-sample P&L.
+    # Recorded so a result can never be read without knowing how the panel
+    # was priced.
+    summary["panel_pricing"] = panel_pricing
 
     return {
         "periods": periods,
@@ -814,6 +846,7 @@ def parameter_optimization(
     benchmark_slippage: float = 0.0,
     benchmark_expense_ratio: float = 0.0,
     benchmark_cost_is_periodic: bool = False,
+    panel_pricing: str = "net-exposure",
     **kwargs,
 ) -> List[Dict[str, Any]]:
     """
@@ -866,6 +899,7 @@ def parameter_optimization(
         latency = 0
     if latency < 0:
         latency = 0
+    panel_pricing = resolve_panel_pricing(panel_pricing)
 
     if isinstance(data, dict):
         # Normalize dict panel data (symbol -> OHLCV DataFrame) to a
@@ -912,7 +946,22 @@ def parameter_optimization(
             # every rolling indicator NaN, so the strategy stays flat).
             # Without this guard such a combo reports a flat (zero) return
             # and can be ranked as "optimal" by the grid search.
-            if not signals_active(signals):
+            # The test is book-aware in the "book" pricing mode: a
+            # market-neutral book is a position, not a flat one.
+            book_weights = (
+                strategy_target_weights(strategy, data)
+                if panel_pricing == "book"
+                else None
+            )
+            if not _window_takes_position(
+                strategy,
+                signals,
+                data,
+                panel_pricing=panel_pricing,
+                latency=latency,
+                fill_rate=fill_rate,
+                book_weights=book_weights,
+            ):
                 continue
 
             returns = _calculate_strategy_returns(
@@ -920,6 +969,8 @@ def parameter_optimization(
                 impact_coefficient, adv_window, borrow_cost, funding_cost,
                 latency, fill_rate,
                 initial_capital=initial_capital,
+                panel_pricing=panel_pricing,
+                book_weights=book_weights,
             )
 
             if len(returns) > 1:
@@ -1074,6 +1125,40 @@ def signals_active(signals: pd.Series) -> bool:
     """
     # NaN != 0 evaluates to True in pandas, so we must explicitly exclude NaN
     return bool((signals.notna() & (signals != 0)).any())
+
+
+def _window_takes_position(
+    strategy,
+    signals: pd.Series,
+    data,
+    panel_pricing: str = "net-exposure",
+    latency: int = 0,
+    fill_rate: float = 1.0,
+    book_weights: Optional[pd.DataFrame] = None,
+) -> bool:
+    """Does the strategy hold a position in this window?
+
+    Under the ``net-exposure`` pricing convention the test is the scalar
+    signal test (:func:`signals_active`): a flat signal means no position.
+
+    Under the ``book`` pricing convention the test is book-aware: a
+    market-neutral book has a flat *net* exposure but a non-zero *gross*
+    book, so it does hold a position and must not be skipped by the grid
+    search. A strategy that exposes no book falls back to the scalar test.
+    """
+    if panel_pricing == "book":
+        if book_weights is None:
+            book_weights = strategy_target_weights(strategy, data)
+        if book_weights is not None:
+            market = build_market_model(data)
+            if market["is_panel"]:
+                return book_is_active(
+                    book_weights,
+                    market,
+                    lag=1 + latency,
+                    fill_rate=fill_rate,
+                )
+    return signals_active(signals)
 
 
 def _is_constant_returns(returns: pd.Series) -> bool:
@@ -1444,6 +1529,8 @@ def _calculate_strategy_returns(
     latency: int = 0,
     fill_rate: float = 1.0,
     initial_capital: float = 100000.0,
+    panel_pricing: str = "net-exposure",
+    book_weights: Optional[pd.DataFrame] = None,
 ) -> pd.Series:
     """Calculate strategy returns from signals and market data.
 
@@ -1478,6 +1565,13 @@ def _calculate_strategy_returns(
             notional for market-impact calculation. The notional at risk is
             |position_change| * equity, where equity is approximated by
             initial_capital * cumprod(1 + raw_returns). Default 100000.
+        panel_pricing: "net-exposure" (the default) prices the portfolio as
+            `net_exposure x mean(asset returns)`; "book" prices the true
+            per-asset book return `sum_i w_i r_i`. The cost model is
+            identical in both modes (it still sees |d net exposure|).
+        book_weights: the per-asset target book of the strategy on `data`
+            (rows = dates, columns = symbols). Required for the "book"
+            pricing mode; ignored otherwise.
     """
     if fill_rate is None:
         fill_rate = 1.0
@@ -1487,6 +1581,7 @@ def _calculate_strategy_returns(
         latency = 0
     if latency < 0:
         latency = 0
+    panel_pricing = resolve_panel_pricing(panel_pricing)
     # Shared market model: the single definition of how a single asset, a
     # MultiIndex panel and a dict panel are priced. It is shared with
     # run_backtest.py so the two entry points return comparable results for
@@ -1558,7 +1653,28 @@ def _calculate_strategy_returns(
         funding_costs = leverage_excess * period_funding_rate
         costs = costs + funding_costs
 
-    strategy_returns = positions * raw_returns - costs
+    # Portfolio return. Two pricing conventions:
+    #
+    #   net-exposure (default): `positions x mean(asset returns)`.
+    #   book: `sum_i w_i r_i` -- the true P&L of the per-asset book.
+    #
+    # The cost series is identical in both modes (commission, slippage,
+    # impact, borrow and funding all come from the net-exposure position
+    # series), so the two modes differ exactly by the exposure-convention
+    # gap and nothing else. When the "book" mode is requested but no book is
+    # available, the net-exposure pricing is used.
+    book_returns = None
+    if panel_pricing == "book" and book_weights is not None:
+        book_returns = book_return_series(
+            book_weights,
+            market,
+            lag=1 + latency,
+            fill_rate=fill_rate,
+        )
+    if book_returns is not None:
+        strategy_returns = book_returns - costs
+    else:
+        strategy_returns = positions * raw_returns - costs
     return strategy_returns.dropna()
 
 
@@ -1945,6 +2061,7 @@ def cpcv_analysis(
     benchmark_expense_ratio: float = 0.0,
     benchmark_cost_is_periodic: bool = False,
     validate_pit: bool = True,
+    panel_pricing: str = "net-exposure",
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -2016,6 +2133,7 @@ def cpcv_analysis(
         latency = 0
     if latency < 0:
         latency = 0
+    panel_pricing = resolve_panel_pricing(panel_pricing)
 
     if isinstance(data, dict):
         # Normalize dict panel data (symbol -> OHLCV DataFrame) to a
@@ -2153,8 +2271,23 @@ def cpcv_analysis(
                 train_signals = strategy.generate_signals(train_data)
                 test_signals = strategy.generate_signals(test_data)
 
-                # Skip parameter sets that take no position in the test window
-                if not signals_active(test_signals):
+                # Skip parameter sets that take no position in the test window.
+                # The test is book-aware in the "book" pricing mode: a
+                # market-neutral book is a position, not a flat one.
+                test_book_weights = (
+                    strategy_target_weights(strategy, test_data)
+                    if panel_pricing == "book"
+                    else None
+                )
+                if not _window_takes_position(
+                    strategy,
+                    test_signals,
+                    test_data,
+                    panel_pricing=panel_pricing,
+                    latency=latency,
+                    fill_rate=fill_rate,
+                    book_weights=test_book_weights,
+                ):
                     continue
 
                 # Calculate returns for this parameter set
@@ -2163,6 +2296,8 @@ def cpcv_analysis(
                     impact_coefficient, adv_window, borrow_cost, funding_cost,
                     latency, fill_rate,
                     initial_capital=initial_capital,
+                    panel_pricing=panel_pricing,
+                    book_weights=test_book_weights,
                 )
 
                 # Evaluate on training set
@@ -2171,6 +2306,12 @@ def cpcv_analysis(
                     impact_coefficient, adv_window, borrow_cost, funding_cost,
                     latency, fill_rate,
                     initial_capital=initial_capital,
+                    panel_pricing=panel_pricing,
+                    book_weights=(
+                        strategy_target_weights(strategy, train_data)
+                        if panel_pricing == "book"
+                        else None
+                    ),
                 )
 
                 if len(train_returns) > 1 and not _is_constant_returns(train_returns):
@@ -2385,6 +2526,8 @@ def cpcv_analysis(
     summary["book_diagnostic"] = aggregate_book_diagnostics(
         [f.get("book_diagnostic") for f in folds]
     )
+    # The pricing convention that produced the reported out-of-sample P&L.
+    summary["panel_pricing"] = panel_pricing
 
     return {
         "folds": folds,
@@ -2473,6 +2616,7 @@ def out_of_sample_validation(
     benchmark_expense_ratio: float = 0.0,
     benchmark_cost_is_periodic: bool = False,
     validate_pit: bool = True,
+    panel_pricing: str = "net-exposure",
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -2546,6 +2690,7 @@ def out_of_sample_validation(
         latency = 0
     if latency < 0:
         latency = 0
+    panel_pricing = resolve_panel_pricing(panel_pricing)
 
     # Normalize data format
     if isinstance(data, dict):
@@ -2634,6 +2779,7 @@ def out_of_sample_validation(
             benchmark_commission=benchmark_commission,
             benchmark_slippage=benchmark_slippage,
             benchmark_expense_ratio=benchmark_expense_ratio,
+            panel_pricing=panel_pricing,
         )
     elif validation_method == "cpcv":
         validation_results = cpcv_analysis(
@@ -2654,6 +2800,7 @@ def out_of_sample_validation(
             latency=latency,
             fill_rate=fill_rate,
             apply_deflation=apply_deflation,
+            panel_pricing=panel_pricing,
         )
     else:
         raise ValueError(f"Unknown validation_method: {validation_method}. Use 'walk_forward' or 'cpcv'.")
@@ -2680,11 +2827,18 @@ def out_of_sample_validation(
     # Phase 3: CONFIRMATION - Evaluate selected params on validation data
     strategy = strategy_factory(selected_params)
     val_signals = strategy.generate_signals(val_data)
+    val_book_weights = (
+        strategy_target_weights(strategy, val_data)
+        if panel_pricing == "book"
+        else None
+    )
     val_returns = _calculate_strategy_returns(
         val_data, val_signals, commission, slippage,
         impact_coefficient, adv_window, borrow_cost, funding_cost,
         latency, fill_rate,
         initial_capital=initial_capital,
+        panel_pricing=panel_pricing,
+        book_weights=val_book_weights,
     )
 
     ann_factor = _annualization_factor(val_returns.index)
@@ -2727,11 +2881,18 @@ def out_of_sample_validation(
 
     # Phase 4: FINAL TEST - Evaluate on held-out test data
     test_signals = strategy.generate_signals(test_data)
+    test_book_weights = (
+        strategy_target_weights(strategy, test_data)
+        if panel_pricing == "book"
+        else None
+    )
     test_returns = _calculate_strategy_returns(
                     test_data, test_signals, commission, slippage,
                     impact_coefficient, adv_window, borrow_cost, funding_cost,
                     latency, fill_rate,
                     initial_capital=initial_capital,
+                    panel_pricing=panel_pricing,
+                    book_weights=test_book_weights,
                 )
 
     ann_factor_test = _annualization_factor(test_returns.index)
@@ -2986,6 +3147,9 @@ def out_of_sample_validation(
             test_performance.get("book_diagnostic"),
         ]
     )
+    # The pricing convention that produced the reported validation and test
+    # P&L.
+    summary["panel_pricing"] = panel_pricing
 
     return {
         "train_val_test_split": split_info,
@@ -3178,6 +3342,7 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         benchmark_slippage=bench_slippage,
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+        panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
     )
     summary = results["summary"]
     dsr = summary.get("deflated_sharpe")
@@ -3287,6 +3452,7 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         benchmark_slippage=bench_slippage,
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+        panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
     )
     top = results[0] if results else None
     dsr = top.get("deflated_sharpe") if isinstance(top, dict) else None
@@ -3408,6 +3574,7 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         benchmark_slippage=bench_slippage,
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+        panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
     )
     test_perf = results.get("test_performance") or {}
     summary = results.get("summary") or {}
@@ -3514,6 +3681,7 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         benchmark_slippage=bench_slippage,
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+        panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
     )
     summary = results["summary"]
     dsr = summary.get("deflated_sharpe")
@@ -3839,6 +4007,7 @@ def run_cpcv(args) -> int:
         benchmark_slippage=bench_slippage,
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+        panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
@@ -3908,7 +4077,11 @@ def run_cpcv(args) -> int:
     print(f"OOS Sharpe Ratio: {results['summary'].get('oos_sharpe', 'N/A')}")
     print(f"Avg Parameter Stability: {results['summary'].get('avg_param_stability', 'N/A'):.2f}")
     print(f"Overfitting Risk: {results['summary'].get('overfitting_risk', 'N/A')}")
-    _print_book_diagnostic(results["summary"].get("book_diagnostic"))
+    _print_panel_pricing(results["summary"].get("panel_pricing"))
+    _print_book_diagnostic(
+        results["summary"].get("book_diagnostic"),
+        panel_pricing=results["summary"].get("panel_pricing"),
+    )
 
     dsr = results["summary"].get("deflated_sharpe")
     if dsr is not None:
@@ -4050,18 +4223,45 @@ def _make_strategy_factory(strategy_type: str):
     return factory
 
 
-def _print_book_diagnostic(diag, indent: str = "  ") -> None:
+def _print_panel_pricing(mode, indent: str = "  ") -> None:
+    """Print the panel pricing convention that produced the reported P&L.
+
+    Every panel number must be read together with the convention it was
+    produced under: the two conventions can differ by more than the
+    transaction costs (the sign of the gap is not even stable across
+    windows), so a return without its pricing mode is not interpretable.
+    """
+    if mode == "book":
+        print(
+            f"{indent}Panel pricing mode: book (the portfolio return is the "
+            f"true per-asset book return sum_i w_i r_i)."
+        )
+    else:
+        print(
+            f"{indent}Panel pricing mode: net-exposure (the portfolio return "
+            f"is net_exposure x mean(asset returns))."
+        )
+
+
+def _print_book_diagnostic(diag, indent: str = "  ", panel_pricing=None) -> None:
     """Print the panel book diagnostic (measurement only).
 
     The panel path prices a portfolio as ``net_exposure x mean(asset
     returns)``. This prints how much of the strategy's actual book that
     convention misses: the gross book and the turnover the model charges
     nothing for, and the gap between the framework's P&L and the book P&L.
-    Nothing about the reported performance changes.
+    Under the ``book`` pricing mode the reported P&L *is* the book's, and
+    the net-exposure numbers are shown for comparison.
     """
     if not isinstance(diag, dict):
         return
-    print(f"{indent}Panel Book Diagnostic (measurement only -- reported P&L unchanged):")
+    if panel_pricing == "book":
+        print(
+            f"{indent}Panel Book Diagnostic (the reported P&L uses the book "
+            f"convention; the net-exposure pricing is shown for comparison):"
+        )
+    else:
+        print(f"{indent}Panel Book Diagnostic (measurement only -- reported P&L unchanged):")
     print(f"{indent}  Gross book (mean sum|w|):     {diag.get('gross_book', 0.0):.4f}")
     print(f"{indent}  Net exposure (book):          {diag.get('net_exposure', 0.0):.4f}")
     print(f"{indent}  Net exposure (framework):      {diag.get('framework_net_exposure', 0.0):.4f}")
@@ -4082,6 +4282,14 @@ def _print_book_diagnostic(diag, indent: str = "  ") -> None:
             f"{indent}  Book total return:            "
             f"{diag.get('book_total_return', 0.0):.2%} vs framework "
             f"{diag.get('framework_total_return_after_costs', 0.0):.2%}"
+        )
+    if panel_pricing == "book":
+        print(
+            f"{indent}  NOTE: the cost and impact model still sees |d net "
+            f"exposure|, so the book's own rotation is under-charged "
+            f"(compare gross turnover with the charged turnover above). "
+            f"Book-mode results are an upper bound on what a fully costed "
+            f"book would earn."
         )
 
 
@@ -4778,6 +4986,7 @@ def run_walk_forward(args) -> int:
         benchmark_slippage=bench_slippage,
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+        panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
@@ -4846,7 +5055,11 @@ def run_walk_forward(args) -> int:
         f"Total OOS Return: {'N/A' if _total_oos_return is None else f'{_total_oos_return:.2%}'}"
     )
     print(f"OOS Sharpe Ratio: {results['summary'].get('oos_sharpe', 'N/A')}")
-    _print_book_diagnostic(results["summary"].get("book_diagnostic"))
+    _print_panel_pricing(results["summary"].get("panel_pricing"))
+    _print_book_diagnostic(
+        results["summary"].get("book_diagnostic"),
+        panel_pricing=results["summary"].get("panel_pricing"),
+    )
 
     dsr = results["summary"].get("deflated_sharpe")
     if dsr is not None:
@@ -5251,6 +5464,7 @@ def run_parameter_optimization(args) -> int:
         benchmark_slippage=bench_slippage,
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+        panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
     )
 
     if not results:
@@ -5454,6 +5668,7 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
             benchmark_slippage=bench_slippage,
             benchmark_expense_ratio=bench_expense_ratio,
             benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+            panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         )
         if opt_results:
             best_params = opt_results[0]["params"]
@@ -5467,11 +5682,19 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
 
     strategy = strategy_factory(best_params)
     signals = strategy.generate_signals(data)
+    panel_pricing = resolve_panel_pricing(getattr(args, "panel_pricing", None))
+    book_weights = (
+        strategy_target_weights(strategy, data)
+        if panel_pricing == "book"
+        else None
+    )
     returns = _calculate_strategy_returns(data, signals, commission, slippage,
                                           impact_coefficient, args.adv_window,
                                           borrow_cost, funding_cost,
                                           latency=latency, fill_rate=fill_rate,
-                                          initial_capital=args.initial_capital)
+                                          initial_capital=args.initial_capital,
+                                          panel_pricing=panel_pricing,
+                                          book_weights=book_weights)
 
     dsr = None
     n_trials = getattr(args, "n_trials", None)
@@ -5806,6 +6029,7 @@ def run_monte_carlo(args) -> int:
             benchmark_slippage=bench_slippage,
             benchmark_expense_ratio=bench_expense_ratio,
             benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+            panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         )
         if opt_results:
             best_params = opt_results[0]["params"]
@@ -5823,11 +6047,19 @@ def run_monte_carlo(args) -> int:
 
     strategy = strategy_factory(best_params)
     signals = strategy.generate_signals(data)
+    panel_pricing = resolve_panel_pricing(getattr(args, "panel_pricing", None))
+    book_weights = (
+        strategy_target_weights(strategy, data)
+        if panel_pricing == "book"
+        else None
+    )
     returns = _calculate_strategy_returns(data, signals, args.commission, args.slippage,
                                           args.impact_coefficient, args.adv_window,
                                           args.borrow_cost, args.funding_cost,
                                           latency=latency, fill_rate=fill_rate,
-                                          initial_capital=args.initial_capital)
+                                          initial_capital=args.initial_capital,
+                                          panel_pricing=panel_pricing,
+                                          book_weights=book_weights)
 
     # Multiple-testing correction: the base backtest's Sharpe was
     # produced by the parameter search above (or by development
@@ -6361,6 +6593,7 @@ def run_out_of_sample_validation(args) -> int:
         benchmark_slippage=bench_slippage,
         benchmark_expense_ratio=bench_expense_ratio,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
+        panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
     )
 
     if pit_results is not None:
@@ -6392,7 +6625,12 @@ def run_out_of_sample_validation(args) -> int:
     # The held-out window's own diagnostic is printed next to the held-out
     # performance; the validation window's diagnostic and the aggregate over
     # both windows are in the summary JSON.
-    _print_book_diagnostic(test_perf.get("book_diagnostic"), indent="  ")
+    _print_panel_pricing(results["summary"].get("panel_pricing"), indent="  ")
+    _print_book_diagnostic(
+        test_perf.get("book_diagnostic"),
+        indent="  ",
+        panel_pricing=results["summary"].get("panel_pricing"),
+    )
 
     summary = results["summary"]
     dsr = summary.get("deflated_sharpe")
@@ -6650,6 +6888,20 @@ def main():
     common_parser.add_argument("--fill-rate", type=float, default=1.0, help="Execution fill rate (0 < r <= 1); only this fraction of each targeted position change is filled, scaling the achieved position and all transaction costs proportionally. Default 1.0 (full fill, backward compatible).")
     common_parser.add_argument("--fill-rates", type=float, nargs="+", default=None, help="List of fill rates to sweep (overrides --fill-rate).")
     common_parser.add_argument("--latencies", type=int, nargs="+", default=None, help="List of execution latencies (in periods) to sweep (overrides --latency). Delays position execution by each latency after signal generation.")
+    common_parser.add_argument(
+        "--panel-pricing",
+        type=str,
+        default="net-exposure",
+        choices=["net-exposure", "book"],
+        help=(
+            "How a multi-asset panel is priced. 'net-exposure' (default) prices "
+            "the portfolio as net_exposure x mean(asset returns) -- the "
+            "convention every published number was produced under. 'book' "
+            "prices the true per-asset book return sum_i w_i r_i, which makes "
+            "a market-neutral book backtestable. The cost and impact model is "
+            "unchanged in both modes (it still sees |d net exposure|)."
+        ),
+    )
 
     # Walk-forward analysis
     wf_parser = subparsers.add_parser("walk-forward", parents=[common_parser], help="Run walk-forward analysis")

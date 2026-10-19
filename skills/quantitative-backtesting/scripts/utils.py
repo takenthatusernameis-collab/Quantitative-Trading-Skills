@@ -7,6 +7,42 @@ import numpy as np
 import pandas as pd
 
 
+# Panel pricing modes.
+#
+# ``net-exposure`` (the default) prices a panel as
+# ``net_exposure x mean(asset returns)`` -- one scalar per period, the
+# convention every published number in this skill was produced under.
+# ``book`` prices the panel as the true book return ``sum_i w_i r_i`` of the
+# per-asset weights the strategy exposes through
+# ``StrategyBase.generate_target_weights``.
+PANEL_PRICING_MODES = ("net-exposure", "book")
+DEFAULT_PANEL_PRICING = "net-exposure"
+
+
+def resolve_panel_pricing(mode) -> str:
+    """Normalize and validate a panel pricing mode.
+
+    Args:
+        mode: ``"net-exposure"``, ``"book"``, or ``None`` (which means the
+            default, ``"net-exposure"``).
+
+    Returns:
+        The canonical mode string.
+
+    Raises:
+        ValueError: when the mode is not one of :data:`PANEL_PRICING_MODES`.
+    """
+    if mode is None:
+        return DEFAULT_PANEL_PRICING
+    normalized = str(mode).strip().lower()
+    if normalized not in PANEL_PRICING_MODES:
+        raise ValueError(
+            f"Unknown panel pricing mode: {mode!r}. "
+            f"Use one of: {', '.join(PANEL_PRICING_MODES)}."
+        )
+    return normalized
+
+
 def build_market_model(data):
     """Normalize market data into the single representation used by every
     backtest path (``run_backtest.py`` and ``walk_forward.py``).
@@ -214,6 +250,92 @@ def strategy_target_weights(strategy, data):
     return weights
 
 
+def held_book_weights(weights, market, lag: int = 1, fill_rate: float = 1.0):
+    """The per-asset book actually held on each bar of the market model.
+
+    The target book is lagged by the execution convention (``lag = 1 +
+    latency`` periods) and scaled by the fill rate -- exactly the convention
+    the framework's position series uses -- so the book and the positions are
+    measured on the same bars.
+
+    Args:
+        weights: per-asset target weights (rows = dates, columns = symbols)
+            as returned by :func:`strategy_target_weights`, or ``None``.
+        market: the market model returned by :func:`build_market_model`.
+        lag: execution lag in periods (1 + latency).
+        fill_rate: fraction of each targeted change that is filled.
+
+    Returns:
+        A ``pd.DataFrame`` of held weights on the market model's index and
+        columns, or ``None`` when there is no usable book (no weights, a
+        single-asset path, or a book over a different universe).
+    """
+    if weights is None or not isinstance(weights, pd.DataFrame) or weights.empty:
+        return None
+    close = market.get("close")
+    if not isinstance(close, pd.DataFrame) or close.shape[1] == 0:
+        return None
+    # The strategy's book and the market model must describe the same
+    # universe; otherwise the book would silently measure as flat.
+    if not set(weights.columns).intersection(set(close.columns)):
+        return None
+    target = weights.reindex(columns=close.columns).reindex(close.index).fillna(0.0)
+    return (target.shift(lag) * fill_rate).fillna(0.0)
+
+
+def book_return_series(weights, market, lag: int = 1, fill_rate: float = 1.0):
+    """The true book return per period: ``sum_i w_i r_i``.
+
+    This is the P&L of the per-asset book the strategy holds, as opposed to
+    the net-exposure pricing (``net_exposure x mean(asset returns)``) the
+    framework uses by default. The first bar has no per-asset return and is
+    therefore ``NaN`` (not 0), so the book-priced return series has the same
+    index as the net-exposure one.
+
+    Args:
+        weights: per-asset target weights, or ``None``.
+        market: the market model returned by :func:`build_market_model`.
+        lag: execution lag in periods (1 + latency).
+        fill_rate: fraction of each targeted change that is filled.
+
+    Returns:
+        A ``pd.Series`` of book returns, or ``None`` when there is no usable
+        book.
+    """
+    held = held_book_weights(weights, market, lag=lag, fill_rate=fill_rate)
+    if held is None:
+        return None
+    asset_returns = market["close"].pct_change()
+    # `min_count=1` keeps an all-NaN row (the first bar, which has no
+    # return) as NaN instead of collapsing it to 0, so the book-priced
+    # series has exactly the same index as the net-exposure series.
+    return (held * asset_returns).sum(axis=1, min_count=1)
+
+
+def book_is_active(weights, market, lag: int = 1, fill_rate: float = 1.0) -> bool:
+    """True when the book holds a non-zero position on at least one bar.
+
+    A market-neutral book (equal long and short legs) is *not* flat: its
+    gross exposure is positive even though its net exposure is zero. The
+    net-exposure pricing convention cannot tell the two apart, so the
+    book-aware "does this strategy take a position?" test must look at the
+    gross book.
+
+    Args:
+        weights: per-asset target weights, or ``None``.
+        market: the market model returned by :func:`build_market_model`.
+        lag: execution lag in periods (1 + latency).
+        fill_rate: fraction of each targeted change that is filled.
+
+    Returns:
+        ``True`` when the held book is non-empty on any bar.
+    """
+    held = held_book_weights(weights, market, lag=lag, fill_rate=fill_rate)
+    if held is None:
+        return False
+    return bool((held.abs().sum(axis=1) > 0).any())
+
+
 def compute_book_diagnostic(
     weights,
     market,
@@ -279,12 +401,13 @@ def compute_book_diagnostic(
     has_returns = framework_returns is not None and len(framework_returns) > 0
     index = framework_returns.index if has_returns else close.index
 
-    # Target book on the market model's grid, then the book actually held:
-    # lagged by the execution convention and scaled by the fill rate, exactly
-    # like the framework's position series. The bars before the first
-    # executable one hold a flat book.
-    target = weights.reindex(columns=close.columns).reindex(close.index).fillna(0.0)
-    held_full = (target.shift(lag) * fill_rate).fillna(0.0)
+    # The book actually held: the target book lagged by the execution
+    # convention and scaled by the fill rate, exactly like the framework's
+    # position series. The bars before the first executable one hold a flat
+    # book.
+    held_full = held_book_weights(weights, market, lag=lag, fill_rate=fill_rate)
+    if held_full is None:
+        return None
     held = held_full.reindex(index).fillna(0.0)
 
     # Per-asset returns over the framework's window. The first bar of the

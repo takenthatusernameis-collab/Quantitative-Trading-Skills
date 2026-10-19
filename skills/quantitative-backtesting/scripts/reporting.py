@@ -404,6 +404,37 @@ def generate_tear_sheet(
         )
         return out
 
+    def panel_pricing_section(mode):
+        """Render the panel pricing convention that produced the P&L.
+
+        A panel return is not interpretable without it: the net-exposure and
+        book conventions can differ by more than the transaction costs (and
+        the sign of the gap is not stable across windows). Omitted when the
+        mode is unknown (e.g. a single-asset run).
+        """
+        if not mode:
+            return []
+        out = ["<h2>Panel Pricing</h2>", "<table><tr><th>Metric</th><th>Value</th></tr>"]
+        out.append(
+            f"<tr><td>Panel Pricing Mode</td><td class='metric'>{mode}</td></tr>"
+        )
+        out.append("</table>")
+        if mode == "book":
+            out.append(
+                "<p><em>The reported P&amp;L is the true per-asset book "
+                "return sum_i w_i r_i. The cost and impact model is unchanged: "
+                "it still sees |d net exposure|, so the book's own rotation is "
+                "under-charged. Book-mode results are an upper bound on what a "
+                "fully costed book would earn.</em></p>"
+            )
+        else:
+            out.append(
+                "<p><em>The reported P&amp;L is net_exposure x mean(asset "
+                "returns). A long/short book is not representable by that "
+                "scalar: see the panel book diagnostic above.</em></p>"
+            )
+        return out
+
     summary_metrics = [
         ("Total Return", "total_return", fmt_pct),
         ("Annualized Return", "annualized_return", fmt_pct),
@@ -457,6 +488,35 @@ def generate_tear_sheet(
     if not isinstance(_book_diag, dict):
         _book_diag = metrics.get("book_diagnostic")
     html_parts.extend(book_diagnostic_section(_book_diag))
+
+    # Panel pricing convention: the reported P&L is not interpretable
+    # without it (the net-exposure and book conventions can differ by more
+    # than the transaction costs).
+    _pricing = results.get("panel_pricing")
+    if _pricing is None:
+        _pricing = (results.get("config") or {}).get("panel_pricing_effective")
+    if _pricing is not None:
+        html_parts.append("<h2>Panel Pricing</h2>")
+        html_parts.append(
+            "<table><tr><th>Metric</th><th>Value</th></tr>"
+            f"<tr><td>Panel Pricing Mode</td><td class='metric'>{_pricing}</td></tr>"
+            "</table>"
+        )
+        if _pricing == "book":
+            html_parts.append(
+                "<p><em>The reported P&amp;L is the true per-asset book "
+                "return sum_i w_i r_i. The cost and impact model is unchanged: "
+                "it still sees |d net exposure|, so the book's own rotation is "
+                "under-charged (see the gross turnover and the turnover "
+                "charged by the model above). Book-mode results are an upper "
+                "bound on what a fully costed book would earn.</em></p>"
+            )
+        else:
+            html_parts.append(
+                "<p><em>The reported P&amp;L is net_exposure x mean(asset "
+                "returns). A long/short book is not representable by that "
+                "scalar: see the panel book diagnostic above.</em></p>"
+            )
 
     # Trade analytics
     if "total_trades" in metrics:
@@ -634,6 +694,7 @@ def generate_tear_sheet(
                 heading="Panel Book Diagnostic (Walk-Forward)",
             )
         )
+        html_parts.extend(panel_pricing_section(wf_summary.get("panel_pricing")))
 
         periods = wf_results.get("periods", [])
         if periods:
@@ -821,6 +882,7 @@ def generate_tear_sheet(
                 heading="Panel Book Diagnostic (CPCV)",
             )
         )
+        html_parts.extend(panel_pricing_section(cpcv_summary.get("panel_pricing")))
 
         param_stability = cpcv_results.get("param_stability", {})
         if param_stability:
@@ -1129,6 +1191,14 @@ def generate_tear_sheet(
         _book_diag_json = metrics.get("book_diagnostic")
     if isinstance(_book_diag_json, dict):
         summary["book_diagnostic"] = _json_safe(_book_diag_json)
+    # The panel pricing convention that produced the reported P&L. A panel
+    # return is not interpretable without it: the net-exposure and book
+    # conventions can differ by more than the transaction costs.
+    _panel_pricing = results.get("panel_pricing")
+    if _panel_pricing is None:
+        _panel_pricing = (results.get("config") or {}).get("panel_pricing_effective")
+    if _panel_pricing is not None:
+        summary["panel_pricing"] = _panel_pricing
 
     # Surface analysis results in the JSON summary (JSON-safe extraction only).
     if analysis:

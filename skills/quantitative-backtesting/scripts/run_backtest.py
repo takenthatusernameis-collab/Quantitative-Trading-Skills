@@ -30,9 +30,12 @@ from performance import calculate_metrics, generate_report
 from reporting import generate_tear_sheet
 from utils import (
     _annualization_factor,
+    book_is_active,
+    book_return_series,
     build_market_model,
     compute_book_diagnostic,
     market_impact_cost,
+    resolve_panel_pricing,
     strategy_target_weights,
 )
 from walk_forward import estimate_capacity
@@ -77,6 +80,21 @@ def parse_args():
     parser.add_argument("--fill-rates", type=float, nargs="+", default=None, help="List of fill rates to sweep (overrides --fill-rate).")
     parser.add_argument("--latencies", type=int, nargs="+", default=None, help="List of execution latencies (in periods) to sweep (overrides --latency). Delays position execution by each latency after signal generation.")
     parser.add_argument("--adjust-splits", action="store_true", help="Adjust prices for stock splits using the splits column if present.")
+    parser.add_argument(
+        "--panel-pricing",
+        type=str,
+        default="net-exposure",
+        choices=["net-exposure", "book"],
+        help=(
+            "How a multi-asset panel is priced. 'net-exposure' (default) prices "
+            "the portfolio as net_exposure x mean(asset returns) -- the "
+            "convention every published number was produced under. 'book' "
+            "prices the true per-asset book return sum_i w_i r_i of the "
+            "strategy's target weights, which makes a market-neutral book "
+            "backtestable. The cost and impact model is unchanged in both "
+            "modes (it still sees |d net exposure|)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -207,6 +225,16 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             f"--fill-rate must be in (0, 1], got {fill_rate}"
         )
 
+    # Panel pricing mode. "net-exposure" (the default) prices the panel as
+    # `net_exposure x mean(asset returns)` -- one scalar per period, the
+    # convention every published number in this skill was produced under.
+    # "book" prices the true per-asset book return `sum_i w_i r_i` of the
+    # strategy's target weights, so a market-neutral book can be backtested
+    # at all. The cost and impact model is *not* changed by the mode: it
+    # still sees |d net exposure| (see the "Panel book diagnostic" block
+    # and references/cost_models.md).
+    panel_pricing = resolve_panel_pricing(getattr(args, "panel_pricing", None))
+
     # Panel book diagnostic (measurement only). The panel path prices the
     # portfolio as `net_exposure x mean(asset returns)` -- one scalar per
     # period -- so a strategy that holds a long/short book cannot be
@@ -220,11 +248,38 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     # return gap is measured on exactly the bars the framework reports.
     book_weights = strategy_target_weights(strategy, data)
 
-    # Guard against strategies that never take a position (e.g. a lookback
+    # The book return, when the mode prices the book. None when the strategy
+    # exposes no book (the mode then falls back to net-exposure pricing with
+    # an explicit message) or when the data is not a panel.
+    book_returns = None
+    if panel_pricing == "book" and book_weights is not None:
+        book_returns = book_return_series(
+            book_weights,
+            market,
+            lag=1 + latency,
+            fill_rate=fill_rate,
+        )
+
+    # Guard against strategies that never takes a position (e.g. a lookback
     # longer than the data window leaves every rolling indicator NaN, so the
     # signal stays flat at 0). Such strategies produce no trades and their
     # performance metrics are meaningless (division-by-zero Sharpe, etc.).
-    if not signals_active(signals):
+    #
+    # The test is book-aware in "book" mode: a market-neutral book has a
+    # flat net exposure but a non-zero gross book, so it *does* take a
+    # position and must not be rejected. In "net-exposure" mode the test is
+    # the scalar signal test, exactly as before.
+    if panel_pricing == "book" and book_weights is not None:
+        takes_position = book_is_active(
+            book_weights,
+            market,
+            lag=1 + latency,
+            fill_rate=fill_rate,
+        )
+    else:
+        takes_position = signals_active(signals)
+
+    if not takes_position:
         _book_note = ""
         if book_weights is not None:
             _book_only = compute_book_diagnostic(
@@ -308,7 +363,28 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
         funding_costs = leverage_excess * period_funding_rate
         costs = costs + funding_costs
 
-    strategy_returns = positions * raw_returns - costs
+    # Portfolio return. Two pricing conventions:
+    #
+    #   net-exposure (default): `positions x mean(asset returns)` -- the
+    #     scalar net exposure times the equal-weighted basket return. This
+    #     is the convention every published number in this skill was
+    #     produced under.
+    #   book: `sum_i w_i r_i` -- the true P&L of the per-asset book the
+    #     strategy holds. A market-neutral book (flat net exposure, non-zero
+    #     gross book) is only representable under this convention.
+    #
+    # The cost series is identical in both modes: commission, slippage,
+    # impact, borrow and funding are still computed from the *net exposure*
+    # position series. That is a known and reported limitation of the book
+    # mode (the book rotates more than its net exposure does, and the cost
+    # model does not see it) -- the "Panel book diagnostic" block reports
+    # the gross turnover of the book next to the turnover the model charges.
+    if book_returns is not None:
+        effective_pricing = "book"
+        strategy_returns = book_returns - costs
+    else:
+        effective_pricing = "net-exposure"
+        strategy_returns = positions * raw_returns - costs
     strategy_returns = strategy_returns.dropna()
 
     # Panel book diagnostic: the per-asset book the strategy actually holds
@@ -419,6 +495,10 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
         # does not expose a book). Measurement only -- it does not change
         # the reported P&L.
         "book_diagnostic": book_diagnostic,
+        # The pricing convention that produced the reported P&L:
+        # "net-exposure" (the default) or "book". Recorded so a result can
+        # never be read without knowing how the panel was priced.
+        "panel_pricing": effective_pricing,
         "config": {
             "initial_capital": args.initial_capital,
             "commission": args.commission,
@@ -439,6 +519,12 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
             "latency": getattr(args, "latency", 0),
             "fill_rate": fill_rate,
+            # The requested panel pricing mode and the one that was actually
+            # applied. They differ when "book" was requested for a strategy
+            # that exposes no book (or for a single asset): the run then
+            # falls back to the net-exposure convention.
+            "panel_pricing": panel_pricing,
+            "panel_pricing_effective": effective_pricing,
         },
     }
 
@@ -908,11 +994,41 @@ def main():
     # strategy without a book.
     metrics["book_diagnostic"] = results.get("book_diagnostic")
     book_diagnostic = results.get("book_diagnostic")
-    if book_diagnostic:
+
+    # Panel pricing mode: which convention produced the reported P&L. It is
+    # printed before every number so a result can never be read without
+    # knowing how the panel was priced.
+    _requested_pricing = (results.get("config") or {}).get("panel_pricing", "net-exposure")
+    _effective_pricing = results.get("panel_pricing", _requested_pricing)
+    if _effective_pricing == "book":
         print(
-            "Panel Book Diagnostic (measurement only -- the reported P&L "
-            "is unchanged):"
+            "Panel pricing mode: book (the portfolio return is the true "
+            "per-asset book return sum_i w_i r_i)."
         )
+    elif _requested_pricing == "book":
+        print(
+            "Panel pricing mode: net-exposure (FALLBACK: --panel-pricing "
+            "book was requested, but this strategy/data exposes no per-asset "
+            "book, so the run used the net-exposure convention)."
+        )
+    else:
+        print(
+            "Panel pricing mode: net-exposure (the portfolio return is "
+            "net_exposure x mean(asset returns))."
+        )
+
+    if book_diagnostic:
+        if _effective_pricing == "book":
+            print(
+                "Panel Book Diagnostic (the reported P&L uses the book "
+                "convention; the net-exposure pricing is shown for "
+                "comparison):"
+            )
+        else:
+            print(
+                "Panel Book Diagnostic (measurement only -- the reported P&L "
+                "is unchanged):"
+            )
         print(f"  Gross book (mean sum|w|):     {book_diagnostic['gross_book']:.4f}")
         print(f"  Net exposure (book):          {book_diagnostic['net_exposure']:.4f}")
         print(f"  Net exposure (framework):      {book_diagnostic['framework_net_exposure']:.4f}")
@@ -933,6 +1049,16 @@ def main():
                 f"  Book total return:            "
                 f"{book_diagnostic['book_total_return']:.2%} vs framework "
                 f"{book_diagnostic['framework_total_return_after_costs']:.2%}"
+            )
+        if _effective_pricing == "book":
+            print(
+                "  NOTE: the cost and impact model still sees |d net "
+                "exposure|, so the book's own rotation is under-charged "
+                "(compare gross turnover with the charged turnover above). "
+                "Book-mode results are an upper bound on what a fully "
+                "costed book would earn. The trade ledger is still built "
+                "from the net-exposure position series, so a market-neutral "
+                "book produces no trade records."
             )
 
     # Multiple-testing correction: when the number of development

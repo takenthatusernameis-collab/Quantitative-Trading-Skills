@@ -54,7 +54,7 @@ class _Args:
                  borrow_cost=0.0, funding_cost=0.0,
                  validate_point_in_time=False, point_in_time_strict=False,
                  multi_symbol=False, benchmark=None, risk_free_rate=None,
-                 fill_rate=1.0, latency=0):
+                 fill_rate=1.0, latency=0, panel_pricing="net-exposure"):
         self.commission = commission
         self.slippage = slippage
         self.initial_capital = initial_capital
@@ -72,6 +72,7 @@ class _Args:
         self.risk_free_rate = risk_free_rate
         self.fill_rate = fill_rate
         self.latency = latency
+        self.panel_pricing = panel_pricing
 
 
 def test_signals_active_detects_flat_and_active_series():
@@ -2496,6 +2497,135 @@ def test_run_backtest_flat_net_exposure_panel_reports_the_book_it_holds():
         assert "does hold a book" in message, message
 
 
+def test_run_backtest_book_pricing_backtests_a_market_neutral_book():
+    """A market-neutral book is backtestable under the book pricing mode.
+
+    With symmetric quantiles the cross-sectional momentum signal is flat
+    (net exposure 0), so the net-exposure convention refuses to price it
+    ("never takes a position"). Under `--panel-pricing book` the strategy
+    *does* hold a position -- a long/short book with a positive gross
+    exposure -- and the run completes. The reported return is the true book
+    return, recomputed here by hand from the strategy's own weights.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    strategy = build_strategy(
+        "cross_sectional_momentum",
+        '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}',
+    )
+    results = run_backtest(data, strategy, _Args(panel_pricing="book"))
+
+    assert results["panel_pricing"] == "book"
+    diag = results["book_diagnostic"]
+    assert diag is not None
+    # The book is open (gross exposure) but flat in net exposure.
+    assert diag["gross_book"] > 0
+    assert abs(diag["net_exposure"]) < 1e-12
+    assert diag["n_periods_with_book"] > 0
+
+    # The reported return is the book return: sum_i w_i r_i of the held
+    # book, minus the (unchanged, net-exposure-based) cost series. With
+    # zero costs the two are the same number.
+    zero_cost = run_backtest(
+        data,
+        build_strategy(
+            "cross_sectional_momentum",
+            '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}',
+        ),
+        _Args(commission=0.0, slippage=0.0, panel_pricing="book"),
+    )
+    weights = strategy.generate_target_weights(data)
+    assert weights is not None
+    held = weights.shift(1)  # the book is executed with a one-period lag
+    manual = (held * data["close"].pct_change()).sum(axis=1).reindex(
+        zero_cost["returns"].index
+    )
+    expected = float((1 + manual).prod() - 1)
+    reported = float((1 + zero_cost["returns"]).prod() - 1)
+    assert abs(reported - expected) < 1e-12
+
+
+def test_run_backtest_book_pricing_differs_by_the_measured_return_gap():
+    """The two pricing modes differ by exactly the measured return gap.
+
+    The net-exposure mode prices `net_exposure x mean(asset returns)`; the
+    book mode prices `sum_i w_i r_i`. The difference between them is the
+    gap the panel book diagnostic measures -- and the sign of that gap is
+    not stable, so a panel result must always state its pricing mode.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    params = '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}'
+
+    def _run(pricing):
+        return run_backtest(
+            data,
+            build_strategy("cross_sectional_momentum", params),
+            # Zero costs so the two modes differ by the pricing convention
+            # alone, with no transaction-cost difference mixed in.
+            _Args(commission=0.0, slippage=0.0, panel_pricing=pricing),
+        )
+
+    net_exposure = _run("net-exposure")
+    book = _run("book")
+    assert net_exposure["panel_pricing"] == "net-exposure"
+    assert book["panel_pricing"] == "book"
+
+    # Same bars in both modes.
+    assert net_exposure["returns"].index.equals(book["returns"].index)
+
+    ne_total = float((1 + net_exposure["returns"]).prod() - 1)
+    book_total = float((1 + book["returns"]).prod() - 1)
+    diag = net_exposure["book_diagnostic"]
+    assert diag is not None
+    # The measured gap between the two conventions.
+    assert abs((ne_total - book_total) - diag["return_gap_total"]) < 1e-12
+    # The per-period difference is the framework pricing minus the book.
+    difference = net_exposure["returns"] - book["returns"]
+    assert abs(difference.mean() * 1e4 - diag["return_gap_bps"]) < 1e-9
+
+
+def test_run_backtest_net_exposure_pricing_is_the_default_and_is_unchanged():
+    """The default mode is net-exposure, and it reproduces the explicit mode
+    exactly: no published number moves when the mode is not requested."""
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    strategy = build_strategy(
+        "cross_sectional_momentum",
+        '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}',
+    )
+    default = run_backtest(data, strategy, _Args())
+    explicit = run_backtest(data, strategy, _Args(panel_pricing="net-exposure"))
+
+    assert default["panel_pricing"] == "net-exposure"
+    assert explicit["panel_pricing"] == "net-exposure"
+    assert default["config"]["panel_pricing"] == "net-exposure"
+    assert default["config"]["panel_pricing_effective"] == "net-exposure"
+    pd.testing.assert_series_equal(default["returns"], explicit["returns"])
+
+
+def test_run_backtest_book_pricing_falls_back_when_no_book_is_available():
+    """A strategy that exposes no book falls back to net-exposure pricing,
+    and the fallback is recorded rather than silently applied."""
+    data = _make_multiasset_multiindex(n=300, n_assets=2, seed=5)
+    strategy = build_strategy("zscore_mean_reversion", '{"period": 20}')
+    results = run_backtest(data, strategy, _Args(panel_pricing="book"))
+
+    assert results["config"]["panel_pricing"] == "book"
+    assert results["config"]["panel_pricing_effective"] == "net-exposure"
+    assert results["panel_pricing"] == "net-exposure"
+    assert results.get("book_diagnostic") is None
+
+
+def test_run_backtest_book_pricing_on_a_single_asset_is_net_exposure_pricing():
+    """A single asset has no per-asset book: the book mode is a no-op and the
+    numbers are the net-exposure ones."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    net_exposure = run_backtest(data, strategy, _Args())
+    book = run_backtest(data, strategy, _Args(panel_pricing="book"))
+
+    assert book["panel_pricing"] == "net-exposure"
+    pd.testing.assert_series_equal(net_exposure["returns"], book["returns"])
+
+
 def test_cli_data_provenance_reproducible_across_runs():
     """Running the CLI twice with identical inputs yields byte-identical
     data_provenance.json (load_timestamp sanitized to source mtime)."""
@@ -2603,6 +2733,11 @@ TEST_REGISTRY = [
     ("test_run_backtest_book_diagnostic_absent_for_single_asset", test_run_backtest_book_diagnostic_absent_for_single_asset),
     ("test_run_backtest_book_diagnostic_absent_for_strategy_without_a_book", test_run_backtest_book_diagnostic_absent_for_strategy_without_a_book),
     ("test_run_backtest_flat_net_exposure_panel_reports_the_book_it_holds", test_run_backtest_flat_net_exposure_panel_reports_the_book_it_holds),
+    ("test_run_backtest_book_pricing_backtests_a_market_neutral_book", test_run_backtest_book_pricing_backtests_a_market_neutral_book),
+    ("test_run_backtest_book_pricing_differs_by_the_measured_return_gap", test_run_backtest_book_pricing_differs_by_the_measured_return_gap),
+    ("test_run_backtest_net_exposure_pricing_is_the_default_and_is_unchanged", test_run_backtest_net_exposure_pricing_is_the_default_and_is_unchanged),
+    ("test_run_backtest_book_pricing_falls_back_when_no_book_is_available", test_run_backtest_book_pricing_falls_back_when_no_book_is_available),
+    ("test_run_backtest_book_pricing_on_a_single_asset_is_net_exposure_pricing", test_run_backtest_book_pricing_on_a_single_asset_is_net_exposure_pricing),
 ]
 
 if __name__ == "__main__":

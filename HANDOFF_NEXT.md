@@ -2,150 +2,151 @@
 
 ## What changed this session
 
-Executed the prior handoff's next task — **Phase 1 of the panel-book work: expose the
-per-asset target book and quantify the net-exposure gap, without changing any reported
-P&L, cost, impact or capacity number.**
-
-### Core: `skills/quantitative-backtesting/scripts/strategy_builder.py`
-
-- New optional strategy accessor `StrategyBase.generate_target_weights(data)`:
-  returns a `DataFrame` of per-asset portfolio weights (rows = dates, columns = symbols,
-  `sum(|w|) <= 1`) whose **net exposure matches the scalar signal** of
-  `generate_signals`, or `None` by default so every other strategy (and every
-  single-asset run) is unchanged.
-- `CrossSectionalMomentum.generate_target_weights`: long book `+1/n_assets` per long name,
-  short book `-1/n_assets` per short name. The book's net exposure is therefore exactly
-  the scalar signal `(n_long - n_short) / n_assets`, and the gross book is
-  `(n_long + n_short) / n_assets`. A name selected on both sides (the overlapping-quantile
-  case the strategy already warns about) nets to zero, so the net exposure still matches.
-- `DualMomentumStrategy.generate_target_weights`: `1/n_selected` per selected name — a
-  fully invested long-only book. This book is *more* invested than the scalar signal
-  (`n_selected / n_assets`), which the diagnostic reports explicitly (both net exposures).
-- Refactor (behaviour-preserving): the long/short selection of
-  `_generate_multi_asset_signals_dict` / `..._multiindex` and the selected-names
-  selection of the dual-momentum paths are now shared helpers
-  (`_cross_sectional_selection`, `_dual_momentum_selection`) that the signal path *and*
-  the book accessor both use, so the book and the signal can never disagree.
-  Verified bit-identical against verbatim copies of the pre-refactor code for
-  4 cross-sectional and 3 dual-momentum parameter sets (dict and MultiIndex panels).
+Executed the prior handoff's next task — **Phase 2 of the panel-book work: make the panel
+path book-aware behind an explicit, opt-in `--panel-pricing {net-exposure,book}` mode, so
+the market-neutral book is backtestable while every published number stays bit-identical.**
 
 ### Core: `skills/quantitative-backtesting/scripts/utils.py`
 
-- `strategy_target_weights(strategy, data)`: reads the optional accessor, `None` when the
-  strategy has no book.
-- `compute_book_diagnostic(weights, market, positions, framework_returns, lag, fill_rate)`:
-  the measurement itself. The book held in a period is the target book lagged by the
-  execution convention (`1 + latency`) and scaled by the fill rate — the same convention
-  as the framework's position series — so both are measured on the same bars. Reported
-  keys: `n_periods`, `n_periods_with_book`, `n_assets`, `gross_book`, `net_exposure`,
-  `framework_net_exposure`, `gross_turnover`, `framework_turnover`, `return_gap_bps`,
-  `return_gap_total`, `book_total_return`, `framework_total_return`,
-  `framework_total_return_after_costs`. The return gap compares the framework's
-  **pre-cost** pricing (`net_exposure x mean asset return`) with the true book return
-  `sum_i w_i r_i`, so it isolates the exposure-convention gap from the cost gap. Returns
-  `None` for a single asset, a strategy without a book, or a panel with no per-asset data.
-- `aggregate_book_diagnostics(diagnostics)`: the per-window aggregate (means weighted by
-  the number of periods, cumulative returns compounded across the windows).
+- `PANEL_PRICING_MODES = ("net-exposure", "book")`, `DEFAULT_PANEL_PRICING = "net-exposure"`,
+  `resolve_panel_pricing(mode)`: normalizes/validates the mode (`None` -> the default).
+- `held_book_weights(weights, market, lag, fill_rate)`: the book actually held — the target
+  weights re-indexed onto the market model's grid, lagged by `1 + latency` and scaled by
+  the fill rate (the same convention as the framework's position series). Returns `None`
+  when there is no usable book (no weights, a single-asset path, or a book over a
+  different universe). `compute_book_diagnostic` now uses it, so the diagnostic and the
+  pricing read the *same* book (no second implementation).
+- `book_return_series(weights, market, lag, fill_rate)`: the true book return
+  `sum_i w_i r_i`. The first bar (no per-asset return) stays `NaN`
+  (`.sum(axis=1, min_count=1)`), so the book-priced return series has exactly the same
+  index as the net-exposure one.
+- `book_is_active(weights, market, lag, fill_rate)`: the book-aware "does this strategy
+  take a position?" test — a market-neutral book has a flat *net* exposure but a positive
+  *gross* exposure, so it is a position.
 
-### Surfacing (all additive; `None` when there is no book)
+### Core: `skills/quantitative-backtesting/scripts/run_backtest.py`
 
-- `scripts/run_backtest.py`: `results["book_diagnostic"]` and `metrics["book_diagnostic"]`,
-  printed by the CLI as a "Panel Book Diagnostic" block.
-- `scripts/walk_forward.py`: `period["book_diagnostic"]` (walk-forward),
-  `fold["book_diagnostic"]` (CPCV), `validation_performance["book_diagnostic"]` /
-  `test_performance["book_diagnostic"]` (out-of-sample), and `summary["book_diagnostic"]`
-  on all three paths; plus `summary["validation_book_diagnostic"]` /
-  `summary["test_book_diagnostic"]` on the out-of-sample path. The CLI artifacts persist
-  the per-period / per-fold diagnostic rows and the out-of-sample test-window diagnostic.
-- `scripts/reporting.py`: a "Panel Book Diagnostic" table in the tear sheet (main
-  backtest, walk-forward, CPCV) and a top-level `book_diagnostic` key in
-  `tear_sheet_summary.json`.
-- `scripts/run_backtest.py`: the "never takes a position" guard now **explains** the
-  case it used to hide: when the strategy does hold a book but its net exposure is flat
-  (the symmetric-quantile market-neutral book), the error says so (gross book, periods
-  with a book) instead of implying the strategy is flat.
+- New CLI flag `--panel-pricing {net-exposure,book}` (default `net-exposure`).
+- In `book` mode the portfolio return per period is `sum_i w_i r_i` of the held book
+  instead of `positions x mean(asset returns)`. The **cost series is identical in both
+  modes** (commission, slippage, impact, borrow and funding still come from the scalar
+  net-exposure position series) — see "What remains unresolved".
+- The "never takes a position" guard is book-aware in `book` mode (`book_is_active`);
+  `signals_active` is untouched for `net-exposure`.
+- Fallback: a strategy that exposes no book (or a single-asset run) cannot be priced as
+  a book -> the run falls back to net-exposure pricing, and the fallback is **recorded**
+  (`results["config"]["panel_pricing_effective"]`), not silent.
+- The mode is recorded in `results["panel_pricing"]`,
+  `results["config"]["panel_pricing"]` / `["panel_pricing_effective"]`, printed by the
+  CLI ("Panel pricing mode: ...") and rendered in the tear sheet ("Panel Pricing").
 
-### Tests added (all registered in `TEST_REGISTRY`; 459 pytest cases, up from 441)
+### Core: `skills/quantitative-backtesting/scripts/walk_forward.py`
 
-- `tests/test_strategy_builder.py` (+5): the accessor is `None` by default; the
-  cross-sectional book's net exposure equals the scalar signal exactly; the
-  symmetric-quantile book is open (gross book > 0) while its net exposure is flat and
-  both legs are present; single-asset data yields no book; the dual-momentum book is
-  long-only, equally weighted and fully invested.
-- `tests/test_run_backtest.py` (+5): the diagnostic is surfaced for a panel; the book
-  return matches an **independent** hand computation (`sum_i w_i r_i` with a one-period
-  lag); the diagnostic is `None` for a single asset and for a strategy without a book;
-  the flat-net-exposure guard states that the strategy does hold a book.
-- `tests/test_walk_forward.py` (+4): the per-period and summary diagnostics (with the
-  net-exposure invariant and the aggregate's period counts); `None` for a single-asset
-  walk-forward; the out-of-sample per-split diagnostics; the CLI `cpcv` artifact rows.
-- `tests/test_cpcv.py` (+2): the per-fold and summary diagnostics; `None` for a
-  single asset.
-- `tests/test_reporting.py` (+2): the tear-sheet section and the JSON key are present
-  when the diagnostic is, and absent when it is not.
+- The same `--panel-pricing` flag on the `common_parser`, so it is accepted by every
+  subcommand (`walk-forward`, `optimize`, `cpcv`, `monte-carlo`, `out-of-sample`).
+- `_calculate_strategy_returns(..., panel_pricing="net-exposure", book_weights=None)`:
+  in `book` mode the return term is the book return; the cost term is unchanged, so the
+  two modes differ by exactly the exposure-convention gap.
+- New `_window_takes_position(strategy, signals, data, panel_pricing, latency, fill_rate,
+  book_weights)`: the book-aware position test used by the walk-forward, CPCV,
+  `parameter_optimization` and out-of-sample grid searches (a market-neutral book is
+  traded, not skipped). `signals_active` itself is unchanged.
+- `panel_pricing` threaded through `walk_forward_analysis`, `cpcv_analysis`,
+  `out_of_sample_validation`, `parameter_optimization` and the five cost-coefficient
+  sweep helpers; the mode is recorded in `summary["panel_pricing"]` on all three
+  validation paths and printed by the CLI.
+- `scripts/reporting.py`: a "Panel Pricing" section in the tear sheet (main backtest,
+  walk-forward, CPCV) and a top-level `panel_pricing` key in `tear_sheet_summary.json`.
 
-### Documentation
+### Also
 
-- `references/cost_models.md`: new section "Panel book diagnostic (measurement only)"
-  (key table, the accessor contract, what the diagnostic shows, the unchanged
-  limitation) and a pointer from the existing "Known limitation" paragraph.
-- `references/validation_methods.md`: the walk-forward and CPCV "Output" sections
-  document the new `book_diagnostic` summary key.
-- `SKILL.md`: the `strategy_builder.py` / `utils.py` / `run_backtest.py` /
-  `walk_forward.py` descriptions, a new Tips bullet ("A panel backtest prices net
-  exposure, not the book"), and the test-suite descriptions.
+- `scripts/strategy_builder.py`: the symmetric-quantile warning now names the way out
+  (`--panel-pricing book` prices the long and short books separately), and no longer
+  claims the strategy "never takes a position" in absolute terms.
+- `references/cost_models.md`: new section "Panel pricing modes (`--panel-pricing`)"
+  (the two conventions, what changes and what does not, the fallbacks, the
+  configuration table entry).
+- `references/validation_methods.md`: the `panel_pricing` summary key, and the
+  book-aware position test in "Flat parameter sets".
+- `SKILL.md`: the `run_backtest.py` / `utils.py` / `walk_forward.py` descriptions, a new
+  Tips bullet, and the test-suite descriptions.
+
+### Tests added (all registered in `TEST_REGISTRY`; 471 pytest cases, up from 459)
+
+- `tests/test_run_backtest.py` (+5): the market-neutral book backtests in `book` mode
+  (no raise) and its reported return equals the book return recomputed **by hand** from
+  the strategy's own weights; the two modes differ by exactly the measured
+  `return_gap` (per period and cumulative); the default mode is `net-exposure` and
+  reproduces the explicit mode bit-for-bit; a strategy without a book falls back with
+  the fallback recorded; a single asset is unaffected.
+- `tests/test_walk_forward.py` (+4): the market-neutral book is traded in book mode
+  (`periods_with_position > 0`, a non-null `total_oos_return`) while the net-exposure
+  mode skips every combination; the two modes differ by exactly the measured
+  `return_gap`; the summary records `panel_pricing`; the out-of-sample path prices the
+  held-out window under the selected mode.
+- `tests/test_cpcv.py` (+3): all four folds are traded in book mode (the net-exposure
+  mode skips all of them); the two modes differ by exactly the measured `return_gap`;
+  the pinned net-exposure number is unchanged (`0.005399536978800246`).
 
 ## What was actually verified
 
-- **No reported number changed.** Old (git `HEAD`) vs. new code compared key-by-key on a
-  4-asset panel across the walk-forward, CPCV and out-of-sample paths (summaries,
-  per-period / per-fold records, per-split performance, and the full OOS return
-  series): **zero differing keys/values**. The comparison harness extracts `HEAD` with
+- **No published number changed.** Old (git `HEAD`) vs. new code compared key-by-key on a
+  5-asset panel (900 bars) across the walk-forward, CPCV, out-of-sample **and** the
+  single-backtest path (summaries, per-period / per-fold records, per-split
+  performance, the full OOS return series, the equity curve, the trade ledger, the
+  capacity block and the book diagnostic): the **only** differing keys are the three new
+  additive `summary["panel_pricing"]` metadata keys. The harness extracts `HEAD` with
   `git archive` into a temp dir and never touches the working tree.
-- The strategy refactor is behaviour-preserving: the new signal code matches verbatim
-  copies of the pre-refactor code for 4 cross-sectional and 3 dual-momentum parameter
-  sets, dict and MultiIndex panels (`pd.testing.assert_series_equal`, exact).
-- Full suite green: `python -m pytest tests/ -q` -> **459 passed**; each standalone
-  runner also green: `test_cpcv.py` 25/25, `test_data_loader.py` 32/32,
+- The pinned values still hold: `cpcv total_oos_return == 0.005399536978800246`
+  (asserted by an existing test and by a new one), the walk-forward pinned
+  `0.042594435108365136`, and the `net-exposure` mode is bit-identical to the explicit
+  `panel_pricing="net-exposure"` mode.
+- Full suite green: `python -m pytest tests/ -q` -> **471 passed**; every standalone
+  runner also green: `test_cpcv.py` 28/28, `test_data_loader.py` 32/32,
   `test_examples_coverage.py` 6/6, `test_falsifiable_hypothesis_example.py` 3/3,
   `test_generate_sample_data.py` 2/2, `test_monte_carlo.py` 20/20, `test_performance.py`
-  33/33, `test_reporting.py` 60 (unittest), `test_run_backtest.py` 79/79,
-  `test_strategy_builder.py` 33/33, `test_walk_forward.py` 166/166 (11/11 suites).
-- CLI end-to-end on a synthetic 4-asset panel (900 bars, `--multi-symbol`):
-  - `run_backtest.py` (asymmetric cross-sectional momentum, lookback 20, 0.4/0.2):
-    gross book **0.7333**, net exposure (book) **0.2444** = net exposure (framework)
-    **0.2444**, gross turnover **0.1883** vs turnover charged by the model **0.0003**,
-    879/899 periods with a book, return gap **-1.51 bps/period (-15.19% cumulative)**,
-    book total return **+29.01%** vs framework **+13.81%**.
-  - `walk_forward.py cpcv`: `cpcv_summary.json` carries `summary.book_diagnostic` and
-    per-fold `book_diagnostic` rows; the CLI prints the block.
-  - Tear sheet HTML renders the "Panel Book Diagnostic" table; `metrics.json` and
-    `tear_sheet_summary.json` carry the diagnostic.
-- The diagnostic's arithmetic is checked against an independent computation, not against
-  itself: `test_run_backtest_book_diagnostic_book_return_matches_manual_computation`
-  recomputes `sum_i w_i r_i` from the strategy's weights and the close frame.
+  33/33, `test_reporting.py` 60 (unittest, OK), `test_run_backtest.py` 84/84,
+  `test_strategy_builder.py` 33/33, `test_walk_forward.py` 170/170.
+- CLI end-to-end on a synthetic 5-asset panel (900 bars, `--multi-symbol`):
+  - `run_backtest.py`, asymmetric cross-sectional momentum (lookback 20, 0.4/0.2):
+    `net-exposure` -> total return **+19.12%** (Sharpe 1.92) with the diagnostic showing
+    gross book **0.5867**, net exposure 0.1956, gross turnover **0.1751** vs charged
+    turnover **0.0002**, return gap **-1.56 bps/period (-17.14% cumulative)**, book total
+    **+36.27%**; `book` -> reported total return **+36.26%** (the book's), same gap.
+  - Symmetric quantiles (a market-neutral book): `net-exposure` still raises
+    ("never takes a position ... the strategy does hold a book"); `book` runs and reports
+    gross book **0.3911**, net exposure **0.0000**, gross turnover **0.1437** vs charged
+    **0.0000**, total return **+16.26%** (Sharpe 0.48).
+  - `walk_forward.py cpcv`: `net-exposure` -> `folds_with_position` **0**,
+    `total_oos_return` **null** (nothing could be traded); `book` -> `folds_with_position`
+    **4**, `total_oos_return` **0.00044**, `oos_sharpe` **-1.43**, `summary.panel_pricing`
+    `"book"`.
+  - `walk_forward.py out-of-sample`: `book` -> held-out test window total return
+    **+5.52%**, Sharpe **1.2244**, gross book 0.3573, 159/178 periods with a book.
+  - `walk_forward.py monte-carlo --panel-pricing book` runs (base returns priced as the
+    book).
+- The book-mode return is checked against an **independent** hand computation
+  (`test_run_backtest_book_pricing_backtests_a_market_neutral_book`), not against itself.
 
 ## What remains unresolved
 
-- **Panel P&L is still net-exposure based, not book based (the defect Phase 1 measured,
-  not fixed).** The engine still prices a panel as `net_exposure x mean(asset returns)`.
-  Measured above: a book with gross exposure 0.73 earned **+29.0%** while the engine
-  reported **+13.8%**; on the walk-forward summary the book earned **-2.2%** against a
-  reported **+6.6%**; on the held-out out-of-sample window the book earned **-0.6%**
-  against a reported **+4.4%**. The sign of the gap is not even stable, so the
-  net-exposure convention is not a conservative approximation — it is a different
-  strategy.
-- **Panel book rotation is still charged no market impact.** Same root cause: the
-  impact model sees `|d net exposure|` only. Measured: gross turnover 0.188 vs charged
-  0.0003 (a ~600x under-charge) on the 4-asset panel; 0.169 vs 0.004 on the
-  walk-forward aggregate.
-- **A market-neutral book still cannot be backtested.** `run_backtest.py` raises
-  ("never takes a position") for the symmetric-quantile cross-sectional momentum, and
-  the walk-forward / CPCV grid search skips every such combination via `signals_active`.
-  The error message now explains the situation, but the strategy still cannot run.
-- **Dual momentum is priced at a fraction of its own book.** The book is fully invested
-  (`net_exposure` 0.92) while the engine prices 0.18 — a 5x exposure understatement,
-  reported by the diagnostic as `net_exposure` vs `framework_net_exposure`.
+- **The book is still priced with the net exposure's costs.** The cost and impact model
+  is deliberately unchanged in this task, so in `book` mode: commission and slippage are
+  charged on `abs(d net exposure)`, the impact model still sees `abs(d net exposure)`
+  only, borrow and funding are still computed from the scalar net-exposure position
+  series, and the trade ledger is still built from the net-exposure position series.
+  Measured on the 5-asset panel: gross turnover **0.1751** vs charged turnover
+  **0.0002** (~900x under-charge); for the market-neutral book the charged turnover is
+  **0.0000** while the book rotates **0.1437** per period, and its short leg pays **no
+  borrow cost** at all. **Book-mode results are therefore an upper bound** on what a
+  fully costed book would earn. This is stated in the CLI, in the summary JSON and in
+  the tear sheet.
+- **The book-mode trade ledger is empty for a market-neutral book** (the ledger is built
+  from the net-exposure position series), so the trade-level statistics (win rate,
+  profit factor, expectancy) are absent from the metrics in that case. The return and
+  risk metrics are unaffected.
+- **The default is still `net-exposure`.** Flipping it would change every published
+  number; it needs its own decision (out of scope here).
 - **Position warmup divergence (carried over, unchanged).** `run_backtest.py` uses
   `positions = signals.shift(1 + latency).fillna(0)` (the first entry *is* charged);
   `walk_forward.py` uses `positions = signals.shift(1 + latency) * fill_rate` (the first
@@ -153,94 +154,98 @@ P&L, cost, impact or capacity number.**
   `references/cost_models.md`; intentionally unchanged because it alters published
   numbers.
 - **Panel trade ledger is an approximation** (priced on the mean constituent close).
-  Documented.
-- **The diagnostic is a measurement, not a correction.** Any conclusion drawn from a
-  panel backtest today must still be stated as "under the net-exposure convention",
-  with the book numbers reported next to it.
+  Documented; unchanged.
+- **Dual momentum is priced at a fraction of its own book** (book fully invested at
+  `net_exposure` 0.92 vs the engine's 0.18). The `book` mode prices the book correctly;
+  the *cost* understatement above still applies to it.
 
 ## Approaches already failed / why (this session and prior sessions)
 
-- Calling `compute_book_diagnostic` before the return series exists (with
-  `framework_returns=None`): the helper defines the measurement window from the
-  framework's return index, so it returned `None` and the guard's book note was empty.
-  Fixed by computing the diagnostic *after* the returns and computing an
-  exposure-only variant inside the guard branch.
-- Leaving the "never takes a position" guard before the `--latency` / `--fill-rate`
-  resolution: the fill-rate range check then ran after the guard. Reordered so the
-  argument check comes first (the only behaviour change is *which* error a run with
-  both problems reports).
-- Feeding a wide MultiIndex CSV to the `--multi-symbol` CLI: `load_multi_symbol`
-  requires a long-format file with a `symbol` / `ticker` column. The CLI test fixture
-  was rewritten to long format.
-- Re-running the quantile validation inside `generate_target_weights`: the symmetric-
-  quantile warning was then emitted twice per run (attributed to two different frames
-  by `stacklevel=3`). The validation call was removed from the accessor — it is a
-  measurement helper, and the signal path already warns.
-- Printing the *aggregate* (validation + test) diagnostic in the out-of-sample CLI next
-  to the held-out test performance: misleading. The CLI now prints the test window's own
-  diagnostic; both per-split diagnostics and the aggregate stay in the summary JSON.
-- (Prior sessions, unchanged) Reusing the old pseudo-asset panel shape for impact
-  unification: not equivalent to the per-asset model; rejected. Making walk-forward and
-  run_backtest fully identical: would change the single-asset position warmup and every
-  published number; not attempted; the residual difference is documented and asserted.
+- **A bulk string replacement over `walk_forward.py` matched the wrong call.** The
+  pattern `benchmark_cost_is_periodic=...,\n)` also matched
+  `_benchmark_list_alpha_correction(...)`, which does not take `panel_pricing`; two
+  tests failed with `TypeError: _benchmark_list_alpha_correction() got an unexpected
+  keyword argument 'panel_pricing'`. Fixed by reverting that one call and re-checking
+  every insertion by mapping each `panel_pricing=` line back to the call that owns it
+  (a small script that walks the parenthesis depth backwards). Lesson: after any bulk
+  edit in this file, map each inserted argument to its call site.
+- The same bulk replacement also clobbered the `_optimize_sweep_coefficient` body
+  (`top = results[0] if results else None` became `summary = results["summary"]`),
+  because `parameter_optimization` returns a **list**, not a dict. Fixed by restoring
+  the two original lines; three optimize-sweep tests failed until then.
+- **Asserting "the two modes differ by the return gap" on a multi-combination grid
+  failed** (CPCV: observed difference 0.0255 vs the measured gap 0.0318). The grid
+  search scores candidates *under the pricing mode it runs in*, so the two modes can
+  select **different parameters** and the difference is then no longer the pricing
+  convention alone. Fixed by using a single parameter combination in that test (and
+  documenting why in the test docstring) — the same trap applies to any future
+  cross-mode comparison.
+- (Prior sessions, unchanged) Calling `compute_book_diagnostic` before the return series
+  exists: the helper defines the measurement window from the framework's return index,
+  so it returned `None`. Feeding a wide MultiIndex CSV to `--multi-symbol`:
+  `load_multi_symbol` requires a long-format file with a `symbol` column. Re-running
+  the quantile validation inside `generate_target_weights`: the warning was emitted
+  twice per run. Printing the aggregate (validation + test) diagnostic in the
+  out-of-sample CLI next to the held-out test performance: misleading; the CLI now
+  prints the test window's own diagnostic. Reusing the old pseudo-asset panel shape for
+  impact unification: not equivalent to the per-asset model; rejected. Making
+  walk-forward and run_backtest fully identical: would change the single-asset position
+  warmup and every published number; not attempted; the residual difference is
+  documented and asserted.
 
 ## Next task (precise, bounded, evidence-based)
 
-**Phase 2: make the panel path book-aware — behind an explicit, opt-in mode so the
-published numbers stay put.**
+**Phase 2b: cost the book, not the net exposure — turn the `book` mode from an upper
+bound into a costed result.**
 
-Problem (measured above): the panel path cannot represent or price a long/short book.
-The strategy interface returns one scalar per period (net exposure) and
-`build_market_model` prices the portfolio as `net_exposure x mean(asset returns)`, so
-(a) a market-neutral book is indistinguishable from a flat book (the flagship
-cross-sectional strategy cannot be backtested at its default parameters),
-(b) the P&L reported is not the P&L of the book the strategy holds (measured: +29.0% vs
-+13.8%, and the sign of the gap is not stable), and (c) book rotation is charged no
-impact (~600x under-charge measured). Phase 1 made all three *visible*; this task
-changes the *model*.
+Problem (measured above): the `book` mode prices the *return* correctly but still charges
+the *costs* of the net exposure. On the 5-asset panel the book's gross turnover is 0.1751
+against a charged turnover of 0.0002 (~900x under-charge); the market-neutral book rotates
+0.1437 per period and is charged **nothing**, pays no borrow cost on its short leg, and
+produces no trade records. So every book-mode number published so far is an upper bound
+and cannot be quoted as a strategy result.
 
 Work items:
 
-1. Add an explicit panel pricing mode, e.g. `--panel-pricing {net-exposure,book}` on
-   `run_backtest.py` and the `walk_forward.py` subcommands, with **`net-exposure` as the
-   default** so every published number and every pinned test value stays identical.
-   In `book` mode the portfolio return per period is the true book return
-   `sum_i w_i r_i` from the strategy's `generate_target_weights` (falling back to
-   `net-exposure` pricing, with an explicit message, for a strategy that exposes no
-   book).
-2. In `book` mode, the "takes a position" test must be **book-aware**: a market-neutral
-   book is a position (`sum_i |w_i| > 0`), so the symmetric-quantile cross-sectional
-   momentum becomes backtestable and is no longer skipped by the grid search. Keep
-   `signals_active` untouched for the `net-exposure` mode.
-3. Keep the cost and impact model unchanged in this task (the impact model still sees
-   `|d net exposure|`), and **report the missing impact explicitly**: in `book` mode,
-   also print/report the book's gross turnover next to the turnover the model charges
-   (the Phase 1 diagnostic already computes both — reuse it, do not add a second
-   implementation).
-4. Tests: the `net-exposure` mode must stay bit-identical to today's numbers (assert
-   against the pinned values `cpcv total_oos_return == 0.005399536978800246` and the
-   walk-forward `0.042594...`); in `book` mode the symmetric-quantile cross-sectional
-   momentum must backtest instead of raising, and its reported return must equal the
-   book return recomputed by hand; the two modes must differ on a panel with
-   dispersion, with the difference equal to the Phase 1 `return_gap`.
-5. Document the mode and the measured difference in `references/cost_models.md` and
-   `SKILL.md`, and state explicitly which mode produced which number.
+1. In `book` mode only, charge commission + slippage on the book's **gross** turnover
+   `sum_i |dw_i|` (per asset, each change scaled by the fill rate) instead of
+   `abs(d net exposure)`, and compute borrow cost on the book's **short legs**
+   (`sum_i max(-w_i, 0)`) and funding on the book's gross exposure instead of the scalar
+   net exposure. The `net-exposure` mode must not change at all.
+2. Market impact for a book: extend `market_impact_cost` (or add a book variant next to
+   it) to charge `sum_i |dw_i| x equity` per asset against **that asset's own ADV**,
+   keeping the panel convention "portfolio cost = mean of the per-asset impacts" that
+   the current model uses. The impact model must remain a no-op when
+   `--impact-coefficient 0`.
+3. Re-check the panel **capacity** convention before touching the impact model: the
+   current estimate assumes an equal-weight basket whose least liquid constituent
+   binds. A book's capacity depends on the book's own per-asset weights. Decide and
+   document whether the capacity estimate stays basket-based (flagged as an
+   approximation for a book) or becomes book-based — and make the choice visible in the
+   artifacts either way.
+4. Derive the **trade ledger** from the book in `book` mode, so a market-neutral book
+   produces trade records and the win rate / profit factor are meaningful.
+5. Tests: the `net-exposure` path must stay bit-identical (all pinned values, the
+   HEAD-vs-new harness); in `book` mode the charged turnover must equal the book's
+   gross turnover; a book that rotates must be charged more than one that does not; the
+   impact cost must scale with the fill rate and with each asset's own ADV; a
+   market-neutral book must now show a borrow cost on its short leg.
+6. Document the new cost basis in `references/cost_models.md` and `SKILL.md`, and
+   replace the "upper bound" caveat with the residual approximations that remain.
 
-Out of scope for this task (needs its own handoff, because it changes the pinned
-numbers): flipping the default to `book`, and charging market impact on gross turnover
-`sum_i |dw_i| x equity` per asset against that asset's own ADV (Phase 2b). The
-interaction with the panel capacity convention (equal-weight basket, least liquid binds)
-must be re-checked before the impact model is touched.
+Out of scope for this task: flipping the default to `book` (it changes every published
+number and needs its own decision), the position warmup divergence, and the panel trade
+ledger's mean-price approximation.
 
 Constraints: the `net-exposure` mode must stay bit-identical; existing keys keep their
-names and numbers; the full suite must stay green; the market-impact model and the
-panel capacity convention must not change in this task.
+names and numbers; the full suite must stay green. The `book`-mode numbers **will**
+change — they were introduced in this session and are not published, so say so in the
+handoff and in the docs.
 
-Relevant files: `skills/quantitative-backtesting/scripts/strategy_builder.py`
-(`generate_target_weights`, `CrossSectionalMomentum`, `DualMomentumStrategy`),
-`scripts/utils.py` (`build_market_model`, `compute_book_diagnostic`,
-`aggregate_book_diagnostics`), `scripts/run_backtest.py` (the guard and the position
-convention), `scripts/walk_forward.py` (`_calculate_strategy_returns`, `signals_active`
-skips in the grid search, the per-period / per-fold records),
-`scripts/reporting.py` (tear-sheet tables), `tests/test_run_backtest.py`,
-`tests/test_walk_forward.py`, `tests/test_cpcv.py`, `tests/test_strategy_builder.py`.
+Relevant files: `skills/quantitative-backtesting/scripts/utils.py` (`market_impact_cost`,
+`held_book_weights`, `book_return_series`, `book_is_active`),
+`scripts/run_backtest.py` (the cost block and the trade extraction),
+`scripts/walk_forward.py` (`_calculate_strategy_returns` and the grid-search skips),
+`scripts/performance.py` (the trade metrics), `scripts/reporting.py` (the tear-sheet
+tables), `references/cost_models.md`, `tests/test_run_backtest.py`,
+`tests/test_walk_forward.py`, `tests/test_cpcv.py`.

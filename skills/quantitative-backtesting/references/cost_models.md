@@ -203,6 +203,85 @@ the panel with the net-exposure convention, and the impact/capacity models
 still assume an equal-weight book. The diagnostic measures the size of that
 approximation; it does not correct it.
 
+The convention can be changed explicitly -- see "Panel pricing modes" below
+(`--panel-pricing book`), which prices the true book return instead of
+measuring the gap to it. The diagnostic is reported under both modes (in
+`book` mode it shows how much the net-exposure convention would have missed).
+
+### Panel pricing modes (`--panel-pricing`)
+
+The diagnostic above measures a gap that the engine used to hide. The engine
+can now *price* the book instead, behind an explicit opt-in switch:
+
+| Mode | Portfolio return per period | Default |
+| --- | --- | --- |
+| `net-exposure` | `net_exposure[t] x mean_i(r_i[t])` (the scalar signal) | **yes** |
+| `book` | `sum_i w_i[t] r_i[t]` -- the true per-asset book return | no |
+
+```
+run_backtest.py --data panel.csv --multi-symbol --panel-pricing book ...
+walk_forward.py cpcv --data panel.csv --multi-symbol --panel-pricing book ...
+```
+
+The mode is available on `run_backtest.py` and on every `walk_forward.py`
+sub-command (`walk-forward`, `optimize`, `cpcv`, `out-of-sample`). The
+default is `net-exposure`, so **every number published before this change is
+unchanged**; the `net-exposure` mode is bit-identical to the previous code
+(verified key by key against `HEAD` on a 5-asset panel across the walk-forward,
+CPCV, out-of-sample and single-backtest paths).
+
+**What changes in `book` mode.**
+
+1. *The portfolio return is the book's.* The return series is
+   `sum_i w_i r_i` of the held book (the target weights lagged by `1 +
+   latency` periods and scaled by the fill rate), not the scalar net exposure
+   times the basket return. The two modes therefore differ by exactly the
+   `return_gap` the diagnostic measures (with zero costs; see below).
+2. *The "does this strategy take a position?" test becomes book-aware.* A
+   market-neutral book has a flat net exposure but a positive **gross**
+   exposure, so it *is* a position. Under `net-exposure` the symmetric-quantile
+   cross-sectional momentum is rejected ("never takes a position") and the
+   walk-forward / CPCV grid search skips every parameter combination. Under
+   `book` the same strategy is backtested and its parameters are selected.
+3. *The reported mode is recorded.* `results["panel_pricing"]` (and
+   `results["config"]["panel_pricing"]` / `["panel_pricing_effective"]`),
+   `summary["panel_pricing"]` on the walk-forward / CPCV / out-of-sample
+   paths, the CLI stdout, the summary JSON artifacts and the tear sheet
+   ("Panel Pricing") all carry the convention that produced the number. A
+   panel return is not interpretable without it: the sign of the gap between
+   the two conventions is not even stable across windows.
+
+**What does NOT change in `book` mode.** The cost and impact model is
+deliberately left alone:
+
+- commission and slippage are still charged on `abs(d net exposure)`,
+- the market-impact model still sees `abs(d net exposure)` only,
+- borrow and funding costs are still computed from the *scalar* net-exposure
+  position series,
+- the trade ledger is still built from the scalar net-exposure position
+  series, so a market-neutral book produces no trade records and the
+  trade-level statistics (win rate, profit factor, expectancy) are absent
+  from the metrics. The return and risk metrics are unaffected.
+
+A book rotates much more than its net exposure does (measured on a 5-asset
+panel: gross turnover 0.175 against a charged turnover of 0.0002, i.e. a
+~900x under-charge), and a market-neutral book has a zero net exposure, so
+its rotation is charged **nothing at all**. For the same reason a book with
+a short leg pays **no borrow cost** and its funding cost is computed on the
+net exposure rather than the gross book. Book-mode results are therefore an
+**upper bound** on what a fully costed book would earn. The CLI, the
+summary JSON and the tear sheet say so explicitly, and the diagnostic prints
+the gross turnover of the book next to the turnover the model charges.
+Charging market impact on gross turnover (`sum_i abs(dw_i) x equity` per
+asset against that asset's own ADV) is a separate change (Phase 2b) because
+it interacts with the panel capacity convention.
+
+**Fallbacks.** A strategy that exposes no book (no
+`generate_target_weights`, or a single-asset run) cannot be priced as a
+book: the run falls back to the `net-exposure` convention and records
+`panel_pricing_effective = "net-exposure"`, so the fallback is visible in the
+artifacts rather than silent.
+
 ### Cross-path parity
 
 `run_backtest.py` (single backtest) and `walk_forward.py` (walk-forward, CPCV
@@ -473,10 +552,13 @@ Costs are passed as decimal fractions (not bps) to the backtest entry points:
 | `--funding-cost`    | float  | `0.0`    | Annual funding rate for leverage (e.g., 0.02 = 2%) |
 | `--fill-rate`       | float  | `1.0`    | Fraction of each position change filled (0 < r <= 1) |
 | `--fill-rates`      | list   | None     | List of fill rates to sweep (overrides --fill-rate) |
+| `--panel-pricing`   | choice | `net-exposure` | How a panel is priced: `net-exposure` (scalar net exposure x mean asset return) or `book` (true per-asset book return `sum_i w_i r_i`). Not a cost parameter: it selects the pricing convention, and the cost model is identical in both modes. See "Panel pricing modes". |
 
 In the walk-forward module, `commission`, `slippage`, `impact_coefficient`,
 `adv_window`, `borrow_cost`, and `funding_cost` are keyword arguments to
 `walk_forward_analysis`, `parameter_optimization`, and `cpcv_analysis`.
+`panel_pricing` is a keyword argument to the same functions (and to
+`out_of_sample_validation`).
 
 ## Choosing Cost Levels
 

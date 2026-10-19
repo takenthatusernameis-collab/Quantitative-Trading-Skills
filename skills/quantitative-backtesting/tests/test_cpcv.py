@@ -862,6 +862,109 @@ def test_cpcv_book_diagnostic_absent_for_single_asset():
         assert fold.get("book_diagnostic") is None
 
 
+def test_cpcv_book_pricing_backtests_a_market_neutral_book():
+    """CPCV does not skip a market-neutral book under the book pricing mode.
+
+    With symmetric quantiles every fold is skipped under the net-exposure
+    convention (the signal is flat, so the run reports "no position was ever
+    taken"). Under the book pricing mode the strategy holds a real long/short
+    book, so the folds are traded and the out-of-sample record is not empty.
+    """
+    data = _make_multiasset_multiindex(n=504, n_assets=5, seed=42)
+    strategy_factory = _make_strategy_factory("cross_sectional_momentum")
+    param_grid = {"lookback": [15, 20, 30], "top_quantile": [0.2], "bottom_quantile": [0.2]}
+
+    skipped = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+    )
+    assert skipped["summary"]["folds_with_position"] == 0
+    assert skipped["summary"]["total_oos_return"] is None
+
+    priced = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+        panel_pricing="book",
+    )
+    assert priced["summary"]["folds_with_position"] == 4
+    assert priced["summary"]["total_oos_return"] is not None
+    assert priced["summary"]["panel_pricing"] == "book"
+    for fold in priced["folds"]:
+        diag = fold.get("book_diagnostic")
+        assert diag is not None
+        assert diag["gross_book"] > 0
+        # Market-neutral: the net exposure is flat, the gross book is not.
+        assert abs(diag["net_exposure"]) < 1e-9
+
+
+def test_cpcv_book_pricing_differs_by_the_measured_return_gap():
+    """The two pricing modes differ by exactly the measured return gap (with
+    zero costs, so nothing else can explain the difference).
+
+    A single parameter combination is used on purpose: the grid search scores
+    candidates under the pricing mode it runs in, so a multi-combination grid
+    could select *different* parameters in the two modes and the difference
+    would no longer be the pricing convention alone.
+    """
+    data = _make_multiasset_multiindex(n=504, n_assets=5, seed=42)
+    strategy_factory = _make_strategy_factory("cross_sectional_momentum")
+    param_grid = {"lookback": [20], "top_quantile": [0.4], "bottom_quantile": [0.2]}
+
+    def _run(pricing):
+        return cpcv_analysis(
+            data=data,
+            strategy_factory=strategy_factory,
+            param_grid=param_grid,
+            n_splits=4,
+            test_size=0.2,
+            commission=0.0,
+            slippage=0.0,
+            panel_pricing=pricing,
+        )
+
+    net_exposure = _run("net-exposure")
+    book = _run("book")
+    ne_total = net_exposure["summary"]["total_oos_return"]
+    book_total = book["summary"]["total_oos_return"]
+    assert ne_total is not None and book_total is not None
+    diag = net_exposure["summary"]["book_diagnostic"]
+    assert diag is not None
+    assert abs((ne_total - book_total) - diag["return_gap_total"]) < 1e-9
+
+
+def test_cpcv_book_pricing_keeps_the_net_exposure_numbers_unchanged():
+    """Requesting the book pricing mode explicitly does not change the
+    net-exposure numbers: the mode is opt-in and the default path is
+    bit-identical."""
+    data = _make_multiasset_multiindex(n=504, n_assets=5, seed=42)
+    strategy_factory = _make_strategy_factory("cross_sectional_momentum")
+    param_grid = {"lookback": [15, 20, 30], "top_quantile": [0.4], "bottom_quantile": [0.2]}
+
+    default = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+    )
+    explicit = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+        panel_pricing="net-exposure",
+    )
+    assert default["summary"]["total_oos_return"] == 0.005399536978800246
+    assert explicit["summary"]["total_oos_return"] == default["summary"]["total_oos_return"]
+
+
 TEST_REGISTRY = [
     ("cpcv_basic_structure", test_cpcv_basic_structure),
     ("cpcv_purge_embargo", test_cpcv_purge_embargo),
@@ -887,6 +990,9 @@ TEST_REGISTRY = [
     ("cpcv_multi_asset_panel_capacity_does_not_raise", test_cpcv_multi_asset_panel_capacity_does_not_raise),
     ("cpcv_no_active_position_reports_none_and_zero_folds", test_cpcv_no_active_position_reports_none_and_zero_folds),
     ("cpcv_normal_run_keeps_current_numbers", test_cpcv_normal_run_keeps_current_numbers),
+    ("cpcv_book_pricing_backtests_a_market_neutral_book", test_cpcv_book_pricing_backtests_a_market_neutral_book),
+    ("cpcv_book_pricing_differs_by_the_measured_return_gap", test_cpcv_book_pricing_differs_by_the_measured_return_gap),
+    ("cpcv_book_pricing_keeps_the_net_exposure_numbers_unchanged", test_cpcv_book_pricing_keeps_the_net_exposure_numbers_unchanged),
     ("main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 
