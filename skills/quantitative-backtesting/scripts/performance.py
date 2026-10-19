@@ -17,7 +17,7 @@ from typing import Dict, Any, Optional, Union, List
 RISK_FREE_RATE = 0.02  # Annual risk-free rate (2%)
 
 
-def _annualization_factor(index: pd.Index, target_years: float = 1.0) -> float:
+def _annualization_factor(index: pd.Index) -> float:
     """Estimate the number of periods per year from a DatetimeIndex."""
     if not isinstance(index, pd.DatetimeIndex):
         return 252  # Default trading days
