@@ -48,6 +48,7 @@ from walk_forward import (  # noqa: E402
     _add_benchmark_to_summary,
     _benchmark_list_alpha_correction,
     deflated_alpha_ratio,
+    estimate_capacity,
     _load_and_validate_data,
     main as walk_forward_main,
 )
@@ -5969,6 +5970,59 @@ def test_examples_coverage_full_pipeline_runs():
     _ec.test_full_pipeline_example_runs()
 
 
+def test_estimate_capacity_structure_and_estimable():
+    data = _make_ohlcv_data(periods=300, seed=42)
+    cap = estimate_capacity(data, impact_coefficient=0.5)
+    assert cap["estimable"] is True
+    assert cap["unconstrained"] is False
+    assert cap["impact_coefficient"] == 0.5
+    assert cap["max_impact"] == 0.0005
+    assert cap["adv_window"] == 20
+    assert cap["price"] is not None and cap["price"] > 0
+    assert cap["adv_shares"] is not None and cap["adv_shares"] > 0
+    assert cap["adv_notional"] is not None and cap["adv_notional"] > 0
+    assert cap["periods_per_year"] is not None and cap["periods_per_year"] > 0
+    assert cap["max_notional_per_trade"] is not None and cap["max_notional_per_trade"] > 0
+    assert cap["estimated_capacity"] == cap["max_notional_per_trade"]
+
+
+def test_estimate_capacity_zero_impact_is_unconstrained():
+    data = _make_ohlcv_data(periods=300, seed=42)
+    cap = estimate_capacity(data, impact_coefficient=0.0)
+    assert cap["unconstrained"] is True
+    assert cap["estimated_capacity"] is None
+    assert cap["max_notional_per_trade"] is None
+    assert cap["estimable"] is False
+
+
+def test_estimate_capacity_negative_impact_is_unconstrained():
+    data = _make_ohlcv_data(periods=300, seed=42)
+    cap = estimate_capacity(data, impact_coefficient=-0.1)
+    assert cap["unconstrained"] is True
+
+
+def test_estimate_capacity_scales_inversely_with_impact_coefficient():
+    data = _make_ohlcv_data(periods=300, seed=42)
+    cap_low = estimate_capacity(data, impact_coefficient=0.1)
+    cap_high = estimate_capacity(data, impact_coefficient=1.0)
+    assert cap_high["estimated_capacity"] < cap_low["estimated_capacity"]
+    assert abs(cap_high["estimated_capacity"] - cap_low["estimated_capacity"] / 10) < 1e-9
+
+
+def test_estimate_capacity_scales_directly_with_max_impact():
+    data = _make_ohlcv_data(periods=300, seed=42)
+    cap_5bps = estimate_capacity(data, impact_coefficient=0.5, max_impact=0.0005)
+    cap_10bps = estimate_capacity(data, impact_coefficient=0.5, max_impact=0.001)
+    assert abs(cap_10bps["estimated_capacity"] - 2 * cap_5bps["estimated_capacity"]) < 1e-9
+
+
+def test_estimate_capacity_missing_volume_not_estimable():
+    data = _make_ohlcv_data(periods=300, seed=42).drop(columns=["volume"])
+    cap = estimate_capacity(data, impact_coefficient=0.5)
+    assert cap["estimable"] is False
+    assert cap["estimated_capacity"] is None
+
+
 TEST_REGISTRY.extend([
     ("test_examples_coverage_deflated_alpha_imports", test_examples_coverage_deflated_alpha_imports),
     ("test_examples_coverage_deflated_alpha_runs", test_examples_coverage_deflated_alpha_runs),
@@ -5976,6 +6030,12 @@ TEST_REGISTRY.extend([
     ("test_examples_coverage_multiple_benchmarks_runs", test_examples_coverage_multiple_benchmarks_runs),
     ("test_examples_coverage_full_pipeline_imports", test_examples_coverage_full_pipeline_imports),
     ("test_examples_coverage_full_pipeline_runs", test_examples_coverage_full_pipeline_runs),
+    ("test_estimate_capacity_structure_and_estimable", test_estimate_capacity_structure_and_estimable),
+    ("test_estimate_capacity_zero_impact_is_unconstrained", test_estimate_capacity_zero_impact_is_unconstrained),
+    ("test_estimate_capacity_negative_impact_is_unconstrained", test_estimate_capacity_negative_impact_is_unconstrained),
+    ("test_estimate_capacity_scales_inversely_with_impact_coefficient", test_estimate_capacity_scales_inversely_with_impact_coefficient),
+    ("test_estimate_capacity_scales_directly_with_max_impact", test_estimate_capacity_scales_directly_with_max_impact),
+    ("test_estimate_capacity_missing_volume_not_estimable", test_estimate_capacity_missing_volume_not_estimable),
 ])
 
 if __name__ == "__main__":

@@ -1518,6 +1518,90 @@ def _calculate_strategy_returns(
     return strategy_returns.dropna()
 
 
+def estimate_capacity(
+    data: pd.DataFrame,
+    impact_coefficient: float,
+    max_impact: float = 0.0005,
+    adv_window: int = 20,
+) -> Dict[str, Any]:
+    """
+    Estimate strategy capacity from the market-impact cost model.
+
+    Market impact of trading notional ``N`` is:
+        impact = (N / ADV_notional) * impact_coefficient
+    Solving for the maximum tradable notional at a target impact gives the
+    per-trade capacity:
+        capacity_notional = max_impact * ADV_notional / impact_coefficient
+
+    A strategy that rebalances its full position each period can therefore
+    hold roughly ``capacity_notional`` of notional exposure without exceeding
+    ``max_impact`` per trade. Capacity scales inversely with the impact
+    coefficient and directly with the target impact and average daily volume.
+
+    Args:
+        data: OHLCV DataFrame (must contain ``close`` and ``volume``).
+        impact_coefficient: Linear market-impact coefficient. A value of 0
+            means impact is disabled and capacity is unconstrained.
+        max_impact: Maximum acceptable market impact per trade, as a fraction
+            of notional traded (default 0.0005 = 5 bps).
+        adv_window: Rolling window (in periods) for the ADV calculation.
+
+    Returns:
+        Dictionary with keys: impact_coefficient, max_impact, adv_window,
+        price, adv_shares, adv_notional, periods_per_year,
+        max_notional_per_trade, estimated_capacity, unconstrained, estimable.
+        ``unconstrained`` is True when impact is disabled. ``estimable`` is
+        False when ADV cannot be computed (missing columns or empty data).
+    """
+    result = {
+        "impact_coefficient": float(impact_coefficient),
+        "max_impact": float(max_impact),
+        "adv_window": int(adv_window),
+        "price": None,
+        "adv_shares": None,
+        "adv_notional": None,
+        "periods_per_year": None,
+        "max_notional_per_trade": None,
+        "estimated_capacity": None,
+        "unconstrained": False,
+        "estimable": False,
+    }
+
+    if impact_coefficient <= 0:
+        result["unconstrained"] = True
+        return result
+
+    if "close" not in data.columns or "volume" not in data.columns:
+        return result
+
+    close = data["close"]
+    volume = data["volume"]
+    if len(close) == 0 or len(volume) == 0:
+        return result
+
+    price = float(close.iloc[-1])
+    adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
+    adv_notional = adv_shares * close
+    last_adv_notional = float(adv_notional.iloc[-1])
+
+    if not np.isfinite(last_adv_notional) or last_adv_notional <= 0:
+        return result
+
+    ann_factor = _annualization_factor(data.index)
+    max_notional_per_trade = max_impact * last_adv_notional / float(impact_coefficient)
+
+    result.update(
+        price=price,
+        adv_shares=float(adv_shares.iloc[-1]),
+        adv_notional=last_adv_notional,
+        periods_per_year=float(ann_factor),
+        max_notional_per_trade=float(max_notional_per_trade),
+        estimated_capacity=float(max_notional_per_trade),
+        estimable=True,
+    )
+    return result
+
+
 def _calculate_walk_forward_summary(
     oos_returns: pd.Series,
     periods: List[Dict[str, Any]],
