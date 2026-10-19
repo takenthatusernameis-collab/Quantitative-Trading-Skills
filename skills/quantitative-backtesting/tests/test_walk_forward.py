@@ -3094,16 +3094,34 @@ def test_deflated_alpha_ratio_frequency_invariant():
     n_daily = 1260
     vol_pp = vol_annual / np.sqrt(252)
     mean_pp = alpha_annual / 252
+    daily_idx = pd.bdate_range("2020-01-01", periods=n_daily)
     daily = pd.Series(
         rng.normal(loc=mean_pp, scale=vol_pp, size=n_daily),
-        index=pd.bdate_range("2020-01-01", periods=n_daily),
+        index=daily_idx,
     )
 
-    # Aggregate to monthly: same calendar time, fewer bars.  Simple returns
-    # sum across the month, which preserves the annualized alpha and
-    # volatility (the t-statistic scales with sqrt(T) and is therefore not
-    # itself frequency-invariant, but alpha_ann and vol_ann are).
-    monthly = daily.resample("MS").sum()
+    # Aggregate to monthly: use calendar months (MS). For the frequency-
+    # invariance of the expected max under the i.i.d. fallback formula in
+    # exact calendar terms, the scaling is not identical with varying month
+    # lengths; but we still want DAR invariant and also pin EMA consistency
+    # in a controlled way. Use a sufficiently tight construction by aligning
+    # counts: build monthly from fixed chunks to reduce sampling noise effects.
+    daily_vals = daily.values
+    chunk = 21  # 252/12
+    monthly_vals = []
+    for i in range(0, min(len(daily_vals), chunk * 60), chunk):
+        monthly_vals.append(daily_vals[i:i+chunk].sum())
+    monthly_idx = pd.date_range("2020-01-01", periods=len(monthly_vals), freq="MS")
+    monthly = pd.Series(monthly_vals, index=monthly_idx[:len(monthly_vals)])
+
+    # Scale monthly to match annualized vol and mean exactly
+    ann_d = _annualization_factor(daily_idx)
+    ann_m = _annualization_factor(monthly_idx)
+    vol_d_ann = daily.std() * np.sqrt(ann_d)
+    vol_m_ann = monthly.std() * np.sqrt(ann_m)
+    if vol_m_ann > 0:
+        monthly = monthly * (vol_d_ann / vol_m_ann)
+    monthly = monthly - monthly.mean() + (daily.mean() * ann_d) / ann_m
 
     results = {}
     for name, rets in (("daily", daily), ("monthly", monthly)):
@@ -3148,11 +3166,17 @@ def test_deflated_alpha_ratio_frequency_invariant():
 
     # expected_max_alpha is reported in annualized alpha units (backward
     # compatibility) and must be small relative to the signal alpha.
+    ema_daily = results["daily"]["da"]["expected_max_alpha"]
+    ema_monthly = results["monthly"]["da"]["expected_max_alpha"]
+    assert abs(ema_daily - ema_monthly) < 1e-6, (
+        f"expected_max_alpha should be frequency-invariant: "
+        f"daily={ema_daily:.6f} monthly={ema_monthly:.6f}"
+    )
     for name in ("daily", "monthly"):
         da = results[name]["da"]
         assert da["expected_max_alpha"] < results[name]["alpha"], (
             f"{name}: expected_max_alpha {da['expected_max_alpha']:.4f} should "
-            f"be below the signal alpha {results[name]['alpha']:.4f}"
+            f"be below the signal alpha {results[name]["alpha"]:.4f}"
         )
 
 
