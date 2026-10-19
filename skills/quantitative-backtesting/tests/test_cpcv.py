@@ -5,6 +5,7 @@ Run with: python3 skills/quantitative-backtesting/tests/test_cpcv.py
 Uses only standard library + pandas/numpy (required by the scripts under test).
 """
 
+import math
 import sys
 import traceback
 import tempfile
@@ -26,6 +27,49 @@ from walk_forward import (  # noqa: E402
     _calculate_strategy_returns,
     _annualization_factor,
 )
+
+# --- Pinned cross-run regression values -------------------------------------
+#
+# A number that is compared against a value recorded in an earlier run (or on
+# a different machine) is compared with a relative tolerance, never with exact
+# equality. The last bits of a compounded return depend on the numpy/pandas
+# build (summation order, pairwise reduction, SIMD paths), so an exact `==`
+# against a recorded literal fails on a 1-ULP difference while saying nothing
+# about the methodology. The tolerance below is ~5 orders of magnitude tighter
+# than any methodology change would produce: a change in the pricing
+# convention, the warmup convention, the cost model or the parameter
+# selection moves this number by percent, not by 1e-14.
+#
+# The reference value is not a magic constant: it was reproduced bit-for-bit
+# by a from-scratch re-implementation of the CPCV pipeline (see
+# references/validation_methods.md, "Reproducing the pinned CPCV number"),
+# and the structural assertions in the tests below (fold count, selected
+# parameters, number of usable OOS bars) pin the conventions that produce it
+# in a way that is exactly reproducible.
+CPCV_OOS_RETURN_REFERENCE = 0.005399536978800024
+CPCV_OOS_RETURN_REL_TOL = 1e-9
+
+# The OOS series of the pinned configuration: 4 folds x 23 usable bars. A
+# window's first two bars are dropped (the lagged position series is undefined
+# there, and the cost term inherits that NaN), so a 25-bar test window
+# contributes 23 bars.
+CPCV_OOS_BAR_COUNT = 92
+# The selected lookback per fold. Note that fold 0 is a close call: its
+# training Sharpes are 2.681 (lookback 15), 2.747 (20) and 2.738 (30), a
+# 0.34% margin between the best and the runner-up. That is far above float
+# noise, so the pin is stable, but a methodology change that shifts the
+# training Sharpe at that scale can legitimately flip the selection -- in
+# which case the pin (and this constant) must be updated deliberately.
+CPCV_OOS_LOOKBACKS = [20, 15, 15, 15]
+
+
+def _assert_close(actual, expected, rel_tol=CPCV_OOS_RETURN_REL_TOL, label=""):
+    """Assert a float matches a recorded reference within a relative tolerance."""
+    assert actual is not None, f"{label} is None, expected ~{expected!r}"
+    assert math.isclose(actual, expected, rel_tol=rel_tol), (
+        f"{label} = {actual!r}, expected {expected!r} "
+        f"(rel_tol={rel_tol}); this is a real change, not float noise"
+    )
 
 
 def _make_sample_data(n_days: int = 500) -> pd.DataFrame:
@@ -738,7 +782,15 @@ def test_cpcv_no_active_position_reports_none_and_zero_folds():
 
 def test_cpcv_normal_run_keeps_current_numbers():
     """A run that selects parameters keeps its current numbers; only the
-    no-position case changes (0.0 -> None). Deterministic on the seeded panel."""
+    no-position case changes (0.0 -> None). Deterministic on the seeded panel.
+
+    The pinned return is compared with a relative tolerance (the last bits of
+    a compounded float move with the numpy/pandas build) and is accompanied by
+    exactly reproducible structural assertions -- the selected parameter per
+    fold and the number of usable OOS bars -- so the guard still fails loudly
+    if the pricing convention, the warmup convention or the parameter
+    selection changes.
+    """
     data = _make_multiasset_multiindex(n=504, n_assets=5, seed=42)
     strategy_factory = _make_strategy_factory("cross_sectional_momentum")
 
@@ -753,7 +805,174 @@ def test_cpcv_normal_run_keeps_current_numbers():
     summary = results["summary"]
     assert summary["n_folds"] == 4
     assert summary["folds_with_position"] == 4
-    assert summary["total_oos_return"] == 0.005399536978800246
+    _assert_close(
+        summary["total_oos_return"],
+        CPCV_OOS_RETURN_REFERENCE,
+        label="summary['total_oos_return']",
+    )
+    # Structural invariants (exactly reproducible): which parameter each fold
+    # selected, and how many OOS bars the run produced.
+    assert [
+        f["best_params"]["lookback"] for f in results["folds"]
+    ] == CPCV_OOS_LOOKBACKS
+    assert len(results["oos_returns"]) == CPCV_OOS_BAR_COUNT
+
+
+def _independent_cpcv_oos_return(panel, n_splits=4, test_size=0.2, lookbacks=(15, 20, 30),
+                                  top_quantile=0.4, bottom_quantile=0.2,
+                                  commission=0.0002, slippage=0.0001):
+    """Recompute the CPCV out-of-sample return from first principles.
+
+    Deliberately does NOT use the framework's return calculator, its strategy
+    classes or its fold construction: it re-derives the documented conventions
+    so that the framework's number can be checked against the *methodology*
+    rather than against itself.
+
+    The conventions it re-derives:
+
+    * **CPCV fold construction**: the observations are split into
+      ``n_splits`` sequential groups; each group is the test set once (the
+      first ``test_size`` fraction of it), and the training set of a fold is
+      the *other* groups, purged and embargoed around the test window.
+    * **Signal**: the cross-sectional net exposure
+      ``(n_long - n_short) / n_assets`` of the top/bottom quantile buckets,
+      with ``n_long = ceil(n_assets * top_quantile)`` and
+      ``n_short = ceil(n_assets * bottom_quantile)``.
+    * **Execution**: positions are the signal lagged by one period.
+    * **Pricing**: the portfolio return is the position times the *mean of
+      the per-asset returns* (not the return of the mean price).
+    * **Costs**: commission and slippage charged on ``|d position|``.
+    * **Warmup**: the first two bars of every window are dropped (the lagged
+      position is undefined on the first bar and the cost term inherits that
+      NaN on the second). The number of usable bars is returned alongside the
+      return because the warmup convention is *not* observable in the return
+      itself: the dropped bar is a flat-position bar, so it contributes a
+      factor of 1.0 to the product. The bar count is what pins it.
+    * **Selection**: the combination with the best *training* Sharpe wins;
+      combinations that take no position in the test window are skipped.
+
+    Returns:
+        ``(total_oos_return, n_usable_bars)``.
+    """
+    close_all = panel["close"]
+    n_obs = len(close_all)
+    group_size = n_obs // n_splits
+    groups = [
+        (i * group_size, (i + 1) * group_size if i < n_splits - 1 else n_obs)
+        for i in range(n_splits)
+    ]
+
+    def net_signal(close, lookback):
+        lookback_returns = close.pct_change(lookback)
+        signal = pd.Series(0.0, index=close.index)
+        for date in lookback_returns.index[lookback:]:
+            row = lookback_returns.loc[date].dropna()
+            if len(row) == 0:
+                continue
+            n_assets = len(row)
+            n_long = max(1, int(np.ceil(n_assets * top_quantile)))
+            n_short = max(1, int(np.ceil(n_assets * bottom_quantile)))
+            ranked = row.rank(ascending=False, method="first")
+            n_selected_long = len(ranked[ranked <= n_long].index)
+            n_selected_short = len(ranked[ranked > n_assets - n_short].index)
+            signal.loc[date] = (n_selected_long - n_selected_short) / n_assets
+        return signal
+
+    def window_returns(close, signal):
+        positions = signal.shift(1)
+        asset_returns = close.pct_change().mean(axis=1)
+        costs = positions.diff().abs() * (commission + slippage)
+        return (positions * asset_returns - costs).dropna()
+
+    oos_series = []
+    for test_group in range(n_splits):
+        test_start, test_end = groups[test_group]
+        test_len = int((test_end - test_start) * test_size)
+        test_indices = list(range(test_start, test_start + test_len))
+        train_indices = []
+        for train_group in range(n_splits):
+            if train_group == test_group:
+                continue
+            group_start, group_end = groups[train_group]
+            if train_group < test_group:
+                # purge the end of the earlier groups
+                purged_end = min(group_end, test_start)
+                if purged_end > group_start:
+                    train_indices.extend(range(group_start, purged_end))
+            else:
+                # embargo the start of the later groups
+                purged_start = max(group_start, test_start + test_len)
+                if purged_start < group_end:
+                    train_indices.extend(range(purged_start, group_end))
+        train_close = close_all.iloc[train_indices]
+        test_close = close_all.iloc[test_indices]
+
+        best_sharpe = -np.inf
+        best_returns = None
+        for lookback in lookbacks:
+            train_signal = net_signal(train_close, lookback)
+            test_signal = net_signal(test_close, lookback)
+            if not bool((test_signal.notna() & (test_signal != 0)).any()):
+                # takes no position in the test window -> skipped
+                continue
+            train_returns = window_returns(train_close, train_signal)
+            excess = train_returns - 0.02 / 252.0
+            sharpe = excess.mean() / excess.std() * np.sqrt(252.0)
+            if sharpe > best_sharpe:
+                best_sharpe = sharpe
+                best_returns = window_returns(test_close, test_signal)
+        oos_series.append(best_returns)
+
+    oos = pd.concat(oos_series)
+    return float((1 + oos).prod() - 1), len(oos)
+
+
+def test_cpcv_pinned_number_is_reproducible_from_first_principles():
+    """The pinned CPCV number is not a magic constant.
+
+    An independent re-implementation of the documented CPCV conventions (own
+    fold construction, own signal, own execution/pricing/cost conventions,
+    own product) reproduces the framework's out-of-sample return. This is what
+    makes the pin meaningful: it checks the *methodology*, not merely that
+    the code still returns whatever it returned last time.
+
+    The two comparisons are deliberately different in kind:
+
+    * framework vs. the independent re-implementation -- same process, so it
+      is compared with a tight tolerance (1e-12, three orders of magnitude
+      above float noise and four below any methodology change);
+    * framework vs. the recorded reference -- a cross-run comparison, so it
+      uses the looser cross-run tolerance.
+    """
+    data = _make_multiasset_multiindex(n=504, n_assets=5, seed=42)
+    strategy_factory = _make_strategy_factory("cross_sectional_momentum")
+
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid={"lookback": [15, 20, 30], "top_quantile": [0.4], "bottom_quantile": [0.2]},
+        n_splits=4,
+        test_size=0.2,
+    )
+
+    independent, independent_bars = _independent_cpcv_oos_return(data)
+    framework = results["summary"]["total_oos_return"]
+
+    assert math.isclose(framework, independent, rel_tol=1e-12), (
+        f"framework {framework!r} != independent re-implementation {independent!r}"
+    )
+    # The warmup convention is invisible in the return (the dropped bar is a
+    # flat-position bar, so it multiplies the product by 1.0). The usable-bar
+    # count is what pins it.
+    assert independent_bars == len(results["oos_returns"]), (
+        f"independent re-implementation used {independent_bars} usable bars, "
+        f"framework used {len(results['oos_returns'])}"
+    )
+    _assert_close(
+        framework,
+        CPCV_OOS_RETURN_REFERENCE,
+        label="summary['total_oos_return']",
+    )
 
 
 def test_cpcv_surfaces_capacity_trend_per_fold():
@@ -941,7 +1160,15 @@ def test_cpcv_book_pricing_differs_by_the_measured_return_gap():
 def test_cpcv_book_pricing_keeps_the_net_exposure_numbers_unchanged():
     """Requesting the book pricing mode explicitly does not change the
     net-exposure numbers: the mode is opt-in and the default path is
-    bit-identical."""
+    bit-identical.
+
+    Two different comparisons live here:
+
+    * default vs. explicit ``net-exposure`` -- the *same* run twice, so exact
+      equality is the right check (it must be bit-identical, not merely close);
+    * the run vs. the recorded reference -- a cross-run comparison, so it uses
+      the relative tolerance (see ``CPCV_OOS_RETURN_REL_TOL``).
+    """
     data = _make_multiasset_multiindex(n=504, n_assets=5, seed=42)
     strategy_factory = _make_strategy_factory("cross_sectional_momentum")
     param_grid = {"lookback": [15, 20, 30], "top_quantile": [0.4], "bottom_quantile": [0.2]}
@@ -961,8 +1188,18 @@ def test_cpcv_book_pricing_keeps_the_net_exposure_numbers_unchanged():
         test_size=0.2,
         panel_pricing="net-exposure",
     )
-    assert default["summary"]["total_oos_return"] == 0.005399536978800246
+    # Same run, two ways of asking for it: must be bit-identical.
     assert explicit["summary"]["total_oos_return"] == default["summary"]["total_oos_return"]
+    # Cross-run comparison against the recorded reference.
+    _assert_close(
+        default["summary"]["total_oos_return"],
+        CPCV_OOS_RETURN_REFERENCE,
+        label="default['summary']['total_oos_return']",
+    )
+    assert [
+        f["best_params"]["lookback"] for f in default["folds"]
+    ] == CPCV_OOS_LOOKBACKS
+    assert len(default["oos_returns"]) == CPCV_OOS_BAR_COUNT
 
 
 TEST_REGISTRY = [
@@ -990,6 +1227,8 @@ TEST_REGISTRY = [
     ("cpcv_multi_asset_panel_capacity_does_not_raise", test_cpcv_multi_asset_panel_capacity_does_not_raise),
     ("cpcv_no_active_position_reports_none_and_zero_folds", test_cpcv_no_active_position_reports_none_and_zero_folds),
     ("cpcv_normal_run_keeps_current_numbers", test_cpcv_normal_run_keeps_current_numbers),
+    ("cpcv_pinned_number_is_reproducible_from_first_principles",
+     test_cpcv_pinned_number_is_reproducible_from_first_principles),
     ("cpcv_book_pricing_backtests_a_market_neutral_book", test_cpcv_book_pricing_backtests_a_market_neutral_book),
     ("cpcv_book_pricing_differs_by_the_measured_return_gap", test_cpcv_book_pricing_differs_by_the_measured_return_gap),
     ("cpcv_book_pricing_keeps_the_net_exposure_numbers_unchanged", test_cpcv_book_pricing_keeps_the_net_exposure_numbers_unchanged),

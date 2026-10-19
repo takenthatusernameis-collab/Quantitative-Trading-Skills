@@ -577,7 +577,20 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
     under `panel_pricing="book"` a market-neutral book is traded in every
     fold (the net-exposure mode skips all of them), the two modes differ by
     exactly the measured `return_gap`, and the net-exposure numbers are
-    unchanged (the pinned `total_oos_return`).
+     unchanged (the pinned `total_oos_return`).
+     Also covers the **pinned cross-run regression values**: the reference
+     `total_oos_return`, the selected `lookback` per fold and the number of
+     usable OOS bars are asserted, and
+     `test_cpcv_pinned_number_is_reproducible_from_first_principles`
+     re-derives the whole CPCV pipeline independently (own fold construction,
+     own cross-sectional signal, own lag-1 execution, own
+     `mean of per-asset returns` pricing, own cost term, own warmup handling,
+     own product) and requires the framework to agree with it, so the pin
+     checks the *methodology* rather than the code's own last output. The
+     cross-run values are compared with a relative tolerance, never with
+     exact `==`: the last bits of a compounded float move with the
+     numpy/pandas build. See `references/validation_methods.md` under "The
+     Warmup Bars of a Window" and "Reproducing the Pinned CPCV Number".
   - `test_generate_sample_data.py` - Sample data generation creates valid OHLCV
   CSV with expected shape and constraints.
 

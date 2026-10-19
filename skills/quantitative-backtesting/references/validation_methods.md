@@ -699,6 +699,76 @@ the optimizer is chasing noise.
 | 0.3 to 0.5        | medium     |
 | < 0.3             | high       |
 
+### The Warmup Bars of a Window
+
+Every window (train or test) that the framework prices loses its first
+**two** bars to the execution warmup, and the number of usable bars is part
+of the reported result:
+
+- the position series is `signal.shift(1 + latency)`, so it is undefined
+  (`NaN`) on the first bar of a window;
+- the cost term is `positions.diff().abs() * (commission + slippage)`, and
+  `positions.diff()` inherits that `NaN` on the *second* bar as well.
+
+Both bars are therefore dropped from the return series. The second bar is
+dropped as a side effect of the cost term rather than by an explicit
+convention: on that bar the strategy is flat (its signal is still warming up),
+so the bar's return is `0.0` and it multiplies the compounded return by
+`1.0`. The *return* is therefore insensitive to the warmup convention, while
+the *number of usable bars* and the *training sample* are not.
+
+Consequences to keep in mind when reproducing a number:
+
+- a 25-bar test window contributes 23 usable bars;
+- the training Sharpe that drives parameter selection is computed on a
+  series that is missing that one flat bar, so it is not exactly the Sharpe
+  of the strategy's own (longer) return series;
+- the bar count is what pins the convention, not the compounded return.
+
+### Reproducing the Pinned CPCV Number
+
+`tests/test_cpcv.py` pins one reference configuration -- a 5-asset panel of
+504 bars (seed 42), `cross_sectional_momentum`, `lookback` in {15, 20, 30},
+`top_quantile` 0.4, `bottom_quantile` 0.2, 4 splits, `test_size` 0.2 -- and
+asserts:
+
+- `summary["total_oos_return"] == 0.005399536978800024` (within a relative
+  tolerance of `1e-9`);
+- the selected `lookback` per fold, `[20, 15, 15, 15]`;
+- 92 usable out-of-sample bars (4 folds x 23).
+
+The reference is not a magic constant: `test_cpcv_pinned_number_is_reproducible_from_first_principles`
+re-derives the whole pipeline independently -- its own CPCV fold construction
+(group-based, with the other groups as training data), its own cross-sectional
+signal, its own lag-1 execution, its own `mean of per-asset returns` pricing,
+its own cost term, its own warmup handling and its own product -- and
+requires the framework to agree with it. The conventions it re-derives are
+listed in the docstring of `_independent_cpcv_oos_return` in that file.
+
+Two different kinds of comparison are used, and they are not interchangeable:
+
+| Comparison | Kind | Check |
+| ---------- | ---- | ----- |
+| default run vs. explicit `panel_pricing="net-exposure"` | same process, same code path | exact equality (must be bit-identical) |
+| framework vs. the independent re-implementation | same process, independent code | `rel_tol=1e-12` |
+| framework vs. the recorded reference | cross-run / cross-environment | `rel_tol=1e-9` |
+
+A cross-run value is never compared with exact `==`: the last bits of a
+compounded float move with the numpy/pandas build (summation order, pairwise
+reduction), so an exact comparison fails on a 1-ULP difference while saying
+nothing about the methodology. The tolerances above are three to five orders
+of magnitude below any methodology change: a different pricing convention, a
+different warmup convention, a different cost model or a different parameter
+selection moves the number by percent, not by `1e-14`.
+
+The walk-forward path has one pinned reference of the same kind
+(`tests/test_walk_forward.py`, `test_walk_forward_normal_run_keeps_current_numbers`):
+`total_oos_return == 0.042594435108365136` (within `1e-9`), the selected
+`lookback` per period `[20, 20, 20]`, and 189 usable out-of-sample bars
+(3 test windows of 62, 63 and 64 bars -- the window lengths differ because
+the test windows are calendar-aligned and therefore not the same number of
+trading days).
+
 ### Usage Example
 
 ```python

@@ -7,6 +7,7 @@ No third-party test framework is required; uses only the standard library.
 """
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -54,6 +55,27 @@ from walk_forward import (  # noqa: E402
 )
 from strategy_builder import build_strategy  # noqa: E402
 from data_loader import load_data  # noqa: E402
+
+# --- Pinned cross-run regression values -------------------------------------
+#
+# A number compared against a value recorded in an earlier run (or on another
+# machine) is compared with a relative tolerance, never with exact equality:
+# the last bits of a compounded return depend on the numpy/pandas build
+# (summation order, pairwise reduction), so an exact `==` fails on a 1-ULP
+# difference while saying nothing about the methodology. The tolerance is ~5
+# orders of magnitude tighter than any methodology change would produce.
+# The structural assertions in the test below (selected parameter per period,
+# number of usable OOS bars) are exactly reproducible and pin the conventions
+# that produce the number.
+WALK_FORWARD_OOS_RETURN_REFERENCE = 0.042594435108365136
+WALK_FORWARD_OOS_RETURN_REL_TOL = 1e-9
+
+# 3 test windows of 62, 63 and 64 usable bars (the windows are calendar
+# aligned, so they are not the same number of trading days). A window's
+# first two bars are dropped (the lagged position series is undefined there,
+# and the cost term inherits that NaN).
+WALK_FORWARD_OOS_BAR_COUNT = 189
+WALK_FORWARD_LOOKBACKS = [20, 20, 20]
 
 
 def _make_ohlcv_data(periods: int = 300, seed: int = 42) -> pd.DataFrame:
@@ -6385,7 +6407,15 @@ def test_walk_forward_no_active_position_reports_none_and_zero_periods():
 def test_walk_forward_normal_run_keeps_current_numbers():
     """A walk-forward run that selects parameters keeps its current numbers;
     only the no-position case changes (0.0 -> None). Deterministic on the
-    seeded panel."""
+    seeded panel.
+
+    The pinned return is compared with a relative tolerance (the last bits of
+    a compounded float move with the numpy/pandas build) and is accompanied by
+    exactly reproducible structural assertions -- the selected parameter per
+    period and the number of usable OOS bars -- so the guard still fails
+    loudly if the pricing convention, the warmup convention or the parameter
+    selection changes.
+    """
     data, _ = _make_panel_returns_data(periods=504, n_assets=5, seed=42)
     strategy_factory = _make_strategy_factory("cross_sectional_momentum")
 
@@ -6401,7 +6431,21 @@ def test_walk_forward_normal_run_keeps_current_numbers():
 
     summary = results["summary"]
     assert summary["periods_with_position"] == 3
-    assert summary["total_oos_return"] == 0.042594435108365136
+    assert math.isclose(
+        summary["total_oos_return"],
+        WALK_FORWARD_OOS_RETURN_REFERENCE,
+        rel_tol=WALK_FORWARD_OOS_RETURN_REL_TOL,
+    ), (
+        f"total_oos_return = {summary['total_oos_return']!r}, expected "
+        f"{WALK_FORWARD_OOS_RETURN_REFERENCE!r} "
+        f"(rel_tol={WALK_FORWARD_OOS_RETURN_REL_TOL}); this is a real change, "
+        "not float noise"
+    )
+    # Structural invariants (exactly reproducible).
+    assert [
+        p["best_params"]["lookback"] for p in results["periods"]
+    ] == WALK_FORWARD_LOOKBACKS
+    assert len(results["oos_returns"]) == WALK_FORWARD_OOS_BAR_COUNT
 
 
 TEST_REGISTRY.append(
