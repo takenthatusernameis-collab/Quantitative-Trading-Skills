@@ -439,13 +439,14 @@ def generate_tear_sheet(
                 "commission and slippage on its gross turnover sum_i |dw_i|, "
                 "borrow on its short legs, funding on its gross exposure, and "
                 "market impact per asset against that asset's own ADV. "
-                "Residual approximations: the impact is the equal-weighted "
+                "Residual approximation: the impact is the equal-weighted "
                 "mean of the per-asset impacts over the whole panel (so a "
                 "period in which only some names trade is charged less than "
-                "the participation actually consumed), and the capacity "
-                "estimate stays basket-based (equal 1/n per constituent, "
-                "least liquid name binding), which is an approximation for a "
-                "book whose weights differ.</em></p>"
+                "the participation actually consumed). The capacity is "
+                "reported twice: the basket-based estimate (an equal-weight "
+                "basket that rebalances 1/n per constituent, least liquid "
+                "name binding) and, next to it, the book-based estimate "
+                "computed from the strategy's own trade sizes.</em></p>"
             )
         else:
             out.append(
@@ -504,6 +505,15 @@ def generate_tear_sheet(
             f"<tr><td>{_capacity_label}</td>"
             f"<td class='metric'>{fmt_num(capacity)}</td></tr>"
         )
+    # Book-based capacity: the equity level at which the strategy's own
+    # rebalances reach the impact threshold, next to the basket-based
+    # number above. Reported in the book pricing mode only.
+    capacity_book = metrics.get("capacity_book")
+    if capacity_book is not None:
+        html_parts.append(
+            f"<tr><td>Strategy Capacity (Notional, book-based)</td>"
+            f"<td class='metric'>{fmt_num(capacity_book)}</td></tr>"
+        )
     # Capacity trend: the worst capacity reading inside the backtest window.
     # The point-in-time row above only reads the last bar, so a liquidity
     # squeeze inside the window is invisible to it.
@@ -513,6 +523,14 @@ def generate_tear_sheet(
         html_parts.append(
             f"<tr><td>Strategy Capacity Min (Notional)</td>"
             f"<td class='metric'>{fmt_num(_metrics_min_capacity)}</td></tr>"
+        )
+    # The same distribution for the book-based capacity.
+    _metrics_book_trend = metrics.get("capacity_book_trend") or {}
+    _metrics_min_capacity_book = _metrics_book_trend.get("min_capacity")
+    if _metrics_min_capacity_book is not None:
+        html_parts.append(
+            f"<tr><td>Strategy Capacity Min (Notional, book-based)</td>"
+            f"<td class='metric'>{fmt_num(_metrics_min_capacity_book)}</td></tr>"
         )
     html_parts.append("</table>")
 
@@ -685,6 +703,14 @@ def generate_tear_sheet(
                 f"<tr><td>Strategy Capacity (Notional)</td>"
                 f"<td class='metric'>{fmt_num(capacity)}</td></tr>"
             )
+        # Book-based capacity: the capacity implied by the trade sizes the
+        # strategy actually executed out of sample (book pricing mode only).
+        capacity_book = wf_summary.get("capacity_book")
+        if capacity_book is not None:
+            html_parts.append(
+                f"<tr><td>Strategy Capacity (Notional, book-based)</td>"
+                f"<td class='metric'>{fmt_num(capacity_book)}</td></tr>"
+            )
         # Capacity trend: the worst capacity reading inside the sample. The
         # point-in-time row above only reads the last bar, so a liquidity
         # squeeze inside the sample is invisible to it.
@@ -694,6 +720,13 @@ def generate_tear_sheet(
             html_parts.append(
                 f"<tr><td>Strategy Capacity Min (Notional)</td>"
                 f"<td class='metric'>{fmt_num(_wf_min_capacity)}</td></tr>"
+            )
+        _wf_book_trend = wf_summary.get("capacity_book_trend") or {}
+        _wf_min_capacity_book = _wf_book_trend.get("min_capacity")
+        if _wf_min_capacity_book is not None:
+            html_parts.append(
+                f"<tr><td>Strategy Capacity Min (Notional, book-based)</td>"
+                f"<td class='metric'>{fmt_num(_wf_min_capacity_book)}</td></tr>"
             )
         html_parts.append("</table>")
 
@@ -710,10 +743,20 @@ def generate_tear_sheet(
         periods = wf_results.get("periods", [])
         if periods:
             html_parts.append("<h3>Best Parameters Per Period</h3>")
+            # The book-based capacity column is only added when at least one
+            # window produced one (book pricing mode), so the default
+            # tear sheet is unchanged.
+            _show_book_capacity = any(
+                p.get("capacity_book") is not None for p in periods
+            )
+            _book_capacity_header = (
+                "<th>Capacity Book (Notional)</th>" if _show_book_capacity else ""
+            )
             html_parts.append(
                 "<table><tr><th>Period</th><th>Best Params</th>"
                 "<th>In-Sample Sharpe</th><th>Capacity (Notional)</th>"
-                "<th>Capacity Min (Notional)</th></tr>"
+                "<th>Capacity Min (Notional)</th>"
+                f"{_book_capacity_header}</tr>"
             )
             for i, p in enumerate(periods):
                 params_str = _format_params(p.get("best_params"))
@@ -730,11 +773,20 @@ def generate_tear_sheet(
                 cap_min_str = (
                     fmt_num(_p_min_capacity) if _p_min_capacity is not None else "N/A"
                 )
+                _book_capacity_cell = ""
+                if _show_book_capacity:
+                    _cap_book = p.get("capacity_book")
+                    _book_capacity_cell = (
+                        f"<td class='metric'>"
+                        f"{fmt_num(_cap_book) if _cap_book is not None else 'N/A'}"
+                        f"</td>"
+                    )
                 html_parts.append(
                     f"<tr><td>{i + 1}</td><td>{params_str}</td>"
                     f"<td class='metric'>{sharpe_str}</td>"
                     f"<td class='metric'>{cap_str}</td>"
-                    f"<td class='metric'>{cap_min_str}</td></tr>"
+                    f"<td class='metric'>{cap_min_str}</td>"
+                    f"{_book_capacity_cell}</tr>"
                 )
             html_parts.append("</table>")
 
@@ -883,6 +935,21 @@ def generate_tear_sheet(
                 f"<tr><td>Strategy Capacity Min (Notional)</td>"
                 f"<td class='metric'>{fmt_num(_cpcv_min_capacity)}</td></tr>"
             )
+        # Book-based capacity: the capacity implied by the trade sizes the
+        # strategy actually executed out of sample (book pricing mode only).
+        cpcv_capacity_book = cpcv_summary.get("capacity_book")
+        if cpcv_capacity_book is not None:
+            html_parts.append(
+                f"<tr><td>Strategy Capacity (Notional, book-based)</td>"
+                f"<td class='metric'>{fmt_num(cpcv_capacity_book)}</td></tr>"
+            )
+        _cpcv_book_trend = cpcv_summary.get("capacity_book_trend") or {}
+        _cpcv_min_capacity_book = _cpcv_book_trend.get("min_capacity")
+        if _cpcv_min_capacity_book is not None:
+            html_parts.append(
+                f"<tr><td>Strategy Capacity Min (Notional, book-based)</td>"
+                f"<td class='metric'>{fmt_num(_cpcv_min_capacity_book)}</td></tr>"
+            )
         html_parts.append("</table>")
 
         # Panel book diagnostic for the CPCV sample (aggregated over the
@@ -911,10 +978,20 @@ def generate_tear_sheet(
         folds = cpcv_results.get("folds", [])
         if folds:
             html_parts.append("<h3>Best Parameters Per Fold</h3>")
+            # The book-based capacity column is only added when at least one
+            # fold produced one (book pricing mode), so the default tear
+            # sheet is unchanged.
+            _show_book_capacity = any(
+                f.get("capacity_book") is not None for f in folds
+            )
+            _book_capacity_header = (
+                "<th>Capacity Book (Notional)</th>" if _show_book_capacity else ""
+            )
             html_parts.append(
                 "<table><tr><th>Fold</th><th>Best Params</th>"
                 "<th>Best Sharpe</th><th>Capacity (Notional)</th>"
-                "<th>Capacity Min (Notional)</th></tr>"
+                "<th>Capacity Min (Notional)</th>"
+                f"{_book_capacity_header}</tr>"
             )
             for f in folds:
                 params_str = _format_params(f.get("best_params"))
@@ -931,11 +1008,20 @@ def generate_tear_sheet(
                 cap_min_str = (
                     fmt_num(_f_min_capacity) if _f_min_capacity is not None else "N/A"
                 )
+                _book_capacity_cell = ""
+                if _show_book_capacity:
+                    _cap_book = f.get("capacity_book")
+                    _book_capacity_cell = (
+                        f"<td class='metric'>"
+                        f"{fmt_num(_cap_book) if _cap_book is not None else 'N/A'}"
+                        f"</td>"
+                    )
                 html_parts.append(
                     f"<tr><td>{f.get('fold', '?')}</td><td>{params_str}</td>"
                     f"<td class='metric'>{sharpe_str}</td>"
                     f"<td class='metric'>{cap_str}</td>"
-                    f"<td class='metric'>{cap_min_str}</td></tr>"
+                    f"<td class='metric'>{cap_min_str}</td>"
+                    f"{_book_capacity_cell}</tr>"
                 )
             html_parts.append("</table>")
 
@@ -1202,6 +1288,12 @@ def generate_tear_sheet(
         _book_diag_json = metrics.get("book_diagnostic")
     if isinstance(_book_diag_json, dict):
         summary["book_diagnostic"] = _json_safe(_book_diag_json)
+    # The book-based capacity trend is a dict, so it is filtered out of the
+    # scalar-only `metrics` field above; surface it explicitly so the JSON
+    # summary carries the same distribution the HTML rows show.
+    _capacity_book_trend = metrics.get("capacity_book_trend")
+    if isinstance(_capacity_book_trend, dict):
+        summary["capacity_book_trend"] = _json_safe(_capacity_book_trend)
     # The panel pricing convention that produced the reported P&L. A panel
     # return is not interpretable without it: the net-exposure and book
     # conventions can differ by more than the transaction costs.

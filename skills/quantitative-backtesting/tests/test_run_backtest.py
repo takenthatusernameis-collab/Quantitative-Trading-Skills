@@ -2929,6 +2929,249 @@ def test_run_backtest_net_exposure_numbers_are_unchanged_by_the_book_cost_basis(
     assert diag["charged_turnover"] == diag["framework_turnover"]
 
 
+def _book_capacity_by_hand(
+    held,
+    close,
+    volume,
+    impact_coefficient,
+    max_impact=0.0005,
+    adv_window=20,
+):
+    """The book capacity, recomputed from the strategy's own weights.
+
+    The definition: the impact of asset ``i`` at equity ``E`` is
+    ``|dw_i| * E * coefficient / ADV_i``, so the equity at which that trade
+    reaches the impact threshold is ``max_impact * ADV_i / (|dw_i| *
+    coefficient)``. The capacity of the book is the level at which every
+    traded constituent stays inside the threshold, i.e. the minimum of those
+    per-asset levels.
+
+    Returns ``(point_in_time_capacity, per_period_series)``.
+    """
+    adv_notional = volume.rolling(window=adv_window, min_periods=1).mean() * close
+    traded = held.diff().abs()
+    per_asset = (max_impact * adv_notional) / (
+        traded.replace(0.0, np.nan) * impact_coefficient
+    )
+    per_asset = per_asset.where(np.isfinite(per_asset) & (per_asset > 0))
+    series = per_asset.min(axis=1, skipna=True)
+    valid = series.dropna()
+    assert len(valid) > 0
+    return float(valid.iloc[-1]), series
+
+
+def test_book_capacity_equals_the_basket_capacity_for_a_one_over_n_book():
+    """The book-based capacity and the basket-based one are the same rule.
+
+    The basket rule assumes an equal-weight basket that rebalances
+    ``1 / n_assets`` per constituent. The book-based rule uses the trade
+    sizes the strategy actually executes, so for a book that trades exactly
+    ``1 / n_assets`` per constituent every period the two must agree
+    exactly -- otherwise the two numbers would not be comparable.
+    """
+    from utils import book_capacity_estimate  # noqa: E402
+    from walk_forward import estimate_capacity  # noqa: E402
+
+    n_bars, n_assets = 120, 4
+    dates = pd.date_range("2020-01-01", periods=n_bars, freq="B")
+    symbols = [f"ASSET_{i}" for i in range(n_assets)]
+    rng = np.random.default_rng(7)
+    close = pd.DataFrame(
+        100 * np.exp(np.cumsum(rng.normal(0.0004, 0.01, (n_bars, n_assets)), axis=0)),
+        index=dates,
+        columns=symbols,
+    )
+    volume = pd.DataFrame(
+        rng.integers(1_000_000, 4_000_000, (n_bars, n_assets)).astype(float),
+        index=dates,
+        columns=symbols,
+    )
+    impact_coefficient, max_impact, adv_window = 0.5, 0.0005, 20
+
+    # The book alternates between flat and 1/n per constituent, so every
+    # period trades exactly 1/n of the notional in every name.
+    held = pd.DataFrame(0.0, index=dates, columns=symbols)
+    held.iloc[1::2] = 1.0 / n_assets
+
+    book = book_capacity_estimate(
+        held, close, volume,
+        impact_coefficient=impact_coefficient,
+        max_impact=max_impact,
+        adv_window=adv_window,
+    )
+    frame = pd.concat({"close": close, "volume": volume}, axis=1)
+    basket = estimate_capacity(
+        frame, impact_coefficient, max_impact=max_impact, adv_window=adv_window
+    )
+
+    assert book["estimable"] is True
+    assert abs(
+        book["estimated_capacity"] - basket["estimated_capacity"]
+    ) < 1e-6
+    # The binding constituent is the same one the basket rule binds on.
+    assert book["binding_asset"] == basket["binding_asset"]
+    # The trend is the distribution of the per-period readings.
+    assert book["capacity_trend"]["n_periods"] == book["n_periods_measured"]
+    assert (
+        book["capacity_trend"]["min_capacity"]
+        <= book["capacity_trend"]["median_capacity"]
+        <= book["capacity_trend"]["max_capacity"]
+    )
+
+
+def test_book_capacity_is_lower_for_a_book_that_trades_more():
+    """A book that trades more per period has less capacity.
+
+    The basket rule charges every constituent ``1 / n_assets`` of the
+    notional per rebalance. A book that rotates the whole notional through
+    one name consumes ``n_assets`` times the participation, so it supports
+    ``n_assets`` times less capital before it hits the impact threshold.
+    """
+    from utils import book_capacity_estimate  # noqa: E402
+    from walk_forward import estimate_capacity  # noqa: E402
+
+    n_bars, n_assets = 120, 4
+    dates = pd.date_range("2020-01-01", periods=n_bars, freq="B")
+    symbols = [f"ASSET_{i}" for i in range(n_assets)]
+    rng = np.random.default_rng(7)
+    close = pd.DataFrame(
+        100 * np.exp(np.cumsum(rng.normal(0.0004, 0.01, (n_bars, n_assets)), axis=0)),
+        index=dates,
+        columns=symbols,
+    )
+    volume = pd.DataFrame(
+        rng.integers(1_000_000, 4_000_000, (n_bars, n_assets)).astype(float),
+        index=dates,
+        columns=symbols,
+    )
+    # Make the name the book rotates through the least liquid one, so it is
+    # the binding constituent of both capacity rules.
+    volume["ASSET_0"] = 100_000.0
+    impact_coefficient, max_impact, adv_window = 0.5, 0.0005, 20
+
+    # A full rotation: the whole notional moves in and out of one name.
+    held = pd.DataFrame(0.0, index=dates, columns=symbols)
+    held["ASSET_0"] = np.where(np.arange(n_bars) % 2 == 0, 1.0, 0.0)
+
+    book = book_capacity_estimate(
+        held, close, volume,
+        impact_coefficient=impact_coefficient,
+        max_impact=max_impact,
+        adv_window=adv_window,
+    )
+    frame = pd.concat({"close": close, "volume": volume}, axis=1)
+    basket = estimate_capacity(
+        frame, impact_coefficient, max_impact=max_impact, adv_window=adv_window
+    )
+
+    # 1/n per constituent (the basket) vs the whole notional in one name:
+    # exactly n_assets times the participation, so n_assets times less
+    # capacity.
+    assert abs(
+        book["estimated_capacity"] * n_assets - basket["estimated_capacity"]
+    ) / basket["estimated_capacity"] < 1e-6
+    assert book["estimated_capacity"] < basket["estimated_capacity"]
+
+
+def test_run_backtest_reports_the_book_capacity_next_to_the_basket_one():
+    """The book pricing mode reports the book-based capacity.
+
+    The number is the equity level at which the strategy's own rebalances
+    hit the impact threshold, and it is recomputed here by hand from the
+    strategy's own weights (so the test does not compare the engine
+    against itself).
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    params = '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}'
+    impact_coefficient = 0.5
+
+    results = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(impact_coefficient=impact_coefficient, panel_pricing="book"),
+    )
+
+    market, held = _held_book_of(
+        build_strategy("cross_sectional_momentum", params), data
+    )
+    expected, series = _book_capacity_by_hand(
+        held, market["close"], market["volume"], impact_coefficient
+    )
+
+    # The reported number is the hand-computed one.
+    assert results["capacity_book"] is not None
+    assert abs(results["capacity_book"] - expected) < 1e-6
+
+    # The basket-based estimate is still reported next to it.
+    assert results["capacity"] is not None
+
+    # The reported capacity is exactly the equity level at which the worst
+    # trade of the point-in-time bar reaches the impact threshold (and no
+    # other trade of that bar exceeds it).
+    point_in_time_bar = series.dropna().index[-1]
+    adv_notional = (
+        market["volume"].rolling(window=20, min_periods=1).mean()
+        * market["close"]
+    )
+    traded = held.diff().abs().loc[point_in_time_bar]
+    impacts = (
+        traded * results["capacity_book"] * impact_coefficient
+        / adv_notional.loc[point_in_time_bar]
+    )
+    traded_assets = impacts[traded > 0].dropna()
+    assert len(traded_assets) > 0
+    assert abs(traded_assets.max() - 0.0005) < 1e-12
+    assert traded_assets.max() <= 0.0005 + 1e-12
+
+    # The trend is the distribution of the per-period readings.
+    trend = results["capacity_book_trend"]
+    assert trend is not None
+    assert trend["n_periods"] == int(series.notna().sum())
+    assert abs(trend["min_capacity"] - float(series.dropna().min())) < 1e-6
+
+
+def test_run_backtest_book_capacity_is_absent_in_the_net_exposure_mode():
+    """The net-exposure mode keeps a single (basket-based) capacity number.
+
+    The book-based estimate is reported in the book pricing mode only, so
+    the default path is unchanged and a reader never has to wonder which
+    convention produced a capacity number.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    params = '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}'
+    results = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(impact_coefficient=0.5),
+    )
+    assert results["panel_pricing"] == "net-exposure"
+    assert results["capacity_book"] is None
+    assert results["capacity_book_trend"] is None
+    assert results["capacity"] is not None
+
+
+def test_book_capacity_is_none_when_impact_is_disabled():
+    """Without a market-impact model there is no capacity constraint."""
+    from utils import book_capacity_estimate  # noqa: E402
+
+    dates = pd.date_range("2020-01-01", periods=10, freq="B")
+    close = pd.DataFrame({"A": np.arange(10, dtype=float) + 10.0}, index=dates)
+    volume = pd.DataFrame({"A": np.arange(10, dtype=float) + 1e6}, index=dates)
+    held = pd.DataFrame({"A": np.arange(10, dtype=float) / 10.0}, index=dates)
+
+    disabled = book_capacity_estimate(held, close, volume, impact_coefficient=0.0)
+    assert disabled["unconstrained"] is True
+    assert disabled["estimated_capacity"] is None
+    assert disabled["capacity_trend"] is None
+
+    # A book that never trades imposes no capacity constraint either.
+    flat = pd.DataFrame(0.0, index=dates, columns=["A"])
+    no_trade = book_capacity_estimate(flat, close, volume, impact_coefficient=0.5)
+    assert no_trade["estimable"] is False
+    assert no_trade["estimated_capacity"] is None
+
+
+
 def test_cli_data_provenance_reproducible_across_runs():
     """Running the CLI twice with identical inputs yields byte-identical
     data_provenance.json (load_timestamp sanitized to source mtime)."""
@@ -3047,6 +3290,11 @@ TEST_REGISTRY = [
     ("test_run_backtest_book_pricing_builds_a_trade_ledger", test_run_backtest_book_pricing_builds_a_trade_ledger),
     ("test_book_trade_ledger_prices_each_leg_at_its_own_close", test_book_trade_ledger_prices_each_leg_at_its_own_close),
     ("test_run_backtest_net_exposure_numbers_are_unchanged_by_the_book_cost_basis", test_run_backtest_net_exposure_numbers_are_unchanged_by_the_book_cost_basis),
+    ("test_book_capacity_equals_the_basket_capacity_for_a_one_over_n_book", test_book_capacity_equals_the_basket_capacity_for_a_one_over_n_book),
+    ("test_book_capacity_is_lower_for_a_book_that_trades_more", test_book_capacity_is_lower_for_a_book_that_trades_more),
+    ("test_run_backtest_reports_the_book_capacity_next_to_the_basket_one", test_run_backtest_reports_the_book_capacity_next_to_the_basket_one),
+    ("test_run_backtest_book_capacity_is_absent_in_the_net_exposure_mode", test_run_backtest_book_capacity_is_absent_in_the_net_exposure_mode),
+    ("test_book_capacity_is_none_when_impact_is_disabled", test_book_capacity_is_none_when_impact_is_disabled),
 ]
 
 if __name__ == "__main__":

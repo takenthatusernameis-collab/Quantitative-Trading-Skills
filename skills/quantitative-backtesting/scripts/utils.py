@@ -922,6 +922,227 @@ def aggregate_book_diagnostics(diagnostics):
     }
 
 
+def _capacity_trend_from_series(
+    capacity_series: pd.Series,
+    point_in_time_capacity: float,
+):
+    """Summarise the distribution of per-period capacity readings.
+
+    The point-in-time ``estimated_capacity`` is a *single* reading: the ADV
+    of the last bar of the window. A drying-up liquidity regime *inside* the
+    window is invisible to it. This helper turns the per-period capacity
+    series into the distribution that the single reading hides:
+
+        min_capacity      worst liquidity point inside the window
+        median_capacity   typical liquidity point inside the window
+        max_capacity      best liquidity point inside the window
+        last_capacity     the point-in-time reading (= estimated_capacity)
+
+    The two ratios express how the extremes relate to the typical reading:
+
+        min_to_median_ratio  worst / typical  (<= 1; a mid-window squeeze)
+        last_to_median_ratio end-of-window / typical (<= 1 when liquidity
+                              dried up towards the end of the window)
+
+    Both ratios are relative to the median, so they are comparable across
+    windows with different absolute capacity levels.
+    """
+    series = pd.Series(capacity_series, dtype=float)
+    valid = series.replace([np.inf, -np.inf], np.nan).dropna()
+    valid = valid[np.isfinite(valid)]
+
+    last_capacity = float(point_in_time_capacity)
+
+    if len(valid) == 0:
+        return {
+            "n_periods": 0,
+            "min_capacity": None,
+            "median_capacity": None,
+            "max_capacity": None,
+            "last_capacity": last_capacity,
+            "min_to_median_ratio": None,
+            "last_to_median_ratio": None,
+        }
+
+    min_capacity = float(valid.min())
+    median_capacity = float(valid.median())
+    max_capacity = float(valid.max())
+
+    return {
+        "n_periods": int(len(valid)),
+        "min_capacity": min_capacity,
+        "median_capacity": median_capacity,
+        "max_capacity": max_capacity,
+        "last_capacity": last_capacity,
+        "min_to_median_ratio": (
+            float(min_capacity / median_capacity) if median_capacity > 0 else None
+        ),
+        "last_to_median_ratio": (
+            float(last_capacity / median_capacity) if median_capacity > 0 else None
+        ),
+    }
+
+
+def book_capacity_estimate(
+    held_book,
+    close,
+    volume,
+    impact_coefficient: float,
+    max_impact: float = 0.0005,
+    adv_window: int = 20,
+):
+    """Capacity implied by the strategy's own rebalance pattern.
+
+    The basket rule (:func:`walk_forward.estimate_capacity`) assumes an
+    equal-weight basket: every constituent carries ``1 / n_assets`` of the
+    notional and the *least liquid* constituent binds the portfolio
+    capacity. A book whose weights differ trades a different amount in
+    every constituent, so the basket rule mis-states the capacity of such a
+    book: a book that trades *more* per period than ``1 / n_assets`` (a
+    rotation through one name) supports less capital, and a book that
+    trades *less* per period (a cross-sectional book that only rotates when
+    its constituent set changes) supports more.
+
+    This estimator uses the strategy's own trade sizes. The impact model
+    charges asset ``i`` with::
+
+        impact_i = (|dw_i| * equity / ADV_i) * impact_coefficient
+
+    so the equity level at which that trade reaches the ``max_impact``
+    threshold is::
+
+        equity_i = max_impact * ADV_i / (|dw_i| * impact_coefficient)
+
+    and the capacity of the book is the level at which *every* traded
+    constituent stays inside the threshold::
+
+        capacity = min_i ( max_impact * ADV_i / (|dw_i| * impact_coefficient) )
+
+    The two rules agree exactly for a book that rebalances ``1 / n_assets``
+    per constituent every period (the basket rule is that special case);
+    they differ for every other book.
+
+    The estimate is reported per period (each period's own trade sizes
+    against that period's own ADV), so a liquidity squeeze inside the
+    window is visible instead of being hidden behind a single reading:
+
+        estimated_capacity  the point-in-time reading: the capacity of the
+                            most recent bar on which the book actually
+                            traded. Bars on which the book did not trade
+                            impose no constraint, so the reading is the
+                            last *defined* one.
+        capacity_trend      the distribution of the per-period readings
+                            (see :func:`_capacity_trend_from_series`).
+        capacity_series     the per-period readings themselves, so a
+                            caller can merge the series of several windows
+                            without recomputing them.
+
+    Args:
+        held_book: held per-asset weights (rows = dates, columns = symbols).
+        close: close prices -- ``pd.DataFrame`` with one column per asset.
+        volume: volumes, same shape as ``close``, or ``None``.
+        impact_coefficient: linear impact coefficient; ``0`` disables impact.
+        max_impact: maximum acceptable market impact per trade (default
+            0.0005 = 5 bps), the same threshold the basket rule uses.
+        adv_window: rolling window (in periods) for the ADV.
+
+    Returns:
+        A dict with the keys ``estimated_capacity``, ``capacity_trend``,
+        ``capacity_series``, ``n_assets``, ``binding_asset``,
+        ``n_periods_measured``, ``point_in_time_bar``, ``unconstrained``,
+        ``estimable``, ``impact_coefficient``, ``max_impact`` and
+        ``adv_window``. ``estimated_capacity`` is ``None`` when impact is
+        disabled, when the book never traded, or when ADV is not estimable.
+    """
+    result = {
+        "estimated_capacity": None,
+        "capacity_trend": None,
+        "capacity_series": None,
+        "n_assets": None,
+        "binding_asset": None,
+        "n_periods_measured": 0,
+        "point_in_time_bar": None,
+        "unconstrained": False,
+        "estimable": False,
+        "impact_coefficient": float(impact_coefficient),
+        "max_impact": float(max_impact),
+        "adv_window": int(adv_window),
+    }
+
+    if impact_coefficient <= 0:
+        result["unconstrained"] = True
+        return result
+    if held_book is None or not isinstance(held_book, pd.DataFrame) or held_book.empty:
+        return result
+    if not isinstance(close, pd.DataFrame) or not isinstance(volume, pd.DataFrame):
+        return result
+    if close.shape[1] == 0 or volume.shape[1] == 0:
+        return result
+
+    # Only the constituents the book, the prices and the volumes all share
+    # can be priced.
+    columns = [
+        c for c in held_book.columns
+        if c in close.columns and c in volume.columns
+    ]
+    if not columns:
+        return result
+    held = held_book.reindex(columns=columns)
+    prices = close.reindex(columns=columns)
+    volumes = volume.reindex(columns=columns)
+
+    # Average Daily Volume in shares (rolling), then in notional -- the same
+    # convention the impact model uses.
+    adv_shares = volumes.rolling(window=adv_window, min_periods=1).mean()
+    adv_notional = adv_shares * prices
+
+    # The traded weight per asset per period. The first bar of the book has
+    # no change (nothing was held before it), so it is not a trade.
+    traded_weight = held.diff().abs()
+
+    # The per-asset capacity at the impact threshold. A constituent that did
+    # not trade (|dw_i| = 0) imposes no constraint, so it is excluded (NaN)
+    # and skipped by the per-period minimum.
+    traded = traded_weight.replace(0.0, np.nan)
+    per_asset_capacity = (
+        (max_impact * adv_notional) / (traded * float(impact_coefficient))
+    )
+    per_asset_capacity = per_asset_capacity.where(
+        np.isfinite(per_asset_capacity) & (per_asset_capacity > 0)
+    )
+
+    capacity_series = per_asset_capacity.min(axis=1, skipna=True)
+    valid = capacity_series.replace([np.inf, -np.inf], np.nan).dropna()
+    valid = valid[np.isfinite(valid)]
+    if len(valid) == 0:
+        # The book never traded inside the window: it imposes no capacity
+        # constraint of its own.
+        return result
+
+    result["estimable"] = True
+    result["n_assets"] = int(len(columns))
+    result["n_periods_measured"] = int(len(valid))
+    result["capacity_series"] = capacity_series
+
+    # The point-in-time reading: the capacity of the most recent bar on
+    # which the book actually traded.
+    point_in_time = float(valid.iloc[-1])
+    result["estimated_capacity"] = point_in_time
+    point_in_time_bar = valid.index[-1]
+    result["point_in_time_bar"] = str(pd.Timestamp(point_in_time_bar).date())
+    binding_row = per_asset_capacity.loc[point_in_time_bar]
+    if isinstance(binding_row, pd.DataFrame):
+        # A duplicated timestamp would make .loc return a frame.
+        binding_row = binding_row.iloc[-1]
+    binding_row = binding_row.dropna()
+    if len(binding_row):
+        result["binding_asset"] = str(binding_row.idxmin())
+    result["capacity_trend"] = _capacity_trend_from_series(
+        capacity_series, point_in_time
+    )
+    return result
+
+
 def _annualization_factor(index: pd.Index) -> float:
     """Estimate the number of periods per year from a DatetimeIndex."""
     if not isinstance(index, pd.DatetimeIndex):

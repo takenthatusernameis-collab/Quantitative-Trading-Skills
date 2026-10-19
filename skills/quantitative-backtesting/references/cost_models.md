@@ -308,17 +308,6 @@ The book cost basis is not a complete cost model. What is left:
   identical to the net-exposure path (where every constituent always trades
   `1 / n` of the notional) so the two modes stay comparable; a *sum* over the
   traded names would be the conservative alternative.
-- **The capacity estimate stays basket-based.** `estimate_capacity` assumes an
-  equal-weight basket whose least liquid constituent binds the portfolio
-  capacity. A book's capacity depends on its own per-asset weights: the
-  book-based estimate is
-  `min_i ( max_impact x ADV_i / (abs(dw_i) x impact_coefficient) )`, i.e. the
-  equity level at which rebalancing asset `i` hits the impact threshold. The
-  two agree exactly for a book that rebalances `1 / n` per constituent, and
-  differ for any other book (a concentrated book has a *lower* capacity than
-  the basket rule reports). The engine reports the basket-based number in
-  both modes and says so in the CLI, the tear sheet and this file; it is an
-  approximation for a book.
 - **The trade ledger does not reconcile with the equity curve.** The `pnl`
   field of a book trade is in price units scaled by the average weight, and
   the `return` field is that P&L divided by the entry price (the leg's
@@ -328,6 +317,10 @@ The book cost basis is not a complete cost model. What is left:
 - **The impact model is linear in the participation rate** and does not model
   a temporary permanent price impact, an overnight gap risk, or a market
   that moves against the trade. It is a sizing guard, not a fill model.
+
+The *capacity* is no longer one of the residuals: in `book` mode the engine
+reports the book-based capacity next to the basket-based one (see
+"Two capacity estimates" below).
 
 **Fallbacks.** A strategy that exposes no book (no
 `generate_target_weights`, or a single-asset run) cannot be priced as a
@@ -348,7 +341,8 @@ shared definitions live in `scripts/utils.py`:
 | Market impact (book) | `book_market_impact_cost` | per-asset notional `|dw_i| * equity` against each asset's own ADV; portfolio cost = equal-weighted mean |
 | Book cost basis | `book_cost_components` | gross turnover `sum_i |dw_i|`, short legs `sum_i max(-w_i, 0)`, gross exposure `sum_i |w_i|` |
 | Book trade ledger | `book_trade_ledger` | one round trip per asset and direction, priced at the asset's own close |
-| Capacity | `estimate_capacity` | equal-weighted basket; the least liquid constituent binds the portfolio capacity (a basket-based approximation for a book -- see "Residual approximations") |
+| Capacity (basket) | `estimate_capacity` | equal-weighted basket; the least liquid constituent binds the portfolio capacity |
+| Capacity (book) | `book_capacity_estimate` | the strategy's own trade sizes: `min_i ( max_impact * ADV_i / (abs(dw_i) * impact_coefficient) )` |
 
 The mean-of-returns convention is used instead of the return of the mean price
 series (`close.mean(axis=1).pct_change()`) because the latter prices a
@@ -576,11 +570,77 @@ binding member's `price` / `adv_shares` / `adv_notional`, plus `n_assets` and
 `binding_asset` so the driver of the estimate is auditable. For a single
 asset, `n_assets` is 1 and the formula reduces to the single-asset case.
 
+### Two capacity estimates
+
+The basket rule above assumes a *particular* book: an equal-weight basket
+that rebalances `1 / n_assets` per constituent. A strategy that exposes its
+own book trades a different amount in every constituent, so the basket rule
+is an approximation for it. In `book` mode the engine therefore reports **two**
+capacity numbers, computed by `book_capacity_estimate` in `scripts/utils.py`:
+
+| Number | Rule | Meaning |
+| --- | --- | --- |
+| basket-based (`capacity`) | `n_assets * max_impact * min_i(ADV_i) / impact_coefficient` | the notional an equal-weight basket that rebalances `1 / n` per constituent can carry |
+| book-based (`capacity_book`) | `min_i ( max_impact * ADV_i / (abs(dw_i) * impact_coefficient) )` | the equity level at which **the strategy's own** next rebalance reaches the impact threshold |
+
+The book-based number is the direct inversion of the impact model the book
+mode actually charges: the impact of asset `i` at equity `E` is
+`abs(dw_i) * E * impact_coefficient / ADV_i`, so the equity at which that
+trade hits the threshold is `max_impact * ADV_i / (abs(dw_i) *
+impact_coefficient)`, and the capacity of the book is the level at which
+*every* traded constituent stays inside the threshold.
+
+Properties (asserted by the test suite):
+
+- The two rules **agree exactly** for a book that trades `1 / n_assets` per
+  constituent every period: the basket rule is that special case.
+- A book that trades **more** per period supports **less** capital: a book
+  that rotates the whole notional through one name supports `n_assets` times
+  less than the basket rule reports.
+- A book that trades **less** per period (a cross-sectional book that only
+  rotates when its constituent set changes) supports **more** capital than
+  the basket rule reports. The basket number is therefore a *conservative*
+  reading of a book that trades often and an *optimistic* one for a book that
+  trades rarely.
+- The reported number is the **point-in-time** reading: the capacity of the
+  most recent bar on which the book actually traded (bars on which the book
+  did not trade impose no constraint, so they are skipped). The
+  `capacity_book_trend` key reports the distribution of the per-period
+  readings, exactly like `capacity_trend` does for the basket number.
+- It is `None` when impact is disabled, when the panel carries no volume, or
+  when the book never traded in the window.
+
+Where the numbers are reported:
+
+| Path | Book-based capacity | Its distribution |
+| --- | --- | --- |
+| `run_backtest` | `results["capacity_book"]` | `results["capacity_book_trend"]` |
+| `walk_forward_analysis` | `summary["capacity_book"]` | `summary["capacity_book_trend"]` |
+| `walk_forward_analysis` (per window) | `periods[i]["capacity_book"]` | `periods[i]["capacity_book_trend"]` |
+| `cpcv_analysis` | `summary["capacity_book"]` | `summary["capacity_book_trend"]` |
+| `cpcv_analysis` (per fold) | `folds[i]["capacity_book"]` | `folds[i]["capacity_book_trend"]` |
+| `out_of_sample_validation` | `summary["capacity_book"]` (test window), `validation_performance["capacity_book"]` | the matching `capacity_book_trend` keys |
+
+The walk-forward and CPCV summaries also carry `oos_min_capacity_book`: the
+**worst** book-based capacity seen in any out-of-sample window, i.e. the
+liquidity level that actually bound the strategy's own trade sizes. The
+per-window series are merged chronologically (each window's series is
+computed inside its own window, so no artificial trade is created at a window
+boundary) before the summary trend is computed.
+
+The book-based capacity is reported in the **`book` pricing mode only**. In
+the `net-exposure` mode the keys are `None`, so the default path keeps a
+single (basket-based) capacity number and the default artifacts are
+unchanged.
+
 ### Reporting
 
 The tear sheet renders the aggregate capacity as a "Strategy Capacity
 (Notional)" row in the Walk-Forward / CPCV analysis tables and surfaces it in
-`tear_sheet_summary.json` under the corresponding analysis summary.
+`tear_sheet_summary.json` under the corresponding analysis summary. In `book`
+mode it also renders "Strategy Capacity (Notional, book-based)" and the
+matching "Capacity Min" rows, and the per-window / per-fold tables gain a
+"Capacity Book (Notional)" column.
 
 The single-backtest path (`run_backtest.py`) reports the same estimate as
 `results["capacity"]` (mirrored into `metrics["capacity"]`) and the same trend

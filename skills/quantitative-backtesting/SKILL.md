@@ -185,6 +185,17 @@ Risk Metrics:
   point-in-time number, when judging whether a strategy can be scaled.
   Documented in `references/cost_models.md` under "Strategy Capacity
   Estimation".
+- **The capacity estimate depends on the book the strategy actually holds**:
+  the basket rule assumes an equal-weight basket that rebalances `1/n` per
+  constituent, so it is an approximation for any other book. In
+  `--panel-pricing book` mode the engine therefore reports a second,
+  book-based capacity next to the basket one: the equity level at which the
+  strategy's *own* rebalances reach the impact threshold,
+  `min_i ( max_impact * ADV_i / (|dw_i| x impact_coefficient) )`. A book that
+  trades more per period supports *less* capital than the basket rule
+  reports; the two agree exactly for a book that trades `1/n` per
+  constituent every period. Report both numbers, and state which convention
+  each one uses.
 - **A panel backtest prices net exposure, not the book**: a multi-asset
   portfolio is priced as `net_exposure x mean asset return`, one scalar per
   period, so a long/short book cannot be represented by it. Every panel run
@@ -217,10 +228,22 @@ Risk Metrics:
   from +16.3% (uncosted book) to -15.7% (costed book). The trade ledger is
   also built from the book (one round trip per asset and direction, priced at
   each asset's own close), so a market-neutral book finally has trade-level
-  statistics. Residual approximations: the impact stays the equal-weighted
-  mean of the per-asset impacts over the whole panel, and the capacity
-  estimate stays basket-based (an approximation for a book) -- both are
-  flagged in the CLI, the tear sheet and `references/cost_models.md`.
+  statistics. The **capacity** is reported twice in this mode: the
+  basket-based estimate (an equal-weight basket that rebalances `1/n` per
+  constituent, least liquid name binding) and, next to it, the **book-based**
+  estimate `min_i ( max_impact * ADV_i / (|dw_i| x impact_coefficient) )` --
+  the equity level at which the strategy's *own* rebalances reach the impact
+  threshold (`results["capacity_book"]`, `summary["capacity_book"]`,
+  `periods[i]["capacity_book"]`, `folds[i]["capacity_book"]`,
+  `validation_performance["capacity_book"]`, `test_performance["capacity_book"]`,
+  each with a `capacity_book_trend` distribution and, for the walk-forward /
+  CPCV summaries, `oos_min_capacity_book`). The two rules agree exactly for a
+  book that trades `1/n` per constituent every period; a book that trades
+  more per period supports less capital. The book-based capacity is reported
+  in `book` mode only, so the default path keeps a single capacity number.
+  Residual approximation: the impact stays the equal-weighted mean of the
+  per-asset impacts over the whole panel -- it is flagged in the CLI, the tear
+  sheet and `references/cost_models.md`.
   Every panel number must state its mode (`panel_pricing` in the results /
   summary, "Panel Pricing" in the tear sheet). Documented in
   `references/cost_models.md` under "Panel pricing modes (`--panel-pricing`)".
@@ -485,6 +508,14 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
       keys, and the `oos_min_capacity` aggregate; `None` when impact is
       disabled or ADV is not estimable, and the point-in-time
       `estimated_capacity` number is unchanged.
+      **Book-based capacity**: the capacity implied by the strategy's own
+      trade sizes (`results["capacity_book"]`, `summary["capacity_book"]`,
+      `period["capacity_book"]`, `fold["capacity_book"]`, the out-of-sample
+      per-split keys, each with a `capacity_book_trend` distribution and
+      `oos_min_capacity_book` on the walk-forward / CPCV summaries); it agrees
+      exactly with the basket estimate for a book that trades `1/n` per
+      constituent every period, is lower for a book that trades more per
+      period, and is `None` outside the `book` pricing mode.
       **Panel book diagnostic**: the per-window `period["book_diagnostic"]` /
       `fold["book_diagnostic"]` records, the aggregated
       `summary["book_diagnostic"]`, the out-of-sample per-split

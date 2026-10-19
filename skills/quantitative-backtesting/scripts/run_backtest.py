@@ -30,6 +30,7 @@ from performance import calculate_metrics, generate_report
 from reporting import generate_tear_sheet
 from utils import (
     _annualization_factor,
+    book_capacity_estimate,
     book_cost_components,
     book_is_active,
     book_market_impact_cost,
@@ -646,6 +647,34 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
         results["capacity"] = None
         results["capacity_trend"] = None
 
+    # Book-based capacity: the capacity implied by the trade sizes the
+    # strategy actually executes, next to the basket-based estimate above
+    # (which assumes an equal-weight basket rebalancing 1/n per
+    # constituent). A book that trades more per period than that supports
+    # less capital, a book that trades less supports more; the two agree
+    # exactly for a book that trades 1/n per constituent every period.
+    #
+    # Reported in the "book" pricing mode only, so the default net-exposure
+    # path keeps a single capacity number. None when the mode is not "book",
+    # when impact is disabled, when the panel carries no volume, or when
+    # the strategy exposes no book.
+    results["capacity_book"] = None
+    results["capacity_book_trend"] = None
+    if held_book is not None:
+        try:
+            _book_cap = book_capacity_estimate(
+                held_book,
+                close,
+                volume,
+                impact_coefficient=args.impact_coefficient,
+                adv_window=args.adv_window,
+            )
+            results["capacity_book"] = _book_cap.get("estimated_capacity")
+            results["capacity_book_trend"] = _book_cap.get("capacity_trend")
+        except Exception:
+            results["capacity_book"] = None
+            results["capacity_book_trend"] = None
+
     # Optional buy-and-hold benchmark baseline(s).
     # The benchmark return for period t is the close-to-close return
     # from t-1 to t (no shift): the strategy already trades at the next
@@ -1043,6 +1072,10 @@ def main():
     metrics = calculate_metrics(results, risk_free_rate=rfr) if rfr is not None else calculate_metrics(results)
     metrics["capacity"] = results.get("capacity")
     metrics["capacity_trend"] = results.get("capacity_trend")
+    # Book-based capacity: the capacity implied by the strategy's own trade
+    # sizes (book pricing mode only). None in the net-exposure mode.
+    metrics["capacity_book"] = results.get("capacity_book")
+    metrics["capacity_book_trend"] = results.get("capacity_book_trend")
     # Panel book diagnostic: the per-asset book the strategy holds against
     # the framework's net-exposure pricing. None for a single asset or a
     # strategy without a book.
@@ -1122,10 +1155,7 @@ def main():
                 "  Residual approximations: the market-impact model charges "
                 "the equal-weighted mean of the per-asset impacts over the "
                 "whole panel, so a period in which only some names trade is "
-                "charged less than the participation actually consumed; and "
-                "the capacity estimate stays basket-based (equal 1/n per "
-                "constituent, least liquid name binding), which is an "
-                "approximation for a book whose weights differ."
+                "charged less than the participation actually consumed."
             )
         else:
             print(
@@ -1134,6 +1164,43 @@ def main():
                 "under-charged (compare gross turnover with the charged "
                 "turnover above). Use --panel-pricing book to price and "
                 "cost the book itself."
+            )
+
+    # Capacity: the basket-based estimate (the framework's convention) and,
+    # in the book pricing mode, the book-based estimate next to it. Printed
+    # in the book mode only, so the default path's output is unchanged.
+    _capacity_basket = results.get("capacity")
+    _capacity_book = results.get("capacity_book")
+    if _effective_pricing == "book" and _capacity_book is not None:
+        print("Capacity (market impact):")
+        if _capacity_basket is not None:
+            print(
+                "  Basket-based (equal 1/n per constituent): "
+                f"{_capacity_basket:,.2f}"
+            )
+        print(
+            "  Book-based (the strategy's own trade sizes): "
+            f"{_capacity_book:,.2f}"
+        )
+        _cap_book_trend = results.get("capacity_book_trend") or {}
+        _cap_book_min = _cap_book_trend.get("min_capacity")
+        if _cap_book_min is not None:
+            print(
+                "  Book-based, worst reading in the window:    "
+                f"{_cap_book_min:,.2f}"
+            )
+        print(
+            "  The book-based estimate is the equity level at which one of "
+            "the strategy's own rebalances reaches the impact threshold; "
+            "the basket-based estimate assumes an equal-weight basket that "
+            "rebalances 1/n per constituent. The two agree exactly for a "
+            "book that rebalances 1/n per constituent every period."
+        )
+        if _capacity_book > 0:
+            print(
+                f"  The strategy trades {args.initial_capital:,.2f} of "
+                f"equity: {args.initial_capital / _capacity_book:.2f}x the "
+                "book-based capacity."
             )
 
     # Multiple-testing correction: when the number of development

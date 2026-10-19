@@ -33,7 +33,9 @@ from data_loader import (
 from performance import calculate_metrics, generate_report, _benchmark_stats
 from utils import (
     _annualization_factor,
+    _capacity_trend_from_series,
     aggregate_book_diagnostics,
+    book_capacity_estimate,
     book_cost_components,
     book_is_active,
     book_market_impact_cost,
@@ -542,6 +544,8 @@ def walk_forward_analysis(
     total_evaluated_trials = 0
     all_trial_sharpes: List[float] = []
     period_benchmark_stats = []
+    # Per-period book capacity series, merged into the summary trend.
+    period_book_capacity_series: List[Any] = []
 
     for period in periods:
         train_data = period["train_data"]
@@ -714,6 +718,38 @@ def walk_forward_analysis(
         # liquidity squeeze inside the window is invisible to it. None when
         # impact is disabled or ADV is not estimable.
         period["capacity_trend"] = _period_capacity.get("capacity_trend")
+        # Book-based capacity for the period's test window: the capacity
+        # implied by the trade sizes the selected strategy actually executes,
+        # next to the basket-based number above (which assumes an
+        # equal-weight basket rebalancing 1/n per constituent). Reported in
+        # the "book" pricing mode only, so the default net-exposure path
+        # keeps a single capacity number. None when impact is disabled, when
+        # the panel carries no volume, or when the strategy exposes no book.
+        period["capacity_book"] = None
+        period["capacity_book_trend"] = None
+        _period_book_capacity = None
+        if panel_pricing == "book":
+            _period_book_capacity = _window_book_capacity(
+                strategy_factory,
+                period.get("best_params"),
+                period["test_data"],
+                impact_coefficient=impact_coefficient,
+                adv_window=adv_window,
+                latency=latency,
+                fill_rate=fill_rate,
+            )
+            if _period_book_capacity is not None:
+                period["capacity_book"] = _period_book_capacity.get(
+                    "estimated_capacity"
+                )
+                period["capacity_book_trend"] = _period_book_capacity.get(
+                    "capacity_trend"
+                )
+        period_book_capacity_series.append(
+            _period_book_capacity.get("capacity_series")
+            if _period_book_capacity is not None
+            else None
+        )
         # Panel book diagnostic for the period's test window: the per-asset
         # book the selected strategy holds, measured against the
         # framework's net-exposure pricing of the same window. None when
@@ -807,6 +843,30 @@ def walk_forward_analysis(
     # that actually bound the strategy in the regimes it was traded in).
     summary["oos_min_capacity"] = _aggregate_oos_capacity(
         [p.get("capacity_trend") for p in periods]
+    )
+    # Book-based capacity: the same estimate computed from the trade sizes
+    # the strategy actually executed in the out-of-sample windows, next to
+    # the basket-based number above. The per-period series of every window
+    # are merged (each computed inside its own window, so no artificial
+    # trade is created at a window boundary) and the trend is the
+    # distribution of those per-period readings.
+    _book_capacity_series = _merge_capacity_series(period_book_capacity_series)
+    summary["capacity_book"] = None
+    summary["capacity_book_trend"] = None
+    if _book_capacity_series is not None:
+        _book_readings = _book_capacity_series.replace(
+            [np.inf, -np.inf], np.nan
+        ).dropna()
+        if len(_book_readings):
+            _book_point = float(_book_readings.iloc[-1])
+            summary["capacity_book"] = _book_point
+            summary["capacity_book_trend"] = _capacity_trend_from_series(
+                _book_capacity_series, _book_point
+            )
+    # Worst book-based capacity seen in any out-of-sample window: the
+    # liquidity level that actually bound the strategy's own trade sizes.
+    summary["oos_min_capacity_book"] = _aggregate_oos_capacity(
+        [p.get("capacity_book_trend") for p in periods]
     )
     # Panel book diagnostic aggregated over the out-of-sample windows: the
     # book the strategy actually held against the framework's net-exposure
@@ -1729,67 +1789,6 @@ def _calculate_strategy_returns(
     return strategy_returns.dropna()
 
 
-def _capacity_trend_from_series(
-    capacity_series: pd.Series,
-    point_in_time_capacity: float,
-) -> Dict[str, Any]:
-    """Summarise the distribution of per-period capacity readings.
-
-    The point-in-time ``estimated_capacity`` is a *single* reading: the ADV
-    of the last bar of the window. A drying-up liquidity regime *inside* the
-    window is invisible to it. This helper turns the per-period capacity
-    series into the distribution that the single reading hides:
-
-        min_capacity      worst liquidity point inside the window
-        median_capacity   typical liquidity point inside the window
-        max_capacity      best liquidity point inside the window
-        last_capacity     the point-in-time reading (= estimated_capacity)
-
-    The two ratios express how the extremes relate to the typical reading:
-
-        min_to_median_ratio  worst / typical  (<= 1; a mid-window squeeze)
-        last_to_median_ratio end-of-window / typical (<= 1 when liquidity
-                              dried up towards the end of the window)
-
-    Both ratios are relative to the median, so they are comparable across
-    windows with different absolute capacity levels.
-    """
-    series = pd.Series(capacity_series, dtype=float)
-    valid = series.replace([np.inf, -np.inf], np.nan).dropna()
-    valid = valid[np.isfinite(valid)]
-
-    last_capacity = float(point_in_time_capacity)
-
-    if len(valid) == 0:
-        return {
-            "n_periods": 0,
-            "min_capacity": None,
-            "median_capacity": None,
-            "max_capacity": None,
-            "last_capacity": last_capacity,
-            "min_to_median_ratio": None,
-            "last_to_median_ratio": None,
-        }
-
-    min_capacity = float(valid.min())
-    median_capacity = float(valid.median())
-    max_capacity = float(valid.max())
-
-    return {
-        "n_periods": int(len(valid)),
-        "min_capacity": min_capacity,
-        "median_capacity": median_capacity,
-        "max_capacity": max_capacity,
-        "last_capacity": last_capacity,
-        "min_to_median_ratio": (
-            float(min_capacity / median_capacity) if median_capacity > 0 else None
-        ),
-        "last_to_median_ratio": (
-            float(last_capacity / median_capacity) if median_capacity > 0 else None
-        ),
-    }
-
-
 def estimate_capacity(
     data: pd.DataFrame,
     impact_coefficient: float,
@@ -1978,6 +1977,110 @@ def estimate_capacity(
         ),
     )
     return result
+
+
+def _window_held_book(
+    strategy_factory: Callable,
+    best_params: Optional[Dict[str, Any]],
+    window_data,
+    latency: int = 0,
+    fill_rate: float = 1.0,
+):
+    """The book the selected strategy holds in one window, and its market.
+
+    The held book is the target book lagged by the execution convention
+    (``lag = 1 + latency``) and scaled by the fill rate -- the same
+    convention the framework's position series uses, and the same one the
+    book diagnostic and the book cost model measure.
+
+    Returns ``(held_book, market)``, or ``(None, None)`` when the window
+    has no usable book (no selected parameters, a strategy that exposes no
+    weights, a non-panel market, or a book over a different universe).
+    """
+    if best_params is None or window_data is None:
+        return None, None
+
+    strategy = strategy_factory(best_params)
+    weights = strategy_target_weights(strategy, window_data)
+    if weights is None:
+        return None, None
+
+    market = build_market_model(window_data)
+    held = held_book_weights(
+        weights, market, lag=1 + latency, fill_rate=fill_rate
+    )
+    if held is None:
+        return None, None
+    return held, market
+
+
+def _window_book_capacity(
+    strategy_factory: Callable,
+    best_params: Optional[Dict[str, Any]],
+    window_data,
+    impact_coefficient: float,
+    adv_window: int = 20,
+    latency: int = 0,
+    fill_rate: float = 1.0,
+    max_impact: float = 0.0005,
+) -> Optional[Dict[str, Any]]:
+    """The capacity implied by the book's own rebalance pattern in a window.
+
+    The basket rule assumes an equal-weight basket that rebalances
+    ``1 / n_assets`` per constituent; the book-based estimate uses the trade
+    sizes the strategy actually executes, so a concentrated book reports a
+    lower capacity than the basket rule. See
+    :func:`utils.book_capacity_estimate`.
+
+    Returns ``None`` when the window has no book, when the panel carries no
+    volume, or when impact is disabled.
+    """
+    held, market = _window_held_book(
+        strategy_factory,
+        best_params,
+        window_data,
+        latency=latency,
+        fill_rate=fill_rate,
+    )
+    if held is None:
+        return None
+    volume = market.get("volume")
+    if volume is None:
+        return None
+    return book_capacity_estimate(
+        held,
+        market["close"],
+        volume,
+        impact_coefficient=impact_coefficient,
+        max_impact=max_impact,
+        adv_window=adv_window,
+    )
+
+
+def _merge_capacity_series(series_list: List[Any]) -> Optional[pd.Series]:
+    """Merge per-window capacity series into one chronological series.
+
+    Each window's series is computed inside its own window, so merging them
+    creates no artificial trade at a window boundary (a boundary trade would
+    otherwise show up as a capacity reading the strategy never faced).
+    Windows that overlap are de-duplicated by timestamp, keeping the last
+    reading of each timestamp.
+
+    Args:
+        series_list: per-window capacity series (``None`` entries ignored).
+
+    Returns:
+        The merged series, or ``None`` when no window produced a series.
+    """
+    parts = [
+        s for s in (series_list or [])
+        if s is not None and len(s) > 0
+    ]
+    if not parts:
+        return None
+    merged = pd.concat(parts)
+    merged = merged[~merged.index.duplicated(keep="last")].sort_index()
+    return merged
 
 
 def _window_book_diagnostic(
@@ -2301,6 +2404,8 @@ def cpcv_analysis(
     total_evaluated_trials = 0
     all_trial_sharpes: List[float] = []
     fold_benchmark_stats = []
+    # Per-fold book capacity series, merged into the summary trend.
+    fold_book_capacity_series: List[Any] = []
 
     for fold in folds:
         train_data = fold["train_data"]
@@ -2469,6 +2574,32 @@ def cpcv_analysis(
         # trend that `walk_forward_analysis` records). None when impact is
         # disabled or ADV is not estimable.
         fold["capacity_trend"] = _fold_capacity.get("capacity_trend")
+        # Book-based capacity for the fold's test window (mirrors the
+        # per-period book capacity that `walk_forward_analysis` records).
+        # Reported in the "book" pricing mode only. None when impact is
+        # disabled, when the panel carries no volume, or when the strategy
+        # exposes no book.
+        fold["capacity_book"] = None
+        fold["capacity_book_trend"] = None
+        _fold_book_capacity = None
+        if panel_pricing == "book":
+            _fold_book_capacity = _window_book_capacity(
+                strategy_factory,
+                fold.get("best_params"),
+                fold["test_data"],
+                impact_coefficient=impact_coefficient,
+                adv_window=adv_window,
+                latency=latency,
+                fill_rate=fill_rate,
+            )
+            if _fold_book_capacity is not None:
+                fold["capacity_book"] = _fold_book_capacity.get("estimated_capacity")
+                fold["capacity_book_trend"] = _fold_book_capacity.get("capacity_trend")
+        fold_book_capacity_series.append(
+            _fold_book_capacity.get("capacity_series")
+            if _fold_book_capacity is not None
+            else None
+        )
         # Panel book diagnostic for the fold's test window (mirrors the
         # per-period diagnostic that `walk_forward_analysis` records).
         # Measurement only -- no return, cost or impact number changes.
@@ -2573,6 +2704,26 @@ def cpcv_analysis(
     summary["capacity_trend"] = _capacity.get("capacity_trend")
     summary["oos_min_capacity"] = _aggregate_oos_capacity(
         [f.get("capacity_trend") for f in folds]
+    )
+    # Book-based capacity: the same estimate computed from the trade sizes
+    # the strategy actually executed in the out-of-sample folds, next to the
+    # basket-based number above (see the walk-forward summary for the same
+    # keys).
+    _book_capacity_series = _merge_capacity_series(fold_book_capacity_series)
+    summary["capacity_book"] = None
+    summary["capacity_book_trend"] = None
+    if _book_capacity_series is not None:
+        _book_readings = _book_capacity_series.replace(
+            [np.inf, -np.inf], np.nan
+        ).dropna()
+        if len(_book_readings):
+            _book_point = float(_book_readings.iloc[-1])
+            summary["capacity_book"] = _book_point
+            summary["capacity_book_trend"] = _capacity_trend_from_series(
+                _book_capacity_series, _book_point
+            )
+    summary["oos_min_capacity_book"] = _aggregate_oos_capacity(
+        [f.get("capacity_book_trend") for f in folds]
     )
     # Panel book diagnostic aggregated over the out-of-sample folds (see
     # the walk-forward summary for the same key). None when no fold
@@ -2910,6 +3061,24 @@ def out_of_sample_validation(
     )
     val_capacity_point = val_capacity.get("estimated_capacity")
     val_capacity_trend = val_capacity.get("capacity_trend")
+    # Book-based capacity for the validation window: the capacity implied by
+    # the trade sizes the selected strategy actually executes, next to the
+    # basket-based number above. Reported in the "book" pricing mode only.
+    val_capacity_book = None
+    val_capacity_book_trend = None
+    if panel_pricing == "book":
+        _val_book_capacity = _window_book_capacity(
+            strategy_factory,
+            selected_params,
+            val_data,
+            impact_coefficient=impact_coefficient,
+            adv_window=adv_window,
+            latency=latency,
+            fill_rate=fill_rate,
+        )
+        if _val_book_capacity is not None:
+            val_capacity_book = _val_book_capacity.get("estimated_capacity")
+            val_capacity_book_trend = _val_book_capacity.get("capacity_trend")
 
     validation_performance = {
         "selected_params": selected_params,
@@ -2919,6 +3088,9 @@ def out_of_sample_validation(
         "val_n_periods": len(val_returns),
         "capacity": val_capacity_point,
         "capacity_trend": val_capacity_trend,
+        # Book-based capacity for the validation window (see above).
+        "capacity_book": val_capacity_book,
+        "capacity_book_trend": val_capacity_book_trend,
         # Panel book diagnostic for the validation window: the per-asset
         # book the selected strategy holds, measured against the
         # framework's net-exposure pricing of the same window. None when
@@ -2961,6 +3133,24 @@ def out_of_sample_validation(
     )
     test_capacity_point = test_capacity.get("estimated_capacity")
     test_capacity_trend = test_capacity.get("capacity_trend")
+    # Book-based capacity for the held-out test window: the capacity implied
+    # by the trade sizes the selected strategy actually executes. Reported in
+    # the "book" pricing mode only.
+    test_capacity_book = None
+    test_capacity_book_trend = None
+    if panel_pricing == "book":
+        _test_book_capacity = _window_book_capacity(
+            strategy_factory,
+            selected_params,
+            test_data,
+            impact_coefficient=impact_coefficient,
+            adv_window=adv_window,
+            latency=latency,
+            fill_rate=fill_rate,
+        )
+        if _test_book_capacity is not None:
+            test_capacity_book = _test_book_capacity.get("estimated_capacity")
+            test_capacity_book_trend = _test_book_capacity.get("capacity_trend")
 
     test_performance = {
      "test_total_return": test_total_return,
@@ -2970,6 +3160,9 @@ def out_of_sample_validation(
          "test_returns": test_returns,
          "capacity": test_capacity_point,
          "capacity_trend": test_capacity_trend,
+         # Book-based capacity for the held-out test window (see above).
+         "capacity_book": test_capacity_book,
+         "capacity_book_trend": test_capacity_book_trend,
          # Panel book diagnostic for the held-out test window. Measurement
          # only -- the reported test performance is unchanged.
          "book_diagnostic": _window_book_diagnostic(
@@ -3194,6 +3387,12 @@ def out_of_sample_validation(
     # Capacity trend over the whole sample (the per-period / per-fold
     # records carry the same key for their own window).
     summary["capacity_trend"] = _capacity.get("capacity_trend")
+    # Book-based capacity: the capacity implied by the trade sizes the
+    # selected strategy actually executes in the held-out test window, next
+    # to the basket-based number above. The validation window's own book
+    # capacity is reported in `validation_performance`.
+    summary["capacity_book"] = test_capacity_book
+    summary["capacity_book_trend"] = test_capacity_book_trend
     # Panel book diagnostic aggregated over the validation and test
     # windows. None when neither window produced one (single asset, or a
     # strategy that does not expose a book).
@@ -4138,6 +4337,7 @@ def run_cpcv(args) -> int:
         results["summary"].get("book_diagnostic"),
         panel_pricing=results["summary"].get("panel_pricing"),
     )
+    _print_capacity(results["summary"])
 
     dsr = results["summary"].get("deflated_sharpe")
     if dsr is not None:
@@ -4168,6 +4368,10 @@ def run_cpcv(args) -> int:
                 "test_end": f.get("test_end"),
                 "capacity": f.get("capacity"),
                 "capacity_trend": f.get("capacity_trend"),
+                # Book-based capacity for the fold (book pricing mode only):
+                # the capacity implied by the strategy's own trade sizes.
+                "capacity_book": f.get("capacity_book"),
+                "capacity_book_trend": f.get("capacity_book_trend"),
                 # Panel book diagnostic for the fold's test window: the
                 # per-asset book against the framework's net-exposure
                 # pricing (measurement only).
@@ -4302,6 +4506,45 @@ def _print_panel_pricing(mode, indent: str = "  ") -> None:
         )
 
 
+def _print_capacity(summary, indent: str = "  ") -> None:
+    """Print the market-impact capacity estimates of a summary.
+
+    The basket-based estimate assumes an equal-weight basket that rebalances
+    ``1 / n`` per constituent. Under the ``book`` pricing mode the summary
+    also carries the book-based estimate -- the equity level at which the
+    strategy's *own* rebalances reach the impact threshold -- and both are
+    printed so the reader can see which convention produced which number.
+
+    Nothing is printed when there is no book-based estimate, so the
+    ``net-exposure`` output is unchanged.
+    """
+    if not isinstance(summary, dict):
+        return
+    _basket = summary.get("capacity")
+    _book = summary.get("capacity_book")
+    if _book is None:
+        return
+    print(f"{indent}Capacity (market impact):")
+    if _basket is not None:
+        print(
+            f"{indent}  Basket-based (equal 1/n per constituent): {_basket:,.2f}"
+        )
+    print(
+        f"{indent}  Book-based (the strategy's own trade sizes): {_book:,.2f}"
+    )
+    _book_trend = summary.get("capacity_book_trend") or {}
+    _book_min = _book_trend.get("min_capacity")
+    if _book_min is not None:
+        print(
+            f"{indent}  Book-based, worst reading in the sample:    {_book_min:,.2f}"
+        )
+    _oos_min_book = summary.get("oos_min_capacity_book")
+    if _oos_min_book is not None:
+        print(
+            f"{indent}  Book-based, worst out-of-sample window:      {_oos_min_book:,.2f}"
+        )
+
+
 def _print_book_diagnostic(diag, indent: str = "  ", panel_pricing=None) -> None:
     """Print the panel book diagnostic (measurement only).
 
@@ -4358,11 +4601,10 @@ def _print_book_diagnostic(diag, indent: str = "  ", panel_pricing=None) -> None
             f"and funding on its gross exposure."
         )
         print(
-            f"{indent}  Residual approximations: the market-impact model "
+            f"{indent}  Residual approximation: the market-impact model "
             f"charges the equal-weighted mean of the per-asset impacts over "
-            f"the whole panel, and the capacity estimate stays basket-based "
-            f"(equal 1/n per constituent, least liquid name binding), which "
-            f"is an approximation for a book whose weights differ."
+            f"the whole panel, so a period in which only some names trade is "
+            f"charged less than the participation actually consumed."
         )
 
 
@@ -5133,6 +5375,7 @@ def run_walk_forward(args) -> int:
         results["summary"].get("book_diagnostic"),
         panel_pricing=results["summary"].get("panel_pricing"),
     )
+    _print_capacity(results["summary"])
 
     dsr = results["summary"].get("deflated_sharpe")
     if dsr is not None:
@@ -5167,6 +5410,10 @@ def run_walk_forward(args) -> int:
                 "test_end": p.get("test_end"),
                 "capacity": p.get("capacity"),
                 "capacity_trend": p.get("capacity_trend"),
+                # Book-based capacity for the period (book pricing mode only):
+                # the capacity implied by the strategy's own trade sizes.
+                "capacity_book": p.get("capacity_book"),
+                "capacity_book_trend": p.get("capacity_book_trend"),
                 # Panel book diagnostic for the period's test window: the
                 # per-asset book against the framework's net-exposure
                 # pricing (measurement only).
@@ -6703,6 +6950,14 @@ def run_out_of_sample_validation(args) -> int:
         test_perf.get("book_diagnostic"),
         indent="  ",
         panel_pricing=results["summary"].get("panel_pricing"),
+    )
+    _print_capacity(
+        {
+            "capacity": test_perf.get("capacity"),
+            "capacity_book": test_perf.get("capacity_book"),
+            "capacity_book_trend": test_perf.get("capacity_book_trend"),
+        },
+        indent="  ",
     )
 
     summary = results["summary"]

@@ -54,6 +54,14 @@ The result dictionary contains:
   - `oos_min_capacity`: The worst capacity seen in any out-of-sample period
     (the liquidity level that actually bound the strategy in the regimes it
     was traded in). `None` when no period produced a capacity trend.
+  - `capacity_book` / `capacity_book_trend`: The capacity implied by the
+    strategy's own trade sizes (the equity level at which one of its
+    rebalances reaches the impact threshold) and the distribution of the
+    per-period readings, reported in the `book` pricing mode next to the
+    basket-based numbers above; `None` in the `net-exposure` mode. Each
+    period also carries its own `period["capacity_book"]`.
+  - `oos_min_capacity_book`: The worst book-based capacity seen in any
+    out-of-sample period. `None` when no period produced a book capacity.
   - `book_diagnostic`: The panel book diagnostic aggregated over the
     out-of-sample periods: the per-asset book the strategy actually held
     (gross book, book net exposure vs the priced net exposure, book turnover
@@ -648,6 +656,12 @@ The result dictionary contains:
     estimable.
   - `oos_min_capacity`: The worst capacity seen in any out-of-sample fold.
     `None` when no fold produced a capacity trend.
+  - `capacity_book` / `capacity_book_trend`: The capacity implied by the
+    strategy's own trade sizes, reported in the `book` pricing mode next to
+    the basket-based numbers above (see the walk-forward `summary` above).
+    Each fold also carries its own `fold["capacity_book"]`.
+  - `oos_min_capacity_book`: The worst book-based capacity seen in any
+    out-of-sample fold. `None` when no fold produced a book capacity.
   - `book_diagnostic`: The panel book diagnostic aggregated over the
     out-of-sample folds (see the walk-forward `summary` above). Each fold
     also carries its own `fold["book_diagnostic"]`. `None` for a single asset

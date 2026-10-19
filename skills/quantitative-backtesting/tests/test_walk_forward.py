@@ -7182,6 +7182,164 @@ TEST_REGISTRY.append(
 )
 
 
+def _book_capacity_by_hand(held, close, volume, impact_coefficient,
+                           max_impact=0.0005, adv_window=20):
+    """The book capacity, recomputed from the strategy's own weights.
+
+    The impact of asset ``i`` at equity ``E`` is
+    ``|dw_i| * E * coefficient / ADV_i``, so the equity at which that trade
+    reaches the impact threshold is ``max_impact * ADV_i / (|dw_i| *
+    coefficient)``. The capacity of the book is the level at which every
+    traded constituent stays inside the threshold, i.e. the minimum of those
+    per-asset levels.
+
+    Returns ``(point_in_time_capacity, per_period_series)``.
+    """
+    adv_notional = volume.rolling(window=adv_window, min_periods=1).mean() * close
+    traded = held.diff().abs()
+    per_asset = (max_impact * adv_notional) / (
+        traded.replace(0.0, np.nan) * impact_coefficient
+    )
+    per_asset = per_asset.where(np.isfinite(per_asset) & (per_asset > 0))
+    series = per_asset.min(axis=1, skipna=True)
+    valid = series.dropna()
+    assert len(valid) > 0
+    return float(valid.iloc[-1]), series
+
+
+def test_walk_forward_reports_the_book_capacity_per_window_and_summary():
+    """The walk-forward path reports the book-based capacity per window.
+
+    The basket-based capacity assumes an equal-weight basket that rebalances
+    1/n per constituent; the book-based capacity uses the trade sizes the
+    strategy actually executes. Both are reported, and the per-window number
+    is recomputed here by hand from the strategy's own weights.
+    """
+    from utils import build_market_model, held_book_weights  # noqa: E402
+
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=11)
+    factory = lambda params: build_strategy(
+        "cross_sectional_momentum", json.dumps(params)
+    )
+    param_grid = {"lookback": [20], "top_quantile": [0.2], "bottom_quantile": [0.2]}
+    impact_coefficient = 0.5
+
+    res = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=8,
+        test_months=3,
+        step_months=3,
+        impact_coefficient=impact_coefficient,
+        panel_pricing="book",
+    )
+
+    summary = res["summary"]
+    assert summary["panel_pricing"] == "book"
+    # The basket-based estimate is still reported next to the book one.
+    assert summary["capacity"] is not None
+    assert summary["capacity_book"] is not None
+    assert summary["capacity_book_trend"] is not None
+    assert summary["oos_min_capacity_book"] is not None
+
+    measured = 0
+    for p in res["periods"]:
+        assert p["capacity"] is not None
+        book_capacity = p.get("capacity_book")
+        assert book_capacity is not None, p
+        assert p.get("capacity_book_trend") is not None
+
+        # Recompute the window's capacity by hand from the strategy's own
+        # weights in that window.
+        window_data = p["test_data"]
+        strategy = factory(p["best_params"])
+        market = build_market_model(window_data)
+        held = held_book_weights(
+            strategy.generate_target_weights(window_data),
+            market,
+            lag=1,
+            fill_rate=1.0,
+        )
+        expected, series = _book_capacity_by_hand(
+            held, market["close"], market["volume"], impact_coefficient
+        )
+        assert abs(book_capacity - expected) < 1e-6
+        measured += 1
+    assert measured > 0
+
+    # The summary's point-in-time reading is the last reading of the merged
+    # per-window series, and the trend is its distribution.
+    trend = summary["capacity_book_trend"]
+    assert trend["n_periods"] > 0
+    assert trend["min_capacity"] <= trend["median_capacity"] <= trend["max_capacity"]
+    assert abs(trend["last_capacity"] - summary["capacity_book"]) < 1e-9
+
+
+def test_walk_forward_book_capacity_is_absent_in_the_net_exposure_mode():
+    """The net-exposure mode keeps a single (basket-based) capacity number."""
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=11)
+    factory = lambda params: build_strategy(
+        "cross_sectional_momentum", json.dumps(params)
+    )
+    param_grid = {"lookback": [20], "top_quantile": [0.4], "bottom_quantile": [0.2]}
+    res = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=8,
+        test_months=3,
+        step_months=3,
+        impact_coefficient=0.5,
+    )
+    assert res["summary"]["panel_pricing"] == "net-exposure"
+    assert res["summary"]["capacity_book"] is None
+    assert res["summary"]["capacity_book_trend"] is None
+    for p in res["periods"]:
+        assert p.get("capacity_book") is None
+        assert p.get("capacity_book_trend") is None
+
+
+def test_cpcv_reports_the_book_capacity_per_fold():
+    """The CPCV path reports the book-based capacity of every fold."""
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=11)
+    factory = lambda params: build_strategy(
+        "cross_sectional_momentum", json.dumps(params)
+    )
+    param_grid = {"lookback": [20], "top_quantile": [0.2], "bottom_quantile": [0.2]}
+    res = cpcv_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+        impact_coefficient=0.5,
+        panel_pricing="book",
+    )
+    assert res["summary"]["capacity_book"] is not None
+    assert res["summary"]["capacity_book_trend"] is not None
+    folds_with_capacity = 0
+    for fold in res["folds"]:
+        assert fold["capacity"] is not None
+        if fold.get("capacity_book") is not None:
+            folds_with_capacity += 1
+    assert folds_with_capacity > 0
+
+
+TEST_REGISTRY.append(
+    ("test_cpcv_reports_the_book_capacity_per_fold",
+     test_cpcv_reports_the_book_capacity_per_fold)
+)
+TEST_REGISTRY.append(
+    ("test_walk_forward_reports_the_book_capacity_per_window_and_summary",
+     test_walk_forward_reports_the_book_capacity_per_window_and_summary)
+)
+TEST_REGISTRY.append(
+    ("test_walk_forward_book_capacity_is_absent_in_the_net_exposure_mode",
+     test_walk_forward_book_capacity_is_absent_in_the_net_exposure_mode)
+)
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(main())
