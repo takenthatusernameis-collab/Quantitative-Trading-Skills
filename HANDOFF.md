@@ -2,48 +2,34 @@
 
 ## What changed this session
 
-Normalized `_annualization_factor` in `walk_forward.py:1503-1514` and `monte_carlo.py:24-35` to the lowercase base-alias mapping already used in `performance.py`, and added test coverage in the respective test modules.
+Completed the consolidation task from `HANDOFF_NEXT.md`: `_annualization_factor` now lives in exactly one place — `skills/quantitative-backtesting/scripts/utils.py:9` — and all consumers import it from there.
 
-**Fix.** Both helpers used `freq_map = {"B": 252, "D": 365, "W": 52, "M": 12, "Q": 4, "Y": 1}` matched on `freq[0]`. Under pandas 3.0.6 `pd.infer_freq` returns lowercase aliases (`"h"`, `"min"`, `"MS"`, `"ME"`, `"QE-DEC"`), so:
-- Hourly (`"h"`) → not in map → defaulted to **252** instead of **1638**.
-- Minute (`"min"` → `"m"`) → defaulted to **252** instead of **98280**, and collided with month.
-- Monthly start (`"MS"` → `"m"`) collided with minute.
+- `skills/quantitative-backtesting/scripts/walk_forward.py`: removed the local duplicate definition at the old `1504` (22 lines). The module already imported `_annualization_factor` from `scripts.utils` at line 34, so all 16 call sites now resolve to the shared implementation. No call-site changes needed.
+- `skills/quantitative-backtesting/scripts/run_backtest.py`: changed `from performance import calculate_metrics, generate_report, _annualization_factor` to import `_annualization_factor` from `scripts.utils` (added `from scripts.utils import _annualization_factor`), dropping the re-exported copy pulled out of `performance`.
 
-Replaced with `base = freq.lower().split("-")[0]` and `freq_map = {"b": 252, "d": 365, "w": 52, "me": 12, "ms": 12, "qe": 4, "ye": 1, "h": 1638, "min": 98280}`. The `"ms": 12` entry preserves the original `"M": 12` mapping for monthly-start series (`"MS"` → base `"ms"`), which is the common quant case; true millisecond data is not a realistic quant sampling frequency and falls back to 252.
-
-**Tests added.**
-- `test_monte_carlo.py`: `test_annualization_factor_known_frequencies`, `test_annualization_factor_minute_does_not_collide_with_month`, `test_annualization_factor_non_datetime_index` (registered in `TEST_REGISTRY`).
-- `test_walk_forward.py`: same three helpers (registered in `TEST_REGISTRY`).
-- `test_performance.py`: added `"MS": 12` to the existing `test_annualization_factors` cases.
+Behavior is identical — the removed duplicate was byte-for-byte the same map as `utils.py` (including the `"ms": 12` entry), so no mapping semantics changed.
 
 ## What was verified
 
-- `test_performance.py`: 32/32 pass.
-- `test_monte_carlo.py`: 20/20 pass.
-- `test_walk_forward.py`: 132/132 pass.
-- `test_data_loader.py`: 32/32, `test_strategy_builder.py`: 28/28, `test_run_backtest.py`: 65/65, `test_reporting.py`: exit 0, `test_cpcv.py`: 17/17, `test_generate_sample_data.py`: 2/2, `test_examples_coverage.py`: 6/6, `test_falsifiable_hypothesis_example.py`: 3/3.
-- `test_import.py`: exit 0.
-- `verify_end_to_end.py`: exit 0 (VERIFICATION PASSED).
-- pandas 3.0.6 confirmed; `pd.infer_freq` returns lowercase aliases (`"B"`, `"D"`, `"W-SUN"`, `"ME"`, `"MS"`, `"QE-DEC"`, `"YE-DEC"`, `"h"`, `"min"`).
+- Full suite from repo root: **384 passed, 5 failed, 26 warnings** — identical count to the clean `git stash` baseline (384 passed, 5 failed). No regression introduced.
+- The 5 failures are pre-existing and unrelated: example scripts (`multiple_benchmarks_example.py`, `full_pipeline_example.py`, `real_data_pipeline_example.py`, and two others) fail at collection with `ModuleNotFoundError: No module named 'scripts'` because they import `performance`/`monte_carlo` (which now import `scripts.utils`) without the package on `sys.path`. They fail identically on the unmodified baseline.
+- `test_performance.py` parity test (`test_annualization_factor_parity_across_modules`) passes within the suite run; it asserts identical `_annualization_factor` outputs across `performance`, `monte_carlo`, and `walk_forward` for B, D, h, min, ME, MS, QE-DEC, W.
 
 ## What remains unresolved
 
-None from this task. The pandas-3.x `_annualization_factor` defect is now fixed and covered in all three modules that had the pattern.
+The 5 pre-existing example-script import failures (`ModuleNotFoundError: No module named 'scripts'`) are out of scope for this consolidation task but are a real defect: three example scripts cannot run as-is. Fixing them would require adding the `skills/quantitative-backtesting` directory to `sys.path` (or making `scripts` a proper package) in those example entry points. Not attempted here to keep the change minimal and reversible.
 
 ## Approaches that already failed / why
 
-- **First attempt (no `ms` mapping):** applied the exact `performance.py` map (`me`/`qe`/`ye` only) to `walk_forward.py` and `monte_carlo.py`. `test_walk_forward.py::test_deflated_alpha_ratio_frequency_invariant` failed: "Monthly DAR should be ~1 for a strong signal, got 0.4570". Root cause: that test builds a monthly series with `freq="MS"`, whose `infer_freq` base is `"ms"`, which was unmapped → defaulted to 252 → mis-scaled the annualized vol/alpha and broke the frequency-invariant DAR. Diagnosed by running `pd.infer_freq` on `freq="MS"` → `"MS"` → base `"ms"`. Fix: added `"ms": 12` to the map in all three modules, preserving the original monthly=12 semantics. After the fix, baseline (git stash) passed and the full suite passed.
+- No failed approaches this session. The change was a straightforward deletion/duplicate-removal; the only risk was a regression, which the baseline-vs-changed suite comparison ruled out (identical 384/5).
 
 ## Next task (precise, bounded, evidence-based)
 
-None queued. If a new task is needed, the obvious candidates are: (a) the unused `target_years` parameter on `performance.py:_annualization_factor`; (b) verifying whether other modules in `skills/quantitative-backtesting/scripts/` (e.g. `reporting.py`, `data_loader.py`, `strategy_builder.py`) contain the same `freq[0]` / uppercase-key pattern — a grep for `freq\[0\]` and `"M": 12` across the scripts directory found no further occurrences.
+Fix the 5 pre-existing example-script import failures so the example suite actually runs. Concretely: in `skills/quantitative-backtesting/examples/*.py`, insert `sys.path.insert(0, str(Path(__file__).parent))` before importing from `performance`/`monte_carlo`/`strategy_builder`/`data_loader` (mirroring what `run_backtest.py` and `walk_forward.py` already do at their top), or add a `conftest.py`/`pyproject.toml` package config so `scripts` resolves. Then re-run the full suite targeting the example-coverage tests (`test_examples_coverage_*`) to confirm they go from failed → passed. Verify no regression on the 384 currently-passing tests. This is bounded: ~3-5 file edits plus a test run.
 
 ## Relevant files
 
-- `skills/quantitative-backtesting/scripts/walk_forward.py:1503-1514` (fixed)
-- `skills/quantitative-backtesting/scripts/monte_carlo.py:24-35` (fixed)
-- `skills/quantitative-backtesting/scripts/performance.py:32-38` (extended with `ms` mapping)
-- `skills/quantitative-backtesting/tests/test_walk_forward.py` (new tests + registry)
-- `skills/quantitative-backtesting/tests/test_monte_carlo.py` (new tests + registry)
-- `skills/quantitative-backtesting/tests/test_performance.py` (extended `test_annualization_factors`)
-- `skills/quantitative-backtesting/verify_end_to_end.py`
+- `skills/quantitative-backtesting/scripts/utils.py:9` — single source of `_annualization_factor` (unchanged this session, already consolidated).
+- `skills/quantitative-backtesting/scripts/walk_forward.py` — removed duplicate at old lines 1504-1525.
+- `skills/quantitative-backtesting/scripts/run_backtest.py` — import redirected to `scripts.utils`.
+- `skills/quantitative-backtesting/examples/real_data_pipeline_example.py`, `multiple_benchmarks_example.py`, `full_pipeline_example.py` — broken importers (next task).

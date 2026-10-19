@@ -27,8 +27,9 @@ from data_loader import (
     _compute_benchmark_total_return,
 )
 from strategy_builder import build_strategy
-from performance import calculate_metrics, generate_report, _annualization_factor
+from performance import calculate_metrics, generate_report
 from reporting import generate_tear_sheet
+from scripts.utils import _annualization_factor
 
 
 def parse_args():

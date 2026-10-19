@@ -2,27 +2,25 @@
 
 ## What changed this session
 
-- Added parity test `test_annualization_factor_parity_across_modules` in `skills/quantitative-backtesting/tests/test_performance.py` asserting `_annualization_factor` returns identical values across `performance`, `monte_carlo`, and `walk_forward` for frequencies (B, D, h, min, ME, MS, QE-DEC, W). Registered in TEST_REGISTRY.
-- Test suite for performance: 33/33 pass.
+- Removed the duplicate `_annualization_factor` definition from `walk_forward.py` (old lines 1504-1525); it now uses the shared `scripts.utils` import already present at line 34.
+- Redirected `run_backtest.py`'s `_annualization_factor` import from `performance` to `scripts.utils`.
+- Consolidation is now complete: `_annualization_factor` has exactly one definition (`scripts/utils.py:9`), imported by `performance`, `monte_carlo`, `walk_forward`, and `run_backtest`.
 
 ## What was verified
 
-- `skills/quantitative-backtesting/tests/test_performance.py`: 33/33 pass.
-- Verified parity across the three modules for the specified frequencies: all match.
-- End-to-end verification: `verify_end_to_end.py` passes.
-- Core module tests: `test_data_loader.py` 32/32, `test_monte_carlo.py`+`test_walk_forward.py` 153 passed, other module tests (strategy_builder/run_backtest/reporting/cpcv/generate_sample_data/examples/falsifiable) previously reported passing.
+- Full suite from repo root: 384 passed, 5 failed, 26 warnings — identical to the clean baseline (`git stash` → 384 passed, 5 failed). No regression.
+- The 5 failures are pre-existing `ModuleNotFoundError: No module named 'scripts'` errors in example scripts; they fail identically with and without my changes.
 
 ## What remains unresolved
 
-`_annualization_factor` is duplicated across three modules (`performance.py`, `monte_carlo.py`, `walk_forward.py`) with independent maps. They currently agree, but drift is possible. Consider consolidating into a single shared implementation in a future task, with tests guarding parity (the new parity test now guards this). No mismatch found.
+5 pre-existing example-script import failures (see HANDOFF.md). Out of scope for the consolidation but a real defect worth fixing.
 
 ## Next task (precise, bounded)
 
-Consolidate `_annualization_factor` into a single shared function to avoid future drift. Options: (1) move to `scripts/utils.py` and import in all three modules, or (2) import from `performance` in `monte_carlo` and `walk_forward` (walk_forward already imports from performance in places; monte_carlo is standalone but could depend on performance's copy). Keep behavior identical (handle lowercase base aliases, pandas 3.x frequencies like min/ms/ME/MS). Update imports, remove duplicates, ensure tests still pass. Do not change mapping semantics.
+Fix the 5 pre-existing example-script import failures so the example suite runs. Add `sys.path.insert(0, str(Path(__file__).parent))` (or equivalent package config) to `skills/quantitative-backtesting/examples/*.py` before their `performance`/`monte_carlo`/`strategy_builder`/`data_loader` imports, mirroring `run_backtest.py` and `walk_forward.py`. Re-run the full suite and confirm the `test_examples_coverage_*` tests move from failed → passed with no regression on the 384 currently-passing tests.
 
 ## Relevant files
 
-- `skills/quantitative-backtesting/tests/test_performance.py` (added parity test + registry)
-- `skills/quantitative-backtesting/scripts/performance.py` (_annualization_factor)
-- `skills/quantitative-backtesting/scripts/monte_carlo.py` (_annualization_factor)
-- `skills/quantitative-backtesting/scripts/walk_forward.py` (_annualization_factor)
+- `skills/quantitative-backtesting/scripts/utils.py` — single source of `_annualization_factor`.
+- `skills/quantitative-backtesting/scripts/walk_forward.py` (removed duplicate), `run_backtest.py` (import change).
+- `skills/quantitative-backtesting/examples/real_data_pipeline_example.py`, `multiple_benchmarks_example.py`, `full_pipeline_example.py` — broken importers.
