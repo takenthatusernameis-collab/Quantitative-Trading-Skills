@@ -3194,6 +3194,15 @@ def test_deflated_alpha_ratio_cross_sectional_frequency_invariant():
         f"DAR should be frequency-invariant: daily={dar_daily:.4f} "
         f"monthly={dar_monthly:.4f}"
     )
+    # expected_max_alpha (the deflation benchmark) must itself be
+    # frequency-invariant: std(trial_alpha) * sqrt(2 * ln(N)) cancels the
+    # annualization factor, so it cannot depend on the sampling frequency.
+    ema_daily = results["daily"]["da"]["expected_max_alpha"]
+    ema_monthly = results["monthly"]["da"]["expected_max_alpha"]
+    assert abs(ema_daily - ema_monthly) < 1e-6, (
+        f"expected_max_alpha should be frequency-invariant: "
+        f"daily={ema_daily:.6f} monthly={ema_monthly:.6f}"
+    )
     for name in ("daily", "monthly"):
         da = results[name]["da"]
         assert da["expected_max_alpha"] < results[name]["alpha"], (
