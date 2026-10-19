@@ -2,34 +2,41 @@
 
 ## What changed this session
 
-Completed the consolidation task from `HANDOFF_NEXT.md`: `_annualization_factor` now lives in exactly one place — `skills/quantitative-backtesting/scripts/utils.py:9` — and all consumers import it from there.
+Executed the pending handoff task from `HANDOFF_NEXT.md`: audited `walk_forward.py` train/validation/test window construction and added a focused regression test asserting the split boundaries are non-overlapping and ordered, plus registering it in the module's `TEST_REGISTRY` (required by `test_main_registers_every_module_level_test`).
 
-- `skills/quantitative-backtesting/scripts/walk_forward.py`: removed the local duplicate definition at the old `1504` (22 lines). The module already imported `_annualization_factor` from `scripts.utils` at line 34, so all 16 call sites now resolve to the shared implementation. No call-site changes needed.
-- `skills/quantitative-backtesting/scripts/run_backtest.py`: changed `from performance import calculate_metrics, generate_report, _annualization_factor` to import `_annualization_factor` from `scripts.utils` (added `from scripts.utils import _annualization_factor`), dropping the re-exported copy pulled out of `performance`.
+Audit findings (`skills/quantitative-backtesting/scripts/walk_forward.py`):
+- `_split_train_val_test` (line 138) slices sorted DatetimeIndex data with `iloc` into adjacent train/val/test windows: `train = [:train_end]`, `val = [train_end:val_end]`, `test = [val_end:]`. Boundaries are adjacent but non-overlapping.
+- `_verify_split_separation` (line 200) enforces the executable invariant: pairwise-disjoint index sets AND strict chronology (`train_end < val_start` and `val_end < test_start`, strict `<` so a touching boundary is a leak). Raises `ValueError` on any violation.
+- `out_of_sample_validation` (line 2147) calls `_split_train_val_test`, then records `split_info` plus `separation_check` (disjoint/chronological booleans + overlap counts) in the returned summary for audit.
 
-Behavior is identical — the removed duplicate was byte-for-byte the same map as `utils.py` (including the `"ms": 12` entry), so no mapping semantics changed.
+Change (one file, +50 lines):
+- `skills/quantitative-backtesting/tests/test_walk_forward.py`: added `test_split_train_val_test_boundaries_are_chronological_and_non_overlapping`, which runs `_split_train_val_test(data, 0.6, 0.2, 0.2)` on 600 business-daily bars and asserts (a) sizes match fractions and every bar is assigned to exactly one split, (b) pairwise index sets are disjoint, (c) `train_end < val_start` and `val_end < test_start` strictly, (d) `_verify_split_separation(..., strict=False)` reports disjoint/chronological True with zero overlaps. Registered it in `TEST_REGISTRY`.
+- Removed a drafted `test_verify_split_separation_rejects_overlapping_windows` because `test_verify_split_separation_*_overlap_raises` (train/val, val/test, train/test) already cover rejection of overlapping windows.
+
+Note: the walk-forward *rolling* windows inside `walk_forward_analysis` (lines 484-505, `train = data.index < train_end`, `test = [test_start, test_end)` where `test_start == train_end`) are leak-free within a period, but consecutive test windows overlap across periods when `step_months < test_months` (e.g. the existing `test_walk_forward_analysis_multiple_benchmarks_deflated_alpha` uses step_months=2, test_months=3), which double-counts bars in the concatenated OOS record. That is a separate, unfixed observation, not part of this task.
 
 ## What was verified
 
-- Full suite from repo root: **384 passed, 5 failed, 26 warnings** — identical count to the clean `git stash` baseline (384 passed, 5 failed). No regression introduced.
-- The 5 failures are pre-existing and unrelated: example scripts (`multiple_benchmarks_example.py`, `full_pipeline_example.py`, `real_data_pipeline_example.py`, and two others) fail at collection with `ModuleNotFoundError: No module named 'scripts'` because they import `performance`/`monte_carlo` (which now import `scripts.utils`) without the package on `sys.path`. They fail identically on the unmodified baseline.
-- `test_performance.py` parity test (`test_annualization_factor_parity_across_modules`) passes within the suite run; it asserts identical `_annualization_factor` outputs across `performance`, `monte_carlo`, and `walk_forward` for B, D, h, min, ME, MS, QE-DEC, W.
+- `pytest skills/quantitative-backtesting/tests/test_walk_forward.py` → 134 passed, 12 warnings, 0 failures (baseline was 133 passed; +1 new test).
+- The two new assertions run in under a second; no other test regressed.
 
 ## What remains unresolved
 
-The 5 pre-existing example-script import failures (`ModuleNotFoundError: No module named 'scripts'`) are out of scope for this consolidation task but are a real defect: three example scripts cannot run as-is. Fixing them would require adding the `skills/quantitative-backtesting` directory to `sys.path` (or making `scripts` a proper package) in those example entry points. Not attempted here to keep the change minimal and reversible.
+- `walk_forward_analysis` rolling-window OOS overlap across periods when `step_months < test_months` (lines 484-505): duplicated bars in the concatenated OOS record bias the aggregate OOS Sharpe/DSR. Not fixed here; see "Next task".
+- Broader repo has 28 unrelated collection errors in non-quant skills (missing deps); out of scope.
 
 ## Approaches that already failed / why
 
-- No failed approaches this session. The change was a straightforward deletion/duplicate-removal; the only risk was a regression, which the baseline-vs-changed suite comparison ruled out (identical 384/5).
+- Drafted `test_verify_split_separation_rejects_overlapping_windows` as a positive-control leak test; removed as redundant because `test_verify_split_separation_train_val_overlap_raises`, `_val_test_overlap_raises`, and `_train_test_overlap_raises` already cover rejection of overlapping windows. Kept only the `_split_train_val_test`-level test, which is genuine new coverage.
 
 ## Next task (precise, bounded, evidence-based)
 
-Fix the 5 pre-existing example-script import failures so the example suite actually runs. Concretely: in `skills/quantitative-backtesting/examples/*.py`, insert `sys.path.insert(0, str(Path(__file__).parent))` before importing from `performance`/`monte_carlo`/`strategy_builder`/`data_loader` (mirroring what `run_backtest.py` and `walk_forward.py` already do at their top), or add a `conftest.py`/`pyproject.toml` package config so `scripts` resolves. Then re-run the full suite targeting the example-coverage tests (`test_examples_coverage_*`) to confirm they go from failed → passed. Verify no regression on the 384 currently-passing tests. This is bounded: ~3-5 file edits plus a test run.
+Audit `walk_forward_analysis` rolling windows (`skills/quantitative-backtesting/scripts/walk_forward.py:484-505`) for out-of-sample window overlap across consecutive periods when `step_months < test_months` (evidence: `test_walk_forward_analysis_multiple_benchmarks_deflated_alpha` at line ~2158 uses step_months=2, test_months=3, so test windows overlap and bars are double-counted in `oos_returns`). Decide the contract: either (a) reject `step_months < test_months` with `ValueError`, or (b) document that overlapping OOS windows double-count bars and aggregate metrics are computed on the duplicated record. Whichever is chosen, add a focused regression test asserting the contract (non-overlapping test windows, or no duplicated index in `oos_returns`), register it in `TEST_REGISTRY`, and verify with `pytest skills/quantitative-backtesting/tests/test_walk_forward.py` (must stay at 0 failures, no regression on the 134 passing tests).
 
 ## Relevant files
 
-- `skills/quantitative-backtesting/scripts/utils.py:9` — single source of `_annualization_factor` (unchanged this session, already consolidated).
-- `skills/quantitative-backtesting/scripts/walk_forward.py` — removed duplicate at old lines 1504-1525.
-- `skills/quantitative-backtesting/scripts/run_backtest.py` — import redirected to `scripts.utils`.
-- `skills/quantitative-backtesting/examples/real_data_pipeline_example.py`, `multiple_benchmarks_example.py`, `full_pipeline_example.py` — broken importers (next task).
+- `skills/quantitative-backtesting/scripts/walk_forward.py:138` — `_split_train_val_test` (train/val/test split, already correct, covered by new test).
+- `skills/quantitative-backtesting/scripts/walk_forward.py:200` — `_verify_split_separation` (enforces disjoint + strict chronology).
+- `skills/quantitative-backtesting/scripts/walk_forward.py:484-505` — `walk_forward_analysis` rolling train/test windows (next task: OOS overlap across periods).
+- `skills/quantitative-backtesting/scripts/walk_forward.py:2147` — `out_of_sample_validation` records `separation_check` for audit.
+- `skills/quantitative-backtesting/tests/test_walk_forward.py` — new test registered in `TEST_REGISTRY`.

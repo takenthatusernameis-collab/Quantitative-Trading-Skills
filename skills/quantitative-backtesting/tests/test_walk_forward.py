@@ -981,6 +981,55 @@ def test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model():
     )
 
 
+def test_split_train_val_test_boundaries_are_chronological_and_non_overlapping():
+    """_split_train_val_test must produce pairwise-disjoint, strictly
+    chronological train/validation/test windows with no leakage.
+
+    The held-out test set must never share a timestamp with the training
+    or validation window, and validation must sit between train and test.
+    This is the executable invariant behind the train/validation/test split
+    used by out_of_sample_validation (walk_forward.py:138).
+    """
+    data = _make_ohlcv_data(periods=600, seed=42)
+    train_frac, val_frac, test_frac = 0.6, 0.2, 0.2
+    train_data, val_data, test_data = _split_train_val_test(
+        data, train_frac, val_frac, test_frac
+    )
+
+    n = len(data)
+    # Sizes match the requested fractions (floor rounding).
+    assert len(train_data) == int(n * train_frac), (len(train_data), int(n * train_frac))
+    assert len(val_data) == int(n * val_frac), (len(val_data), int(n * val_frac))
+    assert len(test_data) == n - int(n * train_frac) - int(n * val_frac)
+
+    # Every bar is assigned to exactly one split.
+    assert len(train_data) + len(val_data) + len(test_data) == n
+    assert (
+        set(train_data.index) | set(val_data.index) | set(test_data.index)
+        == set(data.index)
+    )
+
+    # Pairwise disjoint: no timestamp shared between any two splits.
+    assert len(set(train_data.index) & set(val_data.index)) == 0
+    assert len(set(val_data.index) & set(test_data.index)) == 0
+    assert len(set(train_data.index) & set(test_data.index)) == 0
+
+    # Strict chronological ordering: train ends before val starts, val ends
+    # before test starts. Adjacent-but-touching boundaries are a leak.
+    assert train_data.index[-1] < val_data.index[0]
+    assert val_data.index[-1] < test_data.index[0]
+
+    # Separation helper agrees on a clean split.
+    check = _verify_split_separation(
+        train_data, val_data, test_data, strict=False
+    )
+    assert check["disjoint"] is True
+    assert check["chronological"] is True
+    assert check["train_val_overlap"] == 0
+    assert check["val_test_overlap"] == 0
+    assert check["train_test_overlap"] == 0
+
+
 def test_out_of_sample_validation_n_trials_matches_evaluated_combinations():
     """out_of_sample_validation's aggregate deflated_sharpe n_trials must equal
     the count of actually-evaluated (finite-Sharpe) combinations across
@@ -5611,6 +5660,7 @@ TEST_REGISTRY = [
     ("test_out_of_sample_validation_with_splits", test_out_of_sample_validation_with_splits),
     ("test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model", test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model),
     ("test_out_of_sample_validation_n_trials_matches_evaluated_combinations", test_out_of_sample_validation_n_trials_matches_evaluated_combinations),
+    ("test_split_train_val_test_boundaries_are_chronological_and_non_overlapping", test_split_train_val_test_boundaries_are_chronological_and_non_overlapping),
     ("test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star", test_out_of_sample_validation_uses_pooled_trial_sharpes_for_sr_star),
     ("test_deflated_sharpe_parity_across_all_four_analysis_paths", test_deflated_sharpe_parity_across_all_four_analysis_paths),
     ("test_cost_sweep_dsr_parity_across_paths", test_cost_sweep_dsr_parity_across_paths),
