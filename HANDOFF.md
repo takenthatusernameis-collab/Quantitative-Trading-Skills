@@ -2,39 +2,48 @@
 
 ## What changed this session
 
-Added end-to-end regression test `test_annualization_scales_risk_metrics_hourly_vs_daily` in `skills/quantitative-backtesting/tests/test_performance.py` (registered in `TEST_REGISTRY`), per the task in HANDOFF_NEXT.md.
+Normalized `_annualization_factor` in `walk_forward.py:1503-1514` and `monte_carlo.py:24-35` to the lowercase base-alias mapping already used in `performance.py`, and added test coverage in the respective test modules.
 
-**Test.** Builds two return series with identical per-period values (seeded normal draws), one on a `"B"` (daily) index and one on a `"h"` (hourly) index via `pd.date_range`, calls `calculate_metrics({"returns": ...}, risk_free_rate=0.0)` on each, and asserts:
-- `hourly annualized_volatility / daily annualized_volatility ≈ sqrt(1638/252)`
-- `hourly sharpe_ratio / daily sharpe_ratio ≈ sqrt(1638/252)`
+**Fix.** Both helpers used `freq_map = {"B": 252, "D": 365, "W": 52, "M": 12, "Q": 4, "Y": 1}` matched on `freq[0]`. Under pandas 3.0.6 `pd.infer_freq` returns lowercase aliases (`"h"`, `"min"`, `"MS"`, `"ME"`, `"QE-DEC"`), so:
+- Hourly (`"h"`) → not in map → defaulted to **252** instead of **1638**.
+- Minute (`"min"` → `"m"`) → defaulted to **252** instead of **98280**, and collided with month.
+- Monthly start (`"MS"` → `"m"`) collided with minute.
 
-(tolerance 1e-9). `risk_free_rate=0` removes the risk-free offset so Sharpe scales purely with the annualization factor. This locks in that the pandas-3.x `_annualization_factor` fix propagates into the actual risk metrics rather than being unit-tested in isolation. No changes to `performance.py` logic.
+Replaced with `base = freq.lower().split("-")[0]` and `freq_map = {"b": 252, "d": 365, "w": 52, "me": 12, "ms": 12, "qe": 4, "ye": 1, "h": 1638, "min": 98280}`. The `"ms": 12` entry preserves the original `"M": 12` mapping for monthly-start series (`"MS"` → base `"ms"`), which is the common quant case; true millisecond data is not a realistic quant sampling frequency and falls back to 252.
+
+**Tests added.**
+- `test_monte_carlo.py`: `test_annualization_factor_known_frequencies`, `test_annualization_factor_minute_does_not_collide_with_month`, `test_annualization_factor_non_datetime_index` (registered in `TEST_REGISTRY`).
+- `test_walk_forward.py`: same three helpers (registered in `TEST_REGISTRY`).
+- `test_performance.py`: added `"MS": 12` to the existing `test_annualization_factors` cases.
 
 ## What was verified
 
-- `test_performance.py`: 32/32 pass (was 31/31), including `main_registers_every_module_level_test` which enforces TEST_REGISTRY consistency.
-- `verify_end_to_end.py`: exits 0.
-- pandas 3.0.6 confirmed; `pd.infer_freq` returns lowercase aliases (`"b"`, `"h"`), so the fix path is exercised.
+- `test_performance.py`: 32/32 pass.
+- `test_monte_carlo.py`: 20/20 pass.
+- `test_walk_forward.py`: 132/132 pass.
+- `test_data_loader.py`: 32/32, `test_strategy_builder.py`: 28/28, `test_run_backtest.py`: 65/65, `test_reporting.py`: exit 0, `test_cpcv.py`: 17/17, `test_generate_sample_data.py`: 2/2, `test_examples_coverage.py`: 6/6, `test_falsifiable_hypothesis_example.py`: 3/3.
+- `test_import.py`: exit 0.
+- `verify_end_to_end.py`: exit 0 (VERIFICATION PASSED).
+- pandas 3.0.6 confirmed; `pd.infer_freq` returns lowercase aliases (`"B"`, `"D"`, `"W-SUN"`, `"ME"`, `"MS"`, `"QE-DEC"`, `"YE-DEC"`, `"h"`, `"min"`).
 
 ## What remains unresolved
 
-None from this task. Related: the same pandas-3.x `infer_freq`/first-char `freq_map` defect exists in two other `_annualization_factor` helpers:
-- `skills/quantitative-backtesting/scripts/walk_forward.py:1503-1514` (`freq_map.get(freq[0], 252)`, uppercase keys `"M"`/`"Q"`/`"Y"`)
-- `skills/quantitative-backtesting/scripts/monte_carlo.py:24-35` (identical pattern)
-Both would mis-annualize (default to 252) for hourly/minutely and collide `"min"` with month under pandas 3.x.
+None from this task. The pandas-3.x `_annualization_factor` defect is now fixed and covered in all three modules that had the pattern.
 
 ## Approaches that already failed / why
 
-None for this task.
+- **First attempt (no `ms` mapping):** applied the exact `performance.py` map (`me`/`qe`/`ye` only) to `walk_forward.py` and `monte_carlo.py`. `test_walk_forward.py::test_deflated_alpha_ratio_frequency_invariant` failed: "Monthly DAR should be ~1 for a strong signal, got 0.4570". Root cause: that test builds a monthly series with `freq="MS"`, whose `infer_freq` base is `"ms"`, which was unmapped → defaulted to 252 → mis-scaled the annualized vol/alpha and broke the frequency-invariant DAR. Diagnosed by running `pd.infer_freq` on `freq="MS"` → `"MS"` → base `"ms"`. Fix: added `"ms": 12` to the map in all three modules, preserving the original monthly=12 semantics. After the fix, baseline (git stash) passed and the full suite passed.
 
 ## Next task (precise, bounded, evidence-based)
 
-Normalize `_annualization_factor` in `walk_forward.py:1503-1514` and `monte_carlo.py:24-35` to the lowercase base-alias mapping already used in `performance.py:32-38` (`base = freq.lower().split("-")[0]`; map `b`=252, `d`=365, `w`=52, `me`=12, `qe`=4, `ye`=1, `h`=1638, `min`=98280; default 252), preserving existing B/D/W/ME/QE-DEC/YE-DEC mappings. Then add test coverage asserting hourly→1638 and minute→98280 (and no min/M collision) in the respective test modules, run the full quant test suite and `verify_end_to_end.py` (exit 0). Constraint: test-only behavior change in metrics helpers is allowed here (unlike the previous session); keep changes smallest and reversible.
+None queued. If a new task is needed, the obvious candidates are: (a) the unused `target_years` parameter on `performance.py:_annualization_factor`; (b) verifying whether other modules in `skills/quantitative-backtesting/scripts/` (e.g. `reporting.py`, `data_loader.py`, `strategy_builder.py`) contain the same `freq[0]` / uppercase-key pattern — a grep for `freq\[0\]` and `"M": 12` across the scripts directory found no further occurrences.
 
 ## Relevant files
 
-- `skills/quantitative-backtesting/tests/test_performance.py` (new test + TEST_REGISTRY entry, added this session)
-- `skills/quantitative-backtesting/scripts/performance.py:20-40` (reference fix pattern)
-- `skills/quantitative-backtesting/scripts/walk_forward.py:1503-1514` (next fix target)
-- `skills/quantitative-backtesting/scripts/monte_carlo.py:24-35` (next fix target)
+- `skills/quantitative-backtesting/scripts/walk_forward.py:1503-1514` (fixed)
+- `skills/quantitative-backtesting/scripts/monte_carlo.py:24-35` (fixed)
+- `skills/quantitative-backtesting/scripts/performance.py:32-38` (extended with `ms` mapping)
+- `skills/quantitative-backtesting/tests/test_walk_forward.py` (new tests + registry)
+- `skills/quantitative-backtesting/tests/test_monte_carlo.py` (new tests + registry)
+- `skills/quantitative-backtesting/tests/test_performance.py` (extended `test_annualization_factors`)
 - `skills/quantitative-backtesting/verify_end_to_end.py`

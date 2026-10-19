@@ -31,7 +31,7 @@ def _annualization_factor(index: pd.Index, target_years: float = 1.0) -> float:
         # (millisecond) all start with "m", so first-char matching collides.
         base = freq.lower().split("-")[0]
         freq_map = {
-            "b": 252, "d": 365, "w": 52, "me": 12,
+            "b": 252, "d": 365, "w": 52, "me": 12, "ms": 12,
             "qe": 4, "ye": 1, "h": int(252 * 6.5),
             "min": int(252 * 6.5 * 60),
         }

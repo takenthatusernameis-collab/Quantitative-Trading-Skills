@@ -22,7 +22,7 @@ import pandas as pd
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
-from monte_carlo import monte_carlo_simulation, estimate_optimal_block_size  # noqa: E402
+from monte_carlo import monte_carlo_simulation, estimate_optimal_block_size, _annualization_factor  # noqa: E402
 
 
 def _make_returns(periods: int = 252, seed: int = 42) -> pd.Series:
@@ -276,6 +276,53 @@ def test_standalone_no_nan_on_extreme_single_move():
     )
 
 
+def test_annualization_factor_known_frequencies():
+    """_annualization_factor maps known frequencies and defaults to 252.
+
+    Regression guard for the pandas 3.x fix: the standalone monte_carlo
+    module previously used uppercase freq_map keys and first-char
+    matching, so hourly ("h") and minutely ("min") defaulted to 252
+    instead of 1638 and 98280, and "min" collided with month ("M"/"ME").
+    """
+    cases = {
+        "B": 252,
+        "D": 365,
+        "W": 52,
+        "ME": 12,
+        "MS": 12,
+        "QE-DEC": 4,
+        "h": int(252 * 6.5),       # hourly: 252 trading days * 6.5 hours
+        "min": int(252 * 6.5 * 60),  # minutely: 252 * 6.5 hours * 60 minutes
+    }
+    for freq, expected in cases.items():
+        idx = pd.date_range("2020-01-01", periods=10, freq=freq)
+        assert _annualization_factor(idx) == expected, (
+            f"{freq}: expected {expected}, got {_annualization_factor(idx)}"
+        )
+
+
+def test_annualization_factor_minute_does_not_collide_with_month():
+    """Minute ("min") and month ("ME"/"MS") must not collide under pandas 3.x.
+
+    "min", "ME", and "MS" all start with "m" in lowercase, so first-char
+    matching would map minute to 12 (month). The full-base-alias match
+    keeps them distinct: minute -> 98280, month -> 12.
+    """
+    minute_idx = pd.date_range("2020-01-01", periods=10, freq="min")
+    month_start_idx = pd.date_range("2020-01-01", periods=10, freq="MS")
+    month_end_idx = pd.date_range("2020-01-01", periods=10, freq="ME")
+    assert _annualization_factor(minute_idx) == int(252 * 6.5 * 60)
+    assert _annualization_factor(month_start_idx) == 12
+    assert _annualization_factor(month_end_idx) == 12
+    assert _annualization_factor(minute_idx) != _annualization_factor(month_start_idx)
+    assert _annualization_factor(minute_idx) != _annualization_factor(month_end_idx)
+
+
+def test_annualization_factor_non_datetime_index():
+    """Non-DatetimeIndex defaults to 252 trading days."""
+    assert _annualization_factor(pd.Index(range(10))) == 252
+
+
 def test_main_registers_every_module_level_test():
     """main() must register every module-level ``test_*`` function.
 
@@ -356,6 +403,9 @@ TEST_REGISTRY = [
     ("monte_carlo_block_size_none_vs_auto_different", test_monte_carlo_block_size_none_vs_auto_different),
     ("test_standalone_no_nan_on_bust_paths", test_standalone_no_nan_on_bust_paths),
     ("test_standalone_no_nan_on_extreme_single_move", test_standalone_no_nan_on_extreme_single_move),
+    ("annualization_factor_known_frequencies", test_annualization_factor_known_frequencies),
+    ("annualization_factor_minute_does_not_collide_with_month", test_annualization_factor_minute_does_not_collide_with_month),
+    ("annualization_factor_non_datetime_index", test_annualization_factor_non_datetime_index),
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 

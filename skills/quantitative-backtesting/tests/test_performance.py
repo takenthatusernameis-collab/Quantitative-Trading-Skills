@@ -58,6 +58,7 @@ def test_annualization_factors():
         "D": 365,
         "W": 52,
         "ME": 12,
+        "MS": 12,
         "QE-DEC": 4,
         "h": int(252 * 6.5),       # hourly: 252 trading days * 6.5 hours
         "min": int(252 * 6.5 * 60),  # minutely: 252 * 6.5 hours * 60 minutes
