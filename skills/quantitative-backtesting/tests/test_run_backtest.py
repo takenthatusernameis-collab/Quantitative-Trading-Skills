@@ -2356,6 +2356,36 @@ def test_run_backtest_capacity_omits_when_volume_unavailable():
     assert results["capacity"] is None
 
 
+def test_run_backtest_surfaces_capacity_trend_in_results():
+    """run_backtest also reports the capacity trend of the backtest window:
+    the per-period capacity distribution, so a liquidity squeeze inside the
+    window is visible instead of being hidden behind the last bar's
+    point-in-time reading. None when impact is disabled."""
+    from walk_forward import estimate_capacity
+
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+
+    enabled = run_backtest(data, strategy, _Args(impact_coefficient=0.5))
+    trend = enabled.get("capacity_trend")
+    assert trend is not None
+    assert trend["min_capacity"] > 0
+    assert trend["last_capacity"] == enabled["capacity"]
+
+    cap_frame = pd.DataFrame({"close": data["close"], "volume": data["volume"]})
+    direct = estimate_capacity(cap_frame, 0.5, adv_window=20)
+    assert trend["min_capacity"] == direct["capacity_trend"]["min_capacity"]
+
+    disabled = run_backtest(data, strategy, _Args(impact_coefficient=0.0))
+    assert disabled["capacity"] is None
+    assert disabled["capacity_trend"] is None
+
+    no_volume = _make_data().drop(columns=["volume"])
+    missing = run_backtest(no_volume, strategy, _Args(impact_coefficient=0.5))
+    assert missing["capacity"] is None
+    assert missing["capacity_trend"] is None
+
+
 def test_cli_data_provenance_reproducible_across_runs():
     """Running the CLI twice with identical inputs yields byte-identical
     data_provenance.json (load_timestamp sanitized to source mtime)."""
@@ -2457,6 +2487,7 @@ TEST_REGISTRY = [
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
     ("test_run_backtest_surfaces_capacity_in_results", test_run_backtest_surfaces_capacity_in_results),
     ("test_run_backtest_capacity_omits_when_volume_unavailable", test_run_backtest_capacity_omits_when_volume_unavailable),
+    ("test_run_backtest_surfaces_capacity_trend_in_results", test_run_backtest_surfaces_capacity_trend_in_results),
 ]
 
 if __name__ == "__main__":

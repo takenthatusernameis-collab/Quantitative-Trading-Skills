@@ -44,6 +44,16 @@ The result dictionary contains:
     were taken but compounded to zero).
   - `periods_with_position`: Number of periods that produced an out-of-sample
     return (at least one parameter set took a position in that period).
+  - `capacity` / `capacity_trend`: Market-impact capacity for the whole
+    sample and the distribution of the per-period capacity readings inside
+    it. `capacity` is a point-in-time reading (the last bar's ADV);
+    `capacity_trend` carries `min_capacity` / `median_capacity` /
+    `max_capacity` and the degradation ratios, so a liquidity squeeze inside
+    the sample stays visible. `None` when impact is disabled or ADV is not
+    estimable.
+  - `oos_min_capacity`: The worst capacity seen in any out-of-sample period
+    (the liquidity level that actually bound the strategy in the regimes it
+    was traded in). `None` when no period produced a capacity trend.
 
 ## Parameter Optimization
 
@@ -607,6 +617,15 @@ The result dictionary contains:
     but compounded to zero).
   - `folds_with_position`: Number of folds that produced an out-of-sample
     return (at least one parameter set took a position in that fold).
+  - `capacity` / `capacity_trend`: Market-impact capacity for the whole
+    sample and the distribution of the per-period capacity readings inside
+    it. `capacity` is a point-in-time reading (the last bar's ADV);
+    `capacity_trend` carries `min_capacity` / `median_capacity` /
+    `max_capacity` and the degradation ratios, so a liquidity squeeze inside
+    the sample stays visible. `None` when impact is disabled or ADV is not
+    estimable.
+  - `oos_min_capacity`: The worst capacity seen in any out-of-sample fold.
+    `None` when no fold produced a capacity trend.
 - `param_stability`: Per-parameter stability analysis with `unique_values`,
   `most_common`, and `stability_ratio`.
 

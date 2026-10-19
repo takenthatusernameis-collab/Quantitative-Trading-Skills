@@ -756,6 +756,58 @@ def test_cpcv_normal_run_keeps_current_numbers():
     assert summary["total_oos_return"] == 0.005399536978800246
 
 
+def test_cpcv_surfaces_capacity_trend_per_fold():
+    """CPCV surfaces the capacity trend of every fold's test window next to
+    the point-in-time per-fold capacity, plus the worst capacity seen in any
+    out-of-sample fold.
+
+    The point-in-time reading only sees the last bar of a fold's window, so a
+    liquidity squeeze inside the window is invisible to it; the trend carries
+    the per-window distribution (min / median / max). All keys are None when
+    impact is disabled (backward compatible).
+    """
+    data = _make_sample_data(600)
+    strategy_factory = _make_strategy_factory("sma_crossover")
+    param_grid = {"fast_period": [5, 10], "slow_period": [15, 20]}
+
+    res_on = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+        impact_coefficient=0.5,
+    )
+
+    summary_trend = res_on["summary"].get("capacity_trend")
+    assert summary_trend is not None
+    assert summary_trend["min_capacity"] > 0
+    assert summary_trend["last_capacity"] == res_on["summary"]["capacity"]
+
+    fold_mins = []
+    for f in res_on["folds"]:
+        trend = f.get("capacity_trend")
+        assert trend is not None, f"Missing per-fold capacity trend on fold {f.get('fold')}"
+        assert trend["min_capacity"] > 0
+        assert trend["last_capacity"] == f["capacity"]
+        fold_mins.append(trend["min_capacity"])
+
+    assert res_on["summary"]["oos_min_capacity"] == min(fold_mins)
+
+    res_off = cpcv_analysis(
+        data=data,
+        strategy_factory=strategy_factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+        impact_coefficient=0.0,
+    )
+    assert res_off["summary"].get("capacity_trend") is None
+    assert res_off["summary"].get("oos_min_capacity") is None
+    for f in res_off["folds"]:
+        assert f.get("capacity_trend") is None
+
+
 TEST_REGISTRY = [
     ("cpcv_basic_structure", test_cpcv_basic_structure),
     ("cpcv_purge_embargo", test_cpcv_purge_embargo),
@@ -775,6 +827,7 @@ TEST_REGISTRY = [
     ("cpcv_multi_asset_dict_dual_momentum", test_cpcv_multi_asset_dict_dual_momentum),
     ("cpcv_surfaces_capacity_in_summary", test_cpcv_surfaces_capacity_in_summary),
     ("cpcv_surfaces_capacity_per_fold", test_cpcv_surfaces_capacity_per_fold),
+    ("cpcv_surfaces_capacity_trend_per_fold", test_cpcv_surfaces_capacity_trend_per_fold),
     ("cpcv_multi_asset_panel_capacity_does_not_raise", test_cpcv_multi_asset_panel_capacity_does_not_raise),
     ("cpcv_no_active_position_reports_none_and_zero_folds", test_cpcv_no_active_position_reports_none_and_zero_folds),
     ("cpcv_normal_run_keeps_current_numbers", test_cpcv_normal_run_keeps_current_numbers),

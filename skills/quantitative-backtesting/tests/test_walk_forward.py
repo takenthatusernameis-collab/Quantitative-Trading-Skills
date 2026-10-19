@@ -6446,6 +6446,281 @@ TEST_REGISTRY.append(
 
 
 
+def _make_flat_liquidity_data(periods: int = 60) -> pd.DataFrame:
+    """Constant price and constant volume: a perfectly flat ADV window."""
+    dates = pd.date_range("2021-01-01", periods=periods, freq="B")
+    return pd.DataFrame({
+        "open": 100.0,
+        "high": 100.5,
+        "low": 99.5,
+        "close": 100.0,
+        "volume": 1_000_000.0,
+    }, index=dates)
+
+
+def _make_declining_liquidity_data(periods: int = 60) -> pd.DataFrame:
+    """Constant price with linearly declining volume: a drying-up window."""
+    dates = pd.date_range("2021-01-01", periods=periods, freq="B")
+    return pd.DataFrame({
+        "open": 100.0,
+        "high": 100.5,
+        "low": 99.5,
+        "close": 100.0,
+        "volume": np.linspace(4_000_000.0, 1_000_000.0, periods),
+    }, index=dates)
+
+
+def test_estimate_capacity_trend_flat_adv_matches_point_in_time():
+    """On a flat-ADV window the capacity trend collapses onto the
+    point-in-time reading: min == median == max == last == estimated_capacity
+    and both ratios are 1. The trend adds no information when liquidity is
+    constant, and it does not move the existing estimate."""
+    data = _make_flat_liquidity_data(60)
+    cap = estimate_capacity(data, impact_coefficient=0.5)
+
+    trend = cap["capacity_trend"]
+    assert trend is not None
+    assert trend["n_periods"] == 60
+    assert trend["min_capacity"] == trend["median_capacity"]
+    assert trend["median_capacity"] == trend["max_capacity"]
+    assert trend["last_capacity"] == cap["estimated_capacity"]
+    assert trend["min_to_median_ratio"] == 1.0
+    assert trend["last_to_median_ratio"] == 1.0
+    # The point-in-time estimate itself is unchanged by the trend.
+    expected = 0.0005 * (1_000_000.0 * 100.0) / 0.5
+    assert abs(cap["estimated_capacity"] - expected) < 1e-6
+
+
+def test_estimate_capacity_trend_declining_adv_reveals_squeeze():
+    """On a declining-ADV window the point-in-time reading (the last, driest
+    bar) understates the window's typical capacity. The trend exposes that
+    degradation instead of hiding it behind the last bar."""
+    data = _make_declining_liquidity_data(60)
+    cap = estimate_capacity(data, impact_coefficient=0.5)
+
+    trend = cap["capacity_trend"]
+    assert trend is not None
+    assert trend["n_periods"] == 60
+    # The point-in-time reading is the last (driest) bar of the window.
+    assert trend["last_capacity"] == cap["estimated_capacity"]
+    assert trend["min_capacity"] < trend["median_capacity"]
+    assert trend["median_capacity"] < trend["max_capacity"]
+    # Both ratios are relative to the median and therefore <= 1 when
+    # liquidity only deteriorates.
+    assert 0.0 < trend["min_to_median_ratio"] <= 1.0
+    assert 0.0 < trend["last_to_median_ratio"] < 1.0
+    # The degradation the point-in-time reading hides: the typical capacity
+    # inside the window is materially above the last-bar reading.
+    assert trend["median_capacity"] > cap["estimated_capacity"]
+
+
+def test_estimate_capacity_trend_none_when_impact_disabled():
+    """With impact disabled the capacity is unconstrained, so there is no
+    capacity trend either (None, never a zero or stale value)."""
+    data = _make_declining_liquidity_data(60)
+    cap = estimate_capacity(data, impact_coefficient=0.0)
+    assert cap["unconstrained"] is True
+    assert cap["capacity_trend"] is None
+
+    cap_missing = estimate_capacity(
+        _make_flat_liquidity_data(60).drop(columns=["volume"]),
+        impact_coefficient=0.5,
+    )
+    assert cap_missing["estimable"] is False
+    assert cap_missing["capacity_trend"] is None
+
+
+def test_estimate_capacity_trend_panel_binds_on_least_liquid_asset():
+    """On a panel the per-period portfolio capacity binds on that period's
+    least liquid constituent, so the trend follows the drying-up of the
+    illiquid member even while the liquid member is unchanged."""
+    dates = pd.date_range("2021-01-01", periods=60, freq="B")
+    symbols = ["LIQ", "ILLIQ"]
+    cols = pd.MultiIndex.from_product([["close", "volume"], symbols])
+    panel = pd.DataFrame(index=dates, columns=cols, dtype=float)
+    for sym in symbols:
+        panel[("close", sym)] = 100.0
+    panel[("volume", "LIQ")] = 1_000_000.0
+    panel[("volume", "ILLIQ")] = np.linspace(400_000.0, 100_000.0, 60)
+
+    cap = estimate_capacity(panel, impact_coefficient=0.5)
+    assert cap["binding_asset"] == "ILLIQ"
+
+    trend = cap["capacity_trend"]
+    assert trend is not None
+    assert trend["last_capacity"] == cap["estimated_capacity"]
+    assert trend["min_capacity"] < trend["median_capacity"]
+    assert trend["last_to_median_ratio"] < 1.0
+    # The binding member's last rolling ADV notional sets the point-in-time
+    # capacity (the mean of the last `adv_window` bars' volume x price).
+    expected_last_adv = float(
+        panel[("volume", "ILLIQ")].rolling(window=20, min_periods=1).mean().iloc[-1]
+    ) * 100.0
+    assert abs(cap["adv_notional"] - expected_last_adv) < 1e-6
+
+
+def test_walk_forward_surfaces_capacity_trend_per_period_and_summary():
+    """The walk-forward path reports the capacity trend of every period's
+    test window and of the whole sample, plus the worst capacity seen in any
+    out-of-sample window. All are None when impact is disabled."""
+    data = _make_ohlcv_data(periods=500, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
+
+    res_on = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        impact_coefficient=0.5,
+    )
+
+    summary_trend = res_on["summary"].get("capacity_trend")
+    assert summary_trend is not None
+    assert summary_trend["min_capacity"] > 0
+    assert summary_trend["median_capacity"] > 0
+    assert summary_trend["last_capacity"] == res_on["summary"]["capacity"]
+
+    period_mins = []
+    for p in res_on["periods"]:
+        trend = p.get("capacity_trend")
+        assert trend is not None, p
+        assert trend["min_capacity"] > 0
+        assert trend["last_capacity"] == p["capacity"]
+        period_mins.append(trend["min_capacity"])
+
+    # The OOS aggregate is the worst capacity in any out-of-sample window.
+    assert res_on["summary"]["oos_min_capacity"] == min(period_mins)
+
+    res_off = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        impact_coefficient=0.0,
+    )
+    assert res_off["summary"].get("capacity_trend") is None
+    assert res_off["summary"].get("oos_min_capacity") is None
+    for p in res_off["periods"]:
+        assert p.get("capacity_trend") is None
+
+
+def test_out_of_sample_validation_surfaces_capacity_trend_per_split():
+    """The out-of-sample path reports the capacity trend of the validation
+    window and of the held-out test window separately, so a liquidity squeeze
+    inside the unseen window stays visible."""
+    data = _make_ohlcv_data(periods=600, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [5, 10], "slow_period": [15, 20]}
+
+    res_on = out_of_sample_validation(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        validation_method="walk_forward",
+        impact_coefficient=0.5,
+        validate_pit=False,
+    )
+    val_trend = res_on["validation_performance"]["capacity_trend"]
+    test_trend = res_on["test_performance"]["capacity_trend"]
+    assert val_trend is not None and val_trend["min_capacity"] > 0
+    assert test_trend is not None and test_trend["min_capacity"] > 0
+    assert val_trend["last_capacity"] == res_on["validation_performance"]["capacity"]
+    assert test_trend["last_capacity"] == res_on["test_performance"]["capacity"]
+    assert res_on["summary"]["validation_capacity_trend"] == val_trend
+    assert res_on["summary"]["test_capacity_trend"] == test_trend
+
+    res_off = out_of_sample_validation(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        validation_method="walk_forward",
+        impact_coefficient=0.0,
+        validate_pit=False,
+    )
+    assert res_off["validation_performance"]["capacity_trend"] is None
+    assert res_off["test_performance"]["capacity_trend"] is None
+    assert res_off["summary"]["validation_capacity_trend"] is None
+    assert res_off["summary"]["test_capacity_trend"] is None
+
+
+def test_cli_cpcv_writes_capacity_trend_per_fold():
+    """CLI cpcv persists the per-fold capacity trend next to the per-fold
+    point-in-time capacity, so the saved artifact shows the liquidity
+    distribution inside each fold and not only the last bar's reading."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "cpcv",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--n-splits", "4",
+            "--test-size", "0.2",
+            "--impact-coefficient", "0.5",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI cpcv should exit 0, got {rc}"
+        summary_path = os.path.join(out_dir, "cpcv_summary.json")
+        with open(summary_path) as f:
+            payload = json.load(f)
+
+        for row in payload["capacity_per_fold"]:
+            trend = row["capacity_trend"]
+            assert trend is not None, row
+            assert trend["min_capacity"] > 0
+            assert trend["last_capacity"] == row["capacity"]
+        assert payload["summary"]["capacity_trend"] is not None
+        assert payload["summary"]["oos_min_capacity"] is not None
+
+
+TEST_REGISTRY.append(
+    ("test_estimate_capacity_trend_flat_adv_matches_point_in_time",
+     test_estimate_capacity_trend_flat_adv_matches_point_in_time)
+)
+TEST_REGISTRY.append(
+    ("test_estimate_capacity_trend_declining_adv_reveals_squeeze",
+     test_estimate_capacity_trend_declining_adv_reveals_squeeze)
+)
+TEST_REGISTRY.append(
+    ("test_estimate_capacity_trend_none_when_impact_disabled",
+     test_estimate_capacity_trend_none_when_impact_disabled)
+)
+TEST_REGISTRY.append(
+    ("test_estimate_capacity_trend_panel_binds_on_least_liquid_asset",
+     test_estimate_capacity_trend_panel_binds_on_least_liquid_asset)
+)
+TEST_REGISTRY.append(
+    ("test_walk_forward_surfaces_capacity_trend_per_period_and_summary",
+     test_walk_forward_surfaces_capacity_trend_per_period_and_summary)
+)
+TEST_REGISTRY.append(
+    ("test_out_of_sample_validation_surfaces_capacity_trend_per_split",
+     test_out_of_sample_validation_surfaces_capacity_trend_per_split)
+)
+TEST_REGISTRY.append(
+    ("test_cli_cpcv_writes_capacity_trend_per_fold",
+     test_cli_cpcv_writes_capacity_trend_per_fold)
+)
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(main())

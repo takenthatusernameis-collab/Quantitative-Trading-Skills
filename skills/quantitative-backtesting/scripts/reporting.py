@@ -392,6 +392,16 @@ def generate_tear_sheet(
             f"<tr><td>Strategy Capacity (Notional)</td>"
             f"<td class='metric'>{fmt_num(capacity)}</td></tr>"
         )
+    # Capacity trend: the worst capacity reading inside the backtest window.
+    # The point-in-time row above only reads the last bar, so a liquidity
+    # squeeze inside the window is invisible to it.
+    _metrics_trend = metrics.get("capacity_trend") or {}
+    _metrics_min_capacity = _metrics_trend.get("min_capacity")
+    if _metrics_min_capacity is not None:
+        html_parts.append(
+            f"<tr><td>Strategy Capacity Min (Notional)</td>"
+            f"<td class='metric'>{fmt_num(_metrics_min_capacity)}</td></tr>"
+        )
     html_parts.append("</table>")
 
     # Trade analytics
@@ -550,6 +560,16 @@ def generate_tear_sheet(
                 f"<tr><td>Strategy Capacity (Notional)</td>"
                 f"<td class='metric'>{fmt_num(capacity)}</td></tr>"
             )
+        # Capacity trend: the worst capacity reading inside the sample. The
+        # point-in-time row above only reads the last bar, so a liquidity
+        # squeeze inside the sample is invisible to it.
+        _wf_trend = wf_summary.get("capacity_trend") or {}
+        _wf_min_capacity = _wf_trend.get("min_capacity")
+        if _wf_min_capacity is not None:
+            html_parts.append(
+                f"<tr><td>Strategy Capacity Min (Notional)</td>"
+                f"<td class='metric'>{fmt_num(_wf_min_capacity)}</td></tr>"
+            )
         html_parts.append("</table>")
 
         periods = wf_results.get("periods", [])
@@ -557,7 +577,8 @@ def generate_tear_sheet(
             html_parts.append("<h3>Best Parameters Per Period</h3>")
             html_parts.append(
                 "<table><tr><th>Period</th><th>Best Params</th>"
-                "<th>In-Sample Sharpe</th><th>Capacity (Notional)</th></tr>"
+                "<th>In-Sample Sharpe</th><th>Capacity (Notional)</th>"
+                "<th>Capacity Min (Notional)</th></tr>"
             )
             for i, p in enumerate(periods):
                 params_str = _format_params(p.get("best_params"))
@@ -567,10 +588,18 @@ def generate_tear_sheet(
                 # ADV is not estimable.
                 cap = p.get("capacity")
                 cap_str = fmt_num(cap) if cap is not None else "N/A"
+                # Per-period capacity trend: the worst liquidity reading
+                # inside the period's test window (N/A when unavailable).
+                _p_trend = p.get("capacity_trend") or {}
+                _p_min_capacity = _p_trend.get("min_capacity")
+                cap_min_str = (
+                    fmt_num(_p_min_capacity) if _p_min_capacity is not None else "N/A"
+                )
                 html_parts.append(
                     f"<tr><td>{i + 1}</td><td>{params_str}</td>"
                     f"<td class='metric'>{sharpe_str}</td>"
-                    f"<td class='metric'>{cap_str}</td></tr>"
+                    f"<td class='metric'>{cap_str}</td>"
+                    f"<td class='metric'>{cap_min_str}</td></tr>"
                 )
             html_parts.append("</table>")
 
@@ -710,6 +739,15 @@ def generate_tear_sheet(
                 f"<tr><td>Strategy Capacity (Notional)</td>"
                 f"<td class='metric'>{fmt_num(cpcv_capacity)}</td></tr>"
             )
+        # Capacity trend: the worst capacity reading inside the sample (the
+        # point-in-time row above only reads the last bar).
+        _cpcv_trend = cpcv_summary.get("capacity_trend") or {}
+        _cpcv_min_capacity = _cpcv_trend.get("min_capacity")
+        if _cpcv_min_capacity is not None:
+            html_parts.append(
+                f"<tr><td>Strategy Capacity Min (Notional)</td>"
+                f"<td class='metric'>{fmt_num(_cpcv_min_capacity)}</td></tr>"
+            )
         html_parts.append("</table>")
 
         param_stability = cpcv_results.get("param_stability", {})
@@ -730,7 +768,8 @@ def generate_tear_sheet(
             html_parts.append("<h3>Best Parameters Per Fold</h3>")
             html_parts.append(
                 "<table><tr><th>Fold</th><th>Best Params</th>"
-                "<th>Best Sharpe</th><th>Capacity (Notional)</th></tr>"
+                "<th>Best Sharpe</th><th>Capacity (Notional)</th>"
+                "<th>Capacity Min (Notional)</th></tr>"
             )
             for f in folds:
                 params_str = _format_params(f.get("best_params"))
@@ -740,10 +779,18 @@ def generate_tear_sheet(
                 # disabled or ADV is not estimable.
                 cap = f.get("capacity")
                 cap_str = fmt_num(cap) if cap is not None else "N/A"
+                # Per-fold capacity trend: the worst liquidity reading inside
+                # the fold's test window (N/A when unavailable).
+                _f_trend = f.get("capacity_trend") or {}
+                _f_min_capacity = _f_trend.get("min_capacity")
+                cap_min_str = (
+                    fmt_num(_f_min_capacity) if _f_min_capacity is not None else "N/A"
+                )
                 html_parts.append(
                     f"<tr><td>{f.get('fold', '?')}</td><td>{params_str}</td>"
                     f"<td class='metric'>{sharpe_str}</td>"
-                    f"<td class='metric'>{cap_str}</td></tr>"
+                    f"<td class='metric'>{cap_str}</td>"
+                    f"<td class='metric'>{cap_min_str}</td></tr>"
                 )
             html_parts.append("</table>")
 

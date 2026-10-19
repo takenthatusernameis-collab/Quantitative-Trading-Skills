@@ -435,13 +435,21 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             _cap_frame = pd.DataFrame({"close": close, "volume": volume})
         if _cap_frame is None:
             results["capacity"] = None
+            results["capacity_trend"] = None
         else:
             _cap = estimate_capacity(
                 _cap_frame, args.impact_coefficient, adv_window=args.adv_window
             )
             results["capacity"] = _cap.get("estimated_capacity")
+            # Capacity trend: the per-period capacity distribution over the
+            # backtest window, so a liquidity squeeze inside the window is
+            # visible instead of being hidden behind the last bar's
+            # point-in-time reading. None when impact is disabled or ADV is
+            # not estimable.
+            results["capacity_trend"] = _cap.get("capacity_trend")
     except Exception:
         results["capacity"] = None
+        results["capacity_trend"] = None
 
     # Optional buy-and-hold benchmark baseline(s).
     # The benchmark return for period t is the close-to-close return
@@ -839,6 +847,7 @@ def main():
     rfr = getattr(args, "risk_free_rate", None)
     metrics = calculate_metrics(results, risk_free_rate=rfr) if rfr is not None else calculate_metrics(results)
     metrics["capacity"] = results.get("capacity")
+    metrics["capacity_trend"] = results.get("capacity_trend")
 
     # Multiple-testing correction: when the number of development
     # trials was reported (--n-trials), echo the Deflated Sharpe

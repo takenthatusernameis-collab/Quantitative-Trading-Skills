@@ -894,6 +894,78 @@ class TestTearSheet(unittest.TestCase):
                 summary = json.load(f)
             self.assertNotIn("capacity", summary["metrics"])
 
+    def test_generate_tear_sheet_surfaces_capacity_trend(self):
+        """The tear sheet renders the capacity trend: a "Strategy Capacity Min"
+        summary row and a "Capacity Min (Notional)" column in the per-period /
+        per-fold tables, so a liquidity squeeze inside a window is visible
+        next to the point-in-time capacity reading."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            wf = self._make_walk_forward_results()
+            wf["summary"]["capacity"] = 4_250_000.0
+            wf["summary"]["capacity_trend"] = {
+                "n_periods": 60,
+                "min_capacity": 900_000.0,
+                "median_capacity": 3_000_000.0,
+                "max_capacity": 4_250_000.0,
+                "last_capacity": 4_250_000.0,
+                "min_to_median_ratio": 0.3,
+                "last_to_median_ratio": 1.4166666666666667,
+            }
+            wf["periods"][0]["capacity"] = 4_250_000.0
+            wf["periods"][0]["capacity_trend"] = {
+                "min_capacity": 1_100_000.0,
+                "median_capacity": 3_000_000.0,
+                "last_capacity": 4_250_000.0,
+            }
+            wf["periods"][1]["capacity"] = 1_100_000.0
+            cpcv = self._make_cpcv_results()
+            cpcv["summary"]["capacity"] = 3_600_000.0
+            cpcv["summary"]["capacity_trend"] = {
+                "min_capacity": 900_000.0,
+                "median_capacity": 2_000_000.0,
+                "last_capacity": 3_600_000.0,
+            }
+            cpcv["folds"][0]["capacity"] = 3_600_000.0
+            cpcv["folds"][0]["capacity_trend"] = {"min_capacity": 900_000.0}
+            analysis = {"walk_forward": wf, "cpcv": cpcv}
+
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+                analysis_results=analysis,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Strategy Capacity Min (Notional)", html)
+            self.assertIn("Capacity Min (Notional)", html)
+            self.assertIn("900000", html.replace(",", ""))
+            self.assertIn("1100000", html.replace(",", ""))
+
+    def test_generate_tear_sheet_omits_capacity_trend_when_absent(self):
+        """Without a capacity trend the "Strategy Capacity Min" row and the
+        "Capacity Min (Notional)" column stay absent (backward compatible)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            wf = self._make_walk_forward_results()
+            wf["summary"]["capacity"] = 4_250_000.0
+            analysis = {"walk_forward": wf}
+
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+                analysis_results=analysis,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Strategy Capacity (Notional)", html)
+            # No summary row for the trend, and the per-period cells of the
+            # trend column render N/A (the column itself is always present,
+            # exactly like the point-in-time capacity column).
+            self.assertNotIn("Strategy Capacity Min", html)
+            self.assertIn("Capacity Min (Notional)", html)
+            self.assertIn("N/A", html)
+
     def test_generate_tear_sheet_handles_missing_equity(self):
         """Tear sheet does not crash when results lack equity_curve."""
         with tempfile.TemporaryDirectory() as tmpdir:

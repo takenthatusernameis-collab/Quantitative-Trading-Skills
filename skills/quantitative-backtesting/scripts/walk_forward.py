@@ -674,6 +674,12 @@ def walk_forward_analysis(
             period["test_data"], impact_coefficient, adv_window=adv_window
         )
         period["capacity"] = _period_capacity.get("estimated_capacity")
+        # Capacity trend for the period's test window: the distribution of the
+        # per-period capacity readings (min / median / max). The point-in-time
+        # `capacity` above only reads the last bar of the window, so a
+        # liquidity squeeze inside the window is invisible to it. None when
+        # impact is disabled or ADV is not estimable.
+        period["capacity_trend"] = _period_capacity.get("capacity_trend")
 
     # Combine all out-of-sample returns
     if oos_returns_list:
@@ -743,6 +749,17 @@ def walk_forward_analysis(
     # enabled and estimable; keep None (backward compatible) otherwise.
     _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window)
     summary["capacity"] = _capacity.get("estimated_capacity")
+    # Capacity trend over the whole sample: the distribution of the
+    # per-period capacity readings, so a liquidity squeeze anywhere in the
+    # sample is visible instead of being hidden behind the last bar's
+    # point-in-time reading. None when impact is disabled or ADV is not
+    # estimable.
+    summary["capacity_trend"] = _capacity.get("capacity_trend")
+    # Worst capacity seen in any out-of-sample window (the liquidity level
+    # that actually bound the strategy in the regimes it was traded in).
+    summary["oos_min_capacity"] = _aggregate_oos_capacity(
+        [p.get("capacity_trend") for p in periods]
+    )
 
     return {
         "periods": periods,
@@ -1522,6 +1539,67 @@ def _calculate_strategy_returns(
     return strategy_returns.dropna()
 
 
+def _capacity_trend_from_series(
+    capacity_series: pd.Series,
+    point_in_time_capacity: float,
+) -> Dict[str, Any]:
+    """Summarise the distribution of per-period capacity readings.
+
+    The point-in-time ``estimated_capacity`` is a *single* reading: the ADV
+    of the last bar of the window. A drying-up liquidity regime *inside* the
+    window is invisible to it. This helper turns the per-period capacity
+    series into the distribution that the single reading hides:
+
+        min_capacity      worst liquidity point inside the window
+        median_capacity   typical liquidity point inside the window
+        max_capacity      best liquidity point inside the window
+        last_capacity     the point-in-time reading (= estimated_capacity)
+
+    The two ratios express how the extremes relate to the typical reading:
+
+        min_to_median_ratio  worst / typical  (<= 1; a mid-window squeeze)
+        last_to_median_ratio end-of-window / typical (<= 1 when liquidity
+                              dried up towards the end of the window)
+
+    Both ratios are relative to the median, so they are comparable across
+    windows with different absolute capacity levels.
+    """
+    series = pd.Series(capacity_series, dtype=float)
+    valid = series.replace([np.inf, -np.inf], np.nan).dropna()
+    valid = valid[np.isfinite(valid)]
+
+    last_capacity = float(point_in_time_capacity)
+
+    if len(valid) == 0:
+        return {
+            "n_periods": 0,
+            "min_capacity": None,
+            "median_capacity": None,
+            "max_capacity": None,
+            "last_capacity": last_capacity,
+            "min_to_median_ratio": None,
+            "last_to_median_ratio": None,
+        }
+
+    min_capacity = float(valid.min())
+    median_capacity = float(valid.median())
+    max_capacity = float(valid.max())
+
+    return {
+        "n_periods": int(len(valid)),
+        "min_capacity": min_capacity,
+        "median_capacity": median_capacity,
+        "max_capacity": max_capacity,
+        "last_capacity": last_capacity,
+        "min_to_median_ratio": (
+            float(min_capacity / median_capacity) if median_capacity > 0 else None
+        ),
+        "last_to_median_ratio": (
+            float(last_capacity / median_capacity) if median_capacity > 0 else None
+        ),
+    }
+
+
 def estimate_capacity(
     data: pd.DataFrame,
     impact_coefficient: float,
@@ -1554,6 +1632,14 @@ def estimate_capacity(
     ``price`` / ``adv_shares`` / ``adv_notional`` describe that binding
     (least liquid) member, and ``binding_asset`` / ``n_assets`` identify it.
 
+    The point-in-time estimate above reads the ADV of the *last* bar of the
+    window, so a liquidity squeeze that happened earlier in the window is
+    hidden. The ``capacity_trend`` key therefore reports the distribution of
+    the per-period capacity readings across the whole window (min / median /
+    max plus the ratios of the extremes to the median). It is ``None`` when
+    impact is disabled or ADV is not estimable, exactly like
+    ``estimated_capacity``.
+
     Args:
         data: OHLCV DataFrame (must contain ``close`` and ``volume``). For a
             multi-asset panel the columns are a MultiIndex whose levels carry
@@ -1568,9 +1654,12 @@ def estimate_capacity(
         Dictionary with keys: impact_coefficient, max_impact, adv_window,
         price, adv_shares, adv_notional, periods_per_year,
         max_notional_per_trade, estimated_capacity, unconstrained, estimable,
-        n_assets, binding_asset.
+        n_assets, binding_asset, capacity_trend.
         ``unconstrained`` is True when impact is disabled. ``estimable`` is
         False when ADV cannot be computed (missing columns or empty data).
+        ``capacity_trend`` describes the per-period capacity distribution
+        inside the window (see ``_capacity_trend_from_series``); it is None
+        when impact is disabled or ADV is not estimable.
     """
     result = {
         "impact_coefficient": float(impact_coefficient),
@@ -1586,6 +1675,7 @@ def estimate_capacity(
         "estimable": False,
         "n_assets": None,
         "binding_asset": None,
+        "capacity_trend": None,
     }
 
     if impact_coefficient <= 0:
@@ -1642,6 +1732,18 @@ def estimate_capacity(
         )
         portfolio_capacity = n_assets * per_asset_capacity
 
+        # Capacity trend: the per-period portfolio capacity series, so a
+        # liquidity squeeze *inside* the window is visible instead of being
+        # hidden behind the last bar's reading. Each period's portfolio
+        # capacity binds on that period's least liquid constituent.
+        _valid_adv_notional = adv_notional.where(
+            np.isfinite(adv_notional) & (adv_notional > 0)
+        )
+        _row_min_adv = _valid_adv_notional.min(axis=1, skipna=True)
+        _capacity_series = (
+            n_assets * max_impact * _row_min_adv / float(impact_coefficient)
+        )
+
         result.update(
             price=binding_price,
             adv_shares=binding_adv_shares,
@@ -1652,6 +1754,9 @@ def estimate_capacity(
             estimable=True,
             n_assets=n_assets,
             binding_asset=str(binding_asset),
+            capacity_trend=_capacity_trend_from_series(
+                _capacity_series, float(portfolio_capacity)
+            ),
         )
         return result
 
@@ -1663,6 +1768,12 @@ def estimate_capacity(
 
     max_notional_per_trade = max_impact * last_adv_notional / float(impact_coefficient)
 
+    # Capacity trend: the per-period capacity series across the window.
+    _valid_adv = adv_notional.where(
+        np.isfinite(adv_notional) & (adv_notional > 0)
+    )
+    _capacity_series = max_impact * _valid_adv / float(impact_coefficient)
+
     result.update(
         price=price,
         adv_shares=float(adv_shares.iloc[-1]),
@@ -1672,8 +1783,43 @@ def estimate_capacity(
         estimated_capacity=float(max_notional_per_trade),
         estimable=True,
         n_assets=1,
+        capacity_trend=_capacity_trend_from_series(
+            _capacity_series, float(max_notional_per_trade)
+        ),
     )
     return result
+
+
+def _aggregate_oos_capacity(
+    trends: List[Any],
+) -> Optional[float]:
+    """Minimum per-window capacity across the out-of-sample windows.
+
+    ``trends`` is a list of per-regime ``capacity_trend`` dicts (one per
+    walk-forward period / CPCV fold). The result is the worst capacity the
+    strategy faced inside any of the out-of-sample windows it was actually
+    traded in, i.e. the liquidity level that really bound the strategy
+    rather than the level of the last bar of the sample.
+
+    None when no window produced a capacity trend (impact disabled or ADV
+    not estimable).
+    """
+    values: List[float] = []
+    for trend in trends or []:
+        if not isinstance(trend, dict):
+            continue
+        value = trend.get("min_capacity")
+        if value is None:
+            continue
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(value):
+            values.append(value)
+    if not values:
+        return None
+    return float(min(values))
 
 
 def _calculate_walk_forward_summary(
@@ -2056,6 +2202,10 @@ def cpcv_analysis(
             fold["test_data"], impact_coefficient, adv_window=adv_window
         )
         fold["capacity"] = _fold_capacity.get("estimated_capacity")
+        # Capacity trend for the fold's test window (mirrors the per-period
+        # trend that `walk_forward_analysis` records). None when impact is
+        # disabled or ADV is not estimable.
+        fold["capacity_trend"] = _fold_capacity.get("capacity_trend")
 
     # Combine all out-of-sample returns
     if oos_returns_list:
@@ -2143,6 +2293,12 @@ def cpcv_analysis(
     # enabled and estimable; keep None (backward compatible) otherwise.
     _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window)
     summary["capacity"] = _capacity.get("estimated_capacity")
+    # Capacity trend over the whole sample (see the walk-forward summary for
+    # the same key) plus the worst capacity seen in any out-of-sample fold.
+    summary["capacity_trend"] = _capacity.get("capacity_trend")
+    summary["oos_min_capacity"] = _aggregate_oos_capacity(
+        [f.get("capacity_trend") for f in folds]
+    )
 
     return {
         "folds": folds,
@@ -2457,7 +2613,9 @@ def out_of_sample_validation(
     # when impact is disabled or ADV is not estimable.
     val_capacity = estimate_capacity(
         val_data, impact_coefficient, adv_window=adv_window
-    ).get("estimated_capacity")
+    )
+    val_capacity_point = val_capacity.get("estimated_capacity")
+    val_capacity_trend = val_capacity.get("capacity_trend")
 
     validation_performance = {
         "selected_params": selected_params,
@@ -2465,7 +2623,8 @@ def out_of_sample_validation(
         "val_sharpe": val_sharpe,
         "val_volatility": float(val_returns.std() * np.sqrt(ann_factor)) if len(val_returns) > 1 else 0.0,
         "val_n_periods": len(val_returns),
-        "capacity": val_capacity,
+        "capacity": val_capacity_point,
+        "capacity_trend": val_capacity_trend,
     }
 
     # Phase 4: FINAL TEST - Evaluate on held-out test data
@@ -2485,7 +2644,9 @@ def out_of_sample_validation(
 
     test_capacity = estimate_capacity(
         test_data, impact_coefficient, adv_window=adv_window
-    ).get("estimated_capacity")
+    )
+    test_capacity_point = test_capacity.get("estimated_capacity")
+    test_capacity_trend = test_capacity.get("capacity_trend")
 
     test_performance = {
      "test_total_return": test_total_return,
@@ -2493,7 +2654,8 @@ def out_of_sample_validation(
          "test_volatility": float(test_returns.std() * np.sqrt(ann_factor_test)) if len(test_returns) > 1 else 0.0,
          "test_n_periods": len(test_returns),
          "test_returns": test_returns,
-         "capacity": test_capacity,
+         "capacity": test_capacity_point,
+         "capacity_trend": test_capacity_trend,
      }
 
     # Benchmark comparison on test set
@@ -2548,8 +2710,14 @@ def out_of_sample_validation(
         # `capacity` key below is computed on the full sample; these two are
         # computed on the validation and held-out test windows only, so a
         # capacity collapse in the unseen test window stays visible.
-        "validation_capacity": val_capacity,
-        "test_capacity": test_capacity,
+        "validation_capacity": val_capacity_point,
+        "test_capacity": test_capacity_point,
+        # Capacity trends for the same two windows: the distribution of the
+        # per-period capacity readings inside each window, so a liquidity
+        # squeeze *within* a window is visible too (the point-in-time
+        # `*_capacity` keys only read the last bar of the window).
+        "validation_capacity_trend": val_capacity_trend,
+        "test_capacity_trend": test_capacity_trend,
         "test_total_return": test_total_return,
         "test_sharpe": test_sharpe,
         "test_volatility": test_performance["test_volatility"],
@@ -2692,6 +2860,9 @@ def out_of_sample_validation(
     # enabled and estimable; keep None (backward compatible) otherwise.
     _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window)
     summary["capacity"] = _capacity.get("estimated_capacity")
+    # Capacity trend over the whole sample (the per-period / per-fold
+    # records carry the same key for their own window).
+    summary["capacity_trend"] = _capacity.get("capacity_trend")
 
     return {
         "train_val_test_split": split_info,
@@ -3634,13 +3805,16 @@ def run_cpcv(args) -> int:
         "param_stability": results["param_stability"],
         "best_params_per_fold": results["best_params_per_fold"],
         # Per-fold market-impact capacity so capacity degradation across
-        # folds/regimes is observable from the saved artifact alone.
+        # folds/regimes is observable from the saved artifact alone. The
+        # trend carries the per-window distribution (min / median) so a
+        # liquidity squeeze inside a fold is visible too.
         "capacity_per_fold": [
             {
                 "fold": f.get("fold"),
                 "test_start": f.get("test_start"),
                 "test_end": f.get("test_end"),
                 "capacity": f.get("capacity"),
+                "capacity_trend": f.get("capacity_trend"),
             }
             for f in results.get("folds", [])
         ],
@@ -4533,13 +4707,16 @@ def run_walk_forward(args) -> int:
         "diagnostics": diagnostics,
         "best_params_per_period": results["best_params_per_period"],
         # Per-period market-impact capacity so capacity degradation across
-        # periods/regimes is observable from the saved artifact alone.
+        # periods/regimes is observable from the saved artifact alone. The
+        # trend carries the per-window distribution (min / median) so a
+        # liquidity squeeze inside a period is visible too.
         "capacity_per_period": [
             {
                 "period": i,
                 "test_start": p.get("test_start"),
                 "test_end": p.get("test_end"),
                 "capacity": p.get("capacity"),
+                "capacity_trend": p.get("capacity_trend"),
             }
             for i, p in enumerate(results.get("periods", []))
         ],

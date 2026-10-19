@@ -311,9 +311,56 @@ per-fold tables. Capacity is `None` (never a stale or zero value) when impact
 is disabled or ADV is not estimable, so a regime with no estimate is
 distinguishable from a regime with a small one.
 
-Note the estimator uses the **latest** ADV in each window, so a per-regime
-value is a point-in-time liquidity reading, not a trend; a capacity
-*degradation trend* across regimes is not yet derived.
+### Capacity trend (liquidity degradation inside a window)
+
+The estimator above uses the **latest** ADV in each window, so a per-regime
+value is a point-in-time liquidity reading: a drying-up regime *inside* the
+window is invisible to it. The `capacity_trend` key therefore reports the
+**distribution** of the per-period capacity readings across the whole window:
+
+| Key                        | Meaning                                                       |
+| -------------------------- | ------------------------------------------------------------- |
+| `n_periods`                | number of periods with a valid capacity reading              |
+| `min_capacity`             | worst (lowest) capacity reading inside the window             |
+| `median_capacity`          | typical capacity reading inside the window                    |
+| `max_capacity`             | best capacity reading inside the window                       |
+| `last_capacity`            | the point-in-time reading (equals `estimated_capacity`)       |
+| `min_to_median_ratio`      | worst / typical: a mid-window liquidity squeeze (<= 1)        |
+| `last_to_median_ratio`     | end-of-window / typical: below 1 means liquidity dried up towards the end of the window |
+
+Both ratios are relative to the median, so they are comparable across windows
+with very different absolute capacity levels. `last_capacity` is by
+construction the same number as the point-in-time `estimated_capacity`, so the
+trend never contradicts the existing estimate.
+
+The trend is surfaced next to the point-in-time capacity everywhere:
+
+| Path                       | Point-in-time                          | Trend                                                   |
+| -------------------------- | -------------------------------------- | ------------------------------------------------------- |
+| `walk_forward_analysis`    | `periods[i]["capacity"]`               | `periods[i]["capacity_trend"]`                          |
+| `cpcv_analysis`            | `folds[i]["capacity"]`                 | `folds[i]["capacity_trend"]`                            |
+| `out_of_sample_validation` | `validation_performance["capacity"]`, `test_performance["capacity"]` | `validation_performance["capacity_trend"]`, `test_performance["capacity_trend"]` |
+| `run_backtest`             | `results["capacity"]`                  | `results["capacity_trend"]`                             |
+
+The summaries also carry the full-sample trend (`summary["capacity_trend"]`)
+and, for the walk-forward / CPCV paths, `summary["oos_min_capacity"]`: the
+**worst** capacity seen in any out-of-sample window, i.e. the liquidity level
+that actually bound the strategy in the regimes it was traded in. The
+out-of-sample summary additionally exposes `summary["validation_capacity_trend"]`
+and `summary["test_capacity_trend"]`. The CLI artifacts persist the per-fold /
+per-period trends in `capacity_per_fold` / `capacity_per_period`, and the tear
+sheet renders a "Strategy Capacity Min (Notional)" summary row plus a
+"Capacity Min (Notional)" column in the per-period and per-fold tables (cells
+render `N/A` when the trend is absent).
+
+The trend is `None` — never a zero or stale value — when impact is disabled
+or ADV is not estimable, exactly like `estimated_capacity`.
+
+**Caveat.** The per-period series uses the same rolling-`adv_window` ADV as the
+point-in-time estimate, so the first `adv_window - 1` periods of a window are
+based on a partial rolling history (noisier, not systematically biased). The
+trend therefore describes the window's liquidity *distribution*; it is not a
+liquidity forecast.
 
 ### Multi-asset panels
 
@@ -338,13 +385,15 @@ The tear sheet renders the aggregate capacity as a "Strategy Capacity
 `tear_sheet_summary.json` under the corresponding analysis summary.
 
 The single-backtest path (`run_backtest.py`) reports the same estimate as
-`results["capacity"]` (mirrored into `metrics["capacity"]`), so capacity is
-part of every reported backtest result, not just multi-period validation.
-Volume is optional on this path: when the data has no `volume` column (or
-ADV is otherwise not estimable), `capacity` is `None` and the run proceeds
-without raising. For a panel the estimate uses the same equal-weighted basket
-rule as the walk-forward paths (the least liquid constituent binds), so the
-two CLIs report the same capacity for the same panel
+`results["capacity"]` (mirrored into `metrics["capacity"]`) and the same trend
+as `results["capacity_trend"]` (mirrored into `metrics["capacity_trend"]`), so
+capacity is part of every reported backtest result, not just multi-period
+validation. Volume is optional on this path: when the data has no `volume`
+column (or ADV is otherwise not estimable), `capacity` and `capacity_trend`
+are `None` and the run proceeds without raising. For a panel the estimate uses
+the same equal-weighted basket rule as the walk-forward paths (the least
+liquid constituent binds), so the two CLIs report the same capacity for the
+same panel
 (`test_run_backtest_panel_capacity_binds_on_least_liquid_constituent`).
 
 ## Configuration
