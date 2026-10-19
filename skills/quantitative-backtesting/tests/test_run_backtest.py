@@ -3171,6 +3171,305 @@ def test_book_capacity_is_none_when_impact_is_disabled():
     assert no_trade["estimated_capacity"] is None
 
 
+# ---------------------------------------------------------------------------
+# Market-impact participation dilution (measurement only)
+# ---------------------------------------------------------------------------
+
+
+def _panel_frame(n_bars=60, n_assets=4, seed=3):
+    """A simple per-asset panel (close + volume) for the impact measurement."""
+    dates = pd.date_range("2021-01-01", periods=n_bars, freq="B")
+    symbols = [f"A{i}" for i in range(n_assets)]
+    rng = np.random.default_rng(seed)
+    close = pd.DataFrame(
+        100 * np.exp(np.cumsum(rng.normal(0.0, 0.01, (n_bars, n_assets)), axis=0)),
+        index=dates,
+        columns=symbols,
+    )
+    volume = pd.DataFrame(
+        rng.integers(1_000_000, 3_000_000, (n_bars, n_assets)).astype(float),
+        index=dates,
+        columns=symbols,
+    )
+    return dates, close, volume
+
+
+def test_impact_participation_dilution_matches_the_hand_computed_aggregations():
+    """The three aggregations of the impact model, recomputed by hand.
+
+    The panel model charges the equal-weighted mean of the per-asset impacts
+    over the **whole** panel, so a period in which only ``k`` of ``n`` names
+    trade is charged ``k / n`` of the participation the traded names
+    consumed. The measurement must reproduce that identity exactly, and the
+    notional-weighted (dollar) aggregation must be the impact rate applied to
+    the notional that was actually traded.
+    """
+    from utils import impact_participation_dilution  # noqa: E402
+
+    dates, close, volume = _panel_frame()
+    n_assets = close.shape[1]
+    coefficient, adv_window, capital = 0.5, 20, 100000.0
+
+    # A book that rotates a quarter of the notional through ONE name every
+    # other period: k = 1 of n = 4 names trade.
+    held = pd.DataFrame(0.0, index=dates, columns=close.columns)
+    held["A0"] = np.where(np.arange(len(dates)) % 2 == 0, 0.25, 0.0)
+
+    raw_returns = close.pct_change().mean(axis=1)
+    measurement = impact_participation_dilution(
+        held, raw_returns, close, volume, coefficient,
+        adv_window=adv_window, initial_capital=capital,
+    )
+    assert measurement is not None
+
+    # Hand computation of the three aggregations.
+    adv_notional = volume.rolling(window=adv_window, min_periods=1).mean() * close
+    equity = capital * (1 + raw_returns).cumprod()
+    traded_notional = held.diff().abs().mul(equity, axis=0)
+    rate = adv_notional.replace(0, np.nan).rdiv(
+        traded_notional.replace(0, np.nan), axis=0
+    ) * coefficient
+    hand_panel = rate.fillna(0).mean(axis=1)
+    hand_traded_only = rate.mean(axis=1, skipna=True).fillna(0.0)
+    hand_notional_weighted = (
+        (rate.fillna(0) * traded_notional.fillna(0)).sum(axis=1)
+        / equity.replace(0, np.nan)
+    )
+
+    assert np.allclose(measurement["panel"], hand_panel, equal_nan=True)
+    assert np.allclose(measurement["traded_only"], hand_traded_only, equal_nan=True)
+    assert np.allclose(
+        measurement["notional_weighted"], hand_notional_weighted, equal_nan=True
+    )
+
+    # The identity: the dilution factor is exactly the fraction of names
+    # that traded.
+    traded = measurement["n_traded"] > 0
+    k = measurement["n_traded"][traded]
+    assert (k == 1).all()
+    assert np.allclose(
+        measurement["panel"][traded], (k / n_assets) * measurement["traded_only"][traded]
+    )
+    # The dilution is therefore exactly the missing (n - k) / n of the
+    # participation the traded names consumed.
+    assert np.allclose(
+        measurement["dilution"][traded],
+        -(n_assets - 1) / n_assets * measurement["traded_only"][traded],
+    )
+
+    # The dollar-consistent aggregation: the impact rate of the traded name
+    # applied to the notional it traded (a quarter of the equity).
+    assert np.allclose(
+        measurement["notional_weighted"][traded],
+        0.25 * measurement["traded_only"][traded],
+    )
+    assert np.allclose(
+        measurement["traded_fraction"][traded], 0.25
+    )
+
+
+def test_run_backtest_reports_the_impact_participation_next_to_the_charged_impact():
+    """The impact participation measurement, recomputed from the weights.
+
+    The reported numbers are recomputed here by hand from the strategy's own
+    weights (and from the run's own charged impact), so the test does not
+    compare the engine against itself.
+    """
+    from utils import impact_participation_dilution  # noqa: E402
+
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    params = '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}'
+    coefficient = 0.5
+
+    results = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(impact_coefficient=coefficient, panel_pricing="book"),
+    )
+    diag = results["book_diagnostic"]
+    market, held = _held_book_of(
+        build_strategy("cross_sectional_momentum", params), data
+    )
+
+    # The impact the run charged: the panel mean of the book's own
+    # per-asset impacts, on the bars the run reports.
+    charged = book_market_impact_cost(
+        held,
+        market["raw_returns"],
+        market["close"],
+        market["volume"],
+        coefficient,
+        adv_window=20,
+        initial_capital=100000,
+    ).reindex(results["returns"].index)
+
+    # The impact the traded names would have paid, from the strategy's own
+    # weights.
+    measurement = impact_participation_dilution(
+        held,
+        market["raw_returns"],
+        market["close"],
+        market["volume"],
+        coefficient,
+        adv_window=20,
+        initial_capital=100000,
+        index=results["returns"].index,
+    )
+
+    assert abs(diag["impact_charged_bps"] - float(charged.mean() * 1e4)) < 1e-12
+    assert abs(
+        diag["impact_traded_only_bps"]
+        - float(measurement["traded_only"].mean() * 1e4)
+    ) < 1e-12
+    assert abs(
+        diag["impact_notional_weighted_bps"]
+        - float(measurement["notional_weighted"].mean() * 1e4)
+    ) < 1e-12
+    # The model charges the panel mean, so it charges *less* than the names
+    # that traded would have paid: the dilution is negative.
+    assert diag["impact_dilution_bps"] < 0
+    assert abs(
+        diag["impact_dilution_bps"]
+        - (diag["impact_charged_bps"] - diag["impact_traded_only_bps"])
+    ) < 1e-9
+    # In the book pricing mode the charged impact *is* the panel mean of the
+    # book's own impacts, so the run-level dilution and the panel dilution
+    # are the same number.
+    assert abs(
+        diag["impact_dilution_bps"] - diag["impact_panel_dilution_bps"]
+    ) < 1e-9
+    # The participation ratio is the fraction of names that traded.
+    traded = measurement["n_traded"] > 0
+    assert abs(
+        diag["impact_participation_ratio"]
+        - float((measurement["n_traded"][traded] / 5.0).mean())
+    ) < 1e-9
+    assert 0.0 < diag["impact_participation_ratio"] <= 1.0
+
+
+def test_impact_participation_is_reported_in_both_pricing_modes():
+    """Both pricing modes report the measurement; the mode changes the
+    *charged* impact, not the impact the traded names would have paid.
+
+    The traded-only number depends on the book and the market only, so it is
+    the same under both conventions -- which is what makes the two readings
+    comparable.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    params = '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}'
+    coefficient = 0.5
+
+    net = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(impact_coefficient=coefficient, panel_pricing="net-exposure"),
+    )
+    book = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(impact_coefficient=coefficient, panel_pricing="book"),
+    )
+    net_diag = net["book_diagnostic"]
+    book_diag = book["book_diagnostic"]
+
+    for diag in (net_diag, book_diag):
+        assert diag["impact_charged_bps"] is not None
+        assert diag["impact_traded_only_bps"] is not None
+        assert diag["impact_dilution_bps"] is not None
+        assert diag["impact_participation_ratio"] is not None
+
+    # The traded names would have paid the same under both conventions.
+    assert abs(
+        net_diag["impact_traded_only_bps"] - book_diag["impact_traded_only_bps"]
+    ) < 1e-9
+    assert abs(
+        net_diag["impact_participation_ratio"]
+        - book_diag["impact_participation_ratio"]
+    ) < 1e-9
+    # The net-exposure convention charges the *scalar* net exposure, so it
+    # charges less than the book convention does.
+    assert net_diag["impact_charged_bps"] < book_diag["impact_charged_bps"]
+    assert net_diag["impact_dilution_bps"] < book_diag["impact_dilution_bps"]
+
+
+def test_impact_participation_is_absent_when_impact_is_disabled():
+    """Without an impact model there is nothing to measure."""
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    params = '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}'
+
+    results = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(impact_coefficient=0.0, panel_pricing="book"),
+    )
+    diag = results["book_diagnostic"]
+    for key in (
+        "impact_charged_bps",
+        "impact_traded_only_bps",
+        "impact_notional_weighted_bps",
+        "impact_dilution_bps",
+        "impact_panel_dilution_bps",
+        "impact_gross_book_return_bps",
+        "impact_dilution_fraction_of_gross_return",
+        "impact_participation_ratio",
+    ):
+        assert diag[key] is None, key
+
+
+def test_impact_participation_does_not_move_any_charged_number():
+    """The measurement is read-only: the returns are unchanged by it.
+
+    The book mode is compared against a run whose diagnostic cannot be
+    computed at all (impact disabled changes the *charges*, so instead the
+    returns are recomputed by hand: the reported return must equal the book
+    return minus the transaction, borrow, funding and impact costs, with the
+    impact charged on the panel mean over the whole panel.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    params = '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}'
+    commission, slippage, coefficient = 0.0002, 0.0001, 0.5
+    borrow, funding, ann_factor = 0.03, 0.02, 252
+
+    results = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(
+            commission=commission,
+            slippage=slippage,
+            impact_coefficient=coefficient,
+            borrow_cost=borrow,
+            funding_cost=funding,
+            panel_pricing="book",
+        ),
+    )
+    market, held = _held_book_of(
+        build_strategy("cross_sectional_momentum", params), data
+    )
+    turnover = held.diff().abs().sum(axis=1, min_count=1)
+    short_leg = held.clip(upper=0).abs().sum(axis=1, min_count=1)
+    gross = held.abs().sum(axis=1, min_count=1)
+    costs = (
+        turnover * (commission + slippage)
+        + short_leg * (borrow / ann_factor)
+        + (gross - 1.0).clip(lower=0) * (funding / ann_factor)
+    )
+    impact = book_market_impact_cost(
+        held,
+        market["raw_returns"],
+        market["close"],
+        market["volume"],
+        coefficient,
+        adv_window=20,
+        initial_capital=100000,
+    )
+    book_return = (held * market["close"].pct_change()).sum(axis=1, min_count=1)
+    manual = (book_return - costs - impact).dropna()
+    assert manual.index.equals(results["returns"].index)
+    assert abs(
+        float((1 + manual).prod() - 1) - float((1 + results["returns"]).prod() - 1)
+    ) < 1e-12
+
+
 
 def test_cli_data_provenance_reproducible_across_runs():
     """Running the CLI twice with identical inputs yields byte-identical
@@ -3295,6 +3594,11 @@ TEST_REGISTRY = [
     ("test_run_backtest_reports_the_book_capacity_next_to_the_basket_one", test_run_backtest_reports_the_book_capacity_next_to_the_basket_one),
     ("test_run_backtest_book_capacity_is_absent_in_the_net_exposure_mode", test_run_backtest_book_capacity_is_absent_in_the_net_exposure_mode),
     ("test_book_capacity_is_none_when_impact_is_disabled", test_book_capacity_is_none_when_impact_is_disabled),
+    ("test_impact_participation_dilution_matches_the_hand_computed_aggregations", test_impact_participation_dilution_matches_the_hand_computed_aggregations),
+    ("test_run_backtest_reports_the_impact_participation_next_to_the_charged_impact", test_run_backtest_reports_the_impact_participation_next_to_the_charged_impact),
+    ("test_impact_participation_is_reported_in_both_pricing_modes", test_impact_participation_is_reported_in_both_pricing_modes),
+    ("test_impact_participation_is_absent_when_impact_is_disabled", test_impact_participation_is_absent_when_impact_is_disabled),
+    ("test_impact_participation_does_not_move_any_charged_number", test_impact_participation_does_not_move_any_charged_number),
 ]
 
 if __name__ == "__main__":

@@ -1125,6 +1125,74 @@ class TestTearSheet(unittest.TestCase):
                 summary = json.load(f)
             self.assertNotIn("book_diagnostic", summary)
 
+    def test_tear_sheet_renders_the_impact_participation_measurement(self):
+        """The market-impact participation measurement is rendered next to
+        the rest of the panel book diagnostic."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            results["book_diagnostic"] = {
+                "n_periods": 100,
+                "n_periods_with_book": 80,
+                "n_assets": 4,
+                "gross_book": 0.5233,
+                "net_exposure": 0.1748,
+                "framework_net_exposure": 0.1748,
+                "gross_turnover": 0.1694,
+                "framework_turnover": 0.0039,
+                "return_gap_bps": -12.5,
+                "return_gap_total": -0.088,
+                "book_total_return": -0.022,
+                "framework_total_return": 0.066,
+                "framework_total_return_after_costs": 0.065,
+                "impact_charged_bps": 0.58,
+                "impact_traded_only_bps": 1.31,
+                "impact_notional_weighted_bps": 0.58,
+                "impact_dilution_bps": -0.73,
+                "impact_panel_dilution_bps": -0.73,
+                "impact_gross_book_return_bps": 2.33,
+                "impact_dilution_fraction_of_gross_return": -0.3133,
+                "impact_participation_ratio": 0.44,
+            }
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.065}, tmpdir, symbol="PANEL",
+                strategy_name="CSM", save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Impact Charged by Model (bps/period)", html)
+            self.assertIn("Impact Traded Names Would Pay (bps/period)", html)
+            self.assertIn("Impact Notional-Weighted (bps/period)", html)
+            self.assertIn("Impact Understatement (bps/period)", html)
+            self.assertIn("Impact Understatement (% of gross book return)", html)
+            self.assertIn("Names Trading per Period (participation)", html)
+
+    def test_tear_sheet_omits_the_impact_rows_without_an_impact_model(self):
+        """Without an impact model there is nothing to render, so the rows
+        are omitted (the default tear sheet stays unchanged)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            results["book_diagnostic"] = {
+                "n_periods": 100,
+                "n_periods_with_book": 80,
+                "n_assets": 4,
+                "gross_book": 0.5233,
+                "net_exposure": 0.1748,
+                "framework_net_exposure": 0.1748,
+                "gross_turnover": 0.1694,
+                "framework_turnover": 0.0039,
+                "impact_charged_bps": None,
+                "impact_traded_only_bps": None,
+                "impact_dilution_bps": None,
+            }
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.065}, tmpdir, symbol="PANEL",
+                strategy_name="CSM", save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Panel Book Diagnostic", html)
+            self.assertNotIn("Impact Charged by Model (bps/period)", html)
+
     def test_tear_sheet_includes_walk_forward_section(self):
         """Walk-forward analysis results are rendered as an HTML section."""
         with tempfile.TemporaryDirectory() as tmpdir:

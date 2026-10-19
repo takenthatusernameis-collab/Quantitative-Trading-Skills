@@ -2,214 +2,266 @@
 
 ## What changed this session
 
-Executed the prior handoff's next task — **Phase 2c: the book-based capacity estimate,
-reported next to the basket-based one.** The `book` pricing mode now reports *two*
-capacity numbers: the framework's basket-based estimate (unchanged, unchanged meaning,
-unchanged numbers) and a new book-based estimate computed from the trade sizes the
-strategy actually executes. The `net-exposure` mode is **bit-identical** to the previous
-commit (verified key by key against `HEAD`, in both pricing modes).
+Executed the prior handoff's next task — **quantify the participation dilution of
+the panel impact model: measure, do not change the charged costs.** The panel impact
+model charges the **equal-weighted mean over all `n` panel names** of the per-asset
+impacts, so a period in which only `k` of `n` names trade is charged `1 / n` of the
+participation its traded names consumed. That approximation used to be flagged in
+prose only; it is now **measured and reported next to the impact the run charged**,
+in both pricing modes, in the CLI output, in the tear sheet and in the artifacts.
+
+**No charged cost, return, capacity or Sharpe number moved.** The HEAD-vs-new
+parity harness shows **zero** changed numbers in the `net-exposure` mode *and* in the
+`book` mode: the only differences are the 112 new additive `impact_*` keys (see
+"Verification").
 
 ### Core: `skills/quantitative-backtesting/scripts/utils.py`
 
-- **`book_capacity_estimate(held_book, close, volume, impact_coefficient,
-  max_impact=0.0005, adv_window=20)`** (new). The direct inversion of the impact model
-  the book mode charges: the impact of asset `i` at equity `E` is
-  `|dw_i| x E x impact_coefficient / ADV_i`, so the equity at which that trade hits the
-  threshold is `max_impact x ADV_i / (|dw_i| x impact_coefficient)`, and the capacity of
-  the book is
-  `min_i ( max_impact x ADV_i / (|dw_i| x impact_coefficient) )`
-  over the constituents that actually traded in that period. It returns the
-  point-in-time reading (`estimated_capacity`), the per-period series
-  (`capacity_series`), the distribution (`capacity_trend`), the `binding_asset` and
-  `n_periods_measured`. It is `None` when impact is disabled, when there is no volume,
-  or when the book never traded.
-- **`_capacity_trend_from_series`** moved here from `walk_forward.py` (verbatim, no
-  behaviour change) so the estimator and the analysis paths share one implementation
-  instead of two copies. `walk_forward.py` re-imports it, so
-  `walk_forward._capacity_trend_from_series` still resolves.
+- **`impact_participation_dilution(held_book, raw_returns, close, volume,
+  impact_coefficient, adv_window=20, initial_capital=100000.0, index=None)`**
+  (rewritten; a partial version of it was left unused in commit `9a1db4d`). Measures
+  three aggregations of the *same* per-asset impact model
+  (`rate_i = |dw_i| x equity / ADV_i x coefficient`):
+  - `panel` — the equal-weighted mean over all `n` names: the convention the engine
+    charges in `book` mode (a name that did not trade contributes zero);
+  - `traded_only` — the equal-weighted mean over the `k` names that actually traded:
+    the participation the traded names consumed;
+  - `notional_weighted` — `sum_i rate_i x notional_i / equity`: the *dollar-consistent*
+    aggregation of a linear impact model (the impact rate of each name applied to
+    the notional traded in that name).
+  It also returns `n_traded`, `participation_ratio` (`k / n`), `traded_fraction`
+  (`f`, the traded notional as a fraction of the equity) and `dilution`
+  (`panel - traded_only`). Two identities make it auditable, and both are asserted
+  by the tests: `panel == (k / n) x traded_only` (the dilution factor is exactly the
+  fraction of names that traded) and `notional_weighted == f x traded_only` when the
+  traded names trade equal notionals.
+- **`_impact_dilution_keys(...)`** (new): turns the measurement into the diagnostic
+  scalars, choosing the *charged* impact by pricing convention (the panel mean of
+  the book's own impacts in `book` mode, the `|d net exposure|` model in
+  `net-exposure` mode) and computing the "as a fraction of the gross book return"
+  reading (only when the book earned a positive gross return, where the ratio would
+  be a sign-flipping artifact).
+- **`format_impact_dilution_lines(diagnostic, indent)`** (new): the shared CLI
+  block, used by both entry points so the two CLIs print the same lines.
+- **`compute_book_diagnostic(...)`** gains the optional `impact_coefficient`,
+  `adv_window` and `initial_capital` arguments and reports the measurement:
+  `impact_charged_bps`, `impact_traded_only_bps`, `impact_notional_weighted_bps`,
+  `impact_dilution_bps`, `impact_panel_dilution_bps`, `impact_gross_book_return_bps`,
+  `impact_dilution_fraction_of_gross_return`, `impact_participation_ratio` (all
+  `None` when impact is disabled).
+- **`aggregate_book_diagnostics(...)`** aggregates the new keys with the period
+  weighting and recomputes the ratio from the aggregated bps values (the aggregate
+  is the ratio of the aggregates, not an average of ratios). The keys are always
+  present (`None` when the measurement does not apply), so a consumer never has to
+  guess whether a missing key means "not measured" or "not reported".
 
-### Core: `skills/quantitative-backtesting/scripts/walk_forward.py`
+### Wiring
 
-- `_window_held_book(...)` (new): the book the selected strategy holds in one window
-  (`lag = 1 + latency`, `fill_rate`), plus its market model — the same convention the
-  book diagnostic and the book cost model measure.
-- `_window_book_capacity(...)` (new): the book capacity of one window.
-- `_merge_capacity_series(...)` (new): merges the per-window capacity series by
-  timestamp. Each window's series is computed **inside its own window**, so merging
-  creates no artificial trade at a window boundary.
-- Wiring: `periods[i]["capacity_book"]` / `["capacity_book_trend"]` (walk-forward),
-  `folds[i]["capacity_book"]` / `["capacity_book_trend"]` (CPCV),
-  `validation_performance` / `test_performance` (out-of-sample), plus
-  `summary["capacity_book"]`, `summary["capacity_book_trend"]` and
-  `summary["oos_min_capacity_book"]` on the walk-forward and CPCV summaries. The
-  CLI artifacts (`capacity_per_period`, `capacity_per_fold`) carry the new keys.
-- CLI: a `Capacity (market impact):` block (basket-based and book-based, plus the
-  worst reading and the worst out-of-sample window) — printed **only** when the
-  book-based number exists, so the `net-exposure` output is unchanged.
+- `scripts/run_backtest.py`: the diagnostic is called with the run's own impact
+  parameters; the CLI prints the impact participation block under the panel book
+  diagnostic.
+- `scripts/walk_forward.py`: `_window_book_diagnostic(...)` takes the impact
+  parameters and passes them through; the four call sites (walk-forward periods, CPCV
+  folds, out-of-sample validation and test) pass the run's values; the shared
+  `_print_book_diagnostic` prints the impact block.
+- `scripts/reporting.py`: the tear sheet renders the impact rows (only when the
+  measurement exists, so the default tear sheet is unchanged).
 
-### Core: `skills/quantitative-backtesting/scripts/run_backtest.py`
+### Tests (all new tests recompute the numbers by hand from the strategy's own weights)
 
-- `results["capacity_book"]` / `results["capacity_book_trend"]` (mirrored into
-  `metrics`), computed from the held book the engine already builds. The CLI prints the
-  two capacity numbers and the strategy's capital as a multiple of the book capacity.
-- The book-mode note no longer claims the capacity stays basket-based.
+- `tests/test_run_backtest.py`:
+  `test_impact_participation_dilution_matches_the_hand_computed_aggregations`
+  (the three aggregations and both identities on a hand-built book),
+  `test_run_backtest_reports_the_impact_participation_next_to_the_charged_impact`
+  (the reported numbers vs a hand computation from the strategy's own weights, and
+  the run's own charged impact), `test_impact_participation_is_reported_in_both_pricing_modes`
+  (the traded-only reading is the same under both conventions, which is what makes
+  the two comparable), `test_impact_participation_is_absent_when_impact_is_disabled`,
+  and `test_impact_participation_does_not_move_any_charged_number` (the reported
+  return equals the book return minus the hand-computed transaction, borrow, funding
+  and impact costs).
+- `tests/test_walk_forward.py`:
+  `test_walk_forward_reports_the_impact_participation_per_window_and_summary` (per
+  window vs a hand computation; the summary is the period-weighted aggregate) and
+  `test_walk_forward_impact_participation_is_absent_when_impact_is_disabled`.
+- `tests/test_reporting.py`:
+  `test_tear_sheet_renders_the_impact_participation_measurement` and
+  `test_tear_sheet_omits_the_impact_rows_without_an_impact_model`.
 
-### Core: `skills/quantitative-backtesting/scripts/reporting.py`
+### Documentation
 
-- Tear sheet: `Strategy Capacity (Notional, book-based)` and
-  `Strategy Capacity Min (Notional, book-based)` rows (single backtest, walk-forward,
-  CPCV), a `Capacity Book (Notional)` column in the per-period and per-fold tables
-  (added **only** when at least one window produced a book capacity, so the default
-  tear sheet is unchanged), and `capacity_book_trend` in `tear_sheet_summary.json`.
+- `references/cost_models.md`: a new section **"Market-impact participation
+  (measurement only)"** with the definitions, the identities, the key table, the
+  reference numbers, the decision and the caveat; the "Residual approximations in
+  `book` mode" bullet now points at the measurement.
+- `SKILL.md`: the `utils.py` inventory, the "panel-pricing book" residual bullet, a
+  new best-practice bullet and the test-coverage paragraph.
+- `references/validation_methods.md`: the new summary keys.
 
-### Docs
+## The measurement, and the decision it supports
 
-`references/cost_models.md` (new section "Two capacity estimates"; the capacity is no
-longer listed as a residual approximation of `book` mode), `references/validation_methods.md`
-(the new summary keys), `SKILL.md` (the two capacity conventions, the new keys, the
-test coverage).
+On the reference panel used throughout the documentation (900 bars, 5 assets, 2 bps
+commission, 1 bps slippage, 3 % borrow, impact coefficient 0.5, $100k of equity):
+
+| Reading | `book` mode | `net-exposure` mode |
+| --- | --- | --- |
+| charged by the model | 0.058 bps/period | 0.00007 bps/period |
+| traded names would have paid | 0.131 bps/period | 0.152 bps/period |
+| understatement (dilution) | -0.073 bps/period | -0.152 bps/period |
+| notional-weighted (dollar) cost | 0.058 bps/period | 0.073 bps/period |
+| names trading per period | 2.21 of 5 (ratio 0.44) | 2.29 of 5 (ratio 0.46) |
+| gross book return | -1.03 bps/period | +1.56 bps/period |
+
+1. **The dilution is exactly `n / k`** (44 % of the participation, the `k / n`
+   factor and nothing else).
+2. **The *cost* of the trades is not understated.** The book trades only
+   `f = 44 %` of its equity in the `k` names it touches (it enters or exits one
+   name at `1 / n` of the equity at a time), so the dollar-consistent cost
+   `f x traded_only` is 0.058 bps/period — the same number the panel convention
+   charges. For this family of books the panel convention is *not* an
+   approximation of the dollar cost: the `k / n` dilution and the "only a fraction
+   of the equity was traded" factor cancel exactly.
+3. **The conservative alternative would overcharge.** Charging the mean over the
+   traded names would cost 0.131 bps/period instead of 0.058 (2.26x the
+   dollar-consistent cost), i.e. about 0.66 percentage points of the reported
+   book-mode return (-15.68 % -> about -16.2 %). It is a *rate* comparison, not a
+   cost comparison.
+
+**Decision: the traded-only mean does _not_ become the default.** It is the
+conservative reading of the *participation rate*, but it is not a cost: it
+implicitly charges the whole equity in every name the book touched. The
+dimensionally consistent aggregation of a linear impact model is the
+notional-weighted one, and switching to it is a separate, number-changing change.
+The engine keeps charging the panel mean and now *reports* the measurement, so the
+size of the convention is visible in every artifact.
+
+**Correction to the prior handoff's premise.** The dilution was described as "the
+largest remaining assumption in the book-mode numbers". The cost decomposition of
+the reference run (899 bars) shows it is not: transaction 0.489 bps/period
+(123 bps/yr), borrow 0.233 bps/period (59 bps/yr), impact 0.058 bps/period
+(15 bps/yr) — the impact term is 7 % of the charged cost, and the understatement
+is about 0.66 pp of the -15.68 % return. The *relative* error in the impact term
+is large (2.26x), but the term itself is small next to the transaction and borrow
+costs at this capital level.
+
+**Where the convention does bite.** The cancellation in (2) is a property of a book
+that trades `1 / n` of the equity in each name it touches. A book that
+*concentrates* (the whole notional moving in and out of one name) trades `f ~ 1`
+in `k = 1` name, so the panel convention undercharges it by a factor of `n` while
+the notional-weighted aggregation stays correct. The measurement distinguishes the
+three cases, so a reader always knows which one they are in.
+
+**Caveat.** The `impact_coefficient` is read here as a price concession rate (the
+cost is the rate applied to the traded notional), which is what the "price
+elasticity of the order book" description of the model implies. If it is meant as a
+portfolio-level cost rate per unit of participation, the panel convention is the
+intended one and the notional-weighted reading does not apply.
 
 ## What was actually verified
 
-- **Full suite**: `python -m pytest tests/ -q` -> **487 passed** (was 479; +8 new).
-  The three standalone runners also pass: `python tests/test_run_backtest.py` ->
-  95/95, `python tests/test_walk_forward.py` -> 175/175, `python tests/test_cpcv.py` ->
-  28/28.
-- **Bit-identity (the harness the previous session built)**: the HEAD-vs-new snapshot
-  harness (`/home/runner/work/_temp/kilo-tmp/kilo/parity_probe.py` +
-  `compare_snapshots.py`) was run in **both** pricing modes against the final tree.
-  `head_repo2/` is the extracted `HEAD` tree (`5a8293f`, the Phase 2b commit);
-  `head_repo/` is the older extraction the previous session used — use `head_repo2/`.
-  The probe takes the pricing mode as a third argument (`net-exposure` or `book`):
-  - `net-exposure`: **28 differing leaves, all of them the new `capacity_book*` keys**
-    (all `None` in that mode). **No existing number moved.**
-  - `book`: **30 differing leaves, all of them the new `capacity_book*` keys**.
-    **No existing number moved.**
-- **Methodological properties (new tests, recomputed by hand from the strategy's own
-  weights, not from the engine)**:
-  - The book capacity **equals the basket capacity exactly** for a book that trades
-    `1 / n_assets` per constituent every period (the basket rule is that special
-    case) — `test_book_capacity_equals_the_basket_capacity_for_a_one_over_n_book`.
-  - A book that trades **more** per period supports **less** capital: a book that
-    rotates the whole notional through the least liquid name supports exactly
-    `n_assets` times less than the basket rule reports —
-    `test_book_capacity_is_lower_for_a_book_that_trades_more`.
-  - The reported number is the equity level at which the **worst** trade of the
-    point-in-time bar reaches the 5 bps threshold and no other trade exceeds it —
-    `test_run_backtest_reports_the_book_capacity_next_to_the_basket_one`.
-  - The per-window number of the walk-forward path matches a hand recomputation from
-    the strategy's own weights in that window —
-    `test_walk_forward_reports_the_book_capacity_per_window_and_summary`; the CPCV
-    path reports it per fold — `test_cpcv_reports_the_book_capacity_per_fold`.
-  - The keys are `None` outside the `book` mode —
-    `test_run_backtest_book_capacity_is_absent_in_the_net_exposure_mode`,
-    `test_walk_forward_book_capacity_is_absent_in_the_net_exposure_mode` — and `None`
-    when impact is disabled — `test_book_capacity_is_none_when_impact_is_disabled`.
-- **End-to-end numbers** (900-bar 5-asset market-neutral cross-sectional book,
-  commission 2 bps + slippage 1 bps, borrow 3 %, impact coefficient 0.5,
-  `run_backtest.py --panel-pricing book --multi-symbol`):
-  basket capacity `3,248,736.88` vs **book capacity `4,197,791.02`**, worst reading
-  in the window `1,870,360.08`; the strategy trades `100,000` of equity, i.e.
-  `0.02x` the book capacity. The book capacity is *higher* here because this book
-  rotates less than the basket rule assumes (it only trades when its constituent set
-  changes) — that is the honest reading, not an error.
-  The walk-forward path on the same data: basket `3,248,736.88`, book `3,032,075.71`,
-  worst out-of-sample window `1,870,360.08`.
-- **CLI smoke tests**: `run_backtest.py --panel-pricing book --multi-symbol` and
-  `walk_forward.py walk-forward --panel-pricing book --multi-symbol` both run end to
-  end and print the new capacity block; the walk-forward artifact carries
-  `capacity_book` / `capacity_book_trend` per period.
+- **Full test suite**: `python -m pytest tests/ -q` -> **496 passed** (487 before
+  this session; 9 new tests). The standalone runners also pass
+  (`test_run_backtest.py` 100/100, `test_walk_forward.py` 177/177, `test_cpcv.py`
+  28/28, `test_reporting.py`).
+- **Parity harness** (`/home/runner/work/_temp/kilo-tmp/kilo/`): `head_repo3` is
+  `git archive HEAD` (commit `9a1db4d`) and `parity_probe.py` dumps the
+  `run_backtest` / `walk_forward` / `cpcv` outputs of both trees. The diff is
+  **112 leaves in each mode, every one of them a new `impact_*` key that is missing
+  in HEAD**; there is **no other difference** — no return, cost, capacity, Sharpe or
+  bar-count change. Checked in the `net-exposure` mode *and* in the `book` mode.
+  (The walk-forward OOS return is bit-identical: 0.045572663211203235 in
+  `net-exposure`, -0.027351524036712926 in `book`.)
+- **The published book-mode number is unchanged**: the reference panel reproduces
+  **-15.68 %** (the documentation quotes -15.7 %), and the uncosted book return is
+  -9.56 % (the documentation quotes the +16.3 % -> -15.7 % pair for a *directional*
+  quantile set; the market-neutral book's own pre-cost return is -9.56 %).
+- **The cross-path warmup question is settled**: the walk-forward's NaN-warmup book
+  and the single backtest's zero-warmup book charge the *same* trades (the turnover
+  sums over a window are identical, 7.40 vs 7.40), because the target weights are
+  0 (not NaN) before the strategy is defined, so the book is flat at the start of
+  every window in both conventions. The prior handoff's unresolved item 3 is
+  therefore inert; no change is needed.
 
 ## What remains unresolved
 
-1. **The impact model is still the mean over the whole panel.** A period in which only
-   `k` of `n` names trade is charged the mean over `n` names, so the drag is diluted
-   relative to the participation actually consumed. This is the largest remaining
-   assumption in the book-mode numbers (the book-mode P&L is flattered by it) and it is
-   *not* fixed by the new capacity estimate. See "Next task".
-2. **The book-based capacity is reported in the `book` mode only.** The numbers would
-   be identical in `net-exposure` mode (the weights and the ADV do not depend on the
-   pricing mode), so it *could* be reported as a measurement in both modes. It was left
-   out deliberately so the default path keeps a single capacity number and the default
-   artifacts stay unchanged.
-3. **The book capacity uses the `warmup="zero"` book** (the establishment of the book
-   is a real trade), while the walk-forward *cost* basis uses the NaN-warmup book (the
-   first book change is entered for free and its bar is dropped). The two therefore
-   differ in the first bar of every window. The capacity reading is the *last* bar on
-   which the book traded, so this only matters for a window with a single trade.
-4. **The book trade ledger does not reconcile with the equity curve** (`pnl` is in
-   price units scaled by the average weight; the ledger ignores compounding and
-   transaction costs). Unchanged from last session.
-5. **The book-mode numbers are still unpublished**, so the capacity addition breaks no
-   published number.
-6. Not attempted (out of scope, no evidence of a defect): the `mean-of-per-asset-
-   impacts` convention itself, the walk-forward/CPCV *grid search* being scored on the
-   book's costed returns (it is, in book mode, but the selection criterion was not
-   re-examined), and a break-even-capital ("at what capital does the net edge
-   disappear?") report.
+- The **impact model's aggregation convention is still the panel mean** (by
+  decision, with the measurement now reported). A concentrated book is still
+  undercharged by up to a factor `n` by the *charged* number — the measurement
+  reports it, but the engine still charges the panel mean.
+- The **impact model is linear in the participation rate** and has no temporary /
+  permanent split, no gap risk and no fill model. It is a sizing guard.
+- The **`fill_rate` convention** (from the prior handoff) is still open: the
+  framework scales the *position* by the fill rate, and the book mode scales the
+  *book* by it too, so a 50 % fill rate halves the book and the traded notional
+  instead of delaying the fill. It is pinned by a test
+  (`test_run_backtest_book_pricing_market_impact_scales_with_the_fill_rate`) and
+  changing it moves numbers.
+- The reference artifacts in `test_output/` are **not** regenerated by this session
+  (the default single-asset path is unchanged, so there is nothing to regenerate);
+  a panel-mode artifact set does not exist in the repo yet.
 
-## Approaches that have already failed (do not repeat)
+## Approaches that have already failed (and why)
 
-- **"A constant 1/n book has the basket capacity."** Wrong assumption, and it fails
-  silently: a *constant* book never trades after its establishment, so the estimator
-  reports no capacity at all (`None` — "the book never traded"). The two rules agree
-  only for a book that *trades* `1/n` per constituent every period. The test builds
-  one deliberately (the book alternates between flat and `1/n`).
-- **Asserting that the *minimum* impact over the traded assets equals the threshold.**
-  At the reported capacity the *binding* (least liquid) asset has the **maximum**
-  impact, exactly `max_impact`; the most liquid traded asset has the minimum. The
-  test now asserts `max == max_impact` and `max <= max_impact`.
-- **"A concentrated book has exactly `n_assets` times less capacity."** Only true when
-  the name that trades is also the least liquid one: the basket rule binds on the
-  least liquid *name*, the book rule on the name that *trades*. The test makes the
-  traded name the least liquid so the factor is exact.
-- **Building a whole-sample book by concatenating the per-window books.** Rejected: it
-  creates an artificial unwind/establishment trade at every window boundary, and those
-  bars would carry the *smallest* capacity readings (the strategy never faced them).
-  The per-window series are computed inside their own window and merged by timestamp
-  instead.
-- **Duplicating the capacity-trend helper** in `utils.py` and `walk_forward.py` was
-  avoided: the helper was *moved* (imported by `walk_forward.py`) so there is one
-  implementation, otherwise the two would drift.
+- **The partial `impact_participation_dilution` in commit `9a1db4d`** (an empty
+  commit message, a function nothing called, no tests): it measured only the
+  "traded-only mean" and framed the gap as an under-charge. It was rewritten
+  because the traded-only mean is *not* a cost, and reporting it alone would have
+  led to the wrong decision (see below). Do not restore it.
+- **Switching the default to the mean over the traded names** (the "conservative"
+  alternative the prior handoff proposed to evaluate): rejected on the evidence
+  above — it would overcharge the impact by `n / k` for the books this framework
+  produces. The conservative-looking number is the wrong number.
+- **Reporting the dilution without the notional-weighted third reading**: rejected
+  — with only two readings ("charged" vs "traded only") the natural conclusion is
+  "the model undercharges, switch to the conservative convention", which the
+  measurement shows to be wrong. The dollar-consistent third reading is what makes
+  the decision correct.
 
 ## Next task (one precise, bounded item)
 
-**Quantify the participation dilution of the panel impact model — measure, do not
-change the charged costs.**
+**Add the notional-weighted (dollar-consistent) impact as an _opt-in_ chargeable
+convention, with the capacity rule that is consistent with it — and compare.**
 
-- Evidence: `skills/quantitative-backtesting/scripts/utils.py::book_market_impact_cost`
-  charges the **equal-weighted mean over the whole panel** of the per-asset impacts
-  (over `n` names), so a period in which only `k` of `n` names trade is charged
-  `1/n` of the participation it actually consumed. For the cross-sectional book the
-  constituent set changes often, so many periods trade only some names. The same
-  dilution applies to the net-exposure path (`market_impact_cost`). This is the
-  largest remaining *assumption* in the book-mode numbers, and it is currently only
-  flagged in prose ("Residual approximation: the impact stays the equal-weighted
-  mean of the per-asset impacts over the whole panel").
-- Scope: add a **measurement only** (the repo's established pattern, cf. the panel
-  book diagnostic) that reports, next to the charged impact, the impact the *traded*
-  names would have paid (the mean over the traded names only) and the difference in
-  bps per period and as a fraction of the gross book return. Surface it in the book
-  diagnostic (both pricing modes), the CLI block, the tear sheet and
-  `references/cost_models.md`. **No charged cost, return, capacity or Sharpe number
-  may move** — the net-exposure path must stay bit-identical.
-- Decide from the measurement whether the conservative convention (the mean over the
-  traded names) should become the *default*; if it does, that is a separate,
-  number-changing change and must be flagged as such (it would change the published
-  book-mode return of -15.7 %).
-- Verify: the new tests must recompute the diluted impact by hand from the
-  strategy's own weights, and the HEAD-vs-new harness must still show **zero**
-  changed numbers in the `net-exposure` mode (the harness described above is at
-  `/home/runner/work/_temp/kilo-tmp/kilo/`).
+- Evidence: the measurement now proves the current panel convention is
+  *accidentally* right for the books this framework produces (`f = k / n`, so
+  `panel == notional_weighted`: 0.0579 vs 0.0581 bps/period on the reference panel)
+  and *wrong by a factor `n`* for a concentrated book (`f ~ 1`, `k = 1`), where the
+  charged impact is `1 / n` of what the trade costs. The number is already computed
+  and reported (`impact_notional_weighted_bps`), so only the *charging* path and
+  the capacity inversion are missing. A framework that lets a user run a
+  concentrated book must be able to charge it correctly.
+- Scope: add an impact-aggregation option (e.g. `impact_aggregation =
+  "panel" | "notional-weighted"`) to the impact cost path
+  (`utils.market_impact_cost` / `utils.book_market_impact_cost` and their call
+  sites in `run_backtest.py` and `walk_forward.py`), exposed on the CLI
+  (`--impact-aggregation`), with the **default unchanged** (`"panel"`), so no
+  published number moves. Add the matching capacity inversion for the
+  notional-weighted model: the drag of asset `i` is
+  `coefficient x (|dw_i| x E / ADV_i) x (|dw_i| x E) / E =
+  coefficient x dw_i^2 x E / ADV_i`, so the equity at which the trade hits
+  `max_impact` is `max_impact x ADV_i / (coefficient x dw_i^2)` — a *different*
+  capacity rule from the current `max_impact x ADV_i / (|dw_i| x coefficient)`.
+  Report both capacity numbers side by side (as the basket/book pair is reported
+  today) and both impact readings in the diagnostic.
+- Verify: (a) the charged impact of the new mode equals the already-measured
+  `impact_notional_weighted_bps` (the measurement is the oracle);
+  (b) the new mode's capacity is the exact inverse of the new charge (recomputed
+  by hand from the strategy's own weights, as the existing book-capacity test does);
+  (c) the HEAD-vs-new harness shows **zero** changed numbers with the default
+  aggregation, in **both** pricing modes; (d) the full suite stays green.
+- Do **not** change the default aggregation, and do **not** re-quote the published
+  book-mode return (-15.68 %) without re-running the parity harness.
 
 **Files touched this session** (all under `skills/quantitative-backtesting/`):
 `scripts/utils.py`, `scripts/run_backtest.py`, `scripts/walk_forward.py`,
-`scripts/reporting.py`, `references/cost_models.md`, `references/validation_methods.md`,
-`SKILL.md`, `tests/test_run_backtest.py`, `tests/test_walk_forward.py`, plus
-`HANDOFF.md` / `HANDOFF_NEXT.md` at the repo root.
+`scripts/reporting.py`, `references/cost_models.md`,
+`references/validation_methods.md`, `SKILL.md`, `tests/test_run_backtest.py`,
+`tests/test_walk_forward.py`, `tests/test_reporting.py`, plus `HANDOFF.md` /
+`HANDOFF_NEXT.md` at the repo root.
 
-**Git state: the work is in the working tree and is NOT committed** (the session did
-not get an explicit instruction to commit, and mutating git commands need a separate
-confirmation). `git status` shows 11 modified files, nothing untracked, no unrelated
-edits. The next session should review the diff and commit it as one checkpoint, e.g.
-`git add -A && git commit -m "Report the book-based capacity next to the basket-based one"`.
+**Git state**: the work is in the working tree and is NOT committed (mutating git
+commands need a separate confirmation). `git status` shows 10 modified files under
+`skills/quantitative-backtesting/` plus the two handoff files, nothing untracked, no
+unrelated edits. The next session should review the diff and commit it as one
+checkpoint, e.g.
+`git add -A && git commit -m "Measure the participation dilution of the panel impact model"`.

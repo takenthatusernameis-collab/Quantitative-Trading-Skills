@@ -38,6 +38,7 @@ from utils import (
     book_trade_ledger,
     build_market_model,
     compute_book_diagnostic,
+    format_impact_dilution_lines,
     held_book_weights,
     market_impact_cost,
     resolve_panel_pricing,
@@ -304,6 +305,9 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
                 framework_returns=None,
                 lag=1 + latency,
                 fill_rate=fill_rate,
+                impact_coefficient=args.impact_coefficient,
+                adv_window=args.adv_window,
+                initial_capital=args.initial_capital,
             )
             if _book_only and _book_only.get("n_periods_with_book"):
                 _book_note = (
@@ -448,6 +452,9 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             lag=1 + latency,
             fill_rate=fill_rate,
             pricing_mode=effective_pricing,
+            impact_coefficient=args.impact_coefficient,
+            adv_window=args.adv_window,
+            initial_capital=args.initial_capital,
         )
 
     # Build equity curve
@@ -1152,10 +1159,11 @@ def main():
                 "from the book, one round trip per asset."
             )
             print(
-                "  Residual approximations: the market-impact model charges "
+                "  Residual approximation: the market-impact model charges "
                 "the equal-weighted mean of the per-asset impacts over the "
                 "whole panel, so a period in which only some names trade is "
-                "charged less than the participation actually consumed."
+                "charged less than the participation actually consumed (see "
+                "the impact participation block below)."
             )
         else:
             print(
@@ -1165,6 +1173,8 @@ def main():
                 "turnover above). Use --panel-pricing book to price and "
                 "cost the book itself."
             )
+        for _line in format_impact_dilution_lines(book_diagnostic):
+            print(_line)
 
     # Capacity: the basket-based estimate (the framework's convention) and,
     # in the book pricing mode, the book-based estimate next to it. Printed

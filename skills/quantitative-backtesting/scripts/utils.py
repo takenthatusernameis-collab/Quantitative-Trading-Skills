@@ -478,51 +478,253 @@ def impact_participation_dilution(
     impact_coefficient,
     adv_window=20,
     initial_capital=100000.0,
+    index=None,
 ):
-    """Measure how much the panel impact model dilutes participation.
+    """Measure the participation dilution of the panel impact model.
 
-    The charged impact (``book_market_impact_cost``) is the equal-weighted
-    mean over **all** panel names, including names that did not trade in a
-    period (their impact is zero). The traded-only impact is the same per-asset
-    model but averaged over the names that actually traded. Their difference
-    is the participation dilution: how much less the model charges than the
-    traded names would have paid.
+    The panel impact model charges the **equal-weighted mean over all `n`
+    panel names** of the per-asset impacts. A name that did not trade has an
+    impact of zero, so a period in which only `k` of `n` names trade is
+    charged `1 / n` of the participation its traded names consumed. This
+    function measures that dilution instead of leaving it implicit.
 
-    This is a **measurement only**: it does not change any charged cost,
-    return, capacity or Sharpe number.
+    Three aggregations of the *same* per-asset impact model are reported, all
+    as a fraction of the portfolio equity per period:
 
-    Returns a dict with ``charged`` and ``traded_only`` (per-period Series),
-    ``difference_bps`` (per-period Series, charged - traded_only in bps) and
-    ``mean_difference_bps``, or ``None`` when impact is disabled.
+    ``panel``
+        the equal-weighted mean over all `n` names -- the convention the
+        engine charges in ``book`` mode. A name that did not trade
+        contributes zero. Identical to
+        :func:`book_market_impact_cost`.
+    ``traded_only``
+        the equal-weighted mean over the `k` names that actually traded
+        (names whose ADV cannot be estimated are skipped). This is the
+        participation the traded names consumed, and the conservative
+        reading of the same per-asset model.
+    ``notional_weighted``
+        the dollar-consistent aggregation of a linear impact model: the
+        impact *rate* of each name applied to the notional traded in that
+        name, summed and divided by the equity
+        (``sum_i rate_i * notional_i / equity``). It charges the price
+        concession on the notional that was actually traded instead of on
+        the whole equity.
+
+    Two exact relationships (asserted by the test suite) make the
+    measurement auditable:
+
+    * ``panel == (k / n) * traded_only`` -- the dilution factor is exactly
+      the fraction of names that traded (when every traded name has an
+      estimable ADV);
+    * ``notional_weighted == f * traded_only`` when the traded names trade
+      equal notionals, where ``f`` is the traded notional as a fraction of
+      the equity. In general it is ``f`` times the *notional-weighted* mean
+      rate, which is the quantity a linear impact model actually implies.
+
+    This is a **measurement only**: it changes no charged cost, return,
+    capacity or Sharpe number.
+
+    Args:
+        held_book: the per-asset book actually held (rows = dates, columns =
+            symbols), as returned by :func:`held_book_weights`.
+        raw_returns: ``pd.Series`` of market returns per period.
+        close: close prices -- ``pd.DataFrame`` with one column per asset.
+        volume: volumes, same shape as ``close``, or ``None``.
+        impact_coefficient: linear impact coefficient; ``0`` disables impact.
+        adv_window: rolling window (in periods) for the ADV.
+        initial_capital: starting portfolio value used to scale notional.
+        index: when given, the measurement is restricted to this index (the
+            window the caller reports on).
+
+    Returns:
+        A dict of per-period ``pd.Series`` with the keys ``panel``,
+        ``traded_only``, ``notional_weighted``, ``n_traded``,
+        ``participation_ratio``, ``traded_fraction`` and ``dilution``
+        (``panel - traded_only``), or ``None`` when impact is disabled or
+        there is no usable book.
     """
-    if impact_coefficient <= 0 or volume is None:
+    if impact_coefficient is None or impact_coefficient <= 0 or volume is None:
         return None
     if held_book is None or not isinstance(held_book, pd.DataFrame) or held_book.empty:
         return None
-    charged = book_market_impact_cost(
-        held_book, raw_returns, close, volume, impact_coefficient,
-        adv_window=adv_window, initial_capital=initial_capital,
-    )
-    if charged is None:
+    if not isinstance(close, pd.DataFrame) or close.shape[1] == 0:
         return None
 
-    adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
-    adv_notional = adv_shares * close
+    n_assets = close.shape[1]
+    # The book is measured in the market's universe: a weight on an asset
+    # outside the panel has no ADV and therefore no impact.
+    book = held_book.reindex(index=close.index, columns=close.columns)
+    close = close.reindex(columns=close.columns)
+    volume = volume.reindex(columns=close.columns)
+
+    # Average Daily Volume in notional (rolling), the same ADV the charged
+    # impact model uses.
+    adv_notional = volume.rolling(window=adv_window, min_periods=1).mean() * close
+    # Equity of the portfolio, the same approximation the charged model uses.
     equity = initial_capital * (1 + raw_returns).cumprod()
-    traded_weight = held_book.diff().abs()
-    traded_notional = traded_weight.mul(equity, axis=0)
+
+    # The notional traded per asset and the per-asset impact rate
+    # (participation in that asset's own ADV).
+    traded_notional = book.diff().abs().mul(equity, axis=0)
     traded = traded_notional.replace(0, np.nan)
     adv_denominator = adv_notional.replace(0, np.nan)
-    per_asset = adv_denominator.rdiv(traded, axis=0) * impact_coefficient
-    # traded-only mean: average over names that actually traded
-    traded_only = per_asset.where(per_asset.notna() & (traded_notional != 0)).mean(axis=1, skipna=True).fillna(0.0)
-    difference_bps = (charged - traded_only) * 1e4
-    return {
-        "charged": charged,
+    rate = adv_denominator.rdiv(traded, axis=0) * impact_coefficient
+
+    # The charged convention: the equal-weighted mean over the whole panel.
+    panel = rate.fillna(0).mean(axis=1)
+
+    # The names that actually traded in the period.
+    traded_mask = traded_notional.notna() & (traded_notional != 0)
+    traded_only = rate.where(traded_mask).mean(axis=1, skipna=True).fillna(0.0)
+
+    # The dollar-consistent aggregation: the impact rate of each name
+    # applied to the notional traded in that name.
+    notional = traded_notional.fillna(0.0)
+    equity_safe = equity.replace(0, np.nan)
+    notional_weighted = (rate.fillna(0.0) * notional).sum(axis=1) / equity_safe
+
+    n_traded = traded_mask.sum(axis=1)
+    measurement = {
+        "panel": panel,
         "traded_only": traded_only,
-        "difference_bps": difference_bps,
-        "mean_difference_bps": float(difference_bps.mean()),
+        "notional_weighted": notional_weighted,
+        "n_traded": n_traded,
+        "participation_ratio": n_traded / float(n_assets),
+        "traded_fraction": notional.sum(axis=1) / equity_safe,
+        "dilution": panel - traded_only,
     }
+    if index is not None:
+        measurement = {k: v.reindex(index) for k, v in measurement.items()}
+    return measurement
+
+
+def _impact_dilution_keys(
+    held_book,
+    market,
+    positions,
+    index,
+    pricing_mode,
+    gross_book_return,
+    impact_coefficient=0.0,
+    adv_window=20,
+    initial_capital=100000.0,
+):
+    """The impact-dilution scalars of the panel book diagnostic.
+
+    Reports, next to the impact the run actually charged, the impact the
+    names that traded would have paid under the same per-asset model, and
+    the difference between them.
+
+    The charged impact depends on the pricing convention:
+
+    * ``book``: the panel mean of the book's own per-asset impacts (the
+      convention :func:`book_market_impact_cost` charges);
+    * ``net-exposure``: the model the default path charges, i.e. the
+      ``|d net exposure|`` of the scalar position series split equally over
+      the panel.
+
+    Args:
+        held_book: the book actually held, on the market model's index.
+        market: the market model returned by :func:`build_market_model`.
+        positions: the framework's position series.
+        index: the window the diagnostic is measured on.
+        pricing_mode: ``"net-exposure"`` or ``"book"``.
+        gross_book_return: the per-period pre-cost book return (for the
+            "as a fraction of the gross book return" reading).
+        impact_coefficient: linear impact coefficient; ``0`` disables the
+            measurement.
+        adv_window: rolling window (in periods) for the ADV.
+        initial_capital: starting portfolio value used to scale notional.
+
+    Returns:
+        A dict of scalars, or an empty dict when the measurement does not
+        apply (impact disabled, no volume, or no usable book).
+    """
+    keys = {
+        "impact_charged_bps": None,
+        "impact_traded_only_bps": None,
+        "impact_notional_weighted_bps": None,
+        "impact_dilution_bps": None,
+        "impact_panel_dilution_bps": None,
+        "impact_gross_book_return_bps": None,
+        "impact_dilution_fraction_of_gross_return": None,
+        "impact_participation_ratio": None,
+    }
+
+    close = market.get("close")
+    volume = market.get("volume")
+    raw_returns = market.get("raw_returns")
+    if not isinstance(close, pd.DataFrame) or raw_returns is None:
+        return keys
+    if pricing_mode != "book" and positions is None:
+        return keys
+
+    measurement = impact_participation_dilution(
+        held_book,
+        raw_returns,
+        close,
+        volume,
+        impact_coefficient,
+        adv_window=adv_window,
+        initial_capital=initial_capital,
+        index=index,
+    )
+    if measurement is None:
+        return keys
+
+    if pricing_mode == "book":
+        # The book convention: the panel mean of the book's own impacts.
+        charged = measurement["panel"]
+    else:
+        # The net-exposure convention: the scalar position series split
+        # equally over the panel, exactly as `market_impact_cost` charges it.
+        position_changes = positions.diff().abs()
+        charged = market_impact_cost(
+            position_changes=position_changes,
+            raw_returns=raw_returns,
+            close=close,
+            volume=volume,
+            is_panel=market.get("is_panel", True),
+            impact_coefficient=impact_coefficient,
+            adv_window=adv_window,
+            initial_capital=initial_capital,
+        )
+        if charged is None:
+            return keys
+        charged = charged.reindex(index)
+
+    traded_only = measurement["traded_only"]
+    gross_bps = (
+        float(gross_book_return.mean() * 1e4)
+        if gross_book_return is not None and len(gross_book_return)
+        else None
+    )
+    dilution_bps = float((charged - traded_only).mean() * 1e4)
+
+    keys["impact_charged_bps"] = float(charged.mean() * 1e4)
+    keys["impact_traded_only_bps"] = float(traded_only.mean() * 1e4)
+    keys["impact_notional_weighted_bps"] = float(
+        measurement["notional_weighted"].mean() * 1e4
+    )
+    keys["impact_dilution_bps"] = dilution_bps
+    keys["impact_panel_dilution_bps"] = float(
+        measurement["dilution"].mean() * 1e4
+    )
+    keys["impact_gross_book_return_bps"] = gross_bps
+    # The understatement as a fraction of the gross book return. Only
+    # meaningful when the book earned a positive gross return; a negative or
+    # zero denominator would turn the ratio into a sign-flipping artifact.
+    keys["impact_dilution_fraction_of_gross_return"] = (
+        dilution_bps / gross_bps if gross_bps is not None and gross_bps > 0 else None
+    )
+    # The participation ratio is measured over the periods in which the book
+    # actually traded: a flat period contributes no participation at all and
+    # would otherwise drag the average towards zero.
+    traded_periods = measurement["n_traded"] > 0
+    if bool(traded_periods.any()):
+        keys["impact_participation_ratio"] = float(
+            measurement["participation_ratio"][traded_periods].mean()
+        )
+    return keys
 
 
 def book_trade_ledger(held_book, close):
@@ -743,6 +945,9 @@ def compute_book_diagnostic(
     lag: int = 1,
     fill_rate: float = 1.0,
     pricing_mode: str = "net-exposure",
+    impact_coefficient: float = 0.0,
+    adv_window: int = 20,
+    initial_capital: float = 100000.0,
 ):
     """Measure the per-asset book against the framework's net-exposure pricing.
 
@@ -781,6 +986,10 @@ def compute_book_diagnostic(
             (``"net-exposure"`` or ``"book"``). It selects which turnover the
             cost model actually charges, which the diagnostic reports as
             ``charged_turnover``.
+        impact_coefficient: linear impact coefficient of the run; ``0``
+            disables the market-impact measurement.
+        adv_window: rolling window (in periods) for the ADV.
+        initial_capital: starting portfolio value used to scale notional.
 
     Returns:
         A dict of diagnostics, or ``None`` when there is no book to measure
@@ -855,6 +1064,26 @@ def compute_book_diagnostic(
         after_costs = None
         return_gap_bps = None
         return_gap_total = None
+
+    # The participation dilution of the panel impact model (measurement
+    # only). The impact model charges the equal-weighted mean of the
+    # per-asset impacts over the *whole* panel, so a period in which only
+    # `k` of `n` names trade is charged `1 / n` of the participation its
+    # traded names consumed. The measurement reports the impact the traded
+    # names would have paid next to the impact the run charged, so the size
+    # of that approximation is visible instead of implied.
+    impact_keys = _impact_dilution_keys(
+        held_full,
+        market,
+        positions,
+        index,
+        pricing_mode,
+        gross_book_return=book_return,
+        impact_coefficient=impact_coefficient,
+        adv_window=adv_window,
+        initial_capital=initial_capital,
+    )
+
     return {
         "n_periods": n_periods,
         "n_periods_with_book": int((gross > 0).sum()),
@@ -900,6 +1129,9 @@ def compute_book_diagnostic(
         # costed number is the one a reader must use). The two keys above
         # are always *pre-cost*.
         "reported_total_return": after_costs,
+        # The market-impact participation measurement (see
+        # `_impact_dilution_keys`). All None when impact is disabled.
+        **impact_keys,
     }
 
 
@@ -957,6 +1189,44 @@ def aggregate_book_diagnostics(diagnostics):
     _bases = {d.get("cost_basis") for d in valid if d.get("cost_basis")}
     cost_basis = _bases.pop() if len(_bases) == 1 else ("mixed" if _bases else None)
 
+    # The impact participation measurement. The per-window bps readings are
+    # averaged with the period weighting; the "as a fraction of the gross
+    # book return" reading is recomputed from the aggregated bps values, so
+    # the aggregate is the ratio of the aggregated quantities rather than an
+    # average of ratios. The keys are always present (None when the
+    # measurement does not apply), so a consumer never has to guess whether
+    # a missing key means "not measured" or "not reported".
+    _impact_bps = {
+        "impact_charged_bps": None,
+        "impact_traded_only_bps": None,
+        "impact_notional_weighted_bps": None,
+        "impact_dilution_bps": None,
+        "impact_panel_dilution_bps": None,
+        "impact_gross_book_return_bps": None,
+        "impact_dilution_fraction_of_gross_return": None,
+        "impact_participation_ratio": None,
+    }
+    for key in (
+        "impact_charged_bps",
+        "impact_traded_only_bps",
+        "impact_notional_weighted_bps",
+        "impact_dilution_bps",
+        "impact_panel_dilution_bps",
+        "impact_gross_book_return_bps",
+    ):
+        if any(d.get(key) is not None for d in valid):
+            _impact_bps[key] = _weighted_mean(key)
+    _gross_bps = _impact_bps.get("impact_gross_book_return_bps")
+    _dilution_bps = _impact_bps.get("impact_dilution_bps")
+    if _gross_bps is not None and _dilution_bps is not None and _gross_bps > 0:
+        _impact_bps["impact_dilution_fraction_of_gross_return"] = (
+            _dilution_bps / _gross_bps
+        )
+    if any(d.get("impact_participation_ratio") is not None for d in valid):
+        _impact_bps["impact_participation_ratio"] = _weighted_mean(
+            "impact_participation_ratio"
+        )
+
     return {
         "n_periods": n_periods,
         "n_periods_with_book": sum(int(d.get("n_periods_with_book") or 0) for d in valid),
@@ -974,7 +1244,65 @@ def aggregate_book_diagnostics(diagnostics):
         "framework_total_return": framework_total,
         "framework_total_return_after_costs": _compound("framework_total_return_after_costs"),
         "reported_total_return": _compound("reported_total_return"),
+        **_impact_bps,
     }
+
+
+def format_impact_dilution_lines(diagnostic, indent: str = "  ") -> list:
+    """The CLI lines of the market-impact participation measurement.
+
+    The measurement is reported next to the impact the run charged, so the
+    size of the panel-convention approximation is visible in the run output
+    instead of only in the artifacts.
+
+    Args:
+        diagnostic: a book diagnostic dict (as returned by
+            :func:`compute_book_diagnostic`).
+        indent: the indentation of the printed lines.
+
+    Returns:
+        A list of lines, empty when the measurement is absent (impact
+        disabled, or no book to measure).
+    """
+    if not isinstance(diagnostic, dict):
+        return []
+    charged = diagnostic.get("impact_charged_bps")
+    traded_only = diagnostic.get("impact_traded_only_bps")
+    if charged is None or traded_only is None:
+        return []
+
+    dilution = diagnostic.get("impact_dilution_bps")
+    notional_weighted = diagnostic.get("impact_notional_weighted_bps")
+    fraction = diagnostic.get("impact_dilution_fraction_of_gross_return")
+    participation = diagnostic.get("impact_participation_ratio")
+    n_assets = diagnostic.get("n_assets")
+
+    lines = [
+        f"{indent}Impact participation (market-impact model, measurement only):",
+        f"{indent}  {'Charged by the model:':<33}{charged:.2f} bps/period",
+        f"{indent}  {'Traded names would have paid:':<33}{traded_only:.2f} bps/period",
+    ]
+    if dilution is not None:
+        _frac = (
+            f" ({fraction:.2%} of the gross book return)"
+            if fraction is not None
+            else ""
+        )
+        lines.append(
+            f"{indent}  {'Understatement (dilution):':<33}{dilution:.2f} bps/period{_frac}"
+        )
+    if notional_weighted is not None:
+        lines.append(
+            f"{indent}  {'Notional-weighted (dollar) cost:':<33}"
+            f"{notional_weighted:.2f} bps/period"
+        )
+    if participation is not None and n_assets:
+        lines.append(
+            f"{indent}  {'Names trading per period:':<33}"
+            f"{participation * n_assets:.2f} of {n_assets} "
+            f"(participation {participation:.0%})"
+        )
+    return lines
 
 
 def _capacity_trend_from_series(

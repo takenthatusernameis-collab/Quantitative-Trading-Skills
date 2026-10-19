@@ -394,6 +394,43 @@ def generate_tear_sheet(
                 fmt_pct,
             ),
         ]
+        # The market-impact participation measurement, rendered only when it
+        # exists (impact enabled), so the default tear sheet is unchanged.
+        if diag.get("impact_charged_bps") is not None:
+            rows.extend(
+                [
+                    (
+                        "Impact Charged by Model (bps/period)",
+                        diag.get("impact_charged_bps"),
+                        fmt_num,
+                    ),
+                    (
+                        "Impact Traded Names Would Pay (bps/period)",
+                        diag.get("impact_traded_only_bps"),
+                        fmt_num,
+                    ),
+                    (
+                        "Impact Notional-Weighted (bps/period)",
+                        diag.get("impact_notional_weighted_bps"),
+                        fmt_num,
+                    ),
+                    (
+                        "Impact Understatement (bps/period)",
+                        diag.get("impact_dilution_bps"),
+                        fmt_num,
+                    ),
+                    (
+                        "Impact Understatement (% of gross book return)",
+                        diag.get("impact_dilution_fraction_of_gross_return"),
+                        fmt_pct,
+                    ),
+                    (
+                        "Names Trading per Period (participation)",
+                        diag.get("impact_participation_ratio"),
+                        fmt_pct,
+                    ),
+                ]
+            )
         out = [f"<h2>{heading}</h2>", "<table><tr><th>Metric</th><th>Value</th></tr>"]
         for label, value, fmt in rows:
             display = fmt(value) if value is not None else "N/A"
@@ -446,7 +483,11 @@ def generate_tear_sheet(
                 "reported twice: the basket-based estimate (an equal-weight "
                 "basket that rebalances 1/n per constituent, least liquid "
                 "name binding) and, next to it, the book-based estimate "
-                "computed from the strategy's own trade sizes.</em></p>"
+                "computed from the strategy's own trade sizes. The impact "
+                "participation measurement in the panel book diagnostic "
+                "above quantifies the residual approximation of the impact "
+                "model (the equal-weighted mean of the per-asset impacts "
+                "over the whole panel).</em></p>"
             )
         else:
             out.append(

@@ -184,6 +184,11 @@ the scalar signal `(n_long - n_short) / n_assets` and the gross book is
 | `framework_total_return` | cumulative return the engine priced, before costs |
 | `framework_total_return_after_costs` | cumulative return the engine reported |
 
+The diagnostic also carries the **market-impact participation measurement**
+(`impact_*` keys): the impact the run charged next to the impact the names
+that traded would have paid, and the difference between them. See "Market-impact
+participation (measurement only)" below.
+
 The diagnostic is surfaced by `run_backtest.py` (`results["book_diagnostic"]`,
 `metrics["book_diagnostic"]`), by the walk-forward, CPCV and out-of-sample
 paths (`summary["book_diagnostic"]`, plus the per-period / per-fold and
@@ -307,7 +312,11 @@ The book cost basis is not a complete cost model. What is left:
   relative to the participation actually consumed. The convention is kept
   identical to the net-exposure path (where every constituent always trades
   `1 / n` of the notional) so the two modes stay comparable; a *sum* over the
-  traded names would be the conservative alternative.
+  traded names would be the conservative alternative. **The size of this
+  approximation is now measured** -- see "Market-impact participation
+  (measurement only)" below, which reports the impact the traded names would
+  have paid next to the impact the run charged, and the decision the
+  measurement supports.
 - **The trade ledger does not reconcile with the equity curve.** The `pnl`
   field of a book trade is in price units scaled by the average weight, and
   the `return` field is that P&L divided by the entry price (the leg's
@@ -327,6 +336,114 @@ reports the book-based capacity next to the basket-based one (see
 book: the run falls back to the `net-exposure` convention and records
 `panel_pricing_effective = "net-exposure"`, so the fallback is visible in the
 artifacts rather than silent.
+
+### Market-impact participation (measurement only)
+
+The panel impact model charges the **equal-weighted mean over all `n` panel
+names** of the per-asset impacts. A name that did not trade has an impact of
+zero, so a period in which only `k` of `n` names trade is charged `1 / n` of
+the participation its traded names consumed. That approximation used to be
+flagged in prose only; it is now *measured* and reported next to the impact
+the run charged, under both pricing modes.
+
+`utils.impact_participation_dilution` computes three aggregations of the
+same per-asset impact model (`impact_i = |dw_i| * equity / ADV_i *
+impact_coefficient`):
+
+| Aggregation | Definition | What it answers |
+| --- | --- | --- |
+| `panel` | the equal-weighted mean over all `n` names (the convention the engine charges in `book` mode) | what the model charges |
+| `traded_only` | the equal-weighted mean over the `k` names that actually traded | what the participation the traded names consumed was worth |
+| `notional_weighted` | `sum_i rate_i * notional_i / equity`: the impact *rate* of each name applied to the notional traded in that name | what the trades cost in dollars (the dollar-consistent aggregation of a linear impact model) |
+
+Two exact identities make the measurement auditable (both asserted by the
+test suite):
+
+- `panel == (k / n) * traded_only` -- the dilution factor is exactly the
+  fraction of names that traded;
+- `notional_weighted == f * traded_only` when the traded names trade equal
+  notionals, where `f` is the traded notional as a fraction of the equity.
+  In general it is `f` times the *notional-weighted* mean rate.
+
+The diagnostic reports the scalars (all `None` when impact is disabled):
+
+| Key | Meaning |
+| --- | --- |
+| `impact_charged_bps` | the impact the run charged, per period, in bps (the panel mean in `book` mode, the net-exposure model in `net-exposure` mode) |
+| `impact_traded_only_bps` | the impact the names that traded would have paid, per period, in bps |
+| `impact_notional_weighted_bps` | the dollar-consistent aggregation, per period, in bps |
+| `impact_dilution_bps` | `charged - traded_only`: the understatement the run carries (negative = the model charges less) |
+| `impact_panel_dilution_bps` | the panel-convention dilution on the book's own trades (`panel - traded_only`); equal to `impact_dilution_bps` in `book` mode |
+| `impact_gross_book_return_bps` | the mean per-period gross (pre-cost) book return, in bps: the denominator of the ratio below |
+| `impact_dilution_fraction_of_gross_return` | `impact_dilution_bps / impact_gross_book_return_bps` (`None` when the book did not earn a positive gross return, where the ratio would be a sign-flipping artifact) |
+| `impact_participation_ratio` | the mean fraction of the panel's names that traded per period (over the periods in which the book traded) |
+
+They are surfaced in the panel book diagnostic (`results["book_diagnostic"]`,
+`period["book_diagnostic"]`, `fold["book_diagnostic"]`,
+`summary["book_diagnostic"]`, the out-of-sample per-split keys), in the CLI
+stdout of both entry points, and in the tear sheet ("Panel Book Diagnostic").
+The summary aggregates the per-window values with the period weighting, and
+recomputes the ratio from the aggregated bps values.
+
+**What the measurement shows.** On the reference panel used throughout this
+document (900 bars, 5 assets, 2 bps commission, 1 bps slippage, 3 % borrow,
+impact coefficient 0.5, $100k of equity), in `book` mode with the
+market-neutral cross-sectional book and in `net-exposure` mode with the
+asymmetric quantiles the default path requires (0.4 / 0.2):
+
+| Reading | `book` mode | `net-exposure` mode |
+| --- | --- | --- |
+| charged by the model | 0.058 bps/period | 0.00007 bps/period |
+| traded names would have paid | 0.131 bps/period | 0.152 bps/period |
+| understatement (dilution) | -0.073 bps/period | -0.152 bps/period |
+| notional-weighted (dollar) cost | 0.058 bps/period | 0.073 bps/period |
+| names trading per period | 2.21 of 5 (ratio 0.44) | 2.29 of 5 (ratio 0.46) |
+| gross book return | -1.03 bps/period | +1.56 bps/period |
+
+Three things follow from it.
+
+1. **The dilution is exactly `n / k`.** The model charges 44 % of the
+   participation the traded names consumed -- the `k / n` factor, and nothing
+   else.
+2. **But the *cost* of those trades is not understated.** The book trades
+   only `f = 44 %` of its equity in the `k` names it touches (it enters or
+   exits one name at `1 / n` of the equity at a time), so the
+   dollar-consistent cost `f * traded_only` is 0.058 bps/period -- the same
+   number the panel convention charges. For this family of books the panel
+   convention is *not* an approximation of the dollar cost: the `k / n`
+   dilution and the "only a fraction of the equity was traded" factor cancel
+   exactly.
+3. **The conservative alternative would overcharge.** Charging the mean over
+   the traded names instead would cost 0.131 bps/period instead of
+   0.058 -- 2.26x the dollar-consistent cost, i.e. about 0.66 percentage
+   points of the reported book-mode return (-15.68 % -> about -16.2 % on
+   the reference panel). It is a *rate* comparison, not a cost comparison.
+
+**Decision: the traded-only mean does *not* become the default.** It is the
+conservative reading of the *participation rate*, but it is not a cost: it
+implicitly charges the whole equity in every name the book touched. The
+dimensionally consistent aggregation of a linear impact model is the
+notional-weighted one, and that is a separate, number-changing change (it
+would move every published impact number). Until that change is made
+deliberately, the engine keeps charging the panel mean and *reports* the
+measurement, so the size of the convention is visible in every artifact.
+
+**Where the convention does bite.** The cancellation in (2) is a property of
+a book that trades `1 / n` of the equity in each name it touches. A book
+that *concentrates* -- the whole notional moving in and out of one name --
+trades `f ~ 1` of the equity in `k = 1` name, so the panel convention
+undercharges it by a factor of `n` while the notional-weighted aggregation
+stays correct. A book that trades a fraction of the equity in *many* names
+(`f` close to 1, `k` close to `n`) is charged approximately right by either
+convention. The measurement distinguishes the three cases, so a reader always
+knows which one they are in.
+
+**Caveat.** The `impact_coefficient` is interpreted here as a price
+concession rate (the cost is the rate applied to the traded notional), which
+is the reading the "price elasticity of the order book" description of the
+model implies. If instead it is meant as a portfolio-level cost rate per unit
+of participation, the panel convention is the intended one and the
+notional-weighted reading does not apply.
 
 ### Cross-path parity
 

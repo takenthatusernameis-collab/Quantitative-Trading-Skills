@@ -71,6 +71,12 @@ The result dictionary contains:
     asset or a strategy that does not expose a book. Each period also carries
     its own `period["book_diagnostic"]`. See `cost_models.md`, "Panel book
     diagnostic (measurement only)".
+  - The `impact_*` keys of the same diagnostic: the market-impact
+    participation measurement (the impact the run charged, the impact the
+    names that traded would have paid, the difference between them, the
+    dollar-consistent notional-weighted cost and the participation ratio).
+    All `None` when impact is disabled. See `cost_models.md`, "Market-impact
+    participation (measurement only)".
   - `panel_pricing`: The pricing convention that produced the reported
     out-of-sample P&L: `"net-exposure"` (the default) or `"book"`. A panel
     return is not interpretable without it. In `book` mode the *costs* are

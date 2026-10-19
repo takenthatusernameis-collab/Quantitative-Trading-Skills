@@ -7326,6 +7326,122 @@ def test_cpcv_reports_the_book_capacity_per_fold():
     assert folds_with_capacity > 0
 
 
+def test_walk_forward_reports_the_impact_participation_per_window_and_summary():
+    """The walk-forward path reports the impact participation measurement.
+
+    The per-window number is recomputed here by hand from the strategy's own
+    weights in that window, and the summary's number is the period-weighted
+    aggregate of the windows.
+    """
+    from utils import build_market_model, held_book_weights  # noqa: E402
+    from utils import impact_participation_dilution  # noqa: E402
+
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=11)
+    factory = lambda params: build_strategy(
+        "cross_sectional_momentum", json.dumps(params)
+    )
+    param_grid = {"lookback": [20], "top_quantile": [0.2], "bottom_quantile": [0.2]}
+    impact_coefficient = 0.5
+
+    res = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=8,
+        test_months=3,
+        step_months=3,
+        impact_coefficient=impact_coefficient,
+        panel_pricing="book",
+    )
+
+    summary = res["summary"]
+    assert summary["book_diagnostic"] is not None
+    agg = summary["book_diagnostic"]
+    assert agg["impact_charged_bps"] is not None
+    assert agg["impact_traded_only_bps"] is not None
+    assert agg["impact_dilution_bps"] is not None
+    assert agg["impact_participation_ratio"] is not None
+
+    measured = 0
+    weighted_dilution = 0.0
+    total_periods = 0
+    for p in res["periods"]:
+        diag = p.get("book_diagnostic")
+        assert diag is not None, p
+        assert diag["impact_charged_bps"] is not None
+        assert diag["impact_traded_only_bps"] is not None
+        # The panel convention charges the mean over the whole panel, so it
+        # charges less than the names that traded would have paid.
+        assert diag["impact_dilution_bps"] < 0
+        assert abs(
+            diag["impact_dilution_bps"]
+            - (diag["impact_charged_bps"] - diag["impact_traded_only_bps"])
+        ) < 1e-9
+
+        # Recompute the window's measurement by hand from the strategy's own
+        # weights in that window.
+        window_data = p["test_data"]
+        strategy = factory(p["best_params"])
+        market = build_market_model(window_data)
+        held = held_book_weights(
+            strategy.generate_target_weights(window_data),
+            market,
+            lag=1,
+            fill_rate=1.0,
+        )
+        measurement = impact_participation_dilution(
+            held,
+            market["raw_returns"],
+            market["close"],
+            market["volume"],
+            impact_coefficient,
+            adv_window=20,
+            initial_capital=100000,
+            index=p["test_returns"].index,
+        )
+        assert abs(
+            diag["impact_traded_only_bps"]
+            - float(measurement["traded_only"].mean() * 1e4)
+        ) < 1e-9
+
+        weighted_dilution += diag["impact_dilution_bps"] * p["test_returns"].shape[0]
+        total_periods += p["test_returns"].shape[0]
+        measured += 1
+    assert measured > 0
+    # The summary aggregates the windows with the period weighting.
+    assert abs(
+        agg["impact_dilution_bps"] - weighted_dilution / total_periods
+    ) < 1e-9
+
+
+def test_walk_forward_impact_participation_is_absent_when_impact_is_disabled():
+    """Without an impact model there is nothing to measure."""
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=11)
+    factory = lambda params: build_strategy(
+        "cross_sectional_momentum", json.dumps(params)
+    )
+    param_grid = {"lookback": [20], "top_quantile": [0.4], "bottom_quantile": [0.2]}
+    res = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=8,
+        test_months=3,
+        step_months=3,
+        impact_coefficient=0.0,
+    )
+    agg = res["summary"]["book_diagnostic"]
+    assert agg is not None
+    assert agg["impact_charged_bps"] is None
+    assert agg["impact_traded_only_bps"] is None
+    assert agg["impact_dilution_bps"] is None
+    for p in res["periods"]:
+        diag = p.get("book_diagnostic")
+        if diag is not None:
+            assert diag["impact_charged_bps"] is None
+            assert diag["impact_dilution_bps"] is None
+
+
 TEST_REGISTRY.append(
     ("test_cpcv_reports_the_book_capacity_per_fold",
      test_cpcv_reports_the_book_capacity_per_fold)
@@ -7337,6 +7453,14 @@ TEST_REGISTRY.append(
 TEST_REGISTRY.append(
     ("test_walk_forward_book_capacity_is_absent_in_the_net_exposure_mode",
      test_walk_forward_book_capacity_is_absent_in_the_net_exposure_mode)
+)
+TEST_REGISTRY.append(
+    ("test_walk_forward_reports_the_impact_participation_per_window_and_summary",
+     test_walk_forward_reports_the_impact_participation_per_window_and_summary)
+)
+TEST_REGISTRY.append(
+    ("test_walk_forward_impact_participation_is_absent_when_impact_is_disabled",
+     test_walk_forward_impact_participation_is_absent_when_impact_is_disabled)
 )
 
 

@@ -42,6 +42,7 @@ from utils import (
     book_return_from_held,
     build_market_model,
     compute_book_diagnostic,
+    format_impact_dilution_lines,
     held_book_weights,
     market_impact_cost,
     resolve_panel_pricing,
@@ -763,6 +764,9 @@ def walk_forward_analysis(
             latency=latency,
             fill_rate=fill_rate,
             panel_pricing=panel_pricing,
+            impact_coefficient=impact_coefficient,
+            adv_window=adv_window,
+            initial_capital=initial_capital,
         )
 
     # Combine all out-of-sample returns
@@ -2091,6 +2095,9 @@ def _window_book_diagnostic(
     latency: int = 0,
     fill_rate: float = 1.0,
     panel_pricing: str = "net-exposure",
+    impact_coefficient: float = 0.0,
+    adv_window: int = 20,
+    initial_capital: float = 100000.0,
 ) -> Optional[Dict[str, Any]]:
     """Panel book diagnostic for one validation window.
 
@@ -2128,6 +2135,9 @@ def _window_book_diagnostic(
         lag=1 + latency,
         fill_rate=fill_rate,
         pricing_mode=panel_pricing,
+        impact_coefficient=impact_coefficient,
+        adv_window=adv_window,
+        initial_capital=initial_capital,
     )
 
 
@@ -2611,6 +2621,9 @@ def cpcv_analysis(
             latency=latency,
             fill_rate=fill_rate,
             panel_pricing=panel_pricing,
+            impact_coefficient=impact_coefficient,
+            adv_window=adv_window,
+            initial_capital=initial_capital,
         )
 
     # Combine all out-of-sample returns
@@ -3103,6 +3116,9 @@ def out_of_sample_validation(
             latency=latency,
             fill_rate=fill_rate,
             panel_pricing=panel_pricing,
+            impact_coefficient=impact_coefficient,
+            adv_window=adv_window,
+            initial_capital=initial_capital,
         ),
     }
 
@@ -3173,6 +3189,9 @@ def out_of_sample_validation(
              latency=latency,
              fill_rate=fill_rate,
              panel_pricing=panel_pricing,
+             impact_coefficient=impact_coefficient,
+             adv_window=adv_window,
+             initial_capital=initial_capital,
          ),
      }
 
@@ -4604,8 +4623,11 @@ def _print_book_diagnostic(diag, indent: str = "  ", panel_pricing=None) -> None
             f"{indent}  Residual approximation: the market-impact model "
             f"charges the equal-weighted mean of the per-asset impacts over "
             f"the whole panel, so a period in which only some names trade is "
-            f"charged less than the participation actually consumed."
+            f"charged less than the participation actually consumed (see the "
+            f"impact participation block below)."
         )
+    for _line in format_impact_dilution_lines(diag, indent=indent + "  "):
+        print(_line)
 
 
 def _load_and_validate_data(
