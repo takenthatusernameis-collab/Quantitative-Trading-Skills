@@ -33,5 +33,8 @@
     "tail_ratio": 0.928418262963775,
     "initial_capital": null
   },
-  "plot_files": []
+  "plot_files": [
+    "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/examples/example_output/equity_curve.png",
+    "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/examples/example_output/returns_distribution.png"
+  ]
 }
