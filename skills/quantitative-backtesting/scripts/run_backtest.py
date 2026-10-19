@@ -30,6 +30,7 @@ from strategy_builder import build_strategy
 from performance import calculate_metrics, generate_report
 from reporting import generate_tear_sheet
 from utils import _annualization_factor
+from walk_forward import estimate_capacity
 
 
 def parse_args():
@@ -419,6 +420,17 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     # about bias controls engaged during backtest setup/validation.
     if pit_result is not None or survivorship is not None:
         results["bias_controls_engaged"] = True
+
+    # Surface market-impact capacity estimate in the results summary so the
+    # single-backtest path reports capacity consistently with walk-forward/
+    # CPCV/out-of-sample paths. Build a close/volume frame from the aligned
+    # series (handles single-asset, MultiIndex and dict-panel inputs).
+    try:
+        _cap_frame = pd.DataFrame({"close": close, "volume": volume})
+        _cap = estimate_capacity(_cap_frame, args.impact_coefficient, adv_window=args.adv_window)
+        results["capacity"] = _cap.get("estimated_capacity")
+    except Exception:
+        results["capacity"] = None
 
     # Optional buy-and-hold benchmark baseline(s).
     # The benchmark return for period t is the close-to-close return
@@ -815,6 +827,7 @@ def main():
     print("Calculating performance metrics...")
     rfr = getattr(args, "risk_free_rate", None)
     metrics = calculate_metrics(results, risk_free_rate=rfr) if rfr is not None else calculate_metrics(results)
+    metrics["capacity"] = results.get("capacity")
 
     # Multiple-testing correction: when the number of development
     # trials was reported (--n-trials), echo the Deflated Sharpe
