@@ -65,8 +65,10 @@ The result dictionary contains:
     diagnostic (measurement only)".
   - `panel_pricing`: The pricing convention that produced the reported
     out-of-sample P&L: `"net-exposure"` (the default) or `"book"`. A panel
-    return is not interpretable without it. See `cost_models.md`, "Panel
-    pricing modes (`--panel-pricing`)".
+    return is not interpretable without it. In `book` mode the *costs* are
+    charged on the book too (gross turnover, short legs, gross exposure,
+    per-asset market impact), so the out-of-sample record is a costed book
+    record. See `cost_models.md`, "Panel pricing modes (`--panel-pricing`)".
 
 ## Parameter Optimization
 
@@ -651,8 +653,9 @@ The result dictionary contains:
     also carries its own `fold["book_diagnostic"]`. `None` for a single asset
     or a strategy that does not expose a book.
   - `panel_pricing`: The pricing convention that produced the reported
-    out-of-sample P&L: `"net-exposure"` (the default) or `"book"`. See
-    `cost_models.md`, "Panel pricing modes (`--panel-pricing`)".
+    out-of-sample P&L: `"net-exposure"` (the default) or `"book"`. In `book`
+    mode the costs are charged on the book as well. See `cost_models.md`,
+    "Panel pricing modes (`--panel-pricing`)".
 - `param_stability`: Per-parameter stability analysis with `unique_values`,
   `most_common`, and `stability_ratio`.
 

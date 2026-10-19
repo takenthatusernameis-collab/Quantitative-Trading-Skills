@@ -250,7 +250,13 @@ def strategy_target_weights(strategy, data):
     return weights
 
 
-def held_book_weights(weights, market, lag: int = 1, fill_rate: float = 1.0):
+def held_book_weights(
+    weights,
+    market,
+    lag: int = 1,
+    fill_rate: float = 1.0,
+    warmup: str = "zero",
+):
     """The per-asset book actually held on each bar of the market model.
 
     The target book is lagged by the execution convention (``lag = 1 +
@@ -264,6 +270,17 @@ def held_book_weights(weights, market, lag: int = 1, fill_rate: float = 1.0):
         market: the market model returned by :func:`build_market_model`.
         lag: execution lag in periods (1 + latency).
         fill_rate: fraction of each targeted change that is filled.
+        warmup: how the bars before the first executable one are represented.
+
+            * ``"zero"`` (default): a flat book (weight 0). The book is
+              *defined* but empty, so its return contribution is 0 and its
+              turnover is 0.
+            * ``"nan"``: the book is *undefined* before the first executable
+              bar, mirroring a position series that is NaN there. The
+              difference is observable in the cost model: with a NaN warmup
+              the first book change is not charged and the bar it happens on
+              is dropped from the return series, which is exactly what the
+              framework's net-exposure path does with a NaN position series.
 
     Returns:
         A ``pd.DataFrame`` of held weights on the market model's index and
@@ -280,7 +297,338 @@ def held_book_weights(weights, market, lag: int = 1, fill_rate: float = 1.0):
     if not set(weights.columns).intersection(set(close.columns)):
         return None
     target = weights.reindex(columns=close.columns).reindex(close.index).fillna(0.0)
-    return (target.shift(lag) * fill_rate).fillna(0.0)
+    held = target.shift(lag) * fill_rate
+    if warmup == "nan":
+        return held
+    if warmup != "zero":
+        raise ValueError(
+            f"Unknown book warmup convention: {warmup!r}. "
+            "Use one of: 'zero', 'nan'."
+        )
+    return held.fillna(0.0)
+
+
+def book_gross_turnover(held_book):
+    """Per-period gross turnover of a book: ``sum_i |dw_i|``.
+
+    The book's turnover is the total notional weight that changes hands in a
+    period, summed over the assets. It is the quantity a transaction-cost
+    model must charge: the net-exposure convention can only see
+    ``|d sum_i w_i|``, which is zero for a book that rotates in place (a
+    market-neutral book in particular).
+
+    ``min_count=1`` keeps a row whose per-asset changes are all undefined
+    (the warmup bars of a NaN-warmup book) as ``NaN`` instead of collapsing
+    it to 0, so the book cost basis can drop exactly the same bars the
+    net-exposure path drops.
+
+    Args:
+        held: held per-asset weights (rows = dates, columns = symbols).
+
+    Returns:
+        A ``pd.Series`` of gross turnover per period.
+    """
+    return held_book.diff().abs().sum(axis=1, min_count=1)
+
+
+def book_cost_components(
+    held_book,
+    commission: float = 0.0,
+    slippage: float = 0.0,
+    borrow_cost: float = 0.0,
+    funding_cost: float = 0.0,
+    ann_factor: int = 252,
+):
+    """The transaction, borrow and funding costs of a per-asset book.
+
+    This is the book-mode counterpart of the net-exposure cost model: every
+    term is charged on the *book* rather than on the scalar net exposure.
+
+    ==================  ==================================================
+    term                basis
+    ==================  ==================================================
+    transaction         gross turnover ``sum_i |dw_i|``
+    borrow              short legs ``sum_i max(-w_i, 0)``
+    funding             gross exposure ``sum_i |w_i|`` above 1x
+    ==================  ==================================================
+
+    The fill rate is already inside ``held`` (the book is scaled by it), so
+    every term scales with the fill rate exactly like the net-exposure cost
+    model does.
+
+    Args:
+        held: held per-asset weights (rows = dates, columns = symbols).
+        commission: commission rate per trade (as a decimal).
+        slippage: slippage rate per trade (as a decimal).
+        borrow_cost: annual borrow cost rate for short legs (as a decimal).
+        funding_cost: annual funding cost rate for leverage (as a decimal).
+        ann_factor: periods per year, used to convert the annual rates to
+            per-period rates.
+
+    Returns:
+        A dict of ``pd.Series`` with the keys ``turnover``, ``transaction``,
+        ``short_exposure``, ``gross_exposure``, ``borrow``, ``funding`` and
+        ``total``, or ``None`` when there is no usable book.
+    """
+    if held_book is None or not isinstance(held_book, pd.DataFrame) or held_book.empty:
+        return None
+
+    turnover = book_gross_turnover(held_book)
+    transaction = turnover * (commission + slippage)
+    # Short legs: the absolute short exposure of the book, summed over the
+    # assets. A market-neutral book has a flat *net* exposure but a real
+    # short leg, which the net-exposure cost model cannot see.
+    short_exposure = held_book.clip(upper=0).abs().sum(axis=1, min_count=1)
+    gross_exposure = held_book.abs().sum(axis=1, min_count=1)
+
+    borrow = short_exposure * (borrow_cost / ann_factor)
+    # Funding is charged on the leverage used beyond 100% of equity, where
+    # the leverage of a book is its gross exposure.
+    leverage_excess = (gross_exposure - 1.0).clip(lower=0)
+    funding = leverage_excess * (funding_cost / ann_factor)
+
+    return {
+        "turnover": turnover,
+        "transaction": transaction,
+        "short_exposure": short_exposure,
+        "gross_exposure": gross_exposure,
+        "borrow": borrow,
+        "funding": funding,
+        "total": transaction + borrow + funding,
+    }
+
+
+def book_market_impact_cost(
+    held_book,
+    raw_returns,
+    close,
+    volume,
+    impact_coefficient,
+    adv_window=20,
+    initial_capital=100000.0,
+):
+    """Per-period market-impact cost of trading a per-asset book.
+
+    The model is linear and per asset::
+
+        impact_i = (traded_notional_i / ADV_notional_i) * impact_coefficient
+
+    with ``traded_notional_i = |dw_i| * equity`` (the weight change of that
+    asset times the portfolio equity) and ``ADV_notional_i = rolling_mean(
+    volume_i) * close_i``. The portfolio cost is the **equal-weighted mean
+    of the per-asset impacts**, the same panel convention the net-exposure
+    impact model uses, so the two pricing modes stay on the same scale.
+
+    Two properties follow from the model and are asserted by the test suite:
+
+    * the cost scales with the fill rate (the fill rate is inside ``held``);
+    * every asset is measured against **its own** ADV, so a book that
+      concentrates in an illiquid name pays for it.
+
+    The mean-over-assets convention is a simplification: a period in which
+    only ``k`` of ``n`` names trade is charged the mean over ``n`` names, so
+    the drag is diluted relative to the participation actually consumed. The
+    convention is kept identical to the net-exposure path (where every
+    constituent always trades ``1 / n`` of the notional) so that the two
+    modes remain comparable.
+
+    Args:
+        held: held per-asset weights (rows = dates, columns = symbols).
+        raw_returns: ``pd.Series`` of market returns per period.
+        close: close prices -- ``pd.DataFrame`` with one column per asset.
+        volume: volumes, same shape as ``close``, or ``None``.
+        impact_coefficient: linear impact coefficient; ``0`` disables impact.
+        adv_window: rolling window (in periods) for the ADV.
+        initial_capital: starting portfolio value used to scale notional.
+
+    Returns:
+        A ``pd.Series`` of impact cost per period, or ``None`` when impact is
+        disabled (no volume, or a zero coefficient).
+    """
+    if impact_coefficient <= 0 or volume is None:
+        return None
+    if held_book is None or not isinstance(held_book, pd.DataFrame) or held_book.empty:
+        return None
+
+    # Average Daily Volume in shares (rolling), then in notional.
+    adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
+    adv_notional = adv_shares * close
+    # Equity value of the portfolio, scaled by initial_capital so that a
+    # 100% weight change on a $100k account is ~$100k notional. Same
+    # approximation as the net-exposure impact model.
+    equity = initial_capital * (1 + raw_returns).cumprod()
+
+    # The notional traded per asset: the absolute weight change times equity.
+    traded_weight = held_book.diff().abs()
+    traded_notional = traded_weight.mul(equity, axis=0)
+
+    # A zero traded notional means "no trade", so the impact is zero rather
+    # than infinite; a zero ADV is treated as missing.
+    traded = traded_notional.replace(0, np.nan)
+    adv_denominator = adv_notional.replace(0, np.nan)
+    market_impact = adv_denominator.rdiv(traded, axis=0) * impact_coefficient
+    return market_impact.fillna(0).mean(axis=1)
+
+
+def book_trade_ledger(held_book, close):
+    """Per-asset round trips of a book, priced at each asset's own close.
+
+    The net-exposure ledger is a single position series marked on the mean
+    price of the panel, so it cannot describe a book: a market-neutral book
+    has a flat net exposure and would produce no trade record at all. This
+    builds the ledger from the book instead -- one round trip per asset per
+    direction.
+
+    A trade for an asset opens on the bar where its weight becomes non-zero
+    (or flips sign) and closes on the bar where the weight returns to zero
+    (or flips sign again). A *size* change inside a trade does not close it:
+    the cross-sectional book resizes its weights whenever the number of
+    valid constituents changes, and treating every resize as a new trade
+    would bury the ledger in one-bar, zero-P&L records.
+
+    The P&L of a leg is the average weight over the trade times the price
+    move, ``w_avg * (exit_price - entry_price)``, which is the leg's
+    contribution to the portfolio P&L. The sign is carried by the weight
+    itself (a short leg has a negative average weight), so a short leg that
+    loses money records a negative P&L. The ``return`` field is that P&L
+    divided by the entry price, i.e. the leg's contribution to the portfolio
+    *return*; summed over the ledger it approximates the pre-cost book
+    return (it does not include compounding or transaction costs, and the
+    ``pnl`` field is in price units, not currency).
+
+    Args:
+        held: held per-asset weights (rows = dates, columns = symbols).
+        close: close prices -- ``pd.DataFrame`` with one column per asset.
+
+    Returns:
+        A list of trade dicts with the keys ``pnl``, ``return``,
+        ``entry_date``, ``exit_date``, ``symbol``, ``weight`` and (for a
+        leg still open at the end of the sample) ``closed_at_end``.
+    """
+    trades: list = []
+    if held_book is None or not isinstance(held_book, pd.DataFrame) or held_book.empty:
+        return trades
+    if not isinstance(close, pd.DataFrame):
+        return trades
+
+    index = held_book.index
+    for symbol in held_book.columns:
+        if symbol not in close.columns:
+            continue
+        weights = held_book[symbol].reindex(index).fillna(0.0)
+        prices = close[symbol].reindex(index)
+        if prices.isna().all():
+            continue
+
+        entry_idx = None
+        entry_price = None
+        entry_date = None
+        entry_direction = 0
+        weight_sum = 0.0
+        n_bars = 0
+
+        for i in range(len(index)):
+            weight = float(weights.iloc[i])
+            direction = 0 if weight == 0 else (1 if weight > 0 else -1)
+            price = prices.iloc[i]
+            if pd.isna(price):
+                # No price for this bar: the leg cannot be marked. Leave the
+                # trade open and continue (it is closed at the next priced
+                # bar or at the end of the sample).
+                continue
+
+            if direction == 0:
+                if entry_idx is not None:
+                    w_avg = weight_sum / n_bars if n_bars else 0.0
+                    pnl = w_avg * (float(price) - entry_price)
+                    trades.append({
+                        "pnl": float(pnl),
+                        "return": float(pnl / entry_price) if entry_price else 0.0,
+                        "entry_date": str(pd.Timestamp(entry_date).date()),
+                        "exit_date": str(pd.Timestamp(index[i]).date()),
+                        "symbol": str(symbol),
+                        "weight": float(w_avg),
+                    })
+                    entry_idx = None
+                    entry_price = None
+                    entry_date = None
+                    entry_direction = 0
+                    weight_sum = 0.0
+                    n_bars = 0
+                continue
+
+            if entry_idx is None:
+                entry_idx = i
+                entry_price = float(price)
+                entry_date = index[i]
+                entry_direction = direction
+                weight_sum = weight
+                n_bars = 1
+            elif direction != entry_direction:
+                # A flip: close the old leg and open the new one at the
+                # same price.
+                w_avg = weight_sum / n_bars if n_bars else 0.0
+                pnl = w_avg * (float(price) - entry_price)
+                trades.append({
+                    "pnl": float(pnl),
+                    "return": float(pnl / entry_price) if entry_price else 0.0,
+                    "entry_date": str(pd.Timestamp(entry_date).date()),
+                    "exit_date": str(pd.Timestamp(index[i]).date()),
+                    "symbol": str(symbol),
+                    "weight": float(w_avg),
+                })
+                entry_idx = i
+                entry_price = float(price)
+                entry_date = index[i]
+                entry_direction = direction
+                weight_sum = weight
+                n_bars = 1
+            else:
+                weight_sum += weight
+                n_bars += 1
+
+        # Mark a leg that is still open at the end of the sample to market.
+        # Its P&L is in the equity curve but would otherwise be missing from
+        # the ledger, so the trade-level statistics would understate the
+        # activity. The exit is forced by the end of the sample, not by a
+        # signal, and is flagged via `closed_at_end`.
+        if entry_idx is not None and entry_idx < len(index) - 1:
+            last_price = prices.iloc[-1]
+            if not pd.isna(last_price):
+                w_avg = weight_sum / n_bars if n_bars else 0.0
+                pnl = w_avg * (float(last_price) - entry_price)
+                trades.append({
+                    "pnl": float(pnl),
+                    "return": float(pnl / entry_price) if entry_price else 0.0,
+                    "entry_date": str(pd.Timestamp(entry_date).date()),
+                    "exit_date": str(pd.Timestamp(index[-1]).date()),
+                    "symbol": str(symbol),
+                    "weight": float(w_avg),
+                    "closed_at_end": True,
+                })
+
+    return trades
+
+
+def book_return_from_held(held_book, close):
+    """The book return per period of an already-held book: ``sum_i w_i r_i``.
+
+    The first bar has no per-asset return and is therefore ``NaN`` (not 0),
+    so the book-priced return series has the same index as the net-exposure
+    one.
+
+    Args:
+        held: held per-asset weights (rows = dates, columns = symbols).
+        close: close prices -- ``pd.DataFrame`` with one column per asset.
+
+    Returns:
+        A ``pd.Series`` of book returns.
+    """
+    asset_returns = close.pct_change()
+    # `min_count=1` keeps an all-NaN row (the first bar, which has no
+    # return) as NaN instead of collapsing it to 0, so the book-priced
+    # series has exactly the same index as the net-exposure series.
+    return (held_book * asset_returns).sum(axis=1, min_count=1)
 
 
 def book_return_series(weights, market, lag: int = 1, fill_rate: float = 1.0):
@@ -305,11 +653,7 @@ def book_return_series(weights, market, lag: int = 1, fill_rate: float = 1.0):
     held = held_book_weights(weights, market, lag=lag, fill_rate=fill_rate)
     if held is None:
         return None
-    asset_returns = market["close"].pct_change()
-    # `min_count=1` keeps an all-NaN row (the first bar, which has no
-    # return) as NaN instead of collapsing it to 0, so the book-priced
-    # series has exactly the same index as the net-exposure series.
-    return (held * asset_returns).sum(axis=1, min_count=1)
+    return book_return_from_held(held, market["close"])
 
 
 def book_is_active(weights, market, lag: int = 1, fill_rate: float = 1.0) -> bool:
@@ -343,6 +687,7 @@ def compute_book_diagnostic(
     framework_returns,
     lag: int = 1,
     fill_rate: float = 1.0,
+    pricing_mode: str = "net-exposure",
 ):
     """Measure the per-asset book against the framework's net-exposure pricing.
 
@@ -377,6 +722,10 @@ def compute_book_diagnostic(
             ``None`` (the exposure statistics are still measured).
         lag: execution lag in periods (1 + latency).
         fill_rate: fraction of each targeted change that is filled.
+        pricing_mode: the panel pricing convention the run used
+            (``"net-exposure"`` or ``"book"``). It selects which turnover the
+            cost model actually charges, which the diagnostic reports as
+            ``charged_turnover``.
 
     Returns:
         A dict of diagnostics, or ``None`` when there is no book to measure
@@ -451,7 +800,6 @@ def compute_book_diagnostic(
         after_costs = None
         return_gap_bps = None
         return_gap_total = None
-
     return {
         "n_periods": n_periods,
         "n_periods_with_book": int((gross > 0).sum()),
@@ -471,6 +819,19 @@ def compute_book_diagnostic(
         # charges.
         "gross_turnover": float(turnover.mean()),
         "framework_turnover": float(framework_turnover.mean()),
+        # The turnover the cost model actually charges: the net exposure's
+        # under the "net-exposure" convention, the book's own gross turnover
+        # under the "book" convention (where the costs are charged on the
+        # book). The two differ whenever the book rotates in place, which is
+        # exactly the gap the "book" mode closes.
+        "charged_turnover": (
+            float(turnover.mean())
+            if pricing_mode == "book"
+            else float(framework_turnover.mean())
+        ),
+        # Which basis the costs were charged on, so a reader never has to
+        # guess whether the reported numbers are net-exposure or book based.
+        "cost_basis": pricing_mode,
         # Per-period gap between the framework's net-exposure pricing and
         # the true book return, in basis points, and the cumulative gap.
         "return_gap_bps": return_gap_bps,
@@ -478,6 +839,12 @@ def compute_book_diagnostic(
         "book_total_return": book_total,
         "framework_total_return": framework_total,
         "framework_total_return_after_costs": after_costs,
+        # The cumulative return the run actually reported. Under the
+        # "net-exposure" convention this is the framework's costed return;
+        # under the "book" convention it is the book's costed return (the
+        # costed number is the one a reader must use). The two keys above
+        # are always *pre-cost*.
+        "reported_total_return": after_costs,
     }
 
 
@@ -530,6 +897,10 @@ def aggregate_book_diagnostics(diagnostics):
         if framework_total is None or book_total is None
         else float(framework_total - book_total)
     )
+    # The cost basis is a property of the run, not of a window: report it
+    # when every window agrees, and say "mixed" when they do not.
+    _bases = {d.get("cost_basis") for d in valid if d.get("cost_basis")}
+    cost_basis = _bases.pop() if len(_bases) == 1 else ("mixed" if _bases else None)
 
     return {
         "n_periods": n_periods,
@@ -540,11 +911,14 @@ def aggregate_book_diagnostics(diagnostics):
         "framework_net_exposure": _weighted_mean("framework_net_exposure"),
         "gross_turnover": _weighted_mean("gross_turnover"),
         "framework_turnover": _weighted_mean("framework_turnover"),
+        "charged_turnover": _weighted_mean("charged_turnover"),
+        "cost_basis": cost_basis,
         "return_gap_bps": _weighted_mean("return_gap_bps"),
         "return_gap_total": return_gap_total,
         "book_total_return": book_total,
         "framework_total_return": framework_total,
         "framework_total_return_after_costs": _compound("framework_total_return_after_costs"),
+        "reported_total_return": _compound("reported_total_return"),
     }
 
 

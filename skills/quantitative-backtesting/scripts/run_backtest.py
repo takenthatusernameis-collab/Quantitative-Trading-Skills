@@ -30,10 +30,14 @@ from performance import calculate_metrics, generate_report
 from reporting import generate_tear_sheet
 from utils import (
     _annualization_factor,
+    book_cost_components,
     book_is_active,
-    book_return_series,
+    book_market_impact_cost,
+    book_return_from_held,
+    book_trade_ledger,
     build_market_model,
     compute_book_diagnostic,
+    held_book_weights,
     market_impact_cost,
     resolve_panel_pricing,
     strategy_target_weights,
@@ -86,13 +90,16 @@ def parse_args():
         default="net-exposure",
         choices=["net-exposure", "book"],
         help=(
-            "How a multi-asset panel is priced. 'net-exposure' (default) prices "
-            "the portfolio as net_exposure x mean(asset returns) -- the "
+            "How a multi-asset panel is priced and costed. 'net-exposure' "
+            "(default) prices the portfolio as net_exposure x mean(asset "
+            "returns) and charges the costs on the net exposure -- the "
             "convention every published number was produced under. 'book' "
             "prices the true per-asset book return sum_i w_i r_i of the "
             "strategy's target weights, which makes a market-neutral book "
-            "backtestable. The cost and impact model is unchanged in both "
-            "modes (it still sees |d net exposure|)."
+            "backtestable, and charges the costs on the book itself: "
+            "commission and slippage on its gross turnover, borrow on its "
+            "short legs, funding on its gross exposure, and market impact "
+            "per asset against that asset's own ADV."
         ),
     )
     return parser.parse_args()
@@ -230,9 +237,8 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     # convention every published number in this skill was produced under.
     # "book" prices the true per-asset book return `sum_i w_i r_i` of the
     # strategy's target weights, so a market-neutral book can be backtested
-    # at all. The cost and impact model is *not* changed by the mode: it
-    # still sees |d net exposure| (see the "Panel book diagnostic" block
-    # and references/cost_models.md).
+    # at all, and charges the costs on the book itself (its gross turnover,
+    # its short legs, its gross exposure) instead of on the net exposure.
     panel_pricing = resolve_panel_pricing(getattr(args, "panel_pricing", None))
 
     # Panel book diagnostic (measurement only). The panel path prices the
@@ -248,17 +254,25 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     # return gap is measured on exactly the bars the framework reports.
     book_weights = strategy_target_weights(strategy, data)
 
-    # The book return, when the mode prices the book. None when the strategy
-    # exposes no book (the mode then falls back to net-exposure pricing with
-    # an explicit message) or when the data is not a panel.
-    book_returns = None
+    # The book actually held on each bar, when the run prices the panel as
+    # a book. It is the single source of truth for the book-mode return AND
+    # the book-mode cost basis, so the two can never disagree. None when
+    # the strategy exposes no book (the mode then falls back to
+    # net-exposure pricing with an explicit message) or when the data is
+    # not a panel.
+    held_book = None
     if panel_pricing == "book" and book_weights is not None:
-        book_returns = book_return_series(
+        held_book = held_book_weights(
             book_weights,
             market,
             lag=1 + latency,
             fill_rate=fill_rate,
         )
+
+    # The book return, when the mode prices the book.
+    book_returns = None
+    if held_book is not None:
+        book_returns = book_return_from_held(held_book, close)
 
     # Guard against strategies that never takes a position (e.g. a lookback
     # longer than the data window leaves every rolling indicator NaN, so the
@@ -309,30 +323,6 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     if fill_rate < 1.0:
         positions = positions * fill_rate
 
-    # Transaction costs: apply on position changes
-    position_changes = positions.diff().abs()
-    costs = position_changes * (args.commission + args.slippage)
-
-    # Market impact model: impact = (position_notional / ADV) * impact_coefficient
-    # ADV = rolling average of daily volume (in shares) * price
-    #
-    # The model lives in utils.market_impact_cost so that this path and
-    # walk_forward.py charge the same impact for the same panel. For a
-    # panel the portfolio notional is split equally over the constituents
-    # and every constituent is measured against its own ADV.
-    market_impact = market_impact_cost(
-        position_changes=position_changes,
-        raw_returns=raw_returns,
-        close=close,
-        volume=volume,
-        is_panel=is_panel,
-        impact_coefficient=args.impact_coefficient,
-        adv_window=args.adv_window,
-        initial_capital=args.initial_capital,
-    )
-    if market_impact is not None:
-        costs = costs + market_impact
-
     # Borrow and funding costs are annualized rates applied per period.
     # The per-period rate divides by the number of periods per year
     # inferred from the data's index (e.g. 252 for business-daily,
@@ -341,27 +331,84 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     # 252 when the frequency cannot be inferred.
     ann_factor = _annualization_factor(raw_returns.index)
 
-    # Borrow cost for short positions
-    # Applied per period on the absolute value of short positions
-    if args.borrow_cost > 0:
-        # Convert annual rate to per-period rate
-        period_borrow_rate = args.borrow_cost / ann_factor
-        # Short positions are negative; borrow cost applies to absolute short exposure
-        short_positions = positions.clip(upper=0).abs()
-        borrow_costs = short_positions * period_borrow_rate
-        costs = costs + borrow_costs
+    if held_book is not None:
+        # Book cost basis. The costs are charged on the book the strategy
+        # actually holds, not on the scalar net exposure:
+        #
+        #   commission + slippage  on the gross turnover sum_i |dw_i|
+        #   borrow                 on the short legs sum_i max(-w_i, 0)
+        #   funding                on the gross exposure sum_i |w_i| > 1x
+        #   market impact          per asset, against that asset's own ADV
+        #
+        # A market-neutral book has a flat net exposure, so the net-exposure
+        # cost model would charge it nothing at all; the book basis charges
+        # it for the rotation it actually pays for.
+        _book_costs = book_cost_components(
+            held_book,
+            commission=args.commission,
+            slippage=args.slippage,
+            borrow_cost=args.borrow_cost,
+            funding_cost=args.funding_cost,
+            ann_factor=ann_factor,
+        )
+        costs = _book_costs["total"]
+        market_impact = book_market_impact_cost(
+            held_book=held_book,
+            raw_returns=raw_returns,
+            close=close,
+            volume=volume,
+            impact_coefficient=args.impact_coefficient,
+            adv_window=args.adv_window,
+            initial_capital=args.initial_capital,
+        )
+        if market_impact is not None:
+            costs = costs + market_impact
+    else:
+        # Transaction costs: apply on position changes
+        position_changes = positions.diff().abs()
+        costs = position_changes * (args.commission + args.slippage)
 
-    # Funding cost for leveraged positions (gross exposure > 1)
-    # Applied per period on the amount of leverage used beyond 100% equity
-    if args.funding_cost > 0:
-        # Convert annual rate to per-period rate
-        period_funding_rate = args.funding_cost / ann_factor
-        # Gross leverage = absolute position size
-        gross_exposure = positions.abs()
-        # Funding cost applies to leverage beyond 1x (i.e., gross_exposure - 1 when > 1)
-        leverage_excess = (gross_exposure - 1).clip(lower=0)
-        funding_costs = leverage_excess * period_funding_rate
-        costs = costs + funding_costs
+        # Market impact model: impact = (position_notional / ADV) * impact_coefficient
+        # ADV = rolling average of daily volume (in shares) * price
+        #
+        # The model lives in utils.market_impact_cost so that this path and
+        # walk_forward.py charge the same impact for the same panel. For a
+        # panel the portfolio notional is split equally over the constituents
+        # and every constituent is measured against its own ADV.
+        market_impact = market_impact_cost(
+            position_changes=position_changes,
+            raw_returns=raw_returns,
+            close=close,
+            volume=volume,
+            is_panel=is_panel,
+            impact_coefficient=args.impact_coefficient,
+            adv_window=args.adv_window,
+            initial_capital=args.initial_capital,
+        )
+        if market_impact is not None:
+            costs = costs + market_impact
+
+        # Borrow cost for short positions
+        # Applied per period on the absolute value of short positions
+        if args.borrow_cost > 0:
+            # Convert annual rate to per-period rate
+            period_borrow_rate = args.borrow_cost / ann_factor
+            # Short positions are negative; borrow cost applies to absolute short exposure
+            short_positions = positions.clip(upper=0).abs()
+            borrow_costs = short_positions * period_borrow_rate
+            costs = costs + borrow_costs
+
+        # Funding cost for leveraged positions (gross exposure > 1)
+        # Applied per period on the amount of leverage used beyond 100% equity
+        if args.funding_cost > 0:
+            # Convert annual rate to per-period rate
+            period_funding_rate = args.funding_cost / ann_factor
+            # Gross leverage = absolute position size
+            gross_exposure = positions.abs()
+            # Funding cost applies to leverage beyond 1x (i.e., gross_exposure - 1 when > 1)
+            leverage_excess = (gross_exposure - 1).clip(lower=0)
+            funding_costs = leverage_excess * period_funding_rate
+            costs = costs + funding_costs
 
     # Portfolio return. Two pricing conventions:
     #
@@ -373,12 +420,10 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     #     strategy holds. A market-neutral book (flat net exposure, non-zero
     #     gross book) is only representable under this convention.
     #
-    # The cost series is identical in both modes: commission, slippage,
-    # impact, borrow and funding are still computed from the *net exposure*
-    # position series. That is a known and reported limitation of the book
-    # mode (the book rotates more than its net exposure does, and the cost
-    # model does not see it) -- the "Panel book diagnostic" block reports
-    # the gross turnover of the book next to the turnover the model charges.
+    # The two modes also differ in their *cost* basis: the net-exposure
+    # mode charges the scalar net exposure, the book mode charges the book
+    # (gross turnover, short legs, gross exposure). The "Panel book
+    # diagnostic" block reports both turnovers so the difference is visible.
     if book_returns is not None:
         effective_pricing = "book"
         strategy_returns = book_returns - costs
@@ -401,6 +446,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             framework_returns=strategy_returns,
             lag=1 + latency,
             fill_rate=fill_rate,
+            pricing_mode=effective_pricing,
         )
 
     # Build equity curve
@@ -430,60 +476,68 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     # same basket the return series is marked against.
     n_bars = len(position_changes_bool)
 
-    trades = []
-    entry_idx = None
-    entry_price = None
-    entry_date = None
-    entry_direction = None  # +1 for long, -1 for short
-    for i in range(n_bars):
-        if not position_changes_bool.iloc[i]:
-            continue
+    if held_book is not None:
+        # Book ledger: one round trip per asset and direction, priced at
+        # that asset's own close. The net-exposure ledger cannot describe
+        # a book -- a market-neutral book has a flat net exposure and would
+        # produce no trade record at all, leaving the trade-level
+        # statistics (win rate, profit factor, expectancy) empty.
+        trades = book_trade_ledger(held_book, close)
+    else:
+        trades = []
+        entry_idx = None
+        entry_price = None
+        entry_date = None
+        entry_direction = None  # +1 for long, -1 for short
+        for i in range(n_bars):
+            if not position_changes_bool.iloc[i]:
+                continue
 
-        # Close any currently open position at this bar's price.
-        if entry_idx is not None:
-            exit_price = price.iloc[i]
-            exit_date = positions.index[i]
+            # Close any currently open position at this bar's price.
+            if entry_idx is not None:
+                exit_price = price.iloc[i]
+                exit_date = positions.index[i]
+                pnl = (exit_price - entry_price) * entry_direction
+                trades.append({
+                    "pnl": float(pnl),
+                    "return": float(pnl / entry_price),
+                    "entry_date": str(entry_date.date()),
+                    "exit_date": str(exit_date.date()),
+                })
+                entry_idx = None
+                entry_price = None
+                entry_date = None
+                entry_direction = None
+
+            # Open the new position at this bar's price (if it is non-zero).
+            new_pos = positions.iloc[i]
+            if new_pos != 0:
+                entry_idx = i
+                entry_price = price.iloc[i]
+                entry_date = positions.index[i]
+                entry_direction = 1 if new_pos > 0 else -1
+
+        # Mark the final open position to market at the last bar's close.
+        # A strategy still holding a position when the data ends (common
+        # for long-lookback momentum strategies) would otherwise record no
+        # trade at all for that leg: its PnL is in the equity curve but
+        # missing from the trade ledger, so trade-level stats (win rate,
+        # expectancy, profit factor) understate activity and do not
+        # reconcile with the equity curve. The exit is forced by the end
+        # of the sample, not by a signal, so it is flagged via
+        # `closed_at_end`. A position opened on the very last bar has no
+        # later bar to close at and is left unrecorded.
+        if entry_idx is not None and entry_idx < n_bars - 1:
+            exit_price = price.iloc[-1]
+            exit_date = positions.index[-1]
             pnl = (exit_price - entry_price) * entry_direction
             trades.append({
                 "pnl": float(pnl),
                 "return": float(pnl / entry_price),
                 "entry_date": str(entry_date.date()),
                 "exit_date": str(exit_date.date()),
+                "closed_at_end": True,
             })
-            entry_idx = None
-            entry_price = None
-            entry_date = None
-            entry_direction = None
-
-        # Open the new position at this bar's price (if it is non-zero).
-        new_pos = positions.iloc[i]
-        if new_pos != 0:
-            entry_idx = i
-            entry_price = price.iloc[i]
-            entry_date = positions.index[i]
-            entry_direction = 1 if new_pos > 0 else -1
-
-    # Mark the final open position to market at the last bar's close.
-    # A strategy still holding a position when the data ends (common
-    # for long-lookback momentum strategies) would otherwise record no
-    # trade at all for that leg: its PnL is in the equity curve but
-    # missing from the trade ledger, so trade-level stats (win rate,
-    # expectancy, profit factor) understate activity and do not
-    # reconcile with the equity curve. The exit is forced by the end
-    # of the sample, not by a signal, so it is flagged via
-    # `closed_at_end`. A position opened on the very last bar has no
-    # later bar to close at and is left unrecorded.
-    if entry_idx is not None and entry_idx < n_bars - 1:
-        exit_price = price.iloc[-1]
-        exit_date = positions.index[-1]
-        pnl = (exit_price - entry_price) * entry_direction
-        trades.append({
-            "pnl": float(pnl),
-            "return": float(pnl / entry_price),
-            "entry_date": str(entry_date.date()),
-            "exit_date": str(exit_date.date()),
-            "closed_at_end": True,
-        })
 
     results = {
         "equity_curve": equity,
@@ -1003,7 +1057,8 @@ def main():
     if _effective_pricing == "book":
         print(
             "Panel pricing mode: book (the portfolio return is the true "
-            "per-asset book return sum_i w_i r_i)."
+            "per-asset book return sum_i w_i r_i, and the costs are charged "
+            "on the book: gross turnover, short legs and gross exposure)."
         )
     elif _requested_pricing == "book":
         print(
@@ -1033,7 +1088,11 @@ def main():
         print(f"  Net exposure (book):          {book_diagnostic['net_exposure']:.4f}")
         print(f"  Net exposure (framework):      {book_diagnostic['framework_net_exposure']:.4f}")
         print(f"  Gross turnover (book):         {book_diagnostic['gross_turnover']:.4f}")
-        print(f"  Turnover charged by the model: {book_diagnostic['framework_turnover']:.4f}")
+        print(
+            "  Turnover charged by the model: "
+            f"{book_diagnostic.get('charged_turnover', book_diagnostic['framework_turnover']):.4f}"
+            f"  (cost basis: {book_diagnostic.get('cost_basis', 'net-exposure')})"
+        )
         print(
             f"  Periods with a book:           "
             f"{book_diagnostic['n_periods_with_book']}/{book_diagnostic['n_periods']}"
@@ -1043,22 +1102,38 @@ def main():
         if _gap_bps is not None:
             print(
                 f"  Return gap (framework - book): {_gap_bps:.2f} bps/period "
-                f"({_gap_total:.2%} cumulative)"
+                f"({_gap_total:.2%} cumulative, pre-cost)"
             )
             print(
-                f"  Book total return:            "
-                f"{book_diagnostic['book_total_return']:.2%} vs framework "
-                f"{book_diagnostic['framework_total_return_after_costs']:.2%}"
+                f"  Book return (pre-cost):        "
+                f"{book_diagnostic['book_total_return']:.2%}; reported "
+                f"(net of costs): "
+                f"{book_diagnostic.get('reported_total_return', book_diagnostic['framework_total_return_after_costs']):.2%}"
             )
         if _effective_pricing == "book":
             print(
-                "  NOTE: the cost and impact model still sees |d net "
-                "exposure|, so the book's own rotation is under-charged "
-                "(compare gross turnover with the charged turnover above). "
-                "Book-mode results are an upper bound on what a fully "
-                "costed book would earn. The trade ledger is still built "
-                "from the net-exposure position series, so a market-neutral "
-                "book produces no trade records."
+                "  Cost basis: book. Commission and slippage are charged on "
+                "the book's gross turnover (the charged turnover above now "
+                "equals the gross turnover), borrow on its short legs and "
+                "funding on its gross exposure. The trade ledger is built "
+                "from the book, one round trip per asset."
+            )
+            print(
+                "  Residual approximations: the market-impact model charges "
+                "the equal-weighted mean of the per-asset impacts over the "
+                "whole panel, so a period in which only some names trade is "
+                "charged less than the participation actually consumed; and "
+                "the capacity estimate stays basket-based (equal 1/n per "
+                "constituent, least liquid name binding), which is an "
+                "approximation for a book whose weights differ."
+            )
+        else:
+            print(
+                "  NOTE: the costs are charged on the net exposure "
+                "(|d net exposure|), so the book's own rotation is "
+                "under-charged (compare gross turnover with the charged "
+                "turnover above). Use --panel-pricing book to price and "
+                "cost the book itself."
             )
 
     # Multiple-testing correction: when the number of development

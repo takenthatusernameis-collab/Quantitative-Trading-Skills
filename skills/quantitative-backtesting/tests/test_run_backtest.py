@@ -26,6 +26,13 @@ sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 from run_backtest import run_backtest, signals_active, parse_args  # noqa: E402
 from run_backtest import main as run_backtest_main  # noqa: E402  (aliased: the test module defines its own main() runner below)
 from strategy_builder import build_strategy  # noqa: E402
+from performance import calculate_metrics  # noqa: E402
+from utils import (  # noqa: E402
+    book_market_impact_cost,
+    book_trade_ledger,
+    build_market_model,
+    held_book_weights,
+)
 from walk_forward import deflated_sharpe_ratio  # noqa: E402
 from data_loader import DataProvenance  # noqa: E402
 
@@ -2626,6 +2633,302 @@ def test_run_backtest_book_pricing_on_a_single_asset_is_net_exposure_pricing():
     pd.testing.assert_series_equal(net_exposure["returns"], book["returns"])
 
 
+# ---------------------------------------------------------------------------
+# Book cost basis (Phase 2b): the costs are charged on the book, not on the
+# net exposure.
+# ---------------------------------------------------------------------------
+
+
+def _held_book_of(strategy, data, lag=1, fill_rate=1.0):
+    """The book the engine actually holds, rebuilt from the strategy's own
+    weights (an independent path from the engine's internals)."""
+    market = build_market_model(data)
+    weights = strategy.generate_target_weights(data)
+    assert weights is not None
+    return market, held_book_weights(
+        weights, market, lag=lag, fill_rate=fill_rate
+    )
+
+
+def test_run_backtest_book_pricing_charges_the_gross_turnover_of_the_book():
+    """The transaction cost of a book is charged on its gross turnover.
+
+    The net-exposure convention can only see ``|d net exposure|``, which is
+    zero for a market-neutral book: the book rotates (it changes which names
+    it holds) while its net exposure stays flat, so the net-exposure cost
+    model charges it nothing. The book cost basis charges the rotation it
+    actually pays for: ``sum_i |dw_i| x (commission + slippage)``.
+
+    The charged amount is recomputed here by hand from the strategy's own
+    weights, so the test does not compare the engine against itself.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    params = '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}'
+    commission, slippage = 0.0002, 0.0001
+
+    results = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(commission=commission, slippage=slippage, panel_pricing="book"),
+    )
+
+    market, held = _held_book_of(
+        build_strategy("cross_sectional_momentum", params), data
+    )
+    gross_turnover = held.diff().abs().sum(axis=1, min_count=1)
+    expected_cost = gross_turnover * (commission + slippage)
+
+    # The market-neutral book's net exposure never changes, so the
+    # net-exposure cost model would charge it (almost) nothing.
+    diag = results["book_diagnostic"]
+    assert diag["framework_turnover"] < 1e-12
+    assert diag["gross_turnover"] > 0.0
+    # ... while the book cost basis charges its own gross turnover.
+    assert diag["charged_turnover"] == diag["gross_turnover"]
+    assert diag["cost_basis"] == "book"
+
+    # The charged cost is exactly the hand-computed gross-turnover cost:
+    # the reported return is the book return minus that cost.
+    book_return = (held * data["close"].pct_change()).sum(axis=1, min_count=1)
+    manual = (book_return - expected_cost).dropna()
+    assert manual.index.equals(results["returns"].index)
+    expected_total = float((1 + manual).prod() - 1)
+    reported_total = float((1 + results["returns"]).prod() - 1)
+    assert abs(reported_total - expected_total) < 1e-12
+
+    # The book is charged strictly more than the flat net exposure would be.
+    assert expected_cost.sum() > 0.0
+
+
+def test_run_backtest_book_pricing_charges_borrow_on_the_short_leg():
+    """A book's borrow cost is charged on its short legs.
+
+    The net-exposure convention charges borrow on the *net* short exposure:
+    a long net position pays nothing (and a day when the net exposure turns
+    negative it pays on the whole net short). A book holds explicit short
+    legs, so it pays for them on every day it holds them, even when the
+    net exposure is long.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    # Asymmetric quantiles -> a long net exposure, but a real short book.
+    params = '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}'
+    borrow = 0.03
+    ann_factor = 252
+
+    net_exposure = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(commission=0.0, slippage=0.0, borrow_cost=borrow),
+    )
+    book = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(commission=0.0, slippage=0.0, borrow_cost=borrow,
+              panel_pricing="book"),
+    )
+
+    # The net-exposure position is long on average: it pays borrow only on
+    # the days its net exposure turns negative.
+    strategy = build_strategy("cross_sectional_momentum", params)
+    signals = strategy.generate_signals(data)
+    positions = signals.shift(1).fillna(0)
+    net_short = positions.clip(upper=0).abs()
+    assert net_short.mean() < positions.mean()
+
+    _, held = _held_book_of(strategy, data)
+    short_legs = held.clip(upper=0).abs().sum(axis=1, min_count=1)
+    assert short_legs.mean() > 0
+    # The book holds short legs on (almost) every day it is invested, so it
+    # pays more borrow than the net exposure does.
+    assert short_legs.mean() > net_short.mean()
+
+    # Both modes are charged exactly the borrow their own basis implies
+    # (recomputed here by hand, with zero commission, slippage and impact).
+    market = build_market_model(data)
+    raw_returns = market["raw_returns"]
+    expected_net = (positions * raw_returns - net_short * (borrow / ann_factor)).dropna()
+    assert expected_net.index.equals(net_exposure["returns"].index)
+    assert abs(
+        float((1 + expected_net).prod() - 1)
+        - float((1 + net_exposure["returns"]).prod() - 1)
+    ) < 1e-12
+
+    book_return = (held * data["close"].pct_change()).sum(axis=1, min_count=1)
+    expected_book = (book_return - short_legs * (borrow / ann_factor)).dropna()
+    assert expected_book.index.equals(book["returns"].index)
+    assert abs(
+        float((1 + expected_book).prod() - 1)
+        - float((1 + book["returns"]).prod() - 1)
+    ) < 1e-12
+
+
+def test_run_backtest_book_pricing_market_impact_scales_with_the_fill_rate():
+    """The book's market impact is charged per asset, against that asset's
+    own ADV, and scales with the fill rate.
+
+    The net-exposure impact model splits the portfolio notional equally over
+    the constituents; the book model charges each asset the notional it
+    actually trades (``|dw_i| x equity``) against that asset's own ADV.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    params = '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}'
+
+    market, held = _held_book_of(
+        build_strategy("cross_sectional_momentum", params), data
+    )
+    full = book_market_impact_cost(
+        held_book=held,
+        raw_returns=market["raw_returns"],
+        close=market["close"],
+        volume=market["volume"],
+        impact_coefficient=0.5,
+        adv_window=20,
+        initial_capital=100000,
+    )
+    assert full is not None
+    assert full.mean() > 0
+
+    # Impact is disabled with a zero coefficient (a no-op, not a silent
+    # charge).
+    assert book_market_impact_cost(
+        held_book=held,
+        raw_returns=market["raw_returns"],
+        close=market["close"],
+        volume=market["volume"],
+        impact_coefficient=0.0,
+    ) is None
+
+    # The impact scales with the fill rate: the notional traded per asset
+    # is proportional to the weight change, which is scaled by the fill.
+    _, held_half = _held_book_of(
+        build_strategy("cross_sectional_momentum", params), data, fill_rate=0.5
+    )
+    half = book_market_impact_cost(
+        held_book=held_half,
+        raw_returns=market["raw_returns"],
+        close=market["close"],
+        volume=market["volume"],
+        impact_coefficient=0.5,
+        adv_window=20,
+        initial_capital=100000,
+    )
+    assert half is not None
+    ratio = (half.dropna() / full.dropna()).replace([np.inf, -np.inf], np.nan).dropna()
+    assert len(ratio) > 0
+    assert np.allclose(ratio.to_numpy(), 0.5, rtol=1e-9, atol=1e-12)
+
+    # A market-neutral book is charged impact even though its net exposure
+    # never changes (the net-exposure model charges it nothing).
+    charged = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(commission=0.0, slippage=0.0, impact_coefficient=0.5,
+              panel_pricing="book"),
+    )
+    zero_cost = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(commission=0.0, slippage=0.0, impact_coefficient=0.0,
+              panel_pricing="book"),
+    )
+    assert charged["book_diagnostic"]["framework_turnover"] < 1e-12
+    assert float((1 + charged["returns"]).prod() - 1) < float(
+        (1 + zero_cost["returns"]).prod() - 1
+    )
+
+
+def test_run_backtest_book_pricing_builds_a_trade_ledger():
+    """A market-neutral book produces trade records.
+
+    The net-exposure ledger is built from the scalar net exposure, so a
+    market-neutral book produced no trade record at all and the trade-level
+    statistics (win rate, profit factor, expectancy) were empty. The book
+    ledger is built from the book: one round trip per asset and direction.
+    """
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    params = '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}'
+    results = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(panel_pricing="book"),
+    )
+
+    trades = results["trades"]
+    assert len(trades) > 0
+    symbols = {t["symbol"] for t in trades}
+    assert len(symbols) > 1
+    for trade in trades:
+        assert "pnl" in trade and "return" in trade
+        assert "entry_date" in trade and "exit_date" in trade
+        assert trade["entry_date"] <= trade["exit_date"]
+
+    # The trade-level statistics are now available.
+    metrics = calculate_metrics(results)
+    assert metrics["total_trades"] == len(trades)
+    assert 0.0 <= metrics["win_rate"] <= 1.0
+    assert "profit_factor" in metrics
+
+
+def test_book_trade_ledger_prices_each_leg_at_its_own_close():
+    """The book ledger: one round trip per asset and direction, priced at the
+    asset's own close, with the sign carried by the weight."""
+    dates = pd.date_range("2020-01-01", periods=5, freq="B")
+    close = pd.DataFrame(
+        {
+            "A": [10.0, 11.0, 12.0, 11.0, 10.0],
+            "B": [20.0, 19.0, 18.0, 19.0, 20.0],
+        },
+        index=dates,
+    )
+    held = pd.DataFrame(
+        {
+            # A: long for two bars, then flat.
+            "A": [0.5, 0.5, 0.0, 0.0, 0.0],
+            # B: short from bar 2 to the end of the sample.
+            "B": [0.0, 0.0, -0.5, -0.5, -0.5],
+        },
+        index=dates,
+    )
+
+    trades = book_trade_ledger(held, close)
+    assert len(trades) == 2
+
+    long_leg = [t for t in trades if t["symbol"] == "A"][0]
+    assert long_leg["entry_date"] == "2020-01-01"
+    assert long_leg["exit_date"] == "2020-01-03"
+    # +0.5 weight over a 10 -> 12 move: +1.0 of P&L, +10% on the entry.
+    assert abs(long_leg["pnl"] - 1.0) < 1e-12
+    assert abs(long_leg["return"] - 0.1) < 1e-12
+
+    short_leg = [t for t in trades if t["symbol"] == "B"][0]
+    assert short_leg["entry_date"] == "2020-01-03"
+    assert short_leg.get("closed_at_end") is True
+    # -0.5 weight over an 18 -> 20 move: -1.0 of P&L (the sign is carried
+    # by the weight, so a losing short records a negative P&L).
+    assert abs(short_leg["pnl"] + 1.0) < 1e-12
+    assert short_leg["pnl"] < 0
+
+
+def test_run_backtest_net_exposure_numbers_are_unchanged_by_the_book_cost_basis():
+    """The net-exposure path is bit-identical after the book cost basis was
+    added: the default path must not move by a single float."""
+    data = _make_multiasset_multiindex(n=300, n_assets=5, seed=42)
+    params = '{"lookback": 20, "top_quantile": 0.4, "bottom_quantile": 0.2}'
+    results = run_backtest(
+        data,
+        build_strategy("cross_sectional_momentum", params),
+        _Args(impact_coefficient=0.5, borrow_cost=0.03, funding_cost=0.02),
+    )
+    # Pinned: the net-exposure numbers (see references/cost_models.md).
+    assert abs(
+        float((1 + results["returns"]).prod() - 1) - 0.20058890955981612
+    ) < 1e-12
+    # The diagnostic still reports the net-exposure cost basis.
+    diag = results["book_diagnostic"]
+    assert diag["cost_basis"] == "net-exposure"
+    assert diag["charged_turnover"] == diag["framework_turnover"]
+
+
 def test_cli_data_provenance_reproducible_across_runs():
     """Running the CLI twice with identical inputs yields byte-identical
     data_provenance.json (load_timestamp sanitized to source mtime)."""
@@ -2738,6 +3041,12 @@ TEST_REGISTRY = [
     ("test_run_backtest_net_exposure_pricing_is_the_default_and_is_unchanged", test_run_backtest_net_exposure_pricing_is_the_default_and_is_unchanged),
     ("test_run_backtest_book_pricing_falls_back_when_no_book_is_available", test_run_backtest_book_pricing_falls_back_when_no_book_is_available),
     ("test_run_backtest_book_pricing_on_a_single_asset_is_net_exposure_pricing", test_run_backtest_book_pricing_on_a_single_asset_is_net_exposure_pricing),
+    ("test_run_backtest_book_pricing_charges_the_gross_turnover_of_the_book", test_run_backtest_book_pricing_charges_the_gross_turnover_of_the_book),
+    ("test_run_backtest_book_pricing_charges_borrow_on_the_short_leg", test_run_backtest_book_pricing_charges_borrow_on_the_short_leg),
+    ("test_run_backtest_book_pricing_market_impact_scales_with_the_fill_rate", test_run_backtest_book_pricing_market_impact_scales_with_the_fill_rate),
+    ("test_run_backtest_book_pricing_builds_a_trade_ledger", test_run_backtest_book_pricing_builds_a_trade_ledger),
+    ("test_book_trade_ledger_prices_each_leg_at_its_own_close", test_book_trade_ledger_prices_each_leg_at_its_own_close),
+    ("test_run_backtest_net_exposure_numbers_are_unchanged_by_the_book_cost_basis", test_run_backtest_net_exposure_numbers_are_unchanged_by_the_book_cost_basis),
 ]
 
 if __name__ == "__main__":

@@ -174,7 +174,9 @@ the scalar signal `(n_long - n_short) / n_assets` and the gross book is
 | `net_exposure` | mean `sum_i w_i`: the book's net exposure |
 | `framework_net_exposure` | mean net exposure the engine priced (the scalar signal) |
 | `gross_turnover` | mean `sum_i abs(dw_i)`: the turnover the book really has |
-| `framework_turnover` | mean `abs(d net exposure)`: the turnover the cost/impact model charges |
+| `framework_turnover` | mean `abs(d net exposure)`: the turnover the net-exposure cost model charges |
+| `charged_turnover` | the turnover the cost model actually charged: the gross turnover under the `book` cost basis, the net exposure's under `net-exposure` |
+| `cost_basis` | the basis the costs were charged on (`"book"` or `"net-exposure"`) |
 | `n_periods_with_book` | periods in which the book is not flat |
 | `return_gap_bps` | mean per-period gap between the engine's pre-cost return and the book return `sum_i w_i r_i` |
 | `return_gap_total` | cumulative gap (engine pre-cost total minus book total) |
@@ -198,15 +200,14 @@ the net exposure is priced correctly, but the *dispersion* the long/short
 composition earns is discarded, and the book still rotates several times
 more than the turnover the model charges.
 
-**Known limitation (unchanged by the diagnostic).** The engine still prices
-the panel with the net-exposure convention, and the impact/capacity models
-still assume an equal-weight book. The diagnostic measures the size of that
-approximation; it does not correct it.
-
-The convention can be changed explicitly -- see "Panel pricing modes" below
-(`--panel-pricing book`), which prices the true book return instead of
-measuring the gap to it. The diagnostic is reported under both modes (in
-`book` mode it shows how much the net-exposure convention would have missed).
+**Known limitation (unchanged by the diagnostic).** Under the default
+`net-exposure` convention the engine still prices the panel with the scalar
+net exposure, and the impact/capacity models still assume an equal-weight
+book. The diagnostic measures the size of that approximation; it does not
+correct it. Use `--panel-pricing book` to price *and cost* the book itself
+(see "Panel pricing modes" below); the diagnostic is reported under both modes
+(in `book` mode it shows how much the net-exposure convention would have
+missed).
 
 ### Panel pricing modes (`--panel-pricing`)
 
@@ -243,7 +244,13 @@ CPCV, out-of-sample and single-backtest paths).
    cross-sectional momentum is rejected ("never takes a position") and the
    walk-forward / CPCV grid search skips every parameter combination. Under
    `book` the same strategy is backtested and its parameters are selected.
-3. *The reported mode is recorded.* `results["panel_pricing"]` (and
+3. *The costs are charged on the book.* See "The book cost basis" below: the
+   transaction, borrow, funding and impact costs of a book are charged on the
+   book itself, not on the scalar net exposure.
+4. *The trade ledger is built from the book.* One round trip per asset and
+   direction, priced at that asset's own close, so the trade-level statistics
+   (win rate, profit factor, expectancy) exist for a market-neutral book.
+5. *The reported mode is recorded.* `results["panel_pricing"]` (and
    `results["config"]["panel_pricing"]` / `["panel_pricing_effective"]`),
    `summary["panel_pricing"]` on the walk-forward / CPCV / out-of-sample
    paths, the CLI stdout, the summary JSON artifacts and the tear sheet
@@ -251,30 +258,76 @@ CPCV, out-of-sample and single-backtest paths).
    panel return is not interpretable without it: the sign of the gap between
    the two conventions is not even stable across windows.
 
-**What does NOT change in `book` mode.** The cost and impact model is
-deliberately left alone:
+#### The book cost basis
 
-- commission and slippage are still charged on `abs(d net exposure)`,
-- the market-impact model still sees `abs(d net exposure)` only,
-- borrow and funding costs are still computed from the *scalar* net-exposure
-  position series,
-- the trade ledger is still built from the scalar net-exposure position
-  series, so a market-neutral book produces no trade records and the
-  trade-level statistics (win rate, profit factor, expectancy) are absent
-  from the metrics. The return and risk metrics are unaffected.
+Under `net-exposure` the engine can only see one scalar per period, so every
+cost is charged on it:
 
-A book rotates much more than its net exposure does (measured on a 5-asset
-panel: gross turnover 0.175 against a charged turnover of 0.0002, i.e. a
-~900x under-charge), and a market-neutral book has a zero net exposure, so
-its rotation is charged **nothing at all**. For the same reason a book with
-a short leg pays **no borrow cost** and its funding cost is computed on the
-net exposure rather than the gross book. Book-mode results are therefore an
-**upper bound** on what a fully costed book would earn. The CLI, the
-summary JSON and the tear sheet say so explicitly, and the diagnostic prints
-the gross turnover of the book next to the turnover the model charges.
-Charging market impact on gross turnover (`sum_i abs(dw_i) x equity` per
-asset against that asset's own ADV) is a separate change (Phase 2b) because
-it interacts with the panel capacity convention.
+| Cost | `net-exposure` basis | `book` basis |
+| --- | --- | --- |
+| commission + slippage | `abs(d net exposure)` | gross turnover `sum_i abs(dw_i)` |
+| borrow | `abs(min(net exposure, 0))` | short legs `sum_i max(-w_i, 0)` |
+| funding | `max(abs(net exposure) - 1, 0)` | `max(sum_i abs(w_i) - 1, 0)` (gross exposure) |
+| market impact | `abs(d net exposure) x equity / n_assets` per asset | `abs(dw_i) x equity` per asset |
+| trade ledger | the scalar position series, priced on the panel's mean close | the book, priced at each asset's own close |
+
+Every term is charged on the **book** in `book` mode, and the fill rate is
+inside the held book, so every term scales with the fill rate exactly like the
+net-exposure model.
+
+The impact model is the same linear, per-asset model
+(`impact_i = traded_notional_i / ADV_notional_i x impact_coefficient`, with
+`ADV_notional_i = rolling_mean(volume_i) x close_i`), applied to the notional
+each asset actually trades (`abs(dw_i) x equity`) against **that asset's own
+ADV**. The portfolio cost stays the equal-weighted mean of the per-asset
+impacts, the same panel convention the net-exposure path uses, so the two
+modes stay on the same scale.
+
+**Why this matters.** A book rotates much more than its net exposure does
+(measured on a 5-asset panel: gross turnover 0.163 against a charged turnover
+of 0.0002, i.e. a ~900x under-charge), and a market-neutral book has a zero
+net exposure, so under the net-exposure basis its rotation was charged
+**nothing at all**, it paid **no borrow cost** and its funding cost was
+computed on the net exposure rather than the gross book. `book` mode results
+were therefore an **upper bound** on what a fully costed book would earn.
+They are now costed, and they are materially lower: on a 900-bar 5-asset
+market-neutral cross-sectional book the total return moves from **+16.3%**
+(uncosted book) to **-15.7%** (costed book) -- a 32 percentage-point
+difference, of which ~30 points are the transaction, borrow and impact costs
+the book actually pays. A book-mode number must therefore be read as a
+*costed* number, and a net-exposure number as a *net-exposure-convention*
+number; the two are not comparable without the mode.
+
+#### Residual approximations in `book` mode
+
+The book cost basis is not a complete cost model. What is left:
+
+- **Impact is the mean over the whole panel.** A period in which only `k` of
+  `n` names trade is charged the mean over `n` names, so the drag is diluted
+  relative to the participation actually consumed. The convention is kept
+  identical to the net-exposure path (where every constituent always trades
+  `1 / n` of the notional) so the two modes stay comparable; a *sum* over the
+  traded names would be the conservative alternative.
+- **The capacity estimate stays basket-based.** `estimate_capacity` assumes an
+  equal-weight basket whose least liquid constituent binds the portfolio
+  capacity. A book's capacity depends on its own per-asset weights: the
+  book-based estimate is
+  `min_i ( max_impact x ADV_i / (abs(dw_i) x impact_coefficient) )`, i.e. the
+  equity level at which rebalancing asset `i` hits the impact threshold. The
+  two agree exactly for a book that rebalances `1 / n` per constituent, and
+  differ for any other book (a concentrated book has a *lower* capacity than
+  the basket rule reports). The engine reports the basket-based number in
+  both modes and says so in the CLI, the tear sheet and this file; it is an
+  approximation for a book.
+- **The trade ledger does not reconcile with the equity curve.** The `pnl`
+  field of a book trade is in price units scaled by the average weight, and
+  the `return` field is that P&L divided by the entry price (the leg's
+  contribution to the portfolio return). The ledger ignores compounding and
+  transaction costs, and it approximates a leg whose weight changed during the
+  trade by its average weight.
+- **The impact model is linear in the participation rate** and does not model
+  a temporary permanent price impact, an overnight gap risk, or a market
+  that moves against the trade. It is a sizing guard, not a fill model.
 
 **Fallbacks.** A strategy that exposes no book (no
 `generate_target_weights`, or a single-asset run) cannot be priced as a
@@ -291,8 +344,11 @@ shared definitions live in `scripts/utils.py`:
 | Model | Shared function | Convention |
 | --- | --- | --- |
 | Market returns | `build_market_model` | panel return = mean of the per-asset returns (`close.pct_change().mean(axis=1)`) |
-| Market impact | `market_impact_cost` | per-asset notional `|d| * equity / n_assets` against each asset's own ADV; portfolio cost = equal-weighted mean |
-| Capacity | `estimate_capacity` | equal-weighted basket; the least liquid constituent binds the portfolio capacity |
+| Market impact (net exposure) | `market_impact_cost` | per-asset notional `|d| * equity / n_assets` against each asset's own ADV; portfolio cost = equal-weighted mean |
+| Market impact (book) | `book_market_impact_cost` | per-asset notional `|dw_i| * equity` against each asset's own ADV; portfolio cost = equal-weighted mean |
+| Book cost basis | `book_cost_components` | gross turnover `sum_i |dw_i|`, short legs `sum_i max(-w_i, 0)`, gross exposure `sum_i |w_i|` |
+| Book trade ledger | `book_trade_ledger` | one round trip per asset and direction, priced at the asset's own close |
+| Capacity | `estimate_capacity` | equal-weighted basket; the least liquid constituent binds the portfolio capacity (a basket-based approximation for a book -- see "Residual approximations") |
 
 The mean-of-returns convention is used instead of the return of the mean price
 series (`close.mean(axis=1).pct_change()`) because the latter prices a
@@ -552,7 +608,7 @@ Costs are passed as decimal fractions (not bps) to the backtest entry points:
 | `--funding-cost`    | float  | `0.0`    | Annual funding rate for leverage (e.g., 0.02 = 2%) |
 | `--fill-rate`       | float  | `1.0`    | Fraction of each position change filled (0 < r <= 1) |
 | `--fill-rates`      | list   | None     | List of fill rates to sweep (overrides --fill-rate) |
-| `--panel-pricing`   | choice | `net-exposure` | How a panel is priced: `net-exposure` (scalar net exposure x mean asset return) or `book` (true per-asset book return `sum_i w_i r_i`). Not a cost parameter: it selects the pricing convention, and the cost model is identical in both modes. See "Panel pricing modes". |
+| `--panel-pricing`   | choice | `net-exposure` | How a panel is priced **and costed**: `net-exposure` (scalar net exposure x mean asset return, costs charged on the net exposure) or `book` (true per-asset book return `sum_i w_i r_i`, costs charged on the book: gross turnover, short legs, gross exposure, per-asset impact). See "Panel pricing modes". |
 
 In the walk-forward module, `commission`, `slippage`, `impact_coefficient`,
 `adv_window`, `borrow_cost`, and `funding_cost` are keyword arguments to

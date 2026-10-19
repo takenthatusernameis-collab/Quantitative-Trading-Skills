@@ -6962,6 +6962,97 @@ def test_out_of_sample_validation_prices_the_book_on_the_held_out_window():
     assert res["test_performance"]["book_diagnostic"] is not None
 
 
+def test_calculate_strategy_returns_book_mode_charges_the_book_turnover():
+    """The walk-forward return calculator charges the book, not the net
+    exposure, and reports the same bars as the net-exposure convention.
+
+    The charged amount is recomputed here by hand from the strategy's own
+    weights, so the test does not compare the engine against itself.
+    """
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=11)
+    params = {"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}
+    strategy = build_strategy("cross_sectional_momentum", json.dumps(params))
+    signals = strategy.generate_signals(data)
+    weights = strategy.generate_target_weights(data)
+    assert weights is not None
+
+    commission, slippage = 0.0002, 0.0001
+    book_returns = _calculate_strategy_returns(
+        data, signals, commission, slippage,
+        panel_pricing="book", book_weights=weights,
+    )
+    net_returns = _calculate_strategy_returns(
+        data, signals, commission, slippage,
+        panel_pricing="net-exposure",
+    )
+
+    # Same bars in both modes: the warmup bars are dropped by both.
+    assert book_returns.index.equals(net_returns.index)
+
+    # The book's gross turnover, computed from the strategy's own weights
+    # with the engine's execution convention (one period of lag, full
+    # fill).
+    held = weights.reindex(columns=data["close"].columns).reindex(
+        data["close"].index
+    ).fillna(0.0).shift(1)
+    turnover = held.diff().abs().sum(axis=1, min_count=1)
+    expected_cost = turnover * (commission + slippage)
+    book_return = (held * data["close"].pct_change()).sum(axis=1, min_count=1)
+    manual = (book_return - expected_cost).dropna()
+
+    assert manual.index.equals(book_returns.index)
+    assert abs(
+        float((1 + manual).prod() - 1) - float((1 + book_returns).prod() - 1)
+    ) < 1e-12
+
+    # The market-neutral book pays a real transaction cost, which the
+    # net-exposure convention cannot see (its net exposure is flat).
+    assert expected_cost.sum() > 0
+    assert float((1 + book_returns).prod() - 1) < float(
+        (1 + net_returns).prod() - 1
+    )
+
+
+def test_walk_forward_book_pricing_charges_the_book_costs():
+    """The walk-forward out-of-sample record of a book is net of the book's
+    own costs, and the summary says which cost basis produced it."""
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=11)
+    factory = lambda params: build_strategy(
+        "cross_sectional_momentum", json.dumps(params)
+    )
+    param_grid = {"lookback": [20], "top_quantile": [0.2], "bottom_quantile": [0.2]}
+
+    def _run(commission, slippage):
+        return walk_forward_analysis(
+            data=data,
+            strategy_factory=factory,
+            param_grid=param_grid,
+            train_months=8,
+            test_months=3,
+            step_months=3,
+            commission=commission,
+            slippage=slippage,
+            panel_pricing="book",
+        )
+
+    costly = _run(0.0002, 0.0001)
+    free = _run(0.0, 0.0)
+
+    assert costly["summary"]["panel_pricing"] == "book"
+    assert costly["summary"]["total_oos_return"] is not None
+    assert free["summary"]["total_oos_return"] is not None
+    # The book's own transaction costs reduce the out-of-sample record.
+    assert costly["summary"]["total_oos_return"] < free["summary"]["total_oos_return"]
+
+    # The diagnostic states the cost basis that produced the record.
+    diag = costly["summary"]["book_diagnostic"]
+    assert diag is not None
+    assert diag["cost_basis"] == "book"
+    assert diag["charged_turnover"] == diag["gross_turnover"]
+    # ... while the net-exposure basis charges the net exposure's turnover.
+    assert diag["framework_turnover"] < diag["gross_turnover"]
+
+
 def _write_multiasset_panel_csv(path: str, periods: int = 900, n_assets: int = 4, seed: int = 17) -> None:
     """Write a multi-symbol panel CSV (long format) with cross-sectional
     dispersion, for the --multi-symbol CLI paths."""
@@ -7080,6 +7171,14 @@ TEST_REGISTRY.append(
 TEST_REGISTRY.append(
     ("test_out_of_sample_validation_prices_the_book_on_the_held_out_window",
      test_out_of_sample_validation_prices_the_book_on_the_held_out_window)
+)
+TEST_REGISTRY.append(
+    ("test_calculate_strategy_returns_book_mode_charges_the_book_turnover",
+     test_calculate_strategy_returns_book_mode_charges_the_book_turnover)
+)
+TEST_REGISTRY.append(
+    ("test_walk_forward_book_pricing_charges_the_book_costs",
+     test_walk_forward_book_pricing_charges_the_book_costs)
 )
 
 

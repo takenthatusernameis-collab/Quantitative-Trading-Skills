@@ -362,8 +362,7 @@ def generate_tear_sheet(
         """Render the panel book diagnostic as a small table.
 
         The diagnostic compares the per-asset book a strategy actually holds
-        with the framework's net-exposure pricing of the panel. It is
-        measurement only: the reported returns are unchanged. Omitted
+        with the framework's net-exposure pricing of the panel. Omitted
         entirely when the diagnostic is absent (single asset, or a strategy
         that does not expose a book).
         """
@@ -377,17 +376,21 @@ def generate_tear_sheet(
             ("Net Exposure (framework)", diag.get("framework_net_exposure"), fmt_num),
             ("Gross Turnover (book)", diag.get("gross_turnover"), fmt_num),
             ("Turnover Charged by Model", diag.get("framework_turnover"), fmt_num),
+            ("Turnover Actually Charged", diag.get("charged_turnover"), fmt_num),
+            ("Cost Basis", diag.get("cost_basis"), str),
             (
                 "Periods With a Book",
                 None if n_with is None or n_total is None else f"{n_with}/{n_total}",
                 str,
             ),
             ("Return Gap (framework - book, bps/period)", diag.get("return_gap_bps"), fmt_num),
-            ("Return Gap (cumulative)", diag.get("return_gap_total"), fmt_pct),
-            ("Book Total Return", diag.get("book_total_return"), fmt_pct),
+            ("Return Gap (cumulative, pre-cost)", diag.get("return_gap_total"), fmt_pct),
+            ("Book Total Return (pre-cost)", diag.get("book_total_return"), fmt_pct),
             (
-                "Framework Total Return (net of costs)",
-                diag.get("framework_total_return_after_costs"),
+                "Reported Total Return (net of costs)",
+                diag.get("reported_total_return")
+                if diag.get("reported_total_return") is not None
+                else diag.get("framework_total_return_after_costs"),
                 fmt_pct,
             ),
         ]
@@ -396,12 +399,22 @@ def generate_tear_sheet(
             display = fmt(value) if value is not None else "N/A"
             out.append(f"<tr><td>{label}</td><td class='metric'>{display}</td></tr>")
         out.append("</table>")
-        out.append(
-            "<p><em>Measurement only: the panel path prices a portfolio as "
-            "net exposure x mean asset return, so a long/short book cannot be "
-            "represented by that scalar. The reported P&amp;L is unchanged by "
-            "this diagnostic.</em></p>"
-        )
+        if diag.get("cost_basis") == "book":
+            out.append(
+                "<p><em>The reported P&amp;L and the costs both use the book "
+                "convention: the return is sum_i w_i r_i and the costs are "
+                "charged on the book (gross turnover, short legs, gross "
+                "exposure). The net-exposure numbers above are shown for "
+                "comparison.</em></p>"
+            )
+        else:
+            out.append(
+                "<p><em>Measurement only: the panel path prices a portfolio as "
+                "net exposure x mean asset return and charges the costs on "
+                "the net exposure, so a long/short book cannot be represented "
+                "by that scalar. The reported P&amp;L is unchanged by this "
+                "diagnostic.</em></p>"
+            )
         return out
 
     def panel_pricing_section(mode):
@@ -422,16 +435,24 @@ def generate_tear_sheet(
         if mode == "book":
             out.append(
                 "<p><em>The reported P&amp;L is the true per-asset book "
-                "return sum_i w_i r_i. The cost and impact model is unchanged: "
-                "it still sees |d net exposure|, so the book's own rotation is "
-                "under-charged. Book-mode results are an upper bound on what a "
-                "fully costed book would earn.</em></p>"
+                "return sum_i w_i r_i, and the costs are charged on the book: "
+                "commission and slippage on its gross turnover sum_i |dw_i|, "
+                "borrow on its short legs, funding on its gross exposure, and "
+                "market impact per asset against that asset's own ADV. "
+                "Residual approximations: the impact is the equal-weighted "
+                "mean of the per-asset impacts over the whole panel (so a "
+                "period in which only some names trade is charged less than "
+                "the participation actually consumed), and the capacity "
+                "estimate stays basket-based (equal 1/n per constituent, "
+                "least liquid name binding), which is an approximation for a "
+                "book whose weights differ.</em></p>"
             )
         else:
             out.append(
                 "<p><em>The reported P&amp;L is net_exposure x mean(asset "
-                "returns). A long/short book is not representable by that "
-                "scalar: see the panel book diagnostic above.</em></p>"
+                "returns), and the costs are charged on the net exposure. A "
+                "long/short book is not representable by that scalar: see the "
+                "panel book diagnostic above.</em></p>"
             )
         return out
 
@@ -463,10 +484,24 @@ def generate_tear_sheet(
     # is enabled and ADV is estimable. Omitted entirely when None/absent
     # (backward compatible; capacity is a multi-period validation concept
     # and is also rendered per-analysis in the Walk-Forward / CPCV tables).
+    #
+    # The pricing convention is needed here: under the "book" convention the
+    # capacity estimate is still the basket-based one (equal 1/n per
+    # constituent, least liquid name binding), which is an approximation for
+    # a book whose weights differ -- so the label says so at the point of
+    # use.
+    _pricing = results.get("panel_pricing")
+    if _pricing is None:
+        _pricing = (results.get("config") or {}).get("panel_pricing_effective")
     capacity = metrics.get("capacity")
     if capacity is not None:
+        _capacity_label = (
+            "Strategy Capacity (Notional, basket-based)"
+            if _pricing == "book"
+            else "Strategy Capacity (Notional)"
+        )
         html_parts.append(
-            f"<tr><td>Strategy Capacity (Notional)</td>"
+            f"<tr><td>{_capacity_label}</td>"
             f"<td class='metric'>{fmt_num(capacity)}</td></tr>"
         )
     # Capacity trend: the worst capacity reading inside the backtest window.
@@ -492,31 +527,7 @@ def generate_tear_sheet(
     # Panel pricing convention: the reported P&L is not interpretable
     # without it (the net-exposure and book conventions can differ by more
     # than the transaction costs).
-    _pricing = results.get("panel_pricing")
-    if _pricing is None:
-        _pricing = (results.get("config") or {}).get("panel_pricing_effective")
-    if _pricing is not None:
-        html_parts.append("<h2>Panel Pricing</h2>")
-        html_parts.append(
-            "<table><tr><th>Metric</th><th>Value</th></tr>"
-            f"<tr><td>Panel Pricing Mode</td><td class='metric'>{_pricing}</td></tr>"
-            "</table>"
-        )
-        if _pricing == "book":
-            html_parts.append(
-                "<p><em>The reported P&amp;L is the true per-asset book "
-                "return sum_i w_i r_i. The cost and impact model is unchanged: "
-                "it still sees |d net exposure|, so the book's own rotation is "
-                "under-charged (see the gross turnover and the turnover "
-                "charged by the model above). Book-mode results are an upper "
-                "bound on what a fully costed book would earn.</em></p>"
-            )
-        else:
-            html_parts.append(
-                "<p><em>The reported P&amp;L is net_exposure x mean(asset "
-                "returns). A long/short book is not representable by that "
-                "scalar: see the panel book diagnostic above.</em></p>"
-            )
+    html_parts.extend(panel_pricing_section(_pricing))
 
     # Trade analytics
     if "total_trades" in metrics:
