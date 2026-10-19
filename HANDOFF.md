@@ -2,32 +2,39 @@
 
 ## What changed this session
 
-Fixed a false-positive look-ahead violation in `validate_point_in_time` (the primary anti-look-ahead-bias gate in `skills/quantitative-backtesting/scripts/data_loader.py`).
+Added end-to-end regression test `test_annualization_scales_risk_metrics_hourly_vs_daily` in `skills/quantitative-backtesting/tests/test_performance.py` (registered in `TEST_REGISTRY`), per the task in HANDOFF_NEXT.md.
 
-**Defect.** The same-bar correlation check (`|corr(signal_changes, same_bar_returns)| > 0.3`) flagged *every* legitimate `close[t]`-based strategy as look-ahead. This is wrong by construction: a signal generated at time `t` is allowed to use `close[t]`, and `close[t]` is a component of the same-bar return `close[t] - close[t-1]`, so any close-based strategy (SMA crossover, mean reversion, Donchian, Bollinger, MACD, RSI) shows non-trivial same-bar correlation. On the shipped sample data, a legitimate mean-reversion signal (`signal[t] = -sign(close[t] - sma50[t])`) scored corr = -0.361 and was rejected despite having a next-period correlation of only -0.0295 — i.e. no look-ahead at all. The validator would have blocked every registered strategy from passing `--validate-point-in-time`.
+**Test.** Builds two return series with identical per-period values (seeded normal draws), one on a `"B"` (daily) index and one on a `"h"` (hourly) index via `pd.date_range`, calls `calculate_metrics({"returns": ...}, risk_free_rate=0.0)` on each, and asserts:
+- `hourly annualized_volatility / daily annualized_volatility ≈ sqrt(1638/252)`
+- `hourly sharpe_ratio / daily sharpe_ratio ≈ sqrt(1638/252)`
 
-**Fix.** Removed the same-bar correlation check entirely. The definitive look-ahead test is the next-period correlation (`corr(signal_changes, close[t+1] - close[t])`), which is retained unchanged and still catches genuinely forward-looking signals (verified: a `sign(return[t+1])` signal scores corr = +0.498 and is rejected). Same-bar correlation is not a valid look-ahead indicator on its own.
+(tolerance 1e-9). `risk_free_rate=0` removes the risk-free offset so Sharpe scales purely with the annualization factor. This locks in that the pandas-3.x `_annualization_factor` fix propagates into the actual risk metrics rather than being unit-tested in isolation. No changes to `performance.py` logic.
 
 ## What was verified
 
-- `test_data_loader.py`: 32/32 pass (was 30/30; +2 new tests).
-- Full quant suite: walk_forward 129/129, cpcv 17/17, performance 31/31, run_backtest 65/65, strategy_builder 28/28, monte_carlo 17/17, reporting 2/2, generate_sample_data 6/6, examples_coverage 6/6, falsifiable_hypothesis_example 3/3.
-- `verify_end_to_end.py` exits 0.
-- `falsifiable_hypothesis_example.py` still runs end-to-end (PIT passed, 0 violations, bias controls engaged).
-- `full_pipeline_example.py` runs end-to-end.
-- All 8 registered single-asset strategies (sma_crossover, ema_crossover, macd, bollinger_bands, rsi_mean_reversion, donchian_breakout, zscore_mean_reversion, cross_sectional_momentum) now pass `validate_point_in_time` on the shipped sample data.
-- Forward-looking control signal still rejected (corr = +0.498).
+- `test_performance.py`: 32/32 pass (was 31/31), including `main_registers_every_module_level_test` which enforces TEST_REGISTRY consistency.
+- `verify_end_to_end.py`: exits 0.
+- pandas 3.0.6 confirmed; `pd.infer_freq` returns lowercase aliases (`"b"`, `"h"`), so the fix path is exercised.
 
 ## What remains unresolved
 
-None blocking. The next-period correlation threshold (0.3) is a heuristic; it is unchanged and was already in place before this session.
+None from this task. Related: the same pandas-3.x `infer_freq`/first-char `freq_map` defect exists in two other `_annualization_factor` helpers:
+- `skills/quantitative-backtesting/scripts/walk_forward.py:1503-1514` (`freq_map.get(freq[0], 252)`, uppercase keys `"M"`/`"Q"`/`"Y"`)
+- `skills/quantitative-backtesting/scripts/monte_carlo.py:24-35` (identical pattern)
+Both would mis-annualize (default to 252) for hourly/minutely and collide `"min"` with month under pandas 3.x.
+
+## Approaches that already failed / why
+
+None for this task.
 
 ## Next task (precise, bounded, evidence-based)
 
-No pending task. If a future session wants to harden the look-ahead gate further, the candidate is replacing the fixed 0.3 next-period correlation threshold with a statistical test (e.g. a t-test on the regression slope of signal_changes on next-period returns, or a surrogate-based false-positive control), but that is speculative and not currently motivated by evidence.
+Normalize `_annualization_factor` in `walk_forward.py:1503-1514` and `monte_carlo.py:24-35` to the lowercase base-alias mapping already used in `performance.py:32-38` (`base = freq.lower().split("-")[0]`; map `b`=252, `d`=365, `w`=52, `me`=12, `qe`=4, `ye`=1, `h`=1638, `min`=98280; default 252), preserving existing B/D/W/ME/QE-DEC/YE-DEC mappings. Then add test coverage asserting hourly→1638 and minute→98280 (and no min/M collision) in the respective test modules, run the full quant test suite and `verify_end_to_end.py` (exit 0). Constraint: test-only behavior change in metrics helpers is allowed here (unlike the previous session); keep changes smallest and reversible.
 
 ## Relevant files
 
-- `skills/quantitative-backtesting/scripts/data_loader.py:435-452` (validate_point_in_time Check 3 — same-bar check removed)
-- `skills/quantitative-backtesting/tests/test_data_loader.py` (test_validate_point_in_time_does_not_flag_close_based_signals_as_lookahead, test_validate_point_in_time_accepts_legitimate_close_based_signals, test_validate_point_in_time_accepts_sma_crossover_signal)
-- `skills/quantitative-backtesting/SKILL.md:169` (PIT documentation)
+- `skills/quantitative-backtesting/tests/test_performance.py` (new test + TEST_REGISTRY entry, added this session)
+- `skills/quantitative-backtesting/scripts/performance.py:20-40` (reference fix pattern)
+- `skills/quantitative-backtesting/scripts/walk_forward.py:1503-1514` (next fix target)
+- `skills/quantitative-backtesting/scripts/monte_carlo.py:24-35` (next fix target)
+- `skills/quantitative-backtesting/verify_end_to_end.py`

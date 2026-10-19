@@ -74,6 +74,42 @@ def test_annualization_factor_non_datetime_index():
     assert _annualization_factor(pd.Index(range(10))) == 252
 
 
+def test_annualization_scales_risk_metrics_hourly_vs_daily():
+    """annualized_volatility and sharpe_ratio scale by sqrt(annualization_factor).
+
+    Regression test for the pandas 3.x _annualization_factor fix: identical
+    per-period returns on a "B" (daily) vs "h" (hourly) index must produce
+    annualized volatility and Sharpe in the exact sqrt(1638/252) ratio,
+    proving the fix propagates into calculate_metrics rather than being
+    unit-tested in isolation. risk_free_rate=0 removes the risk-free offset
+    so the Sharpe scales purely with the annualization factor.
+    """
+    rng = np.random.default_rng(7)
+    period_returns = rng.normal(0.0005, 0.01, 2000)
+
+    daily_returns = pd.Series(
+        period_returns,
+        index=pd.date_range("2020-01-01", periods=len(period_returns), freq="B"),
+    )
+    hourly_returns = pd.Series(
+        period_returns,
+        index=pd.date_range("2020-01-01", periods=len(period_returns), freq="h"),
+    )
+
+    daily_metrics = calculate_metrics({"returns": daily_returns}, risk_free_rate=0.0)
+    hourly_metrics = calculate_metrics({"returns": hourly_returns}, risk_free_rate=0.0)
+
+    expected_ratio = np.sqrt(1638 / 252)
+    vol_ratio = (
+        hourly_metrics["annualized_volatility"]
+        / daily_metrics["annualized_volatility"]
+    )
+    sharpe_ratio = hourly_metrics["sharpe_ratio"] / daily_metrics["sharpe_ratio"]
+
+    assert abs(vol_ratio - expected_ratio) < 1e-9
+    assert abs(sharpe_ratio - expected_ratio) < 1e-9
+
+
 def test_trade_metrics_use_return_for_avg_win_loss():
     """avg_win/avg_loss are return fractions, not PnL currency amounts.
 
@@ -624,6 +660,7 @@ TEST_REGISTRY = [
     ("trade_analytics_populated", test_trade_analytics_populated),
     ("annualization_factors", test_annualization_factors),
     ("annualization_factor_non_datetime_index", test_annualization_factor_non_datetime_index),
+    ("annualization_scales_risk_metrics_hourly_vs_daily", test_annualization_scales_risk_metrics_hourly_vs_daily),
     ("trade_metrics_use_return_for_avg_win_loss", test_trade_metrics_use_return_for_avg_win_loss),
     ("profit_factor_uses_pnl_gross_profit_over_gross_loss", test_profit_factor_uses_pnl_gross_profit_over_gross_loss),
     ("expectancy_is_mean_pnl", test_expectancy_is_mean_pnl),
