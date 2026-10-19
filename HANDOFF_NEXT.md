@@ -2,25 +2,20 @@
 
 ## What changed this session
 
-- Removed the duplicate `_annualization_factor` definition from `walk_forward.py` (old lines 1504-1525); it now uses the shared `scripts.utils` import already present at line 34.
-- Redirected `run_backtest.py`'s `_annualization_factor` import from `performance` to `scripts.utils`.
-- Consolidation is now complete: `_annualization_factor` has exactly one definition (`scripts/utils.py:9`), imported by `performance`, `monte_carlo`, `walk_forward`, and `run_backtest`.
+- Verified the prior handoff's next task is already complete: all example scripts resolve `scripts` via `sys.path.insert(0, str(scripts_dir))`, and the full quant suite passes (389 passed, 26 warnings; no failures).
+- No code changes were required this session.
 
 ## What was verified
 
-- Full suite from repo root: 384 passed, 5 failed, 26 warnings — identical to the clean baseline (`git stash` → 384 passed, 5 failed). No regression.
-- The 5 failures are pre-existing `ModuleNotFoundError: No module named 'scripts'` errors in example scripts; they fail identically with and without my changes.
+- `python -m pytest skills/quantitative-backtesting/` → 389 passed, 26 warnings, 0 failures (101.4s).
+- All 6 `test_examples_coverage.py` tests pass (import + end-to-end run for deflated_alpha, multiple_benchmarks, full_pipeline).
+- Baseline from prior session (384 passed, 5 failed) is now 389 passed, 0 failed — the 5 example-import failures are resolved with no regression.
 
 ## What remains unresolved
 
-5 pre-existing example-script import failures (see HANDOFF.md). Out of scope for the consolidation but a real defect worth fixing.
+- No quant-suite failures. Broader repo has 28 unrelated collection errors in non-quant skills (missing deps); out of scope.
+- Methodological open question: whether walk-forward evaluation uses genuinely out-of-sample windows and whether deflated-alpha multiple-testing correction is applied consistently across examples. Not yet audited.
 
 ## Next task (precise, bounded)
 
-Fix the 5 pre-existing example-script import failures so the example suite runs. Add `sys.path.insert(0, str(Path(__file__).parent))` (or equivalent package config) to `skills/quantitative-backtesting/examples/*.py` before their `performance`/`monte_carlo`/`strategy_builder`/`data_loader` imports, mirroring `run_backtest.py` and `walk_forward.py`. Re-run the full suite and confirm the `test_examples_coverage_*` tests move from failed → passed with no regression on the 384 currently-passing tests.
-
-## Relevant files
-
-- `skills/quantitative-backtesting/scripts/utils.py` — single source of `_annualization_factor`.
-- `skills/quantitative-backtesting/scripts/walk_forward.py` (removed duplicate), `run_backtest.py` (import change).
-- `skills/quantitative-backtesting/examples/real_data_pipeline_example.py`, `multiple_benchmarks_example.py`, `full_pipeline_example.py` — broken importers.
+Audit `skills/quantitative-backtesting/scripts/walk_forward.py` window construction and confirm train/validation/test splits are chronological with no leakage; add a focused regression test asserting window boundaries are non-overlapping and ordered. Relevant files: `walk_forward.py`, `tests/test_walk_forward.py`. Verify with `pytest skills/quantitative-backtesting/tests/test_walk_forward.py`.
