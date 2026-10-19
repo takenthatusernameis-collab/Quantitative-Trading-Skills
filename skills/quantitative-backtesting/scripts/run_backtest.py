@@ -232,17 +232,22 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     costs = position_changes * (args.commission + args.slippage)
 
     # Market impact model: impact = (position_notional / ADV) * impact_coefficient
-    # Position notional = |position| * price (equity value of the position)
     # ADV = rolling average of daily volume (in shares) * price
     if args.impact_coefficient > 0 and volume is not None:
         # Average Daily Volume in shares (rolling)
         adv_shares = volume.rolling(window=args.adv_window, min_periods=1).mean()
         # Average Daily Volume in notional (shares * price)
         adv_notional = adv_shares * close
-        # Position notional = |position| * equity (we approximate with close price * initial_capital)
-        # Since we don't have equity at this level, we use position * close as a proxy
-        # The cost is applied as a fraction of notional on position changes
-        position_notional = position_changes * close
+        # Position notional = |position_change| * equity, where equity is the
+        # current portfolio value.  Since this function only sees returns (not
+        # equity), equity is approximated by initial_capital * cumprod(1 +
+        # raw_returns), i.e. the value of a fully-invested buy-and-hold position
+        # in the asset at the current price.  This is the correct scaling: the
+        # original implementation multiplied by the raw asset price (~$100),
+        # understating the notional by ~1000x and making impact_coefficient a
+        # silent no-op.  Mirrors _calculate_strategy_returns in walk_forward.py.
+        equity = args.initial_capital * (1 + raw_returns).cumprod()
+        position_notional = position_changes * equity
         # Market impact as fraction of notional traded
         market_impact = (position_notional / adv_notional.replace(0, np.nan)) * args.impact_coefficient
         market_impact = market_impact.fillna(0)

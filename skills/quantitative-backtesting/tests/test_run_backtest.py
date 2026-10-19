@@ -762,6 +762,42 @@ def test_run_backtest_fill_rate_reduces_trading_costs():
     )
 
 
+def test_run_backtest_market_impact_scales_with_equity_not_price():
+    """run_backtest market impact uses equity-scaled notional, not raw price.
+
+    Regression test for a defect where the market-impact notional was computed
+    as ``position_changes * close`` (the asset's unit price, ~$100) instead of
+    ``position_changes * equity`` (the portfolio value, ~$100k). The impact
+    coefficient was therefore understated by ~1000x and effectively a no-op,
+    so the run_backtest CLI path disagreed with ``walk_forward._calculate_strategy_returns``
+    (which already used the equity scaling) by a large margin.
+
+    With identical commission/slippage/impact/borrow/funding, the two paths
+    must now produce identical strategy returns.
+    """
+    from walk_forward import _calculate_strategy_returns
+
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    signals = strategy.generate_signals(data)
+
+    args = _Args(commission=0.0002, slippage=0.0001, impact_coefficient=1.0)
+    rb = run_backtest(data, strategy, args)
+
+    wf = _calculate_strategy_returns(
+        data, signals, 0.0002, 0.0001,
+        impact_coefficient=1.0, adv_window=20,
+        borrow_cost=0.0, funding_cost=0.0,
+        initial_capital=100000.0,
+    )
+
+    diff = (rb["returns"] - wf).abs()
+    assert diff.max() < 1e-12, (
+        f"run_backtest market impact diverges from _calculate_strategy_returns: "
+        f"max |diff| = {diff.max()}"
+    )
+
+
 def test_run_backtest_fill_rate_invalid_values_rejected():
     """fill_rate outside (0, 1] must raise ValueError."""
     data = _make_data()
@@ -2093,6 +2129,7 @@ TEST_REGISTRY = [
     ("test_parse_args_invalid_initial_capital_type", test_parse_args_invalid_initial_capital_type),
     ("test_run_backtest_constant_returns_deflated_sharpe", test_run_backtest_constant_returns_deflated_sharpe),
     ("test_run_backtest_borrow_cost_frequency_aware", test_run_backtest_borrow_cost_frequency_aware),
+    ("test_run_backtest_market_impact_scales_with_equity_not_price", test_run_backtest_market_impact_scales_with_equity_not_price),
     ("test_parse_args_accepts_fill_rate", test_parse_args_accepts_fill_rate),
     ("test_run_backtest_fill_rate_default_is_one", test_run_backtest_fill_rate_default_is_one),
     ("test_run_backtest_fill_rate_one_identical_to_default", test_run_backtest_fill_rate_one_identical_to_default),
