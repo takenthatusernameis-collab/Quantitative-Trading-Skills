@@ -609,6 +609,13 @@ def walk_forward_analysis(
             # to pick on out-of-sample quality must read this key, not
             # `best_sharpe` (which would select on in-sample fit).
             period["test_sharpe"] = _period_sharpe(best_test_returns)
+            # Surface per-period market-impact capacity estimate so capacity
+            # degradation across regimes is observable. Keep None/omitted when
+            # impact is disabled or ADV not estimable (backward compatible).
+            _period_capacity = estimate_capacity(
+                period["test_data"], impact_coefficient, adv_window=adv_window
+            )
+            period["capacity"] = _period_capacity.get("estimated_capacity")
             # Compute benchmark stats for this period
             if benchmark is not None:
                 if isinstance(benchmark, list) and len(benchmark) > 1:

@@ -6074,9 +6074,37 @@ def test_walk_forward_analysis_surfaces_capacity_in_summary():
     assert res_off["summary"].get("capacity") is None
 
 
+def test_walk_forward_analysis_surfaces_capacity_per_period():
+    data = _make_ohlcv_data(periods=500, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
+
+    res = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        impact_coefficient=0.5,
+    )
+    assert len(res["periods"]) > 0
+    for p in res["periods"]:
+        assert "capacity" in p
+        assert p["capacity"] is not None
+        assert p["capacity"] > 0
+
+
 TEST_REGISTRY.append(
     ("test_walk_forward_analysis_surfaces_capacity_in_summary", test_walk_forward_analysis_surfaces_capacity_in_summary)
 )
+TEST_REGISTRY.append(
+    ("test_walk_forward_analysis_surfaces_capacity_per_period", test_walk_forward_analysis_surfaces_capacity_per_period)
+)
+
 
 
 if __name__ == "__main__":
