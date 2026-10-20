@@ -702,20 +702,22 @@ the optimizer is chasing noise.
 ### The Warmup Bars of a Window
 
 Every window (train or test) that the framework prices loses its first
-**two** bars to the execution warmup, and the number of usable bars is part
-of the reported result:
+**`latency + 2`** bars to the execution warmup, and the number of usable bars
+is part of the reported result:
 
 - the position series is `signal.shift(1 + latency)`, so it is undefined
-  (`NaN`) on the first bar of a window;
+  (`NaN`) on the first `1 + latency` bars of a window;
 - the cost term is `positions.diff().abs() * (commission + slippage)`, and
-  `positions.diff()` inherits that `NaN` on the *second* bar as well.
+  `positions.diff()` inherits that `NaN` on the bar after that as well.
 
-Both bars are therefore dropped from the return series. The second bar is
-dropped as a side effect of the cost term rather than by an explicit
-convention: on that bar the strategy is flat (its signal is still warming up),
-so the bar's return is `0.0` and it multiplies the compounded return by
-`1.0`. The *return* is therefore insensitive to the warmup convention, while
-the *number of usable bars* and the *training sample* are not.
+All of those bars are therefore dropped from the return series. The drop is
+*explicit* rather than emergent: `_calculate_strategy_returns` marks the first
+`EXECUTION_WARMUP_BARS` (2) bars of the cost term as `NaN` explicitly, so the
+warmup does not depend on `NaN` propagating through the cost model. On the
+second bar the strategy is flat (its signal is still warming up), so the bar's
+return would be `0.0` and it multiplies the compounded return by `1.0`. The
+*return* is therefore insensitive to the warmup convention, while the *number
+of usable bars* and the *training sample* are not.
 
 Consequences to keep in mind when reproducing a number:
 
@@ -724,6 +726,59 @@ Consequences to keep in mind when reproducing a number:
   series that is missing that one flat bar, so it is not exactly the Sharpe
   of the strategy's own (longer) return series;
 - the bar count is what pins the convention, not the compounded return.
+
+The count above is the *execution* warmup only. A strategy's own indicator
+warmup (a moving average needs `lookback - 1` bars before it produces a
+value) removes further bars on top of it, which is why the recorded
+`execution_warmup_bars` is a lower bound on the bars a window actually
+loses.
+
+### Recording the Warmup Convention
+
+The warmup is part of the methodology, so every result artifact records it
+instead of leaving it in a docstring. Two stable keys are reported:
+
+| Key | Meaning |
+| --- | ------- |
+| `warmup_convention` | Which convention the run applied |
+| `execution_warmup_bars` | How many leading bars of a window that convention makes non-tradable (before any indicator warmup) |
+
+The two conventions are:
+
+| Convention | Entry points | Bars dropped |
+| ---------- | ------------ | ------------ |
+| `walk_forward_drop_undefined` | `walk_forward.py` (walk-forward, CPCV, out-of-sample, Monte Carlo) | `latency + 2` |
+| `run_backtest_open_first_executable` | `run_backtest.py` | 1 |
+
+They differ by exactly one bar, and the difference is intentional:
+
+- `walk_forward.py` keeps the lagged position `NaN`, so the bar on which the
+  position is opened has an undefined turnover and is dropped;
+- `run_backtest.py` zero-fills the lagged position instead, so the strategy
+  opens on the first executable bar and charges the entry cost there. Only the
+  single bar whose turnover is undefined is dropped.
+
+The two series are identical on every bar where both are defined, and the
+one-bar difference is pinned by the cross-path parity tests in
+`tests/test_run_backtest.py`.
+
+Where the metadata appears:
+
+- `results["config"]["warmup_convention"]` and
+  `results["config"]["execution_warmup_bars"]` for `run_backtest()`;
+- `summary["warmup_convention"]` and `summary["execution_warmup_bars"]` for
+  `walk_forward_analysis()`, `cpcv_analysis()` and
+  `out_of_sample_validation()`;
+- the same two keys in the `config` block of every CLI artifact
+  (`walk_forward_summary.json`, `cpcv_summary.json`,
+  `out_of_sample_summary.json`, `monte_carlo_results.json`);
+- the CLI stdout, next to the panel pricing mode.
+
+`utils.execution_warmup_metadata(convention, latency)` is the single
+definition of the counts, and `tests/test_execution_warmup.py` checks that
+the recorded number is the number of bars that are actually missing from the
+reported series -- so the metadata cannot drift away from the behaviour it
+describes.
 
 ### Reproducing the Pinned CPCV Number
 
@@ -859,3 +914,41 @@ Interpretation:
 Parameter stability should be considered alongside out-of-sample performance
 metrics (OOS Sharpe, total return, volatility) and multiple-testing corrections
 (Deflated Sharpe Ratio) to form a complete picture of strategy robustness.
+
+### Open: what `fill_rate` actually models
+
+`--fill-rate` (and the `--fill-rates` sweep) is described in the CLI help as
+"the fraction of each targeted position change that is filled", but the
+implementation **scales the target position**:
+
+```
+positions = signals.shift(1 + latency) * fill_rate
+```
+
+The consequences, measured on a deterministic 5-asset panel
+(`cross_sectional_momentum`, `lookback` 20, 498 usable bars):
+
+- the per-bar return series is **exactly** `fill_rate` times the full-fill
+  series (the ratio is 0.500000 on every bar at `fill_rate=0.5`);
+- therefore a fill-rate sweep is a **position-size (leverage) sweep**, not an
+  execution-realism sweep: the total return falls to 0.48x at
+  `fill_rate=0.5`, and the Sharpe falls from 3.19 to 1.79 -- because the
+  risk-free rate (2%/yr) is subtracted from the *scaled* return and is not
+  scaled with it, so the Sharpe is not scale-invariant;
+- the traded notional per period is `fill_rate * |delta target|`, so the
+  transaction-cost and market-impact charges scale linearly with
+  `fill_rate` (the impact charge halves at `fill_rate=0.5`);
+- `estimate_capacity()` has no `fill_rate` argument at all, so the reported
+  capacity is the capacity at full fill;
+- the *unfilled* part of the target order is not charged anything: there is
+  no shortfall, priority or spread cost for the unexecuted portion.
+
+So a reader who sweeps `--fill-rates 0.5 0.75 1.0` to test "what if only
+half of my orders fill" is in fact measuring a de-risked version of the
+strategy. This is recorded here as an **open methodology question**, not as a
+fixed convention: either the parameter should be renamed/documented as a
+participation limit (a position-size multiplier) with the semantics pinned by
+a test, or it should be re-implemented as a true partial-fill model (the
+held position converges toward the target instead of snapping to
+`fill_rate * target`), which is a number-changing change and must be
+reported as such.

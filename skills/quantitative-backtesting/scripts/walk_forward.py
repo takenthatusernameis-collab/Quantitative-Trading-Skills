@@ -42,6 +42,7 @@ from utils import (
     book_return_from_held,
     build_market_model,
     compute_book_diagnostic,
+    execution_warmup_metadata,
     format_impact_dilution_lines,
     held_book_weights,
     market_impact_cost,
@@ -49,6 +50,8 @@ from utils import (
     resolve_panel_pricing,
     strategy_target_weights,
     DEFAULT_IMPACT_AGGREGATION,
+    EXECUTION_WARMUP_BARS,
+    WARMUP_CONVENTION_WALK_FORWARD,
 )
 from reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
@@ -921,6 +924,12 @@ def walk_forward_analysis(
     # was priced.
     summary["panel_pricing"] = panel_pricing
     summary["impact_aggregation"] = impact_aggregation
+    # The execution warmup this path applied, so a consumer of the summary
+    # knows how many leading bars of every window are not tradable without
+    # having to re-derive the convention from the return series.
+    summary.update(
+        execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency)
+    )
 
     return {
         "periods": periods,
@@ -1709,8 +1718,9 @@ def _calculate_strategy_returns(
     # Execution warmup: intentional two-bar warmup (see validation_methods.md,
     # "The Warmup Bars of a Window"). shift(1 + latency) leaves the first
     # `1 + latency` position undefined and positions.diff() is undefined on
-    # the following bar, so both bars are non-tradable and dropped.
-    EXECUTION_WARMUP_BARS = 2
+    # the following bar, so both bars are non-tradable and dropped. The
+    # constant is shared with run_backtest.py through utils.py so the
+    # convention has a single definition.
     positions = signals.shift(1 + latency) * fill_rate  # Trade at next period's open, delayed by execution latency; partial fills scale achieved exposure
 
     # Borrow and funding costs are annualized rates applied per period.
@@ -2846,6 +2856,11 @@ def cpcv_analysis(
     # The pricing convention that produced the reported out-of-sample P&L.
     summary["panel_pricing"] = panel_pricing
     summary["impact_aggregation"] = impact_aggregation
+    # The execution warmup this path applied (see the walk-forward summary
+    # for the same key).
+    summary.update(
+        execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency)
+    )
 
     return {
         "folds": folds,
@@ -3561,6 +3576,11 @@ def out_of_sample_validation(
     # P&L.
     summary["panel_pricing"] = panel_pricing
     summary["impact_aggregation"] = impact_aggregation
+    # The execution warmup this path applied (see the walk-forward summary
+    # for the same key).
+    summary.update(
+        execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency)
+    )
 
     return {
         "train_val_test_split": split_info,
@@ -4494,6 +4514,7 @@ def run_cpcv(args) -> int:
     print(f"Avg Parameter Stability: {results['summary'].get('avg_param_stability', 'N/A'):.2f}")
     print(f"Overfitting Risk: {results['summary'].get('overfitting_risk', 'N/A')}")
     _print_panel_pricing(results["summary"].get("panel_pricing"))
+    _print_execution_warmup(results["summary"])
     _print_book_diagnostic(
         results["summary"].get("book_diagnostic"),
         panel_pricing=results["summary"].get("panel_pricing"),
@@ -4566,6 +4587,9 @@ def run_cpcv(args) -> int:
             "benchmark_expense_ratio": bench_expense_ratio,
             "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
             "multi_symbol": getattr(args, "multi_symbol", False),
+            # The execution warmup this run applied, so the saved artifact
+            # records how many leading bars of every fold are not tradable.
+            **execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency),
         },
     }
     if pit_results is not None:
@@ -4665,6 +4689,32 @@ def _print_panel_pricing(mode, indent: str = "  ") -> None:
             f"is net_exposure x mean(asset returns), and the costs are "
             f"charged on the net exposure)."
         )
+
+
+def _print_execution_warmup(summary, indent: str = "  ") -> None:
+    """Print the execution warmup convention a run applied.
+
+    Every window this path evaluates starts with bars that are not tradable:
+    the lagged position is undefined on the first ``1 + latency`` bars and
+    the turnover on the bar after that is undefined too. Those bars are
+    dropped from the reported return series, so the number of them is part
+    of the methodology and is printed next to the pricing mode.
+
+    Nothing is printed when the summary carries no warmup metadata (for
+    example a summary produced by an older caller), so the output of such a
+    run is unchanged.
+    """
+    if not isinstance(summary, dict):
+        return
+    convention = summary.get("warmup_convention")
+    warmup_bars = summary.get("execution_warmup_bars")
+    if convention is None or warmup_bars is None:
+        return
+    print(
+        f"{indent}Execution warmup: {convention} ({warmup_bars} bar(s) "
+        "dropped from the front of every window; the position is opened on "
+        "the first bar after the warmup)."
+    )
 
 
 def _print_capacity(summary, indent: str = "  ") -> None:
@@ -5536,6 +5586,7 @@ def run_walk_forward(args) -> int:
     )
     print(f"OOS Sharpe Ratio: {results['summary'].get('oos_sharpe', 'N/A')}")
     _print_panel_pricing(results["summary"].get("panel_pricing"))
+    _print_execution_warmup(results["summary"])
     _print_book_diagnostic(
         results["summary"].get("book_diagnostic"),
         panel_pricing=results["summary"].get("panel_pricing"),
@@ -5611,6 +5662,9 @@ def run_walk_forward(args) -> int:
             "benchmark_expense_ratio": bench_expense_ratio,
             "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
             "multi_symbol": getattr(args, "multi_symbol", False),
+            # The execution warmup this run applied, so the saved artifact
+            # records how many leading bars of every window are not tradable.
+            **execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency),
         },
     }
     if pit_results is not None:
@@ -6546,6 +6600,10 @@ def run_monte_carlo(args) -> int:
                                           initial_capital=args.initial_capital,
                                           panel_pricing=panel_pricing,
                                           book_weights=book_weights)
+    # The warmup convention of the series the Monte Carlo resamples.
+    _print_execution_warmup(
+        execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency)
+    )
 
     # Multiple-testing correction: the base backtest's Sharpe was
     # produced by the parameter search above (or by development
@@ -6719,6 +6777,10 @@ def run_monte_carlo(args) -> int:
             "benchmark_expense_ratio": bench_expense_ratio,
             "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
             "multi_symbol": getattr(args, "multi_symbol", False),
+            # The execution warmup of the return series the Monte Carlo
+            # resampled, so the artifact records the convention the
+            # resampled series was produced under.
+            **execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency),
         },
     }
     if pit_results is not None:
@@ -7113,6 +7175,7 @@ def run_out_of_sample_validation(args) -> int:
     # performance; the validation window's diagnostic and the aggregate over
     # both windows are in the summary JSON.
     _print_panel_pricing(results["summary"].get("panel_pricing"), indent="  ")
+    _print_execution_warmup(results["summary"], indent="  ")
     _print_book_diagnostic(
         test_perf.get("book_diagnostic"),
         indent="  ",
@@ -7253,6 +7316,9 @@ def run_out_of_sample_validation(args) -> int:
             "cpcv_purge_size": args.cpcv_purge_size,
             "cpcv_embargo_size": args.cpcv_embargo_size,
             "multi_symbol": getattr(args, "multi_symbol", False),
+            # The execution warmup this run applied, so the saved artifact
+            # records how many leading bars of every window are not tradable.
+            **execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency),
         },
     }
     if pit_results is not None:

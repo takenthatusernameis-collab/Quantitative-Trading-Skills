@@ -5,6 +5,7 @@ Shared utility functions for the quantitative backtesting toolkit.
 
 import numpy as np
 import pandas as pd
+from typing import Any, Dict
 
 
 # Panel pricing modes.
@@ -33,6 +34,74 @@ DEFAULT_PANEL_PRICING = "net-exposure"
 # published number moves.
 IMPACT_AGGREGATION_MODES = ("panel", "notional-weighted")
 DEFAULT_IMPACT_AGGREGATION = "panel"
+
+
+# Execution warmup conventions.
+#
+# The two entry points warm up differently, on purpose:
+#
+#   * walk_forward / CPCV / out-of-sample / Monte Carlo
+#     (WARMUP_CONVENTION_WALK_FORWARD): the lagged position series is
+#     undefined on its first ``1 + latency`` bars and its first difference
+#     is undefined on the bar after that. Those bars are not tradable, so
+#     they are dropped from the reported return series.
+#   * run_backtest (WARMUP_CONVENTION_RUN_BACKTEST): the lagged position is
+#     zero-filled instead of being dropped, so the strategy opens its
+#     position on the first executable bar and only the single bar whose
+#     turnover is undefined is dropped.
+#
+# The two conventions therefore disagree by exactly one bar, which is
+# intentional and pinned by the cross-path parity tests (see
+# references/validation_methods.md, "The Warmup Bars of a Window").
+#
+# The convention and the number of bars it removes are recorded in every
+# result artifact, so a consumer never has to infer them from the shape of
+# the return series.
+EXECUTION_WARMUP_BARS = 2
+RUN_BACKTEST_WARMUP_BARS = 1
+WARMUP_CONVENTION_WALK_FORWARD = "walk_forward_drop_undefined"
+WARMUP_CONVENTION_RUN_BACKTEST = "run_backtest_open_first_executable"
+
+
+def execution_warmup_metadata(convention: str, latency: int = 0) -> Dict[str, Any]:
+    """Describe the execution warmup a run applied.
+
+    Args:
+        convention: One of :data:`WARMUP_CONVENTION_WALK_FORWARD` or
+            :data:`WARMUP_CONVENTION_RUN_BACKTEST`.
+        latency: The execution latency in bars (the position is delayed by
+            ``1 + latency`` periods).
+
+    Returns:
+        A dict with two stable keys:
+
+        ``warmup_convention``
+            Which of the two entry-point conventions was applied.
+        ``execution_warmup_bars``
+            How many leading bars of the analysis window the convention
+            makes non-tradable, counted *before* any strategy-indicator
+            warmup (a moving average, for instance, removes bars of its
+            own). The walk-forward convention removes ``latency + 2`` bars
+            (the lagged position is undefined for ``1 + latency`` bars and
+            the turnover on the next bar is undefined too);
+            run_backtest removes 1 bar (the turnover on the first bar is
+            undefined) and reports the pre-execution bars as flat.
+    """
+    latency = int(latency or 0)
+    if convention == WARMUP_CONVENTION_WALK_FORWARD:
+        warmup_bars = latency + EXECUTION_WARMUP_BARS
+    elif convention == WARMUP_CONVENTION_RUN_BACKTEST:
+        warmup_bars = RUN_BACKTEST_WARMUP_BARS
+    else:
+        raise ValueError(
+            f"Unknown warmup convention {convention!r}; expected "
+            f"{WARMUP_CONVENTION_WALK_FORWARD!r} or "
+            f"{WARMUP_CONVENTION_RUN_BACKTEST!r}."
+        )
+    return {
+        "warmup_convention": convention,
+        "execution_warmup_bars": int(warmup_bars),
+    }
 
 
 def resolve_impact_aggregation(mode) -> str:

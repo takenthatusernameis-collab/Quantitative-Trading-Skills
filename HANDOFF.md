@@ -2,186 +2,173 @@
 
 ## What changed this session
 
-**Repaired the only two failing tests in the repository, and turned the pinned
-CPCV number from a magic constant into a checked methodology.**
+**Made the execution warmup convention observable in every result artifact,
+without changing a single number.** This was the task assigned in the
+previous `HANDOFF_NEXT.md`.
 
-At the start of the session `skills/quantitative-backtesting/tests/test_cpcv.py`
-exited 1 with **26/28** — `cpcv_normal_run_keeps_current_numbers` and
-`cpcv_book_pricing_keeps_the_net_exposure_numbers_unchanged` both failed on
-`assert summary["total_oos_return"] == 0.005399536978800246`. The current
-value is `0.005399536978800024`: a **relative difference of 4.1e-14**, i.e. a
-last-bit float artifact, not a methodology change.
+The two entry points warm up differently on purpose (`walk_forward.py` drops
+the first `latency + 2` bars of every window, `run_backtest.py` drops 1), and
+until now that was only visible in a comment and a reference document. Every
+result now *records* the convention it applied:
 
-The prior handoff's task (regenerate the pinned `test_output/` snapshot) was
-already done in commit `5b2252d`; that snapshot still reproduces bit-for-bit
-(re-verified this session, see below). No runtime code was touched this
-session — the changes are tests and documentation only.
-
-### Diagnosis (evidence)
-
-- **Not a methodology change.** A methodology change (pricing convention,
-  warmup convention, cost model, parameter selection) moves this number by
-  *percent*, not by 1e-14. The bar set, fold count, selected parameters and
-  OOS Sharpe are structurally identical to what the pin expects.
-- **Not non-determinism.** The value is stable across `PYTHONHASHSEED` in
-  `{0, 1, 12345, 99999}` and across repeated runs.
-- **Not the accumulation order.** `pandas .prod()`, `np.prod`, `math.prod`,
-  `np.cumprod[-1]` and a sequential Python loop all give the same
-  `0.005399536978800024`.
-- **Not the panel-return formulation.** Five formulations of the panel return
-  (pandas `mean(axis=1)`, `np.nanmean`, `sum/n`, multiply-then-mean,
-  `pct_change` vs `div/shift`) all give the same value.
-- **The current value is independently correct.** A from-scratch
-  re-implementation of the CPCV pipeline (own group-based fold construction,
-  own cross-sectional signal, own lag-1 execution, own
-  `mean of per-asset returns` pricing, own cost term, own warmup handling,
-  own product — *not* using the framework's return calculator, strategy
-  classes or fold construction) reproduces
-  `0.005399536978800024` **bit-for-bit**. Getting there required two
-  non-obvious facts, both now recorded in the test: the CPCV training set is
-  the *other groups* (not the plain complement of the test window), and
-  `cpcv_analysis` defaults to `commission=0.0002`, `slippage=0.0001`.
+| Key | Meaning |
+| --- | ------- |
+| `warmup_convention` | `"walk_forward_drop_undefined"` or `"run_backtest_open_first_executable"` |
+| `execution_warmup_bars` | leading bars of a window the convention makes non-tradable (before any indicator warmup) |
 
 ### Changes
 
-- `tests/test_cpcv.py`
-  - Added module constants `CPCV_OOS_RETURN_REFERENCE` (the verified value),
-    `CPCV_OOS_RETURN_REL_TOL = 1e-9`, `CPCV_OOS_BAR_COUNT = 92`,
-    `CPCV_OOS_LOOKBACKS = [20, 15, 15, 15]`, and the helper `_assert_close`.
-  - `test_cpcv_normal_run_keeps_current_numbers`: the cross-run pin now uses a
-    relative tolerance instead of `==`, and is backed by two *exactly*
-    reproducible structural assertions (the selected `lookback` per fold, the
-    number of usable OOS bars).
-  - `test_cpcv_book_pricing_keeps_the_net_exposure_numbers_unchanged`: keeps
-    the **exact** equality for the default-vs-explicit-`net-exposure`
-    comparison (same run twice — it must be bit-identical) and uses the
-    tolerance only for the cross-run comparison against the reference.
-  - **New** `test_cpcv_pinned_number_is_reproducible_from_first_principles`
-    (+ helper `_independent_cpcv_oos_return`): re-derives the CPCV pipeline
-    independently and requires the framework to agree (rel_tol 1e-12) *and* to
-    report the same number of usable bars. Registered in `TEST_REGISTRY`.
-- `tests/test_walk_forward.py`
-  - `test_walk_forward_normal_run_keeps_current_numbers`: the same treatment
-    for the third and last exact-float pin in the repository
-    (`0.042594435108365136`, `rel_tol=1e-9`) plus the structural assertions
-    (`lookback` per period `[20, 20, 20]`, 189 usable OOS bars).
-- `references/validation_methods.md`: new sections **"The Warmup Bars of a
-  Window"** and **"Reproducing the Pinned CPCV Number"** — the warmup
-  convention, the pinned values, the three kinds of comparison (same-run
-  exact / same-process independent / cross-run tolerance) and why a cross-run
-  value is never compared with `==`.
-- `SKILL.md`: the `test_cpcv.py` bullet now describes the pinned-value guard
-  and the independent re-implementation.
+- `scripts/utils.py` — new shared source of truth: `EXECUTION_WARMUP_BARS`
+  (2), `RUN_BACKTEST_WARMUP_BARS` (1), `WARMUP_CONVENTION_WALK_FORWARD`,
+  `WARMUP_CONVENTION_RUN_BACKTEST`, and
+  `execution_warmup_metadata(convention, latency)` (the single definition of
+  the counts; raises `ValueError` on an unknown convention).
+- `scripts/walk_forward.py`
+  - the local `EXECUTION_WARMUP_BARS = 2` is replaced by the imported shared
+    constant (same value, one definition);
+  - `walk_forward_analysis()`, `cpcv_analysis()` and
+    `out_of_sample_validation()` now put both keys in `summary`;
+  - the CLI artifacts (`walk_forward_summary.json`, `cpcv_summary.json`,
+    `out_of_sample_summary.json`, `monte_carlo_results.json`) carry both keys
+    in their `config` block;
+  - new `_print_execution_warmup()` prints the convention next to the panel
+    pricing mode on every subcommand.
+- `scripts/run_backtest.py` — both keys are in `results["config"]`, and the
+  CLI prints the convention next to the panel pricing mode.
+- `tests/test_execution_warmup.py` (**new**, 8 tests) — the metadata contract
+  across all entry points, and the invariant that the recorded bar count
+  equals the number of leading bars that are actually missing from the
+  reported return series.
+- `references/validation_methods.md` — new section **"Recording the Warmup
+  Convention"**; the "The Warmup Bars of a Window" section was corrected (the
+  drop is `latency + 2`, not always 2, and it is explicit rather than
+  emergent); new section **"Open: what `fill_rate` actually models"** (see
+  below).
+- `SKILL.md` — the warmup metadata is described in the `run_backtest.py` and
+  `utils.py` bullets, a new Tips bullet explains the convention, the new
+  test file is listed in the test-coverage section, and the two test files
+  that were missing from the run list (`test_examples_coverage.py`,
+  `test_falsifiable_hypothesis_example.py`) were added.
+
+### No behaviour change
+
+The dropping/reindexing logic was not touched. The only edit inside
+`_calculate_strategy_returns` is that the local constant became an imported
+one with the same value. No return series, cost, impact, capacity, metric or
+pinned number moves.
 
 ## What was actually verified
 
-- **Full suite green**: all 11 test files exit 0 —
+- **Full suite green**: all 12 test files exit 0 —
   `test_cpcv` 29/29, `test_data_loader` 32/32, `test_examples_coverage` 7/7,
-  `test_falsifiable_hypothesis_example` 3/3, `test_generate_sample_data` 2/2,
-  `test_monte_carlo` 20/20, `test_performance` 33/33, `test_reporting` exit 0,
+  `test_execution_warmup` 8/8, `test_falsifiable_hypothesis_example` 3/3,
+  `test_generate_sample_data` 2/2, `test_monte_carlo` 20/20,
+  `test_performance` 33/33, `test_reporting` OK (62 tests),
   `test_run_backtest` 103/103, `test_strategy_builder` 33/33,
   `test_walk_forward` 177/177.
-- **The new guards actually bite** (negative tests, both reverted afterwards;
-  `git diff scripts/` is clean):
-  - changing the execution lag (`shift(1+latency)` -> `shift(2+latency)`)
-    fails `cpcv_normal_run_keeps_current_numbers`,
-    `cpcv_pinned_number_is_reproducible_from_first_principles` and
-    `cpcv_book_pricing_keeps_the_net_exposure_numbers_unchanged`;
-  - changing the warmup NaN convention
-    (`costs = position_changes * (commission + slippage)` ->
-    `.fillna(0.0) * ...`) fails the two guards that assert the usable-bar
-    count (23 -> 24 per fold, 92 -> 96 OOS bars) — note it does **not** move
-    the compounded return, which is why the bar count is the invariant that
-    pins the warmup convention.
-- **The pinned snapshot still reproduces**: re-running the `SKILL.md`
-  regeneration command into a scratch directory yields a `metrics.json` with
-  **zero** differing keys against `skills/quantitative-backtesting/test_output/`
-  and an identical `metrics` block in `tear_sheet_summary.json`.
-- No runtime file changed: `git status` shows only `SKILL.md`,
-  `references/validation_methods.md`, `tests/test_cpcv.py`,
-  `tests/test_walk_forward.py`.
+- **The pinned CPCV number is unchanged**:
+  `summary["total_oos_return"] == 0.005399536978800246` (reference
+  `0.005399536978800024`; the 4.1e-14 relative difference is the known
+  last-bit float artifact, inside the `rel_tol=1e-9` guard), 92 usable OOS
+  bars, selected lookbacks `[20, 15, 15, 15]` — all as before.
+- **The new guards actually bite** (mutations reverted afterwards):
+  - `EXECUTION_WARMUP_BARS = 2 -> 3` fails 6 of the 8 new tests;
+  - `RUN_BACKTEST_WARMUP_BARS = 1 -> 2` fails 3 of the 8 new tests.
+  The tests use *literal* expected counts (2 and 1) rather than re-deriving
+  them from the framework's constants, so a change to a constant cannot be
+  mirrored by the assertions.
+- **The metadata reaches the consumers**: verified end to end on the shipped
+  sample data —
+  - `run_backtest.py` prints
+    `Execution warmup: run_backtest_open_first_executable (1 bar(s) dropped ...)`;
+  - `walk_forward.py walk-forward` prints
+    `Execution warmup: walk_forward_drop_undefined (2 bar(s) dropped ...)`
+    and `walk_forward_summary.json` carries the keys in both `summary` and
+    `config`;
+  - the same holds for the `cpcv` and `monte-carlo` subcommands
+    (`cpcv_summary.json`, `monte_carlo_results.json`).
+- **No new lint findings**: `pyflakes` on the four changed/added files
+  reports nothing new (the four `walk_forward.py` warnings are pre-existing
+  and reproduce on `HEAD`).
 
 ## What remains unresolved
 
-- **The warmup-bar convention is a latent methodology wart** (see the next
-  task). It is now *documented* and *pinned*, not changed.
-- The impact model is still linear in the participation rate (no
-  temporary/permanent split, no gap risk).
-- The `fill_rate` convention is still open (the framework scales
-  position/book by fill rate).
-- The parity harness from the two sessions ago (`baseline_capture.py` /
+- **`--fill-rate` does not model a partial fill.** It scales the *target
+  position*, so a fill-rate sweep is a leverage sweep. Measured this session
+  on a deterministic 5-asset panel: the per-bar return series is exactly
+  `0.5 x` the full-fill series at `fill_rate=0.5`; the Sharpe falls from
+  3.19 to 1.79 (the 2%/yr risk-free rate is not scaled with the returns, so
+  the Sharpe is not scale-invariant); the impact charge halves;
+  `estimate_capacity()` has no `fill_rate` argument at all; and the unfilled
+  part of the order is charged nothing. This is recorded durably in
+  `references/validation_methods.md` ("Open: what `fill_rate` actually
+  models") and in `SKILL.md` (Tips). It is the next task.
+- There is still **no committed multi-asset panel fixture**
+  (`assets/example_data/` has only a single-asset CSV), so the panel/book
+  numbers in `SKILL.md` have no committed reference artifact.
+- The **parity harness** from two sessions ago (`baseline_capture.py` /
   `book_cap_probe.py`) still does not exist; the HEAD-vs-new parity check
   cannot be run as specified.
-- `test_output/` is a single-asset snapshot; there is still no pinned
-  *panel-mode* artifact set, so the panel/book numbers in `SKILL.md` have no
-  committed reference artifact.
+- The **impact model is still linear** in the participation rate (no
+  temporary/permanent split, no gap risk).
+- The `out-of-sample` CLI cannot complete on the shipped
+  `assets/example_data/sample_ohlcv.csv`: it always ends with
+  "No valid parameters selected from validation phase" (verified identical on
+  `HEAD` with `git stash`, so it is pre-existing and not caused by this
+  session). The programmatic path is fine and is covered by the new test.
 
 ## Approaches that have already failed (and why)
 
-- **Re-pinning the literal to the new value and keeping `==`**: rejected. It
-  would have silenced a symptom (the value did not change methodologically)
-  while leaving the guard one library upgrade away from failing again, and it
-  would have hidden that nothing verified *why* the number is what it is.
-- **A first independent re-implementation that used the plain complement of
-  the test window as the CPCV training set**: it produced `0.00812` (50%
-  away) and a different fold-0 selection. The implementation was wrong, not
-  the framework: CPCV trains on the *other groups*, purged/embargoed around
-  the test window. Lesson: verify a re-implementation's *fold construction*
-  and *cost defaults* before concluding the framework is wrong.
-- **Blame the "notional-weighted impact aggregation" work for the drift**:
-  disproved. With `impact_coefficient=0` the impact path is disabled
-  entirely, so it cannot move the number; and the value differs from the pin
-  by 1e-14, which that work could not produce.
-- **The prior session's `replaceAll` lesson still applies**: do not use blind
-  `replaceAll` across call sites that use different variable names
-  (`book_weights` in `walk_forward.py` means two different things).
+- **Adding the warmup keys to `metrics.json`** (so the single-backtest CLI
+  artifact would carry them): rejected. `metrics.json` is written by
+  `calculate_metrics()`, which only copies `initial_capital` out of the
+  config, and the committed `test_output/` snapshot plus
+  `examples/example_output/` would have to be regenerated -- adding
+  machine-specific absolute paths (`plot_files`) to a committed artifact for
+  no methodological gain. The existing precedent (`panel_pricing`) also
+  lives in `results["config"]` and the CLI stdout, not in `metrics.json`, so
+  the warmup metadata follows it.
+- **Changing `position_changes.iloc[:EXECUTION_WARMUP_BARS]` to
+  `[: latency + EXECUTION_WARMUP_BARS]`** so the explicit drop matches the
+  recorded count: it is provably a no-op (the `NaN` region of
+  `positions.diff()` already covers exactly those bars) but the handoff
+  constraint said "do not alter the dropping/reindexing logic", so the
+  dropping logic was left untouched.
+- **The first version of the new tests re-derived the expected bar counts
+  from the framework's own constants** (`latency + EXECUTION_WARMUP_BARS`).
+  A mutation of `EXECUTION_WARMUP_BARS` then passed 3 of the 8 tests, so the
+  expectations were rewritten as literals and the assertions strengthened
+  with an observed-bar-drop check per window/fold.
+- **Running the out-of-sample CLI on the shipped sample data** to demo the
+  metadata: it aborts before writing the artifact ("No valid parameters
+  selected from validation phase"), for every parameter grid tried
+  (`{5,20}`, `{10,30}`, `{20,50}`, `{2,10}`). Pre-existing, not a
+  regression.
 
-## Next task (one precise, bounded item)
+## Environment notes (not repository changes)
 
-**Decide — deliberately, with the number change accepted — whether the second
-warmup bar should be dropped at all, and if it should not, make the warmup
-convention explicit in the code instead of an emergent property of the cost
-term.**
-
-Evidence and constraints:
-
-- `scripts/walk_forward.py:1709` builds `positions = signals.shift(1 + latency)
-  * fill_rate`; `scripts/walk_forward.py:1769-1770` builds the cost term
-  `position_changes = positions.diff().abs()` and
-  `costs = position_changes * (commission + slippage)`.
-- Because `positions[0]` is `NaN` (the lag-1 warmup), `positions.diff()` is
-  `NaN` on **two** bars, and `NaN * 0.0` is `NaN`: every window therefore
-  loses its first **two** bars, not one. The second bar is a flat-position bar
-  (the signal is still warming up), so its return is `0.0`.
-- Consequences, all measured this session:
-  - the compounded OOS return is *unaffected* (the dropped bar multiplies the
-    product by 1.0) — verified by re-running the CPCV with
-    `position_changes.fillna(0.0)`: the total is unchanged
-    (`0.005399536978800024`) but the usable-bar count moves 23 -> 24 per
-    fold;
-  - the *training* sample that drives parameter selection loses one
-    observation, and fold 0's selection is a close call (training Sharpes
-    2.681 / 2.747 / 2.738 for lookback 15 / 20 / 30 — a 0.34% margin), so a
-    change here can flip the selected parameter in that fold and therefore
-    move the OOS result materially.
-- The convention is now documented in
-  `references/validation_methods.md` ("The Warmup Bars of a Window") and
-  pinned by `CPCV_OOS_BAR_COUNT` / `WALK_FORWARD_OOS_BAR_COUNT` and by
-  `test_cpcv_pinned_number_is_reproducible_from_first_principles`.
-- Constraint: this is a **number-changing** decision. If the second bar is
-  kept, the pinned values, the usable-bar counts, the `test_output/`
-  snapshot and possibly the walk-forward numbers must all be re-derived and
-  re-pinned in the same commit, and the change must be reported as a
-  methodology change (with the before/after numbers), not as a bug fix.
-  If the convention is kept as-is, make it explicit in the code (a named
-  constant or an explicit `.dropna()` on the position series rather than
-  relying on NaN propagation through the cost term) so the two-bar drop is
-  intentional and not emergent.
+- `matplotlib` was **missing** from this session's environment, which made
+  `tests/test_reporting.py` fail with 9 errors (all "plot file should be
+  created"). It was installed with `python3 -m pip install matplotlib`; the
+  suite is green with it and was green in the previous session with it.
+  Without matplotlib that file fails, so any future session must install it
+  before trusting a green suite.
+- Running the suite in an environment *with* matplotlib re-writes
+  `skills/quantitative-backtesting/examples/example_output/tear_sheet.html`
+  and `tear_sheet_summary.json` (the committed copies were generated
+  *without* matplotlib, so they have `plot_files: []`). Those two files were
+  reverted after the test runs; expect them to re-appear as modified after
+  any suite run here.
 
 ## Git state
 
-Work is **not committed** (the user did not ask for a commit). `git status`
-shows four modified files, all under `skills/quantitative-backtesting/`:
-`SKILL.md`, `references/validation_methods.md`, `tests/test_cpcv.py`,
-`tests/test_walk_forward.py`. The working tree is the starting point for the
-next session; the last commit is `5b2252d`.
+The work is **not committed** (the user did not ask for a commit).
+`git status` shows three modified files and one new file, all under
+`skills/quantitative-backtesting/`:
+
+- `scripts/utils.py`, `scripts/run_backtest.py`, `scripts/walk_forward.py`
+  (modified)
+- `tests/test_execution_warmup.py` (new)
+- `SKILL.md`, `references/validation_methods.md` (modified)
+
+The last commit is `86d28a9`.

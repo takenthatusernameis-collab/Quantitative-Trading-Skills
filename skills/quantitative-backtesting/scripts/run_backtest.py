@@ -38,12 +38,14 @@ from utils import (
     book_trade_ledger,
     build_market_model,
     compute_book_diagnostic,
+    execution_warmup_metadata,
     format_impact_dilution_lines,
     held_book_weights,
     market_impact_cost,
     resolve_impact_aggregation,
     resolve_panel_pricing,
     strategy_target_weights,
+    WARMUP_CONVENTION_RUN_BACKTEST,
 )
 from walk_forward import estimate_capacity
 
@@ -597,6 +599,16 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
             "latency": getattr(args, "latency", 0),
             "fill_rate": fill_rate,
+            # The execution warmup this run applied, so a consumer of the
+            # results knows how many leading bars of the window are not
+            # tradable without having to re-derive the convention from the
+            # return series. run_backtest zeroes the lagged position
+            # instead of dropping it, so the strategy opens on the first
+            # executable bar and only the bar with an undefined turnover is
+            # dropped -- one bar, against walk_forward.py's two (the
+            # difference is intentional and pinned by the cross-path parity
+            # tests).
+            **execution_warmup_metadata(WARMUP_CONVENTION_RUN_BACKTEST),
             # The requested panel pricing mode and the one that was actually
             # applied. They differ when "book" was requested for a strategy
             # that exposes no book (or for a single asset): the run then
@@ -1140,6 +1152,18 @@ def main():
         print(
             "Panel pricing mode: net-exposure (the portfolio return is "
             "net_exposure x mean(asset returns))."
+        )
+
+    # Execution warmup: how many leading bars of the window are not
+    # tradable under the convention this run applied. Printed next to the
+    # pricing mode so a result can never be read without knowing it.
+    _warmup = (results.get("config") or {}).get("warmup_convention")
+    _warmup_bars = (results.get("config") or {}).get("execution_warmup_bars")
+    if _warmup is not None and _warmup_bars is not None:
+        print(
+            f"Execution warmup: {_warmup} ({_warmup_bars} bar(s) dropped "
+            "from the front of the window; the position is opened on the "
+            "first executable bar)."
         )
 
     if book_diagnostic:

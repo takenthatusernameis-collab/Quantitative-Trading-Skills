@@ -2,63 +2,136 @@
 
 ## The one precise next task
 
-**Surface the execution warmup convention in backtest results/metadata** so the
-two-bar warmup is observable to consumers (not just buried in docs/comments),
-and make it consistent across the CLIs without changing any pinned numbers.
+**Decide what `--fill-rate` is supposed to mean, then make the code, the CLI
+help and the docs agree — and pin the decision with an executable test.**
 
-### Why
+The parameter is documented as "the fraction of each targeted position change
+that is filled", but the implementation **scales the target position**
+(`positions = signals.shift(1 + latency) * fill_rate`). Those are different
+models, and the difference changes what a fill-rate sweep means.
 
-- The warmup convention is now explicit in `walk_forward.py` (non-book path)
-  and documented in `references/validation_methods.md`, but `results` from
-  `run_backtest.py` and the summaries from `walk_forward.py`/`cpcv_analysis`
-  do not record how many bars were dropped or which convention was used.
-- The cross-path parity tests pin that `run_backtest` and `walk_forward`
-  drop a different number of warmup bars for the net-exposure path (run_backtest
-  opens the position on the first executable bar; walk_forward drops the
-  undefined bars) — this difference must remain intact and must stay test-covered.
-- Making the convention explicit in metadata aids reproducibility and prevents
-  confusion when comparing runs across entry points.
+### Why (evidence, measured this session)
+
+Measured on a deterministic 5-asset panel (`cross_sectional_momentum`,
+`lookback` 20, 498 usable bars, `commission=0.0002`, `slippage=0.0001`):
+
+| Quantity | `fill_rate=1.0` | `fill_rate=0.5` |
+| --- | --- | --- |
+| per-bar return series | base | **exactly** `0.5 x` base (ratio `0.500000` on every bar) |
+| total return | `+13.851138%` | `+6.706919%` (ratio `0.4842`) |
+| annualized Sharpe | `3.1864` | `1.7935` |
+| total market-impact cost (`impact_coefficient=0.5`) | `4e-06` | `2e-06` |
+
+- The Sharpe is **not** scale-invariant because the risk-free rate (2%/yr) is
+  subtracted from the *scaled* return and is not scaled with it. So a
+  fill-rate sweep moves the Sharpe even though the strategy is
+  mathematically a smaller version of itself.
+- `estimate_capacity(data, impact_coefficient, max_impact, adv_window)` has
+  **no `fill_rate` parameter** — the reported capacity is the capacity at full
+  fill.
+- The unfilled part of the target order is charged nothing: there is no
+  shortfall, priority or spread cost for the unexecuted portion.
+- Under a real partial fill the held position converges toward the target
+  (`position_t = position_{t-1} + f * delta_target`); the framework snaps to
+  `f * target` instead, so the exposure path is different as well.
+
+Consequence: a researcher who sweeps `--fill-rates 0.5 0.75 1.0` to test
+"what if only half my orders fill" is in fact measuring a de-risked version of
+the strategy, and may read the result as evidence of execution robustness.
+This finding is already recorded durably in
+`references/validation_methods.md` ("Open: what `fill_rate` actually models")
+and in `SKILL.md` (Tips), so it is not lost if this handoff is.
+
+### The decision to make
+
+Two acceptable resolutions (pick one, deliberately):
+
+1. **Keep the current semantics and label them honestly.** Rename/redocument
+   the parameter as a participation or position-scale limit (it is *not* a
+   fill model), fix the CLI help text, and pin the exact scaling with a test
+   (`returns(fill_rate=f) == f * returns(fill_rate=1)` elementwise, plus the
+   fact that the Sharpe is not scale-invariant because of the risk-free
+   rate). No published number moves.
+2. **Implement a true partial-fill model** (the held position converges
+   toward the target). This is a **number-changing** change: the pinned CPCV
+   number, the usable-bar counts, the `test_output/` snapshot and the
+   walk-forward numbers must be re-derived and re-pinned in the same commit,
+   and the change must be reported as a methodology change (with before/after
+   numbers), not as a bug fix.
+
+Option 1 is the smaller reversible change and is the recommended starting
+point; option 2 is the more honest model but is a much larger commitment.
 
 ### Concrete steps
 
-1. **Define a stable metadata key** (e.g., `execution_warmup_bars` and/or
-   `warmup_convention`) in the results/config dicts.
-   - In `walk_forward._calculate_strategy_returns` (and any place that drops
-     bars due to warmup), record `execution_warmup_bars` in the returned info if
-     possible, or thread it through to callers.
-   - In `run_backtest.py`, record it in `results["config"]` / `results` metadata
-     (e.g., `"warmup_convention": "run_backtest_open_first_executable"` vs
-     `"walk_forward_drop_undefined"`), without changing return series.
-   - For walk-forward/CPCV/monte-carlo/out-of-sample summaries, add the same
-     metadata when relevant.
-
-2. **Keep behavior unchanged**: do not alter the dropping/reindexing logic.
-   All existing pins must hold:
-   - CPCV: `CPCV_OOS_RETURN_REFERENCE`, `CPCV_OOS_BAR_COUNT` (92), selected
-     lookbacks unchanged; `test_cpcv_pinned_number_is_reproducible_from_first_principles`
-     must pass.
-   - Walk-forward bar counts and pinned numbers unchanged.
-   - Cross-path parity: `test_run_backtest_panel_matches_walk_forward_return_calculator`
-     and `test_run_backtest_dict_panel_matches_walk_forward_return_calculator`
-     must still pass (the warmup difference must remain).
-
-3. **Document briefly** in the skill docs or references if helpful, but keep
-   changes minimal and reversible.
+1. Read `scripts/utils.py::held_book_weights` and
+   `scripts/walk_forward.py::_calculate_strategy_returns` for the two places
+   `fill_rate` enters (the position series and the held book).
+2. Decide per option 1 or 2 above.
+3. If option 1: update the `--fill-rate` help text in
+   `scripts/run_backtest.py` and `scripts/walk_forward.py`, update the
+   `fill_rate` docstrings, update
+   `references/validation_methods.md` ("Open: what `fill_rate` actually
+   models" -> a decided convention) and the `SKILL.md` tip, and add the
+   pinning test.
+4. If option 2: re-derive and re-pin everything listed above, and record the
+   before/after numbers in `HANDOFF.md`.
 
 ### Evidence to look at
 
-- `skills/quantitative-backtesting/scripts/walk_forward.py:1713-1714,1774-1778,1844-1846`
-- `skills/quantitative-backtesting/scripts/run_backtest.py:335,381-400,449`
-- `skills/quantitative-backtesting/tests/test_run_backtest.py:1382-1455` (cross-path parity)
-- `skills/quantitative-backtesting/tests/test_cpcv.py` (pinned numbers and first-principles reproduction)
-- `skills/quantitative-backtesting/references/validation_methods.md` ("The Warmup Bars of a Window")
+- `skills/quantitative-backtesting/scripts/utils.py` — `held_book_weights`
+  (`held = target.shift(lag) * fill_rate`)
+- `skills/quantitative-backtesting/scripts/walk_forward.py` —
+  `_calculate_strategy_returns` (`positions = signals.shift(1 + latency) * fill_rate`)
+- `skills/quantitative-backtesting/scripts/utils.py` —
+  `estimate_capacity(data, impact_coefficient, max_impact=0.0005, adv_window=20)`
+  (no `fill_rate` argument)
+- `skills/quantitative-backtesting/scripts/walk_forward.py` —
+  `_period_sharpe` (`excess = returns - 0.02 / ann_factor`, not scaled with
+  the position)
+- `skills/quantitative-backtesting/references/validation_methods.md` —
+  "Open: what `fill_rate` actually models"
+- `skills/quantitative-backtesting/scripts/performance.py` —
+  `calculate_metrics` (the same unscaled risk-free subtraction)
 
 ### Constraints
 
-- **No behavior change.** Metadata only. Do not "fix" the warmup difference
-  between entry points — it is intentional and pinned.
-- **Preserve all pinned values.** Run the full quant test suite (all files
-  under `skills/quantitative-backtesting/tests/`) before and after; every test
-  must pass.
-- **Keep it bounded.** Add metadata fields only where they are cheap and
-  don't require restructuring the return pipelines.
+- **Do not change the warmup metadata added this session.** It is
+  behaviour-neutral and is guarded by `tests/test_execution_warmup.py` (8
+  tests) plus the existing cross-path parity tests.
+- **All pinned values must hold** unless the change is explicitly reported as
+  a methodology change with before/after numbers:
+  `CPCV_OOS_RETURN_REFERENCE` (0.005399536978800024),
+  `CPCV_OOS_BAR_COUNT` (92), `CPCV_OOS_LOOKBACKS` ([20, 15, 15, 15]),
+  `WALK_FORWARD_OOS_BAR_COUNT` (189), and the `test_output/` snapshot.
+- **The full suite must be green** (12 files, see "Verification" below).
+
+### Secondary candidate (if the fill-rate decision is judged too large)
+
+Commit a **pinned panel-mode reference artifact**. Today the skill's headline
+panel capability (`--panel-pricing book`, the panel book diagnostic, the
+impact-participation measurement, the notional-weighted impact aggregation)
+is guarded only by internal-consistency unit tests: there is no committed
+artifact holding the actual numbers, so the panel/book claims have no
+evidence trail. There is also no committed multi-asset fixture
+(`assets/example_data/` has only a single-asset CSV), so such an artifact
+needs one. This is bounded but larger than the fill-rate decision.
+
+## Verification (how this repository is checked)
+
+The whole suite is 12 files, each run directly with python3 (no pytest):
+
+```bash
+for f in skills/quantitative-backtesting/tests/test_*.py; do python3 "$f"; done
+```
+
+`matplotlib` is required: without it `tests/test_reporting.py` fails with 9
+errors (all "plot file should be created"). Install it with
+`python3 -m pip install matplotlib` before running the suite.
+
+Latest green run (12/12 files): `test_cpcv` 29/29, `test_data_loader` 32/32,
+`test_examples_coverage` 7/7, `test_execution_warmup` 8/8,
+`test_falsifiable_hypothesis_example` 3/3, `test_generate_sample_data` 2/2,
+`test_monte_carlo` 20/20, `test_performance` 33/33, `test_reporting` OK (62),
+`test_run_backtest` 103/103, `test_strategy_builder` 33/33,
+`test_walk_forward` 177/177.
