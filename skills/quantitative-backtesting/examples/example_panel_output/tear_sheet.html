@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Backtest Tear Sheet</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+        h2 { color: #2980b9; margin-top: 30px; }
+        table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+        th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+        th { background: #3498db; color: white; }
+        tr:nth-child(even) { background: #f9f9f9; }
+        .metric { font-family: monospace; }
+        .positive { color: #27ae60; }
+        .negative { color: #e74c3c; }
+        .chart { margin: 20px 0; text-align: center; }
+        .chart img { max-width: 100%; border-radius: 4px; }
+    </style>
+</head>
+<body>
+<div class="container">
+<h1>Backtest Tear Sheet</h1>
+<p><strong>Symbol:</strong> SPY</p>
+<p><strong>Strategy:</strong> cross_sectional_momentum</p>
+<p><strong>Periods:</strong> 299</p>
+
+<h2>Summary Metrics</h2>
+<table><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Total Return</td><td class='metric positive'>6.58%</td></tr>
+<tr><td>Annualized Return</td><td class='metric positive'>5.52%</td></tr>
+<tr><td>Annualized Volatility</td><td class='metric '>10.71%</td></tr>
+<tr><td>Sharpe Ratio</td><td class='metric '>0.37</td></tr>
+<tr><td>Sortino Ratio</td><td class='metric '>0.62</td></tr>
+<tr><td>Calmar Ratio</td><td class='metric '>0.50</td></tr>
+<tr><td>Max Drawdown</td><td class='metric negative'>-10.94%</td></tr>
+<tr><td>Omega Ratio</td><td class='metric '>2.44</td></tr>
+<tr><td>Skewness</td><td class='metric '>0.20</td></tr>
+<tr><td>Kurtosis</td><td class='metric '>0.15</td></tr>
+<tr><td>VaR (95%)</td><td class='metric '>-1.08%</td></tr>
+<tr><td>CVaR (95%)</td><td class='metric '>-1.32%</td></tr>
+</table>
+<h2>Panel Book Diagnostic</h2>
+<table><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Gross Book (mean sum|w|)</td><td class='metric'>0.56</td></tr>
+<tr><td>Net Exposure (book)</td><td class='metric'>0.19</td></tr>
+<tr><td>Net Exposure (framework)</td><td class='metric'>0.19</td></tr>
+<tr><td>Gross Turnover (book)</td><td class='metric'>0.17</td></tr>
+<tr><td>Turnover Charged by Model</td><td class='metric'>0.00</td></tr>
+<tr><td>Turnover Actually Charged</td><td class='metric'>0.17</td></tr>
+<tr><td>Cost Basis</td><td class='metric'>book</td></tr>
+<tr><td>Periods With a Book</td><td class='metric'>279/299</td></tr>
+<tr><td>Return Gap (framework - book, bps/period)</td><td class='metric'>-2.95</td></tr>
+<tr><td>Return Gap (cumulative, pre-cost)</td><td class='metric'>-8.55%</td></tr>
+<tr><td>Book Total Return (pre-cost)</td><td class='metric'>8.22%</td></tr>
+<tr><td>Reported Total Return (net of costs)</td><td class='metric'>6.58%</td></tr>
+</table>
+<p><em>The reported P&amp;L and the costs both use the book convention: the return is sum_i w_i r_i and the costs are charged on the book (gross turnover, short legs, gross exposure). The net-exposure numbers above are shown for comparison.</em></p>
+<h2>Panel Pricing</h2>
+<table><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Panel Pricing Mode</td><td class='metric'>book</td></tr>
+</table>
+<p><em>The reported P&amp;L is the true per-asset book return sum_i w_i r_i, and the costs are charged on the book: commission and slippage on its gross turnover sum_i |dw_i|, borrow on its short legs, funding on its gross exposure, and market impact per asset against that asset's own ADV. Residual approximation: the impact is the equal-weighted mean of the per-asset impacts over the whole panel (so a period in which only some names trade is charged less than the participation actually consumed). The capacity is reported twice: the basket-based estimate (an equal-weight basket that rebalances 1/n per constituent, least liquid name binding) and, next to it, the book-based estimate computed from the strategy's own trade sizes. The impact participation measurement in the panel book diagnostic above quantifies the residual approximation of the impact model (the equal-weighted mean of the per-asset impacts over the whole panel).</em></p>
+<h2>Trade Analytics</h2>
+<table><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Total Trades</td><td class='metric'>128.00</td></tr>
+<tr><td>Winning Trades</td><td class='metric'>59.00</td></tr>
+<tr><td>Losing Trades</td><td class='metric'>69.00</td></tr>
+<tr><td>Win Rate</td><td class='metric'>46.09%</td></tr>
+<tr><td>Avg Win</td><td class='metric'>0.82%</td></tr>
+<tr><td>Avg Loss</td><td class='metric'>0.66%</td></tr>
+<tr><td>Profit Factor</td><td class='metric'>1.00</td></tr>
+<tr><td>Expectancy</td><td class='metric'>0.0011</td></tr>
+<tr><td>Trades Closed at End</td><td class='metric'>2.00</td></tr>
+<tr><td>Pct Trades Closed at End</td><td class='metric'>1.56%</td></tr>
+</table>
+<h2>Data Provenance</h2>
+<table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>ASSET_0 / source_path</td><td class='metric'>assets/example_data/sample_panel_ohlcv.csv</td></tr>
+<tr><td>ASSET_0 / load_timestamp</td><td class='metric'>2026-10-20T03:30:05.231156Z</td></tr>
+<tr><td>ASSET_0 / file_format</td><td class='metric'>.csv</td></tr>
+<tr><td>ASSET_0 / file_size_bytes</td><td class='metric'>151347</td></tr>
+<tr><td>ASSET_0 / symbol_filter</td><td class='metric'>ASSET_0</td></tr>
+<tr><td>ASSET_0 / start_date_filter</td><td class='metric'>N/A</td></tr>
+<tr><td>ASSET_0 / end_date_filter</td><td class='metric'>N/A</td></tr>
+<tr><td>ASSET_0 / date_range_original</td><td class='metric'>N/A</td></tr>
+<tr><td>ASSET_0 / date_range_final</td><td class='metric'>('2018-01-01 00:00:00', '2019-02-22 00:00:00')</td></tr>
+<tr><td>ASSET_0 / original_shape</td><td class='metric'>(300, 5)</td></tr>
+<tr><td>ASSET_0 / final_shape</td><td class='metric'>(300, 5)</td></tr>
+<tr><td>ASSET_0 / columns_original</td><td class='metric'>["open", "high", "low", "close", "volume"]</td></tr>
+<tr><td>ASSET_0 / columns_final</td><td class='metric'>["open", "high", "low", "close", "volume"]</td></tr>
+<tr><td>ASSET_0 / validation_passed</td><td class='metric'>true</td></tr>
+<tr><td>ASSET_0 / validation_messages</td><td class='metric'>[]</td></tr>
+<tr><td>ASSET_0 / transformations_applied</td><td class='metric'>[]</td></tr>
+<tr><td>ASSET_0 / checksum</td><td class='metric'>9b47dfcda7a08936</td></tr>
+<tr><td>ASSET_1 / source_path</td><td class='metric'>assets/example_data/sample_panel_ohlcv.csv</td></tr>
+<tr><td>ASSET_1 / load_timestamp</td><td class='metric'>2026-10-20T03:30:05.234485Z</td></tr>
+<tr><td>ASSET_1 / file_format</td><td class='metric'>.csv</td></tr>
+<tr><td>ASSET_1 / file_size_bytes</td><td class='metric'>151347</td></tr>
+<tr><td>ASSET_1 / symbol_filter</td><td class='metric'>ASSET_1</td></tr>
+<tr><td>ASSET_1 / start_date_filter</td><td class='metric'>N/A</td></tr>
+<tr><td>ASSET_1 / end_date_filter</td><td class='metric'>N/A</td></tr>
+<tr><td>ASSET_1 / date_range_original</td><td class='metric'>N/A</td></tr>
+<tr><td>ASSET_1 / date_range_final</td><td class='metric'>('2018-01-01 00:00:00', '2019-02-22 00:00:00')</td></tr>
+<tr><td>ASSET_1 / original_shape</td><td class='metric'>(300, 5)</td></tr>
+<tr><td>ASSET_1 / final_shape</td><td class='metric'>(300, 5)</td></tr>
+<tr><td>ASSET_1 / columns_original</td><td class='metric'>["open", "high", "low", "close", "volume"]</td></tr>
+<tr><td>ASSET_1 / columns_final</td><td class='metric'>["open", "high", "low", "close", "volume"]</td></tr>
+<tr><td>ASSET_1 / validation_passed</td><td class='metric'>true</td></tr>
+<tr><td>ASSET_1 / validation_messages</td><td class='metric'>[]</td></tr>
+<tr><td>ASSET_1 / transformations_applied</td><td class='metric'>[]</td></tr>
+<tr><td>ASSET_1 / checksum</td><td class='metric'>c7899bca89e1b208</td></tr>
+<tr><td>ASSET_3 / source_path</td><td class='metric'>assets/example_data/sample_panel_ohlcv.csv</td></tr>
+<tr><td>ASSET_3 / load_timestamp</td><td class='metric'>2026-10-20T03:30:05.236683Z</td></tr>
+<tr><td>ASSET_3 / file_format</td><td class='metric'>.csv</td></tr>
+<tr><td>ASSET_3 / file_size_bytes</td><td class='metric'>151347</td></tr>
+<tr><td>ASSET_3 / symbol_filter</td><td class='metric'>ASSET_3</td></tr>
+<tr><td>ASSET_3 / start_date_filter</td><td class='metric'>N/A</td></tr>
+<tr><td>ASSET_3 / end_date_filter</td><td class='metric'>N/A</td></tr>
+<tr><td>ASSET_3 / date_range_original</td><td class='metric'>N/A</td></tr>
+<tr><td>ASSET_3 / date_range_final</td><td class='metric'>('2018-01-01 00:00:00', '2019-02-22 00:00:00')</td></tr>
+<tr><td>ASSET_3 / original_shape</td><td class='metric'>(300, 5)</td></tr>
+<tr><td>ASSET_3 / final_shape</td><td class='metric'>(300, 5)</td></tr>
+<tr><td>ASSET_3 / columns_original</td><td class='metric'>["open", "high", "low", "close", "volume"]</td></tr>
+<tr><td>ASSET_3 / columns_final</td><td class='metric'>["open", "high", "low", "close", "volume"]</td></tr>
+<tr><td>ASSET_3 / validation_passed</td><td class='metric'>true</td></tr>
+<tr><td>ASSET_3 / validation_messages</td><td class='metric'>[]</td></tr>
+<tr><td>ASSET_3 / transformations_applied</td><td class='metric'>[]</td></tr>
+<tr><td>ASSET_3 / checksum</td><td class='metric'>8cce99ac1a02175e</td></tr>
+<tr><td>ASSET_2 / source_path</td><td class='metric'>assets/example_data/sample_panel_ohlcv.csv</td></tr>
+<tr><td>ASSET_2 / load_timestamp</td><td class='metric'>2026-10-20T03:30:05.239652Z</td></tr>
+<tr><td>ASSET_2 / file_format</td><td class='metric'>.csv</td></tr>
+<tr><td>ASSET_2 / file_size_bytes</td><td class='metric'>151347</td></tr>
+<tr><td>ASSET_2 / symbol_filter</td><td class='metric'>ASSET_2</td></tr>
+<tr><td>ASSET_2 / start_date_filter</td><td class='metric'>N/A</td></tr>
+<tr><td>ASSET_2 / end_date_filter</td><td class='metric'>N/A</td></tr>
+<tr><td>ASSET_2 / date_range_original</td><td class='metric'>N/A</td></tr>
+<tr><td>ASSET_2 / date_range_final</td><td class='metric'>('2018-01-01 00:00:00', '2019-02-22 00:00:00')</td></tr>
+<tr><td>ASSET_2 / original_shape</td><td class='metric'>(300, 5)</td></tr>
+<tr><td>ASSET_2 / final_shape</td><td class='metric'>(300, 5)</td></tr>
+<tr><td>ASSET_2 / columns_original</td><td class='metric'>["open", "high", "low", "close", "volume"]</td></tr>
+<tr><td>ASSET_2 / columns_final</td><td class='metric'>["open", "high", "low", "close", "volume"]</td></tr>
+<tr><td>ASSET_2 / validation_passed</td><td class='metric'>true</td></tr>
+<tr><td>ASSET_2 / validation_messages</td><td class='metric'>[]</td></tr>
+<tr><td>ASSET_2 / transformations_applied</td><td class='metric'>[]</td></tr>
+<tr><td>ASSET_2 / checksum</td><td class='metric'>9c83988fbb64d099</td></tr>
+<tr><td>ASSET_4 / source_path</td><td class='metric'>assets/example_data/sample_panel_ohlcv.csv</td></tr>
+<tr><td>ASSET_4 / load_timestamp</td><td class='metric'>2026-10-20T03:30:05.241909Z</td></tr>
+<tr><td>ASSET_4 / file_format</td><td class='metric'>.csv</td></tr>
+<tr><td>ASSET_4 / file_size_bytes</td><td class='metric'>151347</td></tr>
+<tr><td>ASSET_4 / symbol_filter</td><td class='metric'>ASSET_4</td></tr>
+<tr><td>ASSET_4 / start_date_filter</td><td class='metric'>N/A</td></tr>
+<tr><td>ASSET_4 / end_date_filter</td><td class='metric'>N/A</td></tr>
+<tr><td>ASSET_4 / date_range_original</td><td class='metric'>N/A</td></tr>
+<tr><td>ASSET_4 / date_range_final</td><td class='metric'>('2018-01-01 00:00:00', '2019-02-22 00:00:00')</td></tr>
+<tr><td>ASSET_4 / original_shape</td><td class='metric'>(300, 5)</td></tr>
+<tr><td>ASSET_4 / final_shape</td><td class='metric'>(300, 5)</td></tr>
+<tr><td>ASSET_4 / columns_original</td><td class='metric'>["open", "high", "low", "close", "volume"]</td></tr>
+<tr><td>ASSET_4 / columns_final</td><td class='metric'>["open", "high", "low", "close", "volume"]</td></tr>
+<tr><td>ASSET_4 / validation_passed</td><td class='metric'>true</td></tr>
+<tr><td>ASSET_4 / validation_messages</td><td class='metric'>[]</td></tr>
+<tr><td>ASSET_4 / transformations_applied</td><td class='metric'>[]</td></tr>
+<tr><td>ASSET_4 / checksum</td><td class='metric'>3ae0b207ca031dc0</td></tr>
+<tr><td>bias_controls_engaged</td><td class='metric'>true</td></tr>
+</table>
+<h2>Survivorship Bias Detection</h2>
+<table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>bias_score</td><td class='metric'>0.0</td></tr>
+<tr><td>surviving_symbols</td><td class='metric'>["ASSET_0", "ASSET_1", "ASSET_3", "ASSET_2", "ASSET_4"]</td></tr>
+<tr><td>entered_symbols</td><td class='metric'>[]</td></tr>
+<tr><td>exited_symbols</td><td class='metric'>[]</td></tr>
+<tr><td>insufficient_data</td><td class='metric'>[]</td></tr>
+<tr><td>large_gaps</td><td class='metric'>[]</td></tr>
+</table>
+<div class='chart'><img src='equity_curve.png' alt='equity_curve'></div>
+<div class='chart'><img src='returns_distribution.png' alt='returns_distribution'></div>
+
+</div>
+</body>
+</html>

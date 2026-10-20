@@ -1,0 +1,295 @@
+{
+  "symbol": "SPY",
+  "strategy": "cross_sectional_momentum",
+  "metrics": {
+    "total_return": 0.06582234091576256,
+    "annualized_return": 0.055195729716267516,
+    "annualized_volatility": 0.10711933443429539,
+    "sharpe_ratio": 0.3682240316449431,
+    "sortino_ratio": 0.6235410812884423,
+    "max_drawdown": -0.1094414312557291,
+    "avg_drawdown": -0.04044314020921907,
+    "calmar_ratio": 0.5043403497464595,
+    "max_drawdown_recovery_days": null,
+    "var_95": -0.010829392604459044,
+    "cvar_95": -0.013160089522126722,
+    "skewness": 0.20242052077839812,
+    "kurtosis": 0.15496186973047443,
+    "total_trades": 128,
+    "winning_trades": 59,
+    "losing_trades": 69,
+    "win_rate": 0.4609375,
+    "trades_closed_at_end": 2,
+    "pct_trades_closed_at_end": 0.015625,
+    "avg_win": 0.008218022231479365,
+    "avg_loss": 0.0065797296974178686,
+    "profit_factor": 1.0028290803263697,
+    "expectancy": 0.0011084949065746016,
+    "avg_trade_duration": 9.09375,
+    "omega_ratio": 2.4406999132837495,
+    "tail_ratio": 1.1018650060479176,
+    "initial_capital": 100000,
+    "capacity": null,
+    "capacity_trend": null,
+    "capacity_book": null,
+    "capacity_book_trend": null
+  },
+  "plot_files": [
+    "examples/example_panel_output/equity_curve.png",
+    "examples/example_panel_output/returns_distribution.png"
+  ],
+  "book_diagnostic": {
+    "n_periods": 299,
+    "n_periods_with_book": 279,
+    "n_assets": 5,
+    "gross_book": 0.559866220735786,
+    "net_exposure": 0.1866220735785953,
+    "framework_net_exposure": 0.1866220735785953,
+    "gross_turnover": 0.1705685618729097,
+    "framework_turnover": 0.0006688963210702342,
+    "charged_turnover": 0.1705685618729097,
+    "cost_basis": "book",
+    "return_gap_bps": -2.9499644733121926,
+    "return_gap_total": -0.08554976020295235,
+    "book_total_return": 0.0822418911537659,
+    "framework_total_return": -0.0033078690491864515,
+    "framework_total_return_after_costs": 0.06582234091576256,
+    "reported_total_return": 0.06582234091576256,
+    "impact_charged_bps": null,
+    "impact_traded_only_bps": null,
+    "impact_notional_weighted_bps": null,
+    "impact_dilution_bps": null,
+    "impact_panel_dilution_bps": null,
+    "impact_gross_book_return_bps": null,
+    "impact_dilution_fraction_of_gross_return": null,
+    "impact_participation_ratio": null
+  },
+  "panel_pricing": "book",
+  "data_provenance": {
+    "ASSET_0": {
+      "source_path": "assets/example_data/sample_panel_ohlcv.csv",
+      "load_timestamp": "2026-10-20T03:30:05.231156Z",
+      "file_format": ".csv",
+      "file_size_bytes": 151347,
+      "symbol_filter": "ASSET_0",
+      "start_date_filter": null,
+      "end_date_filter": null,
+      "original_shape": [
+        300,
+        5
+      ],
+      "final_shape": [
+        300,
+        5
+      ],
+      "columns_original": [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+      ],
+      "columns_final": [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+      ],
+      "date_range_original": null,
+      "date_range_final": [
+        "2018-01-01 00:00:00",
+        "2019-02-22 00:00:00"
+      ],
+      "validation_passed": true,
+      "validation_messages": [],
+      "transformations_applied": [],
+      "checksum": "9b47dfcda7a08936",
+      "total_return_type": "price",
+      "name": null
+    },
+    "ASSET_1": {
+      "source_path": "assets/example_data/sample_panel_ohlcv.csv",
+      "load_timestamp": "2026-10-20T03:30:05.234485Z",
+      "file_format": ".csv",
+      "file_size_bytes": 151347,
+      "symbol_filter": "ASSET_1",
+      "start_date_filter": null,
+      "end_date_filter": null,
+      "original_shape": [
+        300,
+        5
+      ],
+      "final_shape": [
+        300,
+        5
+      ],
+      "columns_original": [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+      ],
+      "columns_final": [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+      ],
+      "date_range_original": null,
+      "date_range_final": [
+        "2018-01-01 00:00:00",
+        "2019-02-22 00:00:00"
+      ],
+      "validation_passed": true,
+      "validation_messages": [],
+      "transformations_applied": [],
+      "checksum": "c7899bca89e1b208",
+      "total_return_type": "price",
+      "name": null
+    },
+    "ASSET_3": {
+      "source_path": "assets/example_data/sample_panel_ohlcv.csv",
+      "load_timestamp": "2026-10-20T03:30:05.236683Z",
+      "file_format": ".csv",
+      "file_size_bytes": 151347,
+      "symbol_filter": "ASSET_3",
+      "start_date_filter": null,
+      "end_date_filter": null,
+      "original_shape": [
+        300,
+        5
+      ],
+      "final_shape": [
+        300,
+        5
+      ],
+      "columns_original": [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+      ],
+      "columns_final": [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+      ],
+      "date_range_original": null,
+      "date_range_final": [
+        "2018-01-01 00:00:00",
+        "2019-02-22 00:00:00"
+      ],
+      "validation_passed": true,
+      "validation_messages": [],
+      "transformations_applied": [],
+      "checksum": "8cce99ac1a02175e",
+      "total_return_type": "price",
+      "name": null
+    },
+    "ASSET_2": {
+      "source_path": "assets/example_data/sample_panel_ohlcv.csv",
+      "load_timestamp": "2026-10-20T03:30:05.239652Z",
+      "file_format": ".csv",
+      "file_size_bytes": 151347,
+      "symbol_filter": "ASSET_2",
+      "start_date_filter": null,
+      "end_date_filter": null,
+      "original_shape": [
+        300,
+        5
+      ],
+      "final_shape": [
+        300,
+        5
+      ],
+      "columns_original": [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+      ],
+      "columns_final": [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+      ],
+      "date_range_original": null,
+      "date_range_final": [
+        "2018-01-01 00:00:00",
+        "2019-02-22 00:00:00"
+      ],
+      "validation_passed": true,
+      "validation_messages": [],
+      "transformations_applied": [],
+      "checksum": "9c83988fbb64d099",
+      "total_return_type": "price",
+      "name": null
+    },
+    "ASSET_4": {
+      "source_path": "assets/example_data/sample_panel_ohlcv.csv",
+      "load_timestamp": "2026-10-20T03:30:05.241909Z",
+      "file_format": ".csv",
+      "file_size_bytes": 151347,
+      "symbol_filter": "ASSET_4",
+      "start_date_filter": null,
+      "end_date_filter": null,
+      "original_shape": [
+        300,
+        5
+      ],
+      "final_shape": [
+        300,
+        5
+      ],
+      "columns_original": [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+      ],
+      "columns_final": [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+      ],
+      "date_range_original": null,
+      "date_range_final": [
+        "2018-01-01 00:00:00",
+        "2019-02-22 00:00:00"
+      ],
+      "validation_passed": true,
+      "validation_messages": [],
+      "transformations_applied": [],
+      "checksum": "3ae0b207ca031dc0",
+      "total_return_type": "price",
+      "name": null
+    }
+  },
+  "survivorship_bias": {
+    "surviving_symbols": [
+      "ASSET_0",
+      "ASSET_1",
+      "ASSET_3",
+      "ASSET_2",
+      "ASSET_4"
+    ],
+    "entered_symbols": [],
+    "exited_symbols": [],
+    "insufficient_data": [],
+    "large_gaps": [],
+    "bias_score": 0.0
+  },
+  "bias_controls_engaged": true
+}

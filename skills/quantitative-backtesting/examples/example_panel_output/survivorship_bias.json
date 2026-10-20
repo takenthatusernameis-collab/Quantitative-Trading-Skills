@@ -1,0 +1,14 @@
+{
+  "surviving_symbols": [
+    "ASSET_0",
+    "ASSET_1",
+    "ASSET_3",
+    "ASSET_2",
+    "ASSET_4"
+  ],
+  "entered_symbols": [],
+  "exited_symbols": [],
+  "insufficient_data": [],
+  "large_gaps": [],
+  "bias_score": 0.0
+}
