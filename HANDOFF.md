@@ -2,104 +2,133 @@
 
 ## What changed this session
 
-The HANDOFF_NEXT.md task ("quantify how large a sample the pre-registered
-criteria need -- and whether any sample size can confirm a plausible effect")
-is done, and it **overturned the hypothesis the task was built on**: there
-*is* a sample size at which criterion 2 can confirm a plausible effect.
-Nothing in the framework's decision code was touched: the work is a
-measurement tool, an executable check and a write-up.
+The HANDOFF_NEXT.md task ("report the test resolution next to every swept
+Sharpe") is done. The cost sweeps of `run_backtest.py` now carry the
+resolution of every sweep point, print that threshold beside the swept Sharpe,
+and flag the points the sample cannot distinguish from zero. No threshold,
+bound, criterion or verdict moved: the resolution is read from the framework's
+own `_build_test_resolution` / `minimum_detectable_sharpe`, never re-derived.
 
-### 1. The measurement tool
+### 0. What was already there when this session started
 
-`skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py`
-(written over the stub the previous session left behind):
+Commit `8a9b12e` (made just before this session opened, and not described in
+the previous HANDOFF.md) had already attached the `test_resolution` block to
+the per-coefficient metrics dict of `_run_backtest_sweep_coefficient`, so the
+sweep *artifact* carried it. What was still missing -- and what this session
+added -- was the console reporting, the below-resolution flag, the artifact
+key that states the flag, the executable checks and the write-up.
 
-- It runs the **shipped configuration** -- the worked example's grid, costs,
-  benchmark set, 6-month walk-forward training window, 2-month test/step
-  windows and 0.6/0.2/0.2 chronological split -- through the framework's own
-  `out_of_sample_validation`, and reports the framework's own
-  `summary["test_resolution"]` block (built by `_build_test_resolution`, the
-  same builder the walk-forward, CPCV and out-of-sample paths attach to
-  their summaries). It re-derives nothing, re-tunes nothing, and changes no
-  threshold, no bound, no criterion and no verdict.
-- It sweeps a ladder of sample sizes (default 500 / 1,000 / 2,500 / 5,000 /
-  10,000 bars) over the **synthetic control fixture** (both the effect
-  series and the no-effect series, over three seeds), and reports the
-  minimum confirmable annualized Sharpe / alpha, the framework's own
-  deflation benchmark `SR*` (`expected_max_sharpe`), the observed
-  out-of-sample Sharpe, and whether criterion 2 is inside or beyond the
-  plausibility bound at each rung.
-- `--data FILE` measures the same curve on the **first N bars of a real
-  history** (the benchmark set is resolved from the file's directory, as the
-  worked example resolves it). On the shipped 504-bar sample it reproduces
-  the example's own reported threshold exactly (4.1950).
-- `summarize()` reports the crossing per size over the draws measured there
-  (`first_size_all_within_bound` / `first_size_any_within_bound`), because
-  the crossing moves with the draw.
+### 1. The console
 
-### 2. The executable check
+`skills/quantitative-backtesting/scripts/run_backtest.py`:
 
-`skills/quantitative-backtesting/tests/test_resolution_vs_sample_size.py`
-(new, 4 tests):
+- `_sweep_sharpe_below_resolution(sharpe_ratio, resolution)` -- whether a
+  sweep point's Sharpe is below the resolution of that point's own
+  statistics. **The comparison is on magnitudes** (`|Sharpe| < minSR`): the
+  minimum detectable effect is the smallest *magnitude* the test could have
+  confirmed, so a Sharpe of -3.0 against a resolution of 2.5 is
+  distinguishable from zero while a Sharpe of +0.3 is not. A signed
+  comparison would flag the first and pass the second, which is backwards.
+  It returns `None` ("unknown") when there is no resolution, never a silent
+  "no".
+- `_sweep_resolution_fields(result)` -- the two console fields of a sweep
+  point: the threshold text and the note (`below resolution` / `resolvable` /
+  `n/a`).
+- `_print_sweep_table(title, first_header, leads, results)` -- one
+  implementation of the sweep table, used by all seven sweeps. It replaces
+  seven near-identical 4-line print blocks, so the two new columns cannot
+  drift apart between sweeps.
+- `_print_sweep_resolution_note(results)` -- the shared note under the table,
+  in the single-run path's wording ("measurement, not a correction"), with the
+  scope (test observations, parameter trials) and the plausibility-bound
+  sentence.
+
+Before / after on the shipped sample
+(`--n-trials 12 --commissions 0.0002 0.002 0.004`):
+
+```
+before                                  after
+comm  return  ann_ret  Sharpe  maxDD    comm  return  ann_ret  Sharpe  maxDD  minSR  note
+0.000200  -0.2072  -0.1098  -0.7783  -0.2886
+                                        0.000200  -0.2072  -0.1098  -0.7783  -0.2886  2.5064  below resolution
+                                        0.002000  -0.2366  -0.1265  -0.8976  -0.3039  2.5076  below resolution
+                                        0.004000  -0.2681  -0.1448  -1.0286  -0.3272  2.5090  below resolution
+```
+
+and under the table:
+
+```
+Test resolution (measurement, not a correction): With 503 test observation(s),
+12 parameter trial(s), minSR is the smallest annualized Sharpe each sweep
+point's own significance test could confirm at this sample size. A point
+marked 'below resolution' has a Sharpe the sample cannot distinguish from
+zero: its outcome measures the sample, not the strategy.
+The threshold exceeds the stated plausibility bound (annualized Sharpe <=
+2.00), so at this sample size it measures the sample, not the strategy.
+```
+
+A sweep run **without** `--n-trials` carries no significance test, so the
+columns read `n/a` / `n/a` and the console says so explicitly ("no
+significance test was run on these sweep points ..."), rather than staying
+silent.
+
+### 2. The artifact
+
+Each sweep point in `run_backtest_commission_sweep.json` and its siblings now
+carries one more key:
+
+```json
+"sharpe_below_resolution": true
+```
+
+`true` when the point's Sharpe is below its own resolution, `false` when it is
+not, `null` when there is no resolution to judge it against. The block's
+existing keys did not move.
+
+**The artifact shape before and after the whole task** (the `results` entries
+of `run_backtest_commission_sweep.json`, HEAD~1 -> now):
+
+| key | before | after |
+| --- | --- | --- |
+| `impact_coefficient` ... `latency` | present | present (unchanged) |
+| `total_return`, `annualized_return`, `sharpe_ratio`, `max_drawdown` | present | present (unchanged, same values) |
+| `test_resolution` | **absent** | present (the block, built by `_build_test_resolution` on the very return series the Deflated Sharpe was computed on) |
+| `sharpe_below_resolution` | **absent** | present (`true` / `false` / `null`) |
+
+The existing sweep-shape assertions in `tests/test_run_backtest.py` only
+check for the presence of the four metric keys, so none of them needed
+updating; the whole file is 104/104 green.
+
+### 3. The executable checks
+
+`skills/quantitative-backtesting/tests/test_test_resolution.py` grew from 21
+to 28 tests (28/28 pass). The seven new ones:
 
 | Test | What it pins |
 | --- | --- |
-| `test_the_resolution_improves_with_the_sample_size` | on the no-effect control, the minimum confirmable annualized Sharpe falls from above the 2.0 bound at 2,500 bars to at or below it at 10,000 bars, and the floor it converges onto (`expected_max_sharpe`) is below the bound |
-| `test_the_crossing_is_not_a_property_of_one_random_draw` | at 10,000 bars criterion 2 is inside the sample's resolution on **every** draw measured (seeds 7, 1, 2024, both series), and at 2,500 bars it is outside the resolution on every one |
-| `test_the_measurement_agrees_with_the_shipped_example_path` | the measurement's resolution equals the resolution the worked example's own `run_hypothesis_test` reports on the same data (so it measures the shipped configuration, not a private copy) |
-| `test_the_measurement_moves_no_threshold_and_no_verdict` | the plausibility bounds are the framework's and unmoved, the summary reports a size and never a verdict |
+| `test_every_sweep_point_carries_its_own_test_resolution` | every sweep point carries a `test_resolution` block, `resolvable`, with a positive threshold, `n_parameter_trials` as given, and `observed_annualized_sharpe` equal to **that point's own** `sharpe_ratio` (so the block belongs to that coefficient, not to another) |
+| `test_the_sweep_point_reports_exactly_what_the_single_run_reports` | the sweep point at commission 0.002 and the single run at `--commission 0.002` report the same `total_return` / `annualized_return` / `sharpe_ratio` / `max_drawdown` and the **same** `test_resolution` block |
+| `test_the_sweep_table_prints_the_threshold_next_to_the_sharpe` | the console carries the `minSR` column, the "measurement, not a correction" wording, and the artifact's threshold and Sharpe numbers |
+| `test_the_below_resolution_flag_compares_magnitudes` | `0.31` against a resolution of `2.0` is flagged, `2.5` is not, `-3.0` is **not** flagged, and "no resolution" is `None` (unknown), never `False` |
+| `test_the_sweep_flags_the_points_the_sample_cannot_distinguish_from_zero` | the artifact's `sharpe_below_resolution` equals `abs(sharpe) < threshold` for every point, and the console says "below resolution" and "cannot distinguish from zero" |
+| `test_a_sweep_without_a_significance_test_says_so` | no `--n-trials` -> `n/a` in the console, `not_applicable` in the block, `null` in the flag |
+| `test_the_sweep_point_resolution_carries_no_verdict` | the sweep's block carries no verdict key, keeps `target_p_value == 0.10` and the framework's unmoved plausibility bounds |
 
-### 3. The write-up -- including a correction
+### 4. The write-up
 
-`references/validation_methods.md`:
-
-- New section **"How much data does criterion 2 need?"** (after the
-  positive control): the measured curve for both series, the explicit
-  answer, the mechanism (`mde = sqrt(ann) * [SR* + z_target / sqrt(T-1)]`),
-  and what the measurement does not establish.
-- **A paragraph from the previous session was corrected.** It concluded from
-  the control alone that "the dispersion does not shrink as the sample grows
-  ... so no sample size may suffice at all". The measurement shows the
-  opposite: the dispersion *does* shrink (the walk-forward training window
-  expands, so the later trial Sharpes are more precise), the resolution
-  falls, and criterion 2 becomes confirmable at a plausible effect size. The
-  corrected paragraph keeps the true statement (the thresholds measured on
-  the shipped samples are above 1.5) and drops the unsupported
-  generalization.
-- `SKILL.md` (script and test inventories, a tip, a Test Coverage bullet)
-  and `examples/README.md` (a short note next to the example).
+- `references/validation_methods.md`: new section **"Cost sweeps report the
+  resolution of every point"** (in "Test Resolution (Minimum Detectable
+  Effect)", just before "What the resolution says on the shipped sample"),
+  with the artifact keys, the reproduced console output, the four deliberate
+  properties (magnitude comparison, "below resolution" is not a negative
+  result, no significance test means "unknown", the sweep point *is* the
+  single run) and an explicit statement of what it does **not** establish.
+- `SKILL.md`: the `test_test_resolution.py` inventory entry and a new pitfall
+  bullet ("A swept Sharpe without its resolution is a comparison the sample
+  may not support").
 
 ## What was verified
 
-- **The answer to the open question: yes, there is such a sample size.** On
-  the control's construction the minimum confirmable annualized Sharpe
-  falls below the framework's 2.0 plausibility bound at a few thousand
-  daily bars:
-
-  | Bars | Test observations | Trials | Smallest confirmable annualized Sharpe (no-effect / effect) | SR* (no-effect / effect) | Criterion 2 |
-  | --- | --- | --- | --- | --- | --- |
-  | 500 | 98 | 13 / 4 | 3.8311 / 2.8591 | 1.7356 / 0.7768 | beyond the bound |
-  | 1,000 | 198 | 50 / 53 | 3.1161 / 3.0915 | 1.6491 / 1.7752 | beyond the bound |
-  | 2,500 | 498 | 233 / 189 | 2.3975 / 2.4011 | 1.4403 / 1.4985 | beyond the bound |
-  | 5,000 | 998 | 510 / 434 | 1.9096 / 1.8373 | 1.2560 / 1.2135 | within the bound |
-  | 10,000 | 1,998 | 1,047 / 897 | 1.7136 / 1.6012 | 1.2557 / 1.1584 | within the bound |
-  | 25,000 | 4,998 | 2,641 / 2,210 | 1.3519 / 1.2037 | 1.0618 / 0.9208 | within the bound |
-  | 50,000 | 9,998 | 5,347 / 4,424 | 1.1012 / 1.0100 | 0.8975 / 0.8098 | within the bound |
-
-  The crossing itself: between 4,000 and 4,500 bars on the no-effect series
-  (seed 7) and between 3,000 and 4,000 on the effect series (seed 7); later
-  on the other seeds (5,000-6,000 on seed 2024, 6,000-10,000 on seed 1);
-  **by 10,000 bars every draw measured is inside the bound** (1.52-1.82
-  across three seeds and both series).
-- **The shipped example's stdout is byte-identical.** Captured before and
-  after the change and `diff`ed: no difference (97 lines, same verdict,
-  same resolution block). The example and the shipped CSV were not edited.
-- **The shipped sample's own numbers are reproduced by the new tool**:
-  `--data assets/example_data/sample_ohlcv.csv --sizes 504` reports the
-  minimum confirmable annualized Sharpe **4.1950** -- the number the
-  example prints ("Criterion 2 needs an annualized Sharpe of at least
-  4.1950") -- and the observed Sharpe -0.3581, matching the shipped
-  output.
 - **The whole skill suite**: 18/18 test files pass except the pre-existing
   `test_reporting.py` failures -- `test_cpcv` 29/29, `test_data_loader`
   32/32, `test_examples_coverage` 7/7, `test_execution_warmup` 8/8,
@@ -107,46 +136,65 @@ measurement tool, an executable check and a write-up.
   2/2, `test_inert_param_grid` 27/27, `test_monte_carlo` 20/20,
   `test_no_selection_diagnosis` 34/34, `test_out_of_sample_window` 10/10,
   `test_panel_reference_pinned` 2/2, `test_performance` 33/33,
-  **`test_resolution_vs_sample_size` 4/4 (new)**, `test_run_backtest`
-  104/104, `test_strategy_builder` 33/33, `test_test_resolution` 21/21,
+  `test_resolution_vs_sample_size` 4/4, `test_run_backtest` 104/104,
+  `test_strategy_builder` 33/33, **`test_test_resolution` 28/28 (7 new)**,
   `test_walk_forward` 183/183.
 - `test_reporting.py` fails 9/62 -- **pre-existing and environmental**:
   `matplotlib` is not installed in this container, so the `save_plots=True`
-  tear-sheet tests cannot create their PNGs. The failure names are the same
-  nine as at HEAD.
-- **Lint**: `pyflakes` reports nothing for the two new/changed Python
-  files; `py_compile` is clean. The script's CLI runs, and its `--data` and
-  synthetic paths both work.
+  tear-sheet tests cannot create their PNGs. The nine failure names are the
+  same as at HEAD, and `reporting.py` does not import `run_backtest.py`.
+- **No swept number moved.** The sweep artifact produced by the new code and
+  by the pre-change code (HEAD) differ **only** by the new
+  `sharpe_below_resolution` key; `total_return`, `annualized_return`,
+  `sharpe_ratio`, `max_drawdown` and the whole `test_resolution` block are
+  byte-identical.
+- **The single-run path is untouched.** A single run at HEAD~1 and at HEAD
+  with this change produce byte-identical `metrics.json`, `report.txt` and
+  `data_provenance.json`; `tear_sheet.html` and
+  `tear_sheet_summary.json` differ only in their `load_timestamp`, and the
+  console only in the output directory path.
+- **The shipped `test_output/` snapshot is untouched** (`git status` shows no
+  change under `skills/quantitative-backtesting/test_output/`). Its
+  `metrics.json` numbers are the same ones the sweep point at commission
+  0.0002 reports (`total_return -0.20722505075442543`,
+  `sharpe_ratio -0.7783070851704361`), which is the same-run invariant in
+  artifact form.
+- **Lint**: `pyflakes` reports nothing for the two changed Python files;
+  `py_compile` is clean. The CLI's `--commissions`, `--slippages`,
+  `--impact-coefficients`, `--borrow-costs`, `--funding-costs`, `--fill-rates`
+  and `--latencies` sweeps all run and print the new columns.
 - The skill's frontmatter was not modified, so `skills/marketplace.yaml`
-  needs no regeneration.
+  needs no regeneration (it mirrors the frontmatter only).
 
 ## What remains unresolved
 
-- **The floor is a property of the sample, and the shipped sample's floor is
-  just above the bound.** On the shipped 504-bar sample the deflation
-  benchmark `SR*` is **2.0138**: the 21 configurations its search evaluated
-  were, on their own, expected to produce an annualized Sharpe of 2.01 from
-  luck alone, so on that sample criterion 2 cannot confirm a plausible
-  effect at *any* sample size. More data of the same kind helps (the
-  1/sqrt(T) term), but the floor only falls if the *dispersion* of the trial
-  Sharpes falls. Whether a real strategy's floor is below 2.0 is a
-  property of that strategy on that data -- the framework already reports
-  the number (`expected_max_sharpe`), and the new tool measures the whole
-  curve on a real history with `--data`.
-- **The resolution-vs-sample-size curve was measured on the out-of-sample
-  path only** (the worked example's configuration). The walk-forward and
-  CPCV paths build their own `summary["test_resolution"]` on a different
-  return series (the concatenated out-of-sample windows of the search
-  itself, not the held-out window), so their curves are not measured yet.
+- **The other CLIs' cost sweeps still have no resolution.** `walk_forward.py`
+  has its own per-path cost sweeps -- `walk_forward_commission_sweep.json`,
+  `cpcv_commission_sweep.json`, `monte_carlo_commission_sweep.json`,
+  `out_of_sample_commission_sweep.json`,
+  `parameter_optimization_commission_sweep.json` and the matching impact
+  sweeps -- and each prints a Sharpe (or an OOS Sharpe) and a Deflated Sharpe
+  per sweep point **without** the resolution beside it. They are outside the
+  scope of the task just completed (which was explicitly `run_backtest.py`'s
+  sweeps), and their row builders (`_walk_forward_sweep_coefficient`,
+  `_cpcv_sweep_coefficient`, `_monte_carlo_sweep_coefficient`,
+  `_oos_sweep_coefficient`) return different row shapes per path. This is the
+  natural next task.
+- **The floor (SR\*) is still not a first-class reported number.** The
+  resolution block reports the *minimum detectable effect* but not the floor
+  it converges onto (`expected_max_sharpe`), even though the floor is the
+  number that decides whether a criterion can *ever* confirm a plausible
+  effect: on the shipped 504-bar sample the floor is 2.0138, just above the
+  2.0 bound, so no amount of data would let criterion 2 confirm a plausible
+  effect there.
+- **The resolution ladders of the walk-forward and CPCV paths are still
+  unmeasured.** The resolution-vs-sample-size curve measured earlier covers
+  the out-of-sample path only.
 - **The framework's own key `test_n_periods`** (in `test_performance`, and
-  mirrored into summaries) still counts observations while claiming to
-  count periods. The example no longer misreports it; the framework's CLI
-  and artifacts still do. Renaming or adding an alias changes the artifact
-  shape, so it is deliberately left for a session that can also rebuild the
-  parity harnesses.
-- **The cost-sweep paths** (`run_backtest.py --commission/--slippage`) report
-  a Sharpe per sweep point without a resolution, so a swept Sharpe carries
-  the same defect the `run_backtest.py` path had.
+  mirrored into summaries) still counts observations while claiming to count
+  periods. Renaming it (or adding an alias) changes the artifact shape, so it
+  is deliberately left for a session that can also rebuild the parity
+  harnesses.
 - **`matplotlib` is missing from this environment**, so the reporting tests
   and the tear-sheet figure paths cannot be exercised here.
 - A `RuntimeWarning: invalid value encountered in divide` from numpy's
@@ -157,52 +205,46 @@ measurement tool, an executable check and a write-up.
 
 ## Approaches that failed and why
 
-- **The hypothesis the task was built on failed.** The previous session's
-  note predicted that "the number of trials grows with the sample, so the
-  expected maximum grows with it" and that the resolution would therefore
-  *not* fall below ~1.8-2.4 at any sample size. The measurement refutes it:
-  the trial count does grow, but only through `sqrt(2 ln N)` (3.5 at
-  N = 400, 4.1 at N = 4,400), and the *dispersion* the deflation benchmark
-  is estimated from falls as the sample grows, because the walk-forward
-  training window expands and the later trial Sharpes are estimated on
-  more data. The first draft of the analysis, which assumed a fixed-length
-  training window, reproduced the wrong prediction.
-- **A sample-size ladder built on the control's own regime structure alone
-  would have been circular.** The control's regime length equals the
-  walk-forward training window on purpose, so the trial Sharpes stay
-  comparable. The ladder therefore measures **both** the effect series and
-  the no-effect series, and the no-effect series is the null calibration
-  (with the drift removed the trial Sharpes are pure estimation noise,
-  which is what `SR*` is meant to measure). The regime length turns out not
-  to matter for the no-effect series at all (the drift is removed, so the
-  series is the same random walk), and the measured curve is insensitive to
-  it (identical to four decimal places at 63, 126 and 252 bars).
-- **The curve is not monotone, and a single seed would have misreported
-  it.** On seed 1 the effect series *rises* from 2.11 (3,000 bars) to 2.16
-  (5,000 bars) before falling. The tool therefore reports the crossing per
-  size over the draws measured at that size, and the test pins the crossing
-  on three seeds rather than on one.
-- **Reading the resolution off the walk-forward path's own aggregate was
-  not attempted.** Its return series (the concatenated out-of-sample windows
-  of the search) is not the held-out window, so its resolution is a
-  different statistic; it is left for the next session rather than mixed
-  into this one.
+- **The first draft of the flag compared the Sharpe *signed* against the
+  threshold.** That flagged a Sharpe of -3.0 (which the sample resolves
+  perfectly well) and passed a Sharpe of +0.3 (which it cannot), i.e. it was
+  backwards for every negative point. Caught by the new unit test
+  `test_the_below_resolution_flag_compares_magnitudes`, which now pins the
+  magnitude semantics explicitly. The comparison is `|Sharpe| < minSR`.
+- **The first draft of the shared note did not carry the single-run path's
+  wording.** The task asked for the same wording ("measurement, not a
+  correction"); the note began with the scope instead. Caught by
+  `test_the_sweep_table_prints_the_threshold_next_to_the_sharpe`, which
+  asserts the phrase is present. The note now starts with "Test resolution
+  (measurement, not a correction): With ...".
+- **The flag's input was taken from the block's `observed_annualized_sharpe`
+  rather than from the sweep point's own `sharpe_ratio`.** They are the same
+  number in the real path, but the function then could not be exercised with
+  a synthetic block (a unit test with a different Sharpe had no effect on the
+  answer), which is how the signed-comparison bug stayed invisible. The
+  reported Sharpe is now the primary input and the block's observed value is
+  only the fallback.
+- **Seven copies of the sweep table were not kept.** The seven sweeps each
+  had their own 4-line print block; adding two columns to each would have
+  left seven places to forget the flag. They were replaced by one
+  `_print_sweep_table` helper, which is the only way the columns and the note
+  can stay consistent across sweeps.
 
 ## What was deliberately not done
 
-- **No threshold, bound, criterion or verdict was changed.** The measurement
-  reads `minimum_detectable_sharpe` / `minimum_detectable_alpha` /
-  `_build_test_resolution`; it does not re-derive or re-tune them.
-  `PLAUSIBLE_MAX_ANNUALIZED_SHARPE` (2.0) and
-  `PLAUSIBLE_MAX_ANNUALIZED_ALPHA` (0.10) stay where they are, and the
+- **No threshold, bound, criterion or verdict was changed.** The sweep path
+  *reads* `minimum_detectable_sharpe` and the plausibility bounds through the
+  framework's own `_build_test_resolution`; nothing is re-derived or
+  re-tuned. `PLAUSIBLE_MAX_ANNUALIZED_SHARPE` (2.0) and
+  `PLAUSIBLE_MAX_ANNUALIZED_ALPHA` (0.10) stay where they are, and the new
   test asserts it.
-- **The positive control's fixture and verdicts were not touched.**
-  `scripts/generate_positive_control_data.py` is unchanged; the ladder
-  regenerates the same construction at other lengths. The control's own
-  verdicts (`SUPPORTED` / `NOT SUPPORTED`) and numbers are unchanged --
-  `test_falsifiable_hypothesis_example.py` is still 14/14.
-- **The shipped sample's output was not moved** (byte-identical, verified).
-- **The fixture was not committed as data.** It is regenerated
-  deterministically from the generator inside the test, so the repository
-  does not carry ~1 MB of synthetic price rows.
-- No MCP, plugin, marketplace or agent-tooling surface was touched.
+- **The shared `_build_test_resolution` block was not modified.** Adding a key
+  to it would have changed the `metrics.json` of every single-run artifact
+  and of the walk-forward / CPCV / out-of-sample summaries. The flag is
+  therefore a sibling key of the sweep point, not a key of the block.
+- **The other CLIs' cost sweeps were not touched** (see "What remains
+  unresolved"): they are a separate surface with different row shapes, and
+  the assigned task scoped this one to `run_backtest.py`.
+- **The single-run path was not touched**, so the shipped `test_output/`
+  snapshot and every single-run artifact stay byte-identical.
+- **No MCP, plugin, marketplace or agent-tooling surface was touched.**

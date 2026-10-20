@@ -8,9 +8,10 @@ with various strategies, data sources, and configuration options.
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional, Tuple
 
 import pandas as pd
 
@@ -859,7 +860,173 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
         "sharpe_ratio": metrics.get("sharpe_ratio", 0.0),
         "max_drawdown": metrics.get("max_drawdown", 0.0),
         "test_resolution": metrics.get("test_resolution"),
+        # Whether this sweep point's Sharpe is below the resolution of this
+        # sweep point's own statistics: a statement about the sample, not a
+        # verdict on the point. None when the run carried no significance test
+        # (or the resolution could not be computed) -- "unknown", never "no".
+        "sharpe_below_resolution": _sweep_sharpe_below_resolution(
+            metrics.get("sharpe_ratio"), metrics.get("test_resolution")
+        ),
     }
+
+
+def _sweep_sharpe_below_resolution(
+    sharpe_ratio: Any,
+    resolution: Any,
+) -> Optional[bool]:
+    """Whether a sweep point's Sharpe is below the sample's resolution.
+
+    The minimum detectable effect is the smallest *magnitude* the point's own
+    significance test could have confirmed, so the comparison is on
+    magnitudes: a Sharpe of -3.0 against a resolution of 2.5 is
+    distinguishable from zero, a Sharpe of +0.3 against the same resolution is
+    not. A signed comparison would flag the first and pass the second, which
+    is backwards.
+
+    ``sharpe_ratio`` is the Sharpe the sweep point reports -- the number the
+    reader compares against the threshold. When it is missing, the observed
+    effect the block carries is used instead.
+
+    Returns True/False when the resolution is known, and None when it is not
+    (no significance test was run, or the resolution could not be computed):
+    "unknown", never a silent "no".
+    """
+    if not isinstance(resolution, dict):
+        return None
+    if resolution.get("sharpe_status") != "resolvable":
+        return None
+    threshold = resolution.get("min_detectable_sharpe")
+    if sharpe_ratio is None:
+        sharpe_ratio = resolution.get("observed_annualized_sharpe")
+    if threshold is None or sharpe_ratio is None:
+        return None
+    try:
+        threshold = float(threshold)
+        observed = float(sharpe_ratio)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(threshold) and math.isfinite(observed)):
+        return None
+    return abs(observed) < threshold
+
+
+def _sweep_resolution_fields(result: Dict[str, Any]) -> Tuple[str, str]:
+    """The console fields for one sweep point's test resolution.
+
+    Returns ``(min_detectable_sharpe_text, note_text)``:
+
+    * the smallest annualized Sharpe this sweep point's own significance test
+      could confirm, or ``"n/a"`` when the run carried no significance test;
+    * ``"below resolution"`` when the point's Sharpe cannot be distinguished
+      from zero at that resolution, ``"resolvable"`` when it can, and
+      ``"n/a"`` when there is no resolution to judge it against.
+
+    Both fields are reporting only: no swept number, cost or verdict is
+    changed by them.
+    """
+    resolution = result.get("test_resolution")
+    below = _sweep_sharpe_below_resolution(result.get("sharpe_ratio"), resolution)
+    if below is None:
+        return "n/a", "n/a"
+    try:
+        threshold_text = f"{float(resolution.get('min_detectable_sharpe')):.4f}"
+    except (TypeError, ValueError):
+        return "n/a", "n/a"
+    return threshold_text, ("below resolution" if below else "resolvable")
+
+
+def _print_sweep_resolution_note(results: List[Dict[str, Any]]) -> None:
+    """Explain the resolution columns of a sweep table.
+
+    The wording is the single-run path's: the block is a measurement, not a
+    correction. Nothing printed here changes a swept number or a verdict.
+    """
+    resolutions = [
+        r.get("test_resolution") for r in results
+        if isinstance(r.get("test_resolution"), dict)
+    ]
+    if not resolutions:
+        return
+
+    # A significance test was run when the block carries its scope.
+    tested = [
+        res for res in resolutions
+        if not (
+            res.get("n_test_observations") is None
+            and res.get("n_parameter_trials") is None
+            and res.get("n_benchmarks") is None
+        )
+    ]
+    if not tested:
+        print(
+            "\nTest resolution (measurement, not a correction): no significance "
+            "test was run on these sweep points, so there is no resolution to "
+            "report and the minSR column is n/a."
+        )
+        return
+
+    scope_text = ""
+    scopes = {
+        (res.get("n_test_observations"), res.get("n_parameter_trials"))
+        for res in tested
+    }
+    if len(scopes) == 1:
+        n_obs, trials = next(iter(scopes))
+        parts = []
+        if n_obs is not None:
+            parts.append(f"{n_obs} test observation(s)")
+        if trials is not None:
+            parts.append(f"{trials} parameter trial(s)")
+        if parts:
+            scope_text = "With " + ", ".join(parts) + ", "
+
+    print(
+        "\nTest resolution (measurement, not a correction): "
+        f"{scope_text}minSR is the smallest annualized Sharpe each sweep "
+        "point's own significance test could confirm at this sample size. A "
+        "point marked 'below resolution' has a Sharpe the sample cannot "
+        "distinguish from zero: its outcome measures the sample, not the "
+        "strategy."
+    )
+
+    bounds = {res.get("plausible_max_annualized_sharpe") for res in tested}
+    beyond = any(res.get("sharpe_beyond_plausible_bound") for res in tested)
+    if beyond and len(bounds) == 1:
+        bound = next(iter(bounds))
+        try:
+            bound_text = f"{float(bound):.2f}"
+        except (TypeError, ValueError):
+            bound_text = None
+        if bound_text is not None:
+            print(
+                "The threshold exceeds the stated plausibility bound (annualized "
+                f"Sharpe <= {bound_text}), so at this sample size it measures "
+                "the sample, not the strategy."
+            )
+
+
+def _print_sweep_table(
+    title: str,
+    first_header: str,
+    leads: List[str],
+    results: List[Dict[str, Any]],
+) -> None:
+    """Print a cost-sweep table with each point's resolution beside its Sharpe.
+
+    ``leads`` holds the already-formatted leading column of each sweep point
+    (the swept coefficient), in the same order as ``results``.
+    """
+    print(f"\n{title}:")
+    print(f"{first_header}\treturn\tann_ret\tSharpe\tmaxDD\tminSR\tnote")
+    for lead, result in zip(leads, results):
+        min_sharpe, note = _sweep_resolution_fields(result)
+        print(
+            f"{lead}\t{result['total_return']:.4f}\t"
+            f"{result['annualized_return']:.4f}\t"
+            f"{result['sharpe_ratio']:.4f}\t"
+            f"{result['max_drawdown']:.4f}\t{min_sharpe}\t{note}"
+        )
+    _print_sweep_resolution_note(results)
 
 
 def main():
@@ -991,10 +1158,12 @@ def main():
         print(f"Sweep results saved to: {sweep_path}")
         # Print degradation table
         if sweep_results:
-            print("\nImpact coefficient sweep:")
-            print("coeff\treturn\tann_ret\tSharpe\tmaxDD")
-            for r in sweep_results:
-                print(f"{r['impact_coefficient']:.4f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
+            _print_sweep_table(
+                "Impact coefficient sweep",
+                "coeff",
+                [f"{r['impact_coefficient']:.4f}" for r in sweep_results],
+                sweep_results,
+            )
         return 0
 
     if getattr(args, "borrow_costs", None) is not None and len(args.borrow_costs) > 1:
@@ -1011,10 +1180,12 @@ def main():
             json.dump({"borrow_costs": args.borrow_costs, "results": sweep_results}, f, indent=2)
         print(f"Sweep results saved to: {sweep_path}")
         if sweep_results:
-            print("\nBorrow cost sweep:")
-            print("cost\treturn\tann_ret\tSharpe\tmaxDD")
-            for r in sweep_results:
-                print(f"{r['borrow_cost']:.4f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
+            _print_sweep_table(
+                "Borrow cost sweep",
+                "cost",
+                [f"{r['borrow_cost']:.4f}" for r in sweep_results],
+                sweep_results,
+            )
         return 0
 
     if getattr(args, "funding_costs", None) is not None and len(args.funding_costs) > 1:
@@ -1031,10 +1202,12 @@ def main():
             json.dump({"funding_costs": args.funding_costs, "results": sweep_results}, f, indent=2)
         print(f"Sweep results saved to: {sweep_path}")
         if sweep_results:
-            print("\nFunding cost sweep:")
-            print("cost\treturn\tann_ret\tSharpe\tmaxDD")
-            for r in sweep_results:
-                print(f"{r['funding_cost']:.4f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
+            _print_sweep_table(
+                "Funding cost sweep",
+                "cost",
+                [f"{r['funding_cost']:.4f}" for r in sweep_results],
+                sweep_results,
+            )
         return 0
 
     if getattr(args, "commissions", None) is not None and len(args.commissions) > 1:
@@ -1051,10 +1224,12 @@ def main():
             json.dump({"commissions": args.commissions, "results": sweep_results}, f, indent=2)
         print(f"Sweep results saved to: {sweep_path}")
         if sweep_results:
-            print("\nCommission sweep:")
-            print("comm\treturn\tann_ret\tSharpe\tmaxDD")
-            for r in sweep_results:
-                print(f"{r['commission']:.6f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
+            _print_sweep_table(
+                "Commission sweep",
+                "comm",
+                [f"{r['commission']:.6f}" for r in sweep_results],
+                sweep_results,
+            )
         return 0
 
     if getattr(args, "slippages", None) is not None and len(args.slippages) > 1:
@@ -1071,10 +1246,12 @@ def main():
             json.dump({"slippages": args.slippages, "results": sweep_results}, f, indent=2)
         print(f"Sweep results saved to: {sweep_path}")
         if sweep_results:
-            print("\nSlippage sweep:")
-            print("slip\treturn\tann_ret\tSharpe\tmaxDD")
-            for r in sweep_results:
-                print(f"{r['slippage']:.6f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
+            _print_sweep_table(
+                "Slippage sweep",
+                "slip",
+                [f"{r['slippage']:.6f}" for r in sweep_results],
+                sweep_results,
+            )
         return 0
 
     if getattr(args, "fill_rates", None) is not None and len(args.fill_rates) > 1:
@@ -1091,10 +1268,12 @@ def main():
             json.dump({"fill_rates": args.fill_rates, "results": sweep_results}, f, indent=2)
         print(f"Sweep results saved to: {sweep_path}")
         if sweep_results:
-            print("\nFill rate sweep:")
-            print("rate\treturn\tann_ret\tSharpe\tmaxDD")
-            for r in sweep_results:
-                print(f"{r['fill_rate']:.4f}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
+            _print_sweep_table(
+                "Fill rate sweep",
+                "rate",
+                [f"{r['fill_rate']:.4f}" for r in sweep_results],
+                sweep_results,
+            )
         return 0
 
     if getattr(args, "latencies", None) is not None and len(args.latencies) > 1:
@@ -1111,10 +1290,12 @@ def main():
             json.dump({"latencies": args.latencies, "results": sweep_results}, f, indent=2)
         print(f"Sweep results saved to: {sweep_path}")
         if sweep_results:
-            print("\nLatency sweep:")
-            print("lat\treturn\tann_ret\tSharpe\tmaxDD")
-            for r in sweep_results:
-                print(f"{r['latency']}\t{r['total_return']:.4f}\t{r['annualized_return']:.4f}\t{r['sharpe_ratio']:.4f}\t{r['max_drawdown']:.4f}")
+            _print_sweep_table(
+                "Latency sweep",
+                "lat",
+                [f"{r['latency']}" for r in sweep_results],
+                sweep_results,
+            )
         return 0
 
     print("Running backtest...")

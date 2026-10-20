@@ -227,7 +227,13 @@ Risk Metrics:
   stated plausibility bound is flagged, the block mutates nothing and carries
   no verdict, a run without a significance test says so, the CLI prints it
   next to the Deflated Sharpe line, and the aggregate Deflated Alpha Ratio
-  the alpha resolution belongs to is printed next to that resolution. See
+  the alpha resolution belongs to is printed next to that resolution. The
+  **cost sweeps** are covered too: every sweep point carries the resolution of
+  its own statistics, the sweep table prints that threshold beside the swept
+  Sharpe and flags the points the sample cannot distinguish from zero (on
+  magnitudes, so a large negative Sharpe is not flagged), a sweep without a
+  significance test says so, and a sweep point reports exactly what the single
+  run at the same coefficient reports. See
   `references/validation_methods.md`, "Test Resolution (Minimum Detectable
   Effect)".
 - `test_falsifiable_hypothesis_example.py` - Unit tests for the worked
@@ -504,6 +510,26 @@ Risk Metrics:
   benchmark it coincides with the aggregate's, so what the aggregate line
   adds is the ratio itself, the expected maximum alpha and the benchmark
   count.) Guarded by `tests/test_test_resolution.py`.
+
+- **A swept Sharpe without its resolution is a comparison the sample may not
+  support.** A cost sweep reports one Sharpe per cost level, and the table
+  invites the comparison "Sharpe 1.42 at 2 bps" against "Sharpe 0.31 at 8
+  bps" — a difference the sample may not be able to see. Every sweep point of
+  `run_backtest.py`'s cost sweeps (`--commissions`, `--slippages`,
+  `--impact-coefficients`, `--borrow-costs`, `--funding-costs`, `--fill-rates`,
+  `--latencies`) therefore carries the same `test_resolution` block, built by
+  the framework's own `_build_test_resolution` from the statistics
+  `calculate_metrics` produced for that coefficient, and the sweep table
+  prints that threshold beside the Sharpe (`minSR`) and marks the points the
+  sample cannot distinguish from zero (`below resolution`). The comparison is
+  on magnitudes — `|Sharpe| < minSR` — so a large *negative* Sharpe is not
+  flagged; and "below resolution" is a statement about the sample, not a
+  negative result about the strategy. A sweep run without `--n-trials` carries
+  no significance test, so the columns are `n/a` and the console says so. The
+  sweep point and the single run at the same coefficient report the same
+  numbers and the same block. Guarded by `tests/test_test_resolution.py`;
+  the section is `references/validation_methods.md`, "Cost sweeps report the
+  resolution of every point".
 
 - **The significance machinery is only half-demonstrated by a sample it
   cannot resolve.** On the shipped samples every significance threshold sits

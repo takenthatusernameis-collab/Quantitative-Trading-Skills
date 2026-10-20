@@ -25,7 +25,10 @@ console. These tests pin:
     test can be read as a statement about the sample rather than about the
     strategy;
   * the block is reporting-only: it mutates nothing and changes no number;
-  * a run without a significance test says so instead of staying silent.
+  * a run without a significance test says so instead of staying silent;
+  * the cost sweeps (`run_backtest.py --commissions` and its siblings) report
+    the resolution of every sweep point beside its Sharpe, flag the points
+    the sample cannot distinguish from zero, and move no swept number.
 
 Run with: python3 skills/quantitative-backtesting/tests/test_test_resolution.py
 No third-party test framework is required; uses only the standard library.
@@ -57,6 +60,10 @@ from walk_forward import (  # noqa: E402
     minimum_detectable_sharpe,
     out_of_sample_validation,
     walk_forward_analysis,
+)
+from run_backtest import (  # noqa: E402
+    _sweep_resolution_fields,
+    _sweep_sharpe_below_resolution,
 )
 
 SAMPLE_DATA = SKILLS_DIR / "assets" / "example_data" / "sample_ohlcv.csv"
@@ -655,6 +662,201 @@ def test_the_out_of_sample_cli_prints_the_test_resolution():
 
 
 # ---------------------------------------------------------------------------
+# The cost sweeps (run_backtest.py --commissions and its siblings)
+# ---------------------------------------------------------------------------
+
+def _run_sweep_cli(extra_args, tmp):
+    """Run a cost sweep through the primary backtest CLI."""
+    result = subprocess.run(
+        [
+            sys.executable, str(RUN_BACKTEST_CLI),
+            "--data", str(SAMPLE_DATA),
+            "--strategy", "sma_crossover",
+            "--params", json.dumps({"fast_period": 10, "slow_period": 30}),
+            "--output", tmp,
+        ] + list(extra_args),
+        capture_output=True,
+        text=True,
+        timeout=1800,
+    )
+    assert result.returncode == 0, (
+        f"run_backtest CLI exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-3000:]}\nstderr:\n{result.stderr[-3000:]}"
+    )
+    return result
+
+
+def _commission_sweep_payload(tmp):
+    return json.loads(
+        (Path(tmp) / "run_backtest_commission_sweep.json").read_text()
+    )
+
+
+def test_every_sweep_point_carries_its_own_test_resolution():
+    """Each sweep point reports the resolution of its own statistics.
+
+    A sweep reports one Sharpe per cost level. Without the resolution of the
+    statistics that produced it, "Sharpe 1.42 at 2 bps" and "Sharpe 0.31 at
+    8 bps" read as a difference the sample may not be able to see.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        _run_sweep_cli(
+            ["--n-trials", "12", "--commissions", "0.0002", "0.002", "0.004"], tmp
+        )
+        payload = _commission_sweep_payload(tmp)
+
+    points = payload["results"]
+    assert len(points) == 3
+    for point in points:
+        resolution = point.get("test_resolution")
+        assert isinstance(resolution, dict), "sweep point has no test_resolution"
+        assert resolution["sharpe_status"] == "resolvable"
+        assert resolution["min_detectable_sharpe"] is not None
+        assert resolution["min_detectable_sharpe"] > 0
+        assert resolution["n_parameter_trials"] == 12
+        # The block describes *this* point's statistics: the observed effect is
+        # the point's own reported Sharpe, not another coefficient's.
+        assert resolution["observed_annualized_sharpe"] == point["sharpe_ratio"]
+        assert resolution["n_test_observations"] is not None
+
+
+def test_the_sweep_point_reports_exactly_what_the_single_run_reports():
+    """The sweep point and the single run are the same run.
+
+    The resolution is a measurement attached to a run, so it must not change
+    the run: the sweep point for a coefficient and the single run at that
+    coefficient report the same numbers and the same resolution.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        sweep_dir = Path(tmp) / "sweep"
+        single_dir = Path(tmp) / "single"
+        _run_sweep_cli(
+            ["--n-trials", "12", "--commissions", "0.0002", "0.002"], str(sweep_dir)
+        )
+        _run_sweep_cli(
+            ["--n-trials", "12", "--commission", "0.002"], str(single_dir)
+        )
+        payload = _commission_sweep_payload(sweep_dir)
+        metrics = json.loads((single_dir / "metrics.json").read_text())
+
+    point = [p for p in payload["results"] if p["commission"] == 0.002][0]
+    for key in ("total_return", "annualized_return", "sharpe_ratio", "max_drawdown"):
+        assert point[key] == metrics[key], (
+            f"{key} moved between the sweep point and the single run"
+        )
+    assert point["test_resolution"] == metrics["test_resolution"]
+
+
+def test_the_sweep_table_prints_the_threshold_next_to_the_sharpe():
+    """The swept Sharpe is read next to what the sample could resolve."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result = _run_sweep_cli(
+            ["--n-trials", "12", "--commissions", "0.0002", "0.002"], tmp
+        )
+        payload = _commission_sweep_payload(tmp)
+
+    stdout = result.stdout
+    assert "minSR" in stdout, "the sweep table has no resolution column"
+    assert "Test resolution (measurement, not a correction)" in stdout
+    for point in payload["results"]:
+        threshold = point["test_resolution"]["min_detectable_sharpe"]
+        # The console and the artifact carry the same numbers.
+        assert f"{threshold:.4f}" in stdout
+        assert f"{point['sharpe_ratio']:.4f}" in stdout
+
+
+def test_the_below_resolution_flag_compares_magnitudes():
+    """A Sharpe the sample cannot resolve is flagged, not called a failure.
+
+    The minimum detectable effect is the smallest *magnitude* the test could
+    confirm, so a large negative Sharpe is resolvable and a small positive
+    one is not. A signed comparison would get both backwards.
+    """
+    resolution = {
+        "sharpe_status": "resolvable",
+        "min_detectable_sharpe": 2.0,
+        "observed_annualized_sharpe": 0.31,
+    }
+    assert _sweep_sharpe_below_resolution(0.31, resolution) is True
+    assert _sweep_sharpe_below_resolution(2.5, resolution) is False
+    assert _sweep_sharpe_below_resolution(-3.0, resolution) is False
+    # No resolution means "unknown", never "not below".
+    assert _sweep_sharpe_below_resolution(0.31, None) is None
+    assert _sweep_sharpe_below_resolution(
+        0.31, {"sharpe_status": "not_applicable"}
+    ) is None
+
+    fields = _sweep_resolution_fields({
+        "sharpe_ratio": 0.31,
+        "test_resolution": resolution,
+    })
+    assert fields == ("2.0000", "below resolution")
+    above = _sweep_resolution_fields({
+        "sharpe_ratio": 2.5,
+        "test_resolution": resolution,
+    })
+    assert above == ("2.0000", "resolvable")
+
+
+def test_the_sweep_flags_the_points_the_sample_cannot_distinguish_from_zero():
+    """Every swept point carries the flag, and the console shows it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result = _run_sweep_cli(
+            ["--n-trials", "12", "--commissions", "0.0002", "0.002"], tmp
+        )
+        payload = _commission_sweep_payload(tmp)
+
+    for point in payload["results"]:
+        threshold = point["test_resolution"]["min_detectable_sharpe"]
+        expected = abs(point["sharpe_ratio"]) < threshold
+        assert point["sharpe_below_resolution"] is expected
+    assert "below resolution" in result.stdout
+    assert "cannot distinguish from zero" in result.stdout
+    assert "measures the sample, not the strategy" in result.stdout
+
+
+def test_a_sweep_without_a_significance_test_says_so():
+    """No significance test means no resolution, and the sweep says so."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result = _run_sweep_cli(["--commissions", "0.0002", "0.002"], tmp)
+        payload = _commission_sweep_payload(tmp)
+
+    assert "no significance test was run" in result.stdout
+    assert "n/a" in result.stdout
+    for point in payload["results"]:
+        resolution = point["test_resolution"]
+        assert resolution["sharpe_status"] == "not_applicable"
+        assert resolution["min_detectable_sharpe"] is None
+        # Unknown, not "not below".
+        assert point["sharpe_below_resolution"] is None
+
+
+def test_the_sweep_point_resolution_carries_no_verdict():
+    """The sweep's block reports; it never decides."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _run_sweep_cli(
+            ["--n-trials", "12", "--commissions", "0.0002", "0.002"], tmp
+        )
+        payload = _commission_sweep_payload(tmp)
+
+    for point in payload["results"]:
+        resolution = point["test_resolution"]
+        for forbidden in ("verdict", "supported", "pass", "failed", "rejected"):
+            assert forbidden not in resolution, (
+                f"the sweep's test-resolution block must not carry a verdict "
+                f"key: {forbidden}"
+            )
+        assert resolution["target_p_value"] == 0.10
+        # The plausibility bounds are the framework's, and unmoved.
+        assert resolution["plausible_max_annualized_sharpe"] == (
+            PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+        )
+        assert resolution["plausible_max_annualized_alpha"] == (
+            PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+        )
+
+
+# ---------------------------------------------------------------------------
 # Test registry
 # ---------------------------------------------------------------------------
 
@@ -701,6 +903,20 @@ TEST_REGISTRY = [
      test_the_walk_forward_cli_prints_the_test_resolution),
     ("test_the_out_of_sample_cli_prints_the_test_resolution",
      test_the_out_of_sample_cli_prints_the_test_resolution),
+    ("test_every_sweep_point_carries_its_own_test_resolution",
+     test_every_sweep_point_carries_its_own_test_resolution),
+    ("test_the_sweep_point_reports_exactly_what_the_single_run_reports",
+     test_the_sweep_point_reports_exactly_what_the_single_run_reports),
+    ("test_the_sweep_table_prints_the_threshold_next_to_the_sharpe",
+     test_the_sweep_table_prints_the_threshold_next_to_the_sharpe),
+    ("test_the_below_resolution_flag_compares_magnitudes",
+     test_the_below_resolution_flag_compares_magnitudes),
+    ("test_the_sweep_flags_the_points_the_sample_cannot_distinguish_from_zero",
+     test_the_sweep_flags_the_points_the_sample_cannot_distinguish_from_zero),
+    ("test_a_sweep_without_a_significance_test_says_so",
+     test_a_sweep_without_a_significance_test_says_so),
+    ("test_the_sweep_point_resolution_carries_no_verdict",
+     test_the_sweep_point_resolution_carries_no_verdict),
 ]
 
 

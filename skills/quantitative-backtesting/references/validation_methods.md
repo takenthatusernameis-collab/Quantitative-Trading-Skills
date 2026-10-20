@@ -1406,6 +1406,78 @@ a correction"*. Three properties are deliberate:
   message states that no significance test was run -- silence would be
   indistinguishable from a run that forgot to report the resolution.
 
+### Cost sweeps report the resolution of every point
+
+A cost sweep is a table of Sharpes: one per cost level. Read on its own, the
+table invites exactly the comparison the sample cannot support -- "Sharpe 1.42
+at 2 bps" against "Sharpe 0.31 at 8 bps" reads as a difference, and a sweep
+whose best point is below the sample's resolution is indistinguishable from a
+sweep whose best point is a real difference. The resolution is therefore
+reported for every sweep point, next to the Sharpe it belongs to.
+
+`run_backtest.py`'s cost sweeps (`--commissions`, `--slippages`,
+`--impact-coefficients`, `--borrow-costs`, `--funding-costs`, `--fill-rates`,
+`--latencies`) each produce one `results` entry per swept value in their
+artifact (`run_backtest_commission_sweep.json` and its siblings). Every entry
+now carries:
+
+| Key | Meaning |
+| --- | --- |
+| `test_resolution` | the same block the single-run path attaches, built by `walk_forward._build_test_resolution` from the statistics `calculate_metrics` produced **for that coefficient**, on the very return series the Deflated Sharpe Ratio was computed on |
+| `sharpe_below_resolution` | `true` when that point's Sharpe is below the resolution of its own statistics, `false` when it is not, `null` when there is no resolution to judge it against |
+
+The console table gains two columns:
+
+```
+Commission sweep:
+comm	return	ann_ret	Sharpe	maxDD	minSR	note
+0.000200	-0.2072	-0.1098	-0.7783	-0.2886	2.5064	below resolution
+0.002000	-0.2366	-0.1265	-0.8976	-0.3039	2.5076	below resolution
+0.004000	-0.2681	-0.1448	-1.0286	-0.3272	2.5090	below resolution
+
+Test resolution (measurement, not a correction): With 503 test observation(s),
+12 parameter trial(s), minSR is the smallest annualized Sharpe each sweep
+point's own significance test could confirm at this sample size. A point
+marked 'below resolution' has a Sharpe the sample cannot distinguish from
+zero: its outcome measures the sample, not the strategy.
+The threshold exceeds the stated plausibility bound (annualized Sharpe <=
+2.00), so at this sample size it measures the sample, not the strategy.
+```
+
+(Reproduce with
+`python3 scripts/run_backtest.py --data assets/example_data/sample_ohlcv.csv
+--strategy sma_crossover --params '{"fast_period": 10, "slow_period": 30}'
+--n-trials 12 --commissions 0.0002 0.002 0.004 --output <dir>`.)
+
+Four properties are deliberate:
+
+- **The flag compares magnitudes.** The minimum detectable effect is the
+  smallest *magnitude* the test could have confirmed, so the comparison is
+  `|Sharpe| < minSR`. A signed comparison would flag a Sharpe of -3.0 against a
+  resolution of 2.5 and pass a Sharpe of +0.3 against the same resolution,
+  which is backwards.
+- **"below resolution" is not a negative result.** It says the sample cannot
+  separate this point from zero. It does not say the point is a loss, that the
+  cost assumption is wrong, or that the strategy has no edge; the swept
+  numbers themselves are unchanged and the flag sits beside them.
+- **No significance test means "unknown", not "fine".** A sweep run without
+  `--n-trials` carries no Deflated Sharpe statistic, so `minSR` and `note` are
+  `n/a`, `sharpe_below_resolution` is `null`, and the console says that no
+  significance test was run rather than staying silent.
+- **The sweep point is the single run.** The resolution is a measurement
+  attached to a run, so it may not change the run: the sweep point for a
+  coefficient and the single run at that coefficient report the same returns,
+  Sharpe, drawdown and the same block
+  (`test_the_sweep_point_reports_exactly_what_the_single_run_reports`). The
+  single-run artifacts are unchanged by this.
+
+What this does **not** establish: the resolution says nothing about whether a
+cost assumption is realistic, and it does not turn a sweep into a test of the
+strategy -- each point is still the same strategy on the same history, so the
+sweep inherits the same look-ahead, survivorship and cost-model limitations the
+single run has. It only states what the sample could have resolved at the
+swept coefficient.
+
 ### What the resolution says on the shipped sample
 
 The same measurement on the shipped 504-bar sample, with `--deflate`:
