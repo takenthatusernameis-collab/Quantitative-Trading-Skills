@@ -1,0 +1,70 @@
+{
+  "convention": {
+    "description": "Pinned panel book-pricing reference for the quantitative-backtesting skill. Generated deterministically from the committed multi-asset fixture so the panel/book/impact/capacity numbers are auditable and regression-guarded.",
+    "data_source": "assets/example_data/sample_panel_ohlcv.csv",
+    "symbols": [
+      "ASSET_0",
+      "ASSET_1",
+      "ASSET_2",
+      "ASSET_3",
+      "ASSET_4"
+    ],
+    "n_assets": 5,
+    "panel_pricing": "book",
+    "impact_aggregation": "panel",
+    "impact_coefficient": 1.0,
+    "commission": 0.0002,
+    "slippage": 0.0001,
+    "initial_capital": 100000,
+    "adv_window": 20,
+    "train_months": 8,
+    "test_months": 3,
+    "step_months": 3,
+    "fill_rate": 1.0
+  },
+  "book_diagnostic": {
+    "n_periods": 63,
+    "n_periods_with_book": 44,
+    "n_assets": 5,
+    "gross_book": 0.4190476190476192,
+    "net_exposure": 0.13968253968253963,
+    "framework_net_exposure": 0.13968253968253963,
+    "gross_turnover": 0.19365079365079368,
+    "framework_turnover": 0.0031746031746031746,
+    "charged_turnover": 0.19365079365079368,
+    "cost_basis": "book",
+    "return_gap_bps": 8.105682726302279,
+    "return_gap_total": 0.05016713650408,
+    "book_total_return": -0.05793650682539819,
+    "framework_total_return": -0.007769370321318192,
+    "framework_total_return_after_costs": -0.06162584914393343,
+    "reported_total_return": -0.06162584914393343,
+    "impact_charged_bps": 0.040397496917217245,
+    "impact_traded_only_bps": 0.07122455214390769,
+    "impact_dilution_bps": -0.03082705522669045,
+    "impact_panel_dilution_bps": -0.03082705522669045,
+    "impact_gross_book_return_bps": -9.319861723818654,
+    "impact_dilution_fraction_of_gross_return": null,
+    "impact_participation_ratio": 0.5523809523809524
+  },
+  "summary": {
+    "panel_pricing": "book",
+    "total_oos_return": -0.06162584914393343,
+    "capacity": 1965396.0975084782,
+    "oos_min_capacity": 1144020.6011762265
+  },
+  "pinned": {
+    "impact_charged_bps": 0.040397496917217245,
+    "impact_traded_only_bps": 0.07122455214390769,
+    "impact_dilution_bps": -0.03082705522669045,
+    "impact_participation_ratio": 0.5523809523809524,
+    "capacity": 1965396.0975084782,
+    "oos_min_capacity": 1144020.6011762265,
+    "gross_book": 0.4190476190476192,
+    "gross_turnover": 0.19365079365079368,
+    "return_gap_bps": 8.105682726302279,
+    "book_total_return": -0.05793650682539819
+  },
+  "rel_tol": 1e-09,
+  "abs_tol": 1e-12
+}
