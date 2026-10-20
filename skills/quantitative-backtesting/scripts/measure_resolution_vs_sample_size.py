@@ -85,7 +85,7 @@ import json
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -544,6 +544,51 @@ def measure_ladder(
     return rows
 
 
+def measure_test_frac_sweep(
+    bars: int,
+    seeds: Sequence[int],
+    test_fracs: Sequence[float],
+    val_frac: float = VAL_FRAC,
+    inject_effect: bool = True,
+    paths: Sequence[str] = (PATH_OUT_OF_SAMPLE,),
+) -> List[Dict[str, Any]]:
+    """Measure the out-of-sample path's resolution across held-out fractions.
+
+    At a fixed sample size, sweeps ``test_frac`` with
+    ``train_frac = 0.8 - test_frac`` and ``val_frac = 0.2``, so the three
+    fractions always sum to 1.0 (the shipped default is 0.6 / 0.2 / 0.2 at
+    ``test_frac = 0.2``). Each row is one ``measure_synthetic`` run annotated
+    with the split actually used.
+
+    The trade-off measured: a larger held-out window gives the test more
+    observations (better resolution) but shortens the training window, which
+    raises the deflation floor SR* because the trial Sharpes it is estimated
+    from are then estimated on less data. Where the two effects cross is the
+    answer to "how much of the data should be held out?".
+    """
+    rows: List[Dict[str, Any]] = []
+    for test_frac in test_fracs:
+        train_frac = 0.8 - test_frac
+        if train_frac <= 0:
+            raise ValueError(
+                f"test_frac {test_frac} leaves no training data "
+                f"(train_frac = {train_frac}); keep test_frac below 0.8"
+            )
+        for seed in seeds:
+            rows.append(
+                measure_synthetic(
+                    bars,
+                    seed,
+                    inject_effect,
+                    paths=paths,
+                    train_frac=train_frac,
+                    val_frac=val_frac,
+                    test_frac=test_frac,
+                )
+            )
+    return rows
+
+
 def _path_block(row: Dict[str, Any], path: str) -> Dict[str, Any]:
     """One path's measurement block in one ladder row.
 
@@ -707,6 +752,81 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
     }
 
 
+def _summarize_test_frac_sweep(
+    rows: Sequence[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], Optional[float], Optional[float]]:
+    """Summarise a test-fraction sweep, bucketed by held-out fraction.
+
+    Returns ``(per_fraction_stats, first_all_within_bound, first_any_within_bound)``.
+    Each stat block reports the framework's own resolution numbers for that
+    split: the minimum confirmable Sharpe, the deflation floor SR*, the test
+    observations available, and whether the 2.0 plausibility bound is crossed.
+    """
+    buckets: Dict[float, Dict[str, Any]] = {}
+    for row in rows:
+        test_frac = row.get("test_frac")
+        block = _path_block(row, PATH_OUT_OF_SAMPLE)
+        bucket = buckets.setdefault(
+            test_frac,
+            {
+                "values": [],
+                "floors": [],
+                "measured": 0,
+                "within": 0,
+                "n_test_observations": None,
+            },
+        )
+        bucket["measured"] += 1
+        floor = block.get("expected_max_sharpe")
+        if floor is not None:
+            bucket["floors"].append(floor)
+        value = block.get("min_detectable_sharpe")
+        if value is None:
+            continue
+        if bucket["n_test_observations"] is None:
+            bucket["n_test_observations"] = block.get("n_test_observations")
+        bucket["values"].append(value)
+        if value <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE:
+            bucket["within"] += 1
+
+    stats: List[Dict[str, Any]] = []
+    for test_frac in sorted(buckets):
+        bucket = buckets[test_frac]
+        values = bucket["values"]
+        stats.append(
+            {
+                "test_frac": test_frac,
+                "train_frac": 0.8 - test_frac,
+                "val_frac": VAL_FRAC,
+                "n_test_observations": bucket["n_test_observations"],
+                "min_min_detectable_sharpe": min(values) if values else None,
+                "max_min_detectable_sharpe": max(values) if values else None,
+                "max_expected_max_sharpe": (
+                    max(bucket["floors"]) if bucket["floors"] else None
+                ),
+                "draws_measured": bucket["measured"],
+                "draws_resolved": len(values),
+                "draws_within_bound": bucket["within"],
+                "all_within_bound": bool(values)
+                and len(values) == bucket["measured"]
+                and all(v <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE for v in values),
+                "any_within_bound": any(
+                    v <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE for v in values
+                ),
+            }
+        )
+
+    first_all = next(
+        (entry["test_frac"] for entry in stats if entry["all_within_bound"]),
+        None,
+    )
+    first_any = next(
+        (entry["test_frac"] for entry in stats if entry["any_within_bound"]),
+        None,
+    )
+    return stats, first_all, first_any
+
+
 def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """Summarise a ladder: the crossing of the plausibility bound and the floor.
 
@@ -812,6 +932,52 @@ def print_path_summary(summary: Dict[str, Any], path: str) -> None:
         )
 
 
+def print_test_frac_sweep(
+    stats: Sequence[Dict[str, Any]],
+    first_all: Optional[float],
+    first_any: Optional[float],
+) -> None:
+    """Print the held-out-fraction sweep as a table.
+
+    One row per held-out fraction: the framework's own minimum confirmable
+    Sharpe and deflation floor SR* for that split, plus the plausibility-bound
+    crossing.
+    """
+    header = (
+        f"{'test_frac':>9} {'train_frac':>10} {'val_frac':>8} "
+        f"{'T':>6} {'min SR':>8} {'SR*':>8} {'all within':>10} {'any within':>10}"
+    )
+    print(header)
+    print("-" * len(header))
+    for entry in stats:
+        print(
+            f"{entry['test_frac']:>9.1%} "
+            f"{entry['train_frac']:>10.1%} "
+            f"{entry['val_frac']:>8.1%} "
+            f"{str(entry['n_test_observations'] or '-'):>6} "
+            f"{_fmt(entry['min_min_detectable_sharpe']):>8} "
+            f"{_fmt(entry['max_expected_max_sharpe']):>8} "
+            f"{str(entry['all_within_bound']):>10} "
+            f"{str(entry['any_within_bound']):>10}"
+        )
+    print()
+    if first_all is not None:
+        print(
+            "  first held-out fraction at which EVERY draw is within the "
+            f"plausibility bound: {first_all:.1%}"
+        )
+    else:
+        print(
+            "  no measured held-out fraction brought every draw within the "
+            "plausibility bound"
+        )
+    if first_any is not None:
+        print(
+            "  first held-out fraction at which SOME draw is within the bound: "
+            f"{first_any:.1%}"
+        )
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -845,6 +1011,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             + ". The out-of-sample path is always measured (it is where the "
             "pre-registered criteria are evaluated), but only the paths "
             "listed here are reported."
+        ),
+    )
+    parser.add_argument(
+        "--test-fracs",
+        default=None,
+        help=(
+            "Comma-separated held-out fractions to sweep at a fixed sample "
+            "size (val_frac stays 0.2, train_frac = 0.8 - test_frac, so the "
+            "three always sum to 1). When set, the ladder is replaced by this "
+            "sweep at the single --size given; the shipped 0.6/0.2/0.2 split "
+            "remains the default and is unchanged."
         ),
     )
     parser.add_argument(
@@ -893,6 +1070,48 @@ def main(argv: Optional[List[str]] = None) -> int:
         sizes, seeds=seeds, inject_effect=inject, data_path=args.data, paths=paths
     )
     summary = summarize(rows)
+
+    if args.test_fracs:
+        test_fracs = [float(t) for t in args.test_fracs.split(",") if t.strip()]
+        bad = [t for t in test_fracs if t <= 0.0 or t >= 0.8]
+        if bad:
+            parser.error(
+                "test_frac must be in (0, 0.8) so train_frac = 0.8 - test_frac "
+                f"stays positive: {bad}"
+            )
+        if len(sizes) != 1:
+            parser.error("--test-fracs requires exactly one --size (fixed sample size)")
+        size = sizes[0]
+        rows = measure_test_frac_sweep(
+            size,
+            seeds=seeds,
+            test_fracs=test_fracs,
+            inject_effect=inject,
+        )
+        stats, first_all, first_any = _summarize_test_frac_sweep(rows)
+
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "rows": rows,
+                        "sweep": {
+                            "stats": stats,
+                            "first_all_within_bound": first_all,
+                            "first_any_within_bound": first_any,
+                        },
+                    },
+                    indent=2,
+                    default=str,
+                )
+            )
+            return 0
+        print(
+            f"PATH: {PATH_OUT_OF_SAMPLE} -- held-out fraction sweep at {size} bars "
+            f"(val_frac = {VAL_FRAC:.1%}, train_frac = 0.8 - test_frac)"
+        )
+        print_test_frac_sweep(stats, first_all, first_any)
+        return 0
 
     if args.json:
         print(json.dumps({"rows": rows, "summary": summary}, indent=2, default=str))

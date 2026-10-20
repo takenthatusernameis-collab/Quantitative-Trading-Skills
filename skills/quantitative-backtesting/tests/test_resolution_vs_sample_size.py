@@ -67,7 +67,11 @@ from measure_resolution_vs_sample_size import (  # noqa: E402
     CPCV_TEST_SIZE,
     INITIAL_CAPITAL,
     PARAM_GRID,
+    SELECTION_CRITERION,
     SLIPPAGE,
+    TEST_FRAC,
+    TRAIN_FRAC,
+    VAL_FRAC,
     WF_STEP_MONTHS,
     WF_TEST_MONTHS,
     WF_TRAIN_MONTHS,
@@ -79,6 +83,7 @@ from walk_forward import (  # noqa: E402
     PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
     _make_strategy_factory,
     cpcv_analysis,
+    out_of_sample_validation,
     walk_forward_analysis,
 )
 
@@ -137,6 +142,45 @@ def _control_fixture(bars, seed, inject_effect):
         load_data(str(paths["benchmark"])),
     ]
     return tmpdir, data, benchmarks
+
+
+def _framework_oos_block(bars, seed, inject_effect, train_frac, val_frac, test_frac):
+    """Run the framework's own out_of_sample_validation on the same fixture.
+
+    Returns the summary and the test returns, so callers can read the
+    framework's own ``summary["test_resolution"]]`` block and compare it with
+    what the measurement reports for the identical split.
+    """
+    tmpdir, data, benchmarks = _control_fixture(bars, seed, inject_effect)
+    try:
+        strategy_factory = _make_strategy_factory("sma_crossover")
+        results = out_of_sample_validation(
+            data=data,
+            strategy_factory=strategy_factory,
+            param_grid=PARAM_GRID,
+            train_frac=train_frac,
+            val_frac=val_frac,
+            test_frac=test_frac,
+            validation_method="walk_forward",
+            walk_forward_train_months=WF_TRAIN_MONTHS,
+            walk_forward_test_months=WF_TEST_MONTHS,
+            walk_forward_step_months=WF_STEP_MONTHS,
+            initial_capital=INITIAL_CAPITAL,
+            commission=COMMISSION,
+            slippage=SLIPPAGE,
+            benchmark=benchmarks,
+            total_return_benchmark=False,
+            benchmark_commission=COMMISSION,
+            benchmark_slippage=SLIPPAGE,
+            benchmark_expense_ratio=0.0,
+            benchmark_cost_is_periodic=False,
+            apply_deflation=True,
+            selection_criterion=SELECTION_CRITERION,
+            validate_pit=True,
+        )
+    finally:
+        tmpdir.cleanup()
+    return results.get("summary", {}), results.get("test_performance") or {}
 
 
 def test_the_resolution_improves_with_the_sample_size():
@@ -472,6 +516,84 @@ def test_the_measurement_moves_no_threshold_and_no_verdict_on_any_path():
             assert "verdict" not in key
 
 
+# ---------------------------------------------------------------------------
+# Held-out fraction sweep: the out-of-sample path's resolution as a function
+# of test_frac (train_frac = 0.8 - test_frac, val_frac = 0.2).
+# ---------------------------------------------------------------------------
+
+
+def test_test_frac_sweep_keeps_val_frac_and_sums_to_one():
+    """The sweep holds val_frac at 0.2 and train_frac = 0.8 - test_frac."""
+    for test_frac in (0.1, 0.2, 0.3):
+        measured = measure_synthetic(
+            SMALL_SAMPLE_BARS, 7, False,
+            train_frac=0.8 - test_frac, val_frac=0.2, test_frac=test_frac,
+            paths=(OUT_OF_SAMPLE,),
+        )
+        assert measured["val_frac"] == 0.2
+        assert measured["test_frac"] == test_frac
+        assert measured["train_frac"] == 0.8 - test_frac
+        assert abs(
+            measured["train_frac"]
+            + measured["val_frac"]
+            + measured["test_frac"]
+            - 1.0
+        ) < 1e-9
+
+
+def test_test_frac_sweep_each_split_matches_the_framework_own_block():
+    """Each swept split's numbers equal the framework's own test_resolution block."""
+    for test_frac in (0.1, 0.2, 0.3):
+        train_frac = 0.8 - test_frac
+        measured = measure_synthetic(
+            SMALL_SAMPLE_BARS, 7, False,
+            train_frac=train_frac, val_frac=0.2, test_frac=test_frac,
+            paths=(OUT_OF_SAMPLE,),
+        )
+        block = measured["paths"][OUT_OF_SAMPLE]
+        framework_summary, _ = _framework_oos_block(
+            SMALL_SAMPLE_BARS, 7, False, train_frac, 0.2, test_frac
+        )
+        framework = framework_summary.get("test_resolution")
+        assert isinstance(framework, dict), (
+            "the framework did not attach a test_resolution block to its summary"
+        )
+        assert block["min_detectable_sharpe"] == framework["min_detectable_sharpe"], (
+            f"test_frac={test_frac}: the measured minimum confirmable Sharpe "
+            "must equal the framework's own block"
+        )
+        assert block["n_test_observations"] == framework["n_test_observations"]
+        assert block["expected_max_sharpe"] == (
+            framework_summary["deflated_sharpe"]["expected_max_sharpe"]
+        ), (
+            f"test_frac={test_frac}: the measured deflation floor (SR*) must "
+            "equal the framework's own Deflated Sharpe block"
+        )
+
+
+def test_shipped_default_split_is_unchanged():
+    """The shipped 0.6 / 0.2 / 0.2 split remains the default and its numbers match."""
+    assert TRAIN_FRAC == 0.6
+    assert VAL_FRAC == 0.2
+    assert TEST_FRAC == 0.2
+
+    measured = measure_synthetic(SMALL_SAMPLE_BARS, 7, False, paths=(OUT_OF_SAMPLE,))
+    assert measured["train_frac"] == 0.6
+    assert measured["val_frac"] == 0.2
+    assert measured["test_frac"] == 0.2
+
+    block = measured["paths"][OUT_OF_SAMPLE]
+    framework_summary, _ = _framework_oos_block(
+        SMALL_SAMPLE_BARS, 7, False, 0.6, 0.2, 0.2
+    )
+    framework = framework_summary["test_resolution"]
+    assert block["min_detectable_sharpe"] == framework["min_detectable_sharpe"]
+    assert block["n_test_observations"] == framework["n_test_observations"]
+    assert block["expected_max_sharpe"] == (
+        framework_summary["deflated_sharpe"]["expected_max_sharpe"]
+    )
+
+
 def main() -> int:
     tests = TEST_REGISTRY
     failures = 0
@@ -497,6 +619,9 @@ TEST_REGISTRY = [
     ("test_the_paths_cross_the_plausibility_bound_at_different_sample_sizes", test_the_paths_cross_the_plausibility_bound_at_different_sample_sizes),
     ("test_the_floor_is_reported_for_every_path_and_every_rung", test_the_floor_is_reported_for_every_path_and_every_rung),
     ("test_the_measurement_moves_no_threshold_and_no_verdict_on_any_path", test_the_measurement_moves_no_threshold_and_no_verdict_on_any_path),
+    ("test_test_frac_sweep_keeps_val_frac_and_sums_to_one", test_test_frac_sweep_keeps_val_frac_and_sums_to_one),
+    ("test_test_frac_sweep_each_split_matches_the_framework_own_block", test_test_frac_sweep_each_split_matches_the_framework_own_block),
+    ("test_shipped_default_split_is_unchanged", test_shipped_default_split_is_unchanged),
 ]
 
 
