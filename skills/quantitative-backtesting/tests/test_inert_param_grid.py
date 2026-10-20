@@ -38,10 +38,15 @@ import pandas as pd
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
+import walk_forward as walk_forward_module  # noqa: E402
 from walk_forward import (  # noqa: E402
+    _INERT_GRID_MAX_COMBINATIONS,
     _inert_grid_report,
     _inert_param_grid_keys,
+    _inert_param_grid_keys_measured,
     _make_strategy_factory,
+    _same_behaviour,
+    _strategy_behaviour_fingerprint,
     cpcv_analysis,
     out_of_sample_validation,
     parameter_optimization,
@@ -57,6 +62,147 @@ MEANINGFUL_GRID = {"fast_period": [5, 10], "slow_period": [20, 30]}
 INERT_GRID = {"lookback": [5, 20]}
 # One live key and one inert key: only the inert one may be reported.
 MIXED_GRID = {"fast_period": [5, 10], "lookback": [5, 20]}
+
+# The verdicts the shipped strategies produced before the check learned to
+# look at every combination of the other grid values. None of the shipped
+# strategies has parameters that interact, so the exhaustive check must
+# reproduce these verdicts exactly: the fix may only remove *false*
+# accusations, never add or drop a finding.
+SHIPPED_INERT_VERDICTS = [
+    ("sma_crossover", {"fast_period": [5, 10], "slow_period": [20, 30]}, []),
+    ("sma_crossover", {"lookback": [5, 20]}, ["lookback"]),
+    ("sma_crossover", {"fast_period": [5, 10], "lookback": [5, 20]}, ["lookback"]),
+    ("sma_crossover", {"fast_period": [5, 10, 20], "slow_period": [20, 30, 40]}, []),
+    (
+        "sma_crossover",
+        {"fast_period": [5, 10], "slow_period": [20, 30], "lookback": [5, 20]},
+        ["lookback"],
+    ),
+    (
+        "sma_crossover",
+        {"rsi_period": [5, 14, 30], "lookback": [10, 20]},
+        ["rsi_period", "lookback"],
+    ),
+    ("ema_crossover", {"fast_period": [5, 10], "slow_period": [20, 30]}, []),
+    ("ema_crossover", {"lookback": [5, 20]}, ["lookback"]),
+    ("macd", {"fast_period": [5, 10], "slow_period": [20, 30]}, []),
+    (
+        "macd",
+        {"macd_fast": [5, 12], "macd_slow": [20, 26], "macd_signal": [5, 9]},
+        ["macd_fast", "macd_slow", "macd_signal"],
+    ),
+    (
+        "bollinger_bands",
+        {"fast_period": [5, 10], "slow_period": [20, 30]},
+        ["fast_period", "slow_period"],
+    ),
+    ("bollinger_bands", {"period": [5, 20], "std_dev": [1.5, 2.0, 2.5]}, []),
+    (
+        "rsi_mean_reversion",
+        {"rsi_period": [5, 14, 30], "lookback": [10, 20]},
+        ["rsi_period", "lookback"],
+    ),
+    ("donchian_breakout", {"lookback": [5, 20]}, ["lookback"]),
+    (
+        "donchian_breakout",
+        {"fast_period": [5, 10], "lookback": [5, 20]},
+        ["fast_period", "lookback"],
+    ),
+]
+
+
+class InteractingStrategy:
+    """A strategy whose ``threshold`` is read only in the ``mode == "b"`` branch.
+
+    ``mode`` "a" is long when the close is above its 3-bar mean; ``mode``
+    "b" is long when the close is more than ``threshold`` above that mean.
+    A parameter that is read only inside a branch is the ordinary way a
+    parameter's effect becomes conditional on another parameter, and it is
+    the case the first-value comparison could not see.
+    """
+
+    def __init__(self, params):
+        self.parameters = dict(params)
+
+    def generate_signals(self, data):
+        mode = self.parameters.get("mode", "a")
+        threshold = self.parameters.get("threshold", 0.05)
+        close = data["close"]
+        mid = close.rolling(3).mean()
+        if mode == "a":
+            signal = (close > mid).astype(float)
+        else:
+            signal = ((close - mid) > threshold).astype(float)
+        return pd.Series(signal.to_numpy(), index=close.index)
+
+
+def _interacting_factory(params):
+    return InteractingStrategy(params)
+
+
+def _interacting_data() -> pd.DataFrame:
+    """Six bars whose last one sits 0.0833 above its 3-bar mean.
+
+    The gap is what makes the interaction observable: it is above the 0.05
+    threshold, so the two modes agree there, and below the 0.1 one, so they
+    differ there.
+    """
+    closes = [10.0, 10.0, 10.0, 10.0, 10.0, 10.125]
+    index = pd.date_range("2020-01-01", periods=len(closes), freq="B")
+    return pd.DataFrame(
+        {
+            "open": closes,
+            "high": closes,
+            "low": closes,
+            "close": closes,
+            "volume": [1_000_000] * len(closes),
+        },
+        index=index,
+    )
+
+
+# The grid whose two keys interact: `threshold` is only read when
+# `mode == "b"`, so each key looks inert when the other is held at its
+# first value.
+INTERACTING_GRID = {"mode": ["a", "b"], "threshold": [0.05, 0.1]}
+
+
+def _first_value_inert_keys(strategy_factory, param_grid, data) -> list:
+    """The rule the check used before it looked at every combination.
+
+    Each key is compared with the other grid keys held at their first
+    value, so a key whose effect appears only in combination with a
+    non-first value of another key is accused of being inert. Kept here as
+    the evidence that the demonstration below is a real defect and not a
+    hypothetical one.
+    """
+    inert = []
+    for key, values in (param_grid or {}).items():
+        if not isinstance(values, (list, tuple)) or len(values) < 2:
+            continue
+        fingerprints = []
+        for value in values:
+            params = {}
+            for other_key, other_values in (param_grid or {}).items():
+                if other_key == key:
+                    continue
+                if isinstance(other_values, (list, tuple)) and len(other_values) > 0:
+                    params[other_key] = other_values[0]
+            params[key] = value
+            try:
+                strategy = strategy_factory(params)
+            except Exception:
+                fingerprints.append(None)
+                continue
+            fingerprints.append(_strategy_behaviour_fingerprint(strategy, data))
+        if not fingerprints:
+            continue
+        reference = fingerprints[0]
+        if reference is None:
+            continue
+        if all(_same_behaviour(reference, other) for other in fingerprints[1:]):
+            inert.append(key)
+    return inert
 
 
 def _load_sample() -> pd.DataFrame:
@@ -144,6 +290,194 @@ def test_inert_grid_report_agrees_with_the_key_detector():
     for grid in (INERT_GRID, MEANINGFUL_GRID, MIXED_GRID):
         report = _inert_grid_report(factory, grid, data)
         assert report["inert_grid_params"] == _inert_param_grid_keys(factory, grid, data)
+
+
+# ---------------------------------------------------------------------------
+# The combination defect: a parameter that matters only in combination
+# ---------------------------------------------------------------------------
+
+def test_the_interacting_grid_really_interacts():
+    """The demonstration rests on a behavioural fact, not on a guess."""
+    data = _interacting_data()
+
+    def signals(params):
+        strategy = _interacting_factory(params)
+        return np.asarray(strategy.generate_signals(data), dtype=float)
+
+    # The two modes agree at the first threshold ...
+    assert np.array_equal(
+        signals({"mode": "a", "threshold": 0.05}),
+        signals({"mode": "b", "threshold": 0.05}),
+    )
+    # ... and differ at the second one, so `mode` is live.
+    assert not np.array_equal(
+        signals({"mode": "a", "threshold": 0.1}),
+        signals({"mode": "b", "threshold": 0.1}),
+    )
+    # The two thresholds agree in mode "a" ...
+    assert np.array_equal(
+        signals({"mode": "a", "threshold": 0.05}),
+        signals({"mode": "a", "threshold": 0.1}),
+    )
+    # ... and differ in mode "b", so `threshold` is live.
+    assert not np.array_equal(
+        signals({"mode": "b", "threshold": 0.05}),
+        signals({"mode": "b", "threshold": 0.1}),
+    )
+
+
+def test_the_first_value_rule_would_have_accused_both_keys():
+    """The defect the fix removes: a false accusation, twice over.
+
+    Comparing each key with the other one held at its first value finds no
+    difference in either direction, so the old rule accused two live
+    parameters of being inert.
+    """
+    data = _interacting_data()
+    assert _first_value_inert_keys(
+        _interacting_factory, INTERACTING_GRID, data
+    ) == ["mode", "threshold"]
+
+
+def test_a_key_that_matters_only_in_combination_is_not_accused():
+    """Neither key is accused: each is live in a combination of the other."""
+    data = _interacting_data()
+
+    assert _inert_param_grid_keys(
+        _interacting_factory, INTERACTING_GRID, data
+    ) == []
+    report = _inert_grid_report(_interacting_factory, INTERACTING_GRID, data)
+    assert report["inert_grid_params"] == []
+    assert report["message"] is None
+
+
+def test_a_key_that_is_inert_in_every_combination_is_still_accused():
+    """The exhaustive check does not exonerate a genuinely inert key.
+
+    ``lookback`` is ignored by the strategy in every mode, so it is inert
+    in every combination of ``mode``'s values -- not only in the first one.
+    """
+    data = _interacting_data()
+    grid = {"mode": ["a", "b"], "lookback": [5, 20]}
+
+    keys = _inert_param_grid_keys(_interacting_factory, grid, data)
+    assert "lookback" in keys
+    # `mode` is inert too: the ignored `lookback` cannot change whether
+    # the two modes agree, so they agree in every combination.
+    assert "mode" in keys
+
+
+def test_the_shipped_strategies_keep_their_inert_verdicts():
+    """The fix removes false accusations; it does not move a true finding.
+
+    None of the shipped strategies has interacting parameters, so every
+    verdict below is the one the first-value rule produced as well.
+    """
+    data = _load_sample()
+    for strategy, grid, expected in SHIPPED_INERT_VERDICTS:
+        factory = _make_strategy_factory(strategy)
+        assert _inert_param_grid_keys(factory, grid, data) == expected, (
+            f"{strategy} {grid}: the verdict changed"
+        )
+        assert _first_value_inert_keys(factory, grid, data) == expected, (
+            f"{strategy} {grid}: the pinned verdict is not the historical one"
+        )
+
+
+# ---------------------------------------------------------------------------
+# The bound on the exhaustive comparison
+# ---------------------------------------------------------------------------
+
+def test_a_bounded_check_says_so_in_the_message():
+    """A truncated check accuses on incomplete evidence and says so."""
+    data = _load_sample()
+    factory = _make_strategy_factory("sma_crossover")
+    # A grid whose combinations of the other keys exceed the bound: every
+    # key of two values multiplies the combination count by two, so enough
+    # keys push it past the bound whatever the bound is.
+    n_keys = 2
+    while 2 ** (n_keys - 1) <= _INERT_GRID_MAX_COMBINATIONS:
+        n_keys += 1
+    grid = {"lookback": [5, 20]}
+    grid.update({f"f{i}": [1, 2] for i in range(n_keys)})
+    measured = _inert_param_grid_keys_measured(factory, grid, data)
+    assert measured["bounded"], "the bound was not reached"
+    assert set(measured["bounded"]) <= set(measured["inert"])
+    # The bound falls back to the first combination, not to a partial
+    # answer over the combinations it did evaluate.
+    assert all(
+        count == 1 for count in measured["combinations_evaluated"].values()
+    )
+
+    report = _inert_grid_report(factory, grid, data)
+    assert report["inert_grid_params"] == measured["inert"]
+    assert "bounded" in report["message"]
+    assert "may have missed an interaction between parameters" in report["message"]
+
+
+def test_an_unbounded_check_does_not_mention_the_bound():
+    """The message is unchanged when the check was exhaustive."""
+    data = _load_sample()
+    factory = _make_strategy_factory("sma_crossover")
+
+    measured = _inert_param_grid_keys_measured(factory, INERT_GRID, data)
+    assert not measured["bounded"]
+    report = _inert_grid_report(factory, INERT_GRID, data)
+    assert "bounded" not in report["message"]
+    # The wording the artifacts and the console already carry.
+    assert report["message"] == (
+        "the parameter grid did not change the strategy's behaviour over the "
+        "full sample for: lookback. The search over those parameters is a "
+        "null experiment, not evidence. The strategy reads: fast_period, "
+        "slow_period."
+    )
+
+
+def test_the_bound_is_a_bound_and_not_a_silent_truncation():
+    """A small bound reproduces the first-value answer, and says so."""
+    data = _interacting_data()
+    # With one combination the check is the first-value rule, which accuses
+    # both keys of the interacting grid.
+    measured = _inert_param_grid_keys_measured(
+        _interacting_factory, INTERACTING_GRID, data, max_combinations=1
+    )
+    assert measured["inert"] == ["mode", "threshold"]
+    assert measured["bounded"] == ["mode", "threshold"]
+    assert measured["max_combinations"] == 1
+
+    report = _inert_grid_report(
+        _interacting_factory, INTERACTING_GRID, data, max_combinations=1
+    )
+    assert report["inert_grid_params"] == ["mode", "threshold"]
+    assert "bounded" in report["message"]
+    # With the bound lifted, the same grid accuses nobody.
+    measured = _inert_param_grid_keys_measured(
+        _interacting_factory, INTERACTING_GRID, data
+    )
+    assert measured["inert"] == []
+    assert measured["bounded"] == []
+
+
+def test_a_bounded_check_that_finds_a_difference_never_accuses():
+    """A difference proves liveness, so a bounded check cannot accuse."""
+    data = _load_sample()
+    factory = _make_strategy_factory("sma_crossover")
+    # `fast_period` changes the signals at the first combination, so no
+    # bound can turn it into an inert key.
+    measured = _inert_param_grid_keys_measured(
+        factory, MEANINGFUL_GRID, data, max_combinations=1
+    )
+    assert "fast_period" not in measured["inert"]
+    assert "fast_period" not in measured["bounded"]
+    assert "slow_period" not in measured["inert"]
+
+
+def test_the_report_keeps_its_keys():
+    """The reporting surface is unchanged: the same three keys."""
+    data = _load_sample()
+    factory = _make_strategy_factory("sma_crossover")
+    report = _inert_grid_report(factory, INERT_GRID, data)
+    assert set(report) == {"inert_grid_params", "strategy_parameters", "message"}
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +579,62 @@ def test_parameter_optimization_is_unchanged_by_the_measurement():
         inert_grid_report={},
     )
     assert without == with_report
+
+
+def test_the_measurement_changes_no_number_in_the_walk_forward_summary():
+    """Only the finding itself differs; every number is the same.
+
+    The measurement is a measurement: with the inert-grid check replaced by
+    one that finds nothing, the summary's returns, Sharpe, capacity and
+    selection numbers must be identical, and the only keys that may differ
+    are the two that carry the finding.
+    """
+    data = _load_sample()
+    factory = _make_strategy_factory("sma_crossover")
+
+    with_finding, _ = _capture_stdout(
+        walk_forward_analysis,
+        data=data,
+        strategy_factory=factory,
+        param_grid=INERT_GRID,
+    )
+    original = walk_forward_module._inert_grid_report
+    walk_forward_module._inert_grid_report = lambda *args, **kwargs: {
+        "inert_grid_params": [],
+        "strategy_parameters": [],
+        "message": None,
+    }
+    try:
+        without_finding, _ = _capture_stdout(
+            walk_forward_analysis,
+            data=data,
+            strategy_factory=factory,
+            param_grid=INERT_GRID,
+        )
+    finally:
+        walk_forward_module._inert_grid_report = original
+
+    measured = with_finding["summary"]
+    blank = without_finding["summary"]
+    assert measured["inert_grid_params"] == ["lookback"]
+    assert blank["inert_grid_params"] == []
+    differing = {
+        key
+        for key in set(measured) | set(blank)
+        if measured.get(key) != blank.get(key)
+    }
+    assert differing <= {"inert_grid_params", "inert_grid_message"}, (
+        f"the measurement moved a number: {sorted(differing)}"
+    )
+    # The selection itself is untouched: the same periods, the same
+    # selections, the same out-of-sample numbers.
+    assert measured["total_oos_return"] == blank["total_oos_return"]
+    assert measured["oos_sharpe"] == blank["oos_sharpe"]
+    assert measured["n_periods"] == blank["n_periods"]
+    assert with_finding["best_params_per_period"] == without_finding["best_params_per_period"]
+    assert len(with_finding["oos_returns"]) == len(without_finding["oos_returns"])
+    for left, right in zip(with_finding["oos_returns"], without_finding["oos_returns"]):
+        assert np.array_equal(np.asarray(left, dtype=float), np.asarray(right, dtype=float))
 
 
 def test_out_of_sample_validation_records_the_inert_grid():
@@ -434,6 +824,26 @@ TEST_REGISTRY = [
      test_inert_grid_report_flags_only_the_inert_key_of_a_mixed_grid),
     ("test_inert_grid_report_agrees_with_the_key_detector",
      test_inert_grid_report_agrees_with_the_key_detector),
+    ("test_the_interacting_grid_really_interacts",
+     test_the_interacting_grid_really_interacts),
+    ("test_the_first_value_rule_would_have_accused_both_keys",
+     test_the_first_value_rule_would_have_accused_both_keys),
+    ("test_a_key_that_matters_only_in_combination_is_not_accused",
+     test_a_key_that_matters_only_in_combination_is_not_accused),
+    ("test_a_key_that_is_inert_in_every_combination_is_still_accused",
+     test_a_key_that_is_inert_in_every_combination_is_still_accused),
+    ("test_the_shipped_strategies_keep_their_inert_verdicts",
+     test_the_shipped_strategies_keep_their_inert_verdicts),
+    ("test_a_bounded_check_says_so_in_the_message",
+     test_a_bounded_check_says_so_in_the_message),
+    ("test_an_unbounded_check_does_not_mention_the_bound",
+     test_an_unbounded_check_does_not_mention_the_bound),
+    ("test_the_bound_is_a_bound_and_not_a_silent_truncation",
+     test_the_bound_is_a_bound_and_not_a_silent_truncation),
+    ("test_a_bounded_check_that_finds_a_difference_never_accuses",
+     test_a_bounded_check_that_finds_a_difference_never_accuses),
+    ("test_the_report_keeps_its_keys",
+     test_the_report_keeps_its_keys),
     ("test_walk_forward_analysis_records_the_inert_grid",
      test_walk_forward_analysis_records_the_inert_grid),
     ("test_walk_forward_analysis_records_no_inert_grid_for_a_live_grid",
@@ -444,6 +854,8 @@ TEST_REGISTRY = [
      test_parameter_optimization_hands_the_inert_grid_to_the_caller),
     ("test_parameter_optimization_is_unchanged_by_the_measurement",
      test_parameter_optimization_is_unchanged_by_the_measurement),
+    ("test_the_measurement_changes_no_number_in_the_walk_forward_summary",
+     test_the_measurement_changes_no_number_in_the_walk_forward_summary),
     ("test_out_of_sample_validation_records_the_inert_grid",
      test_out_of_sample_validation_records_the_inert_grid),
     ("test_optimize_cli_warns_next_to_the_ranking_and_records_it",

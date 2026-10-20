@@ -170,7 +170,12 @@ Risk Metrics:
   `parameter_optimization_inert_grid.json`, the single CLI warning printed
   next to the ranking / selection it qualifies, and the invariant that the
   measurement changes no return, cost, impact, capacity or selection
-  number. See `references/validation_methods.md`, "Inert Parameter Grids".
+  number. The key that matters only in *combination* with another key is
+  never accused (the demonstration strategy whose `threshold` is read only
+  in the `mode == "b"` branch), the shipped strategies keep the verdicts
+  they had before the check became exhaustive, and a bounded check says so
+  in the message. See `references/validation_methods.md`, "Inert Parameter
+  Grids".
 - `test_no_selection_diagnosis.py` - Unit tests for the "no parameter could
   be selected" diagnosis on the standalone paths: the standalone CPCV and
   walk-forward analyses record `summary["no_selection_diagnosis"]` (same
@@ -355,7 +360,7 @@ Risk Metrics:
   `low` for the same state — a categorical verdict on a run that could not
   trade, which reads as a finding about the strategy when it is a fact about
   the window. Guarded by `tests/test_no_selection_diagnosis.py`.
-- A parameter grid whose values do **not** change the strategy's behaviour is a null experiment: the "search" over it cannot change any result, yet the artifact would report it as a selected parameter. **Every** analysis path now detects it (`_inert_param_grid_keys` / `_inert_grid_report`): the out-of-sample path (`summary["inert_grid_params"]`), the walk-forward path and the CPCV path (both in their `summary`), and the parameter-optimization path (recorded in `parameter_optimization_inert_grid.json` next to the ranked list, because the ranking artifact is a plain list). Each CLI prints the warning exactly once, next to the ranking / selection it qualifies, so the console and the artifact say the same thing. It is a **warning, not an error**: the same grid may be non-inert on other data, and the measurement is a screen over the data the path prices, so it never changes a return, cost, impact, capacity or selection number. Check the strategy's parameter names before trusting a selection — `sma_crossover` reads `fast_period` and `slow_period`, so a grid over `lookback` searches nothing.
+- A parameter grid whose values do **not** change the strategy's behaviour is a null experiment: the "search" over it cannot change any result, yet the artifact would report it as a selected parameter. **Every** analysis path now detects it (`_inert_param_grid_keys` / `_inert_grid_report`): the out-of-sample path (`summary["inert_grid_params"]`), the walk-forward path and the CPCV path (both in their `summary`), and the parameter-optimization path (recorded in `parameter_optimization_inert_grid.json` next to the ranked list, because the ranking artifact is a plain list). Each CLI prints the warning exactly once, next to the ranking / selection it qualifies, so the console and the artifact say the same thing. It is a **warning, not an error**: the same grid may be non-inert on other data, and the measurement is a screen over the data the path prices, so it never changes a return, cost, impact, capacity or selection number. The check compares each key across **every** combination of the other grid keys' values, so a parameter that matters only in combination with another parameter (one the strategy reads only inside a branch) is never accused of being inert; the comparison is bounded at 16 combinations per key, and a grid that exceeds the bound falls back to the first combination **and the message says the check was bounded**, so a partial answer is never reported as a complete one. Check the strategy's parameter names before trusting a selection — `sma_crossover` reads `fast_period` and `slow_period`, so a grid over `lookback` searches nothing.
 - The `--selection-criterion` flag (`best_oos_sharpe` default, or `most_stable` / `best_avg_sharpe`) chooses the final parameters from the validation phase. **Only `most_stable` selects on in-sample behavior** (how often each combo won the grid search); `best_oos_sharpe` and `best_avg_sharpe` select on each period/fold's **out-of-sample** test Sharpe (`test_sharpe`), never on `best_sharpe`, which is the in-sample training Sharpe the grid search ranked by. Selecting on `best_sharpe` would pick the combo that overfit its training window — the exact selection bias this framework exists to avoid. Each walk-forward period and CPCV fold now carries a `test_sharpe` key (OOS test Sharpe of the selected combo; `None` on degenerate/empty test windows), and the OOS summary carries `selected_params_avg_test_sharpe` (mean OOS test Sharpe of the selected combo across the periods/folds that chose it).
 - For multi-symbol universes, run `--multi-symbol` to detect survivorship bias (late entries, early exits, insufficient history, data gaps) and review `survivorship_bias.json` before trusting panel results. The flag is accepted by every walk-forward subcommand (`walk-forward`, `optimize`, `cpcv`, `monte-carlo`, `out-of-sample`) as well as `run_backtest`; when set, the survivorship-bias report is persisted as `survivorship_bias.json` in the output directory and threaded into the summary JSON (`survivorship_bias`, `bias_controls_engaged=True`) so panel runs are auditable on the same file name across all CLIs.
 - The CLI writes `data_provenance.json` (source path, checksum, filters, transformations, validation outcome) next to the results so every backtest is reproducible and auditable
@@ -692,13 +697,18 @@ python3 skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_exampl
     parameter grid is reported in `summary["inert_grid_params"]`.
   - `test_inert_param_grid.py` - inert parameter grids on **all four**
     analysis paths: the measurement flags a grid key the strategy does not
-    read (`lookback` for `sma_crossover`) and leaves a live key alone; the
-    walk-forward, CPCV and out-of-sample summaries record the finding, the
-    parameter-optimization path hands it to the caller and the CLI writes it
-    to `parameter_optimization_inert_grid.json`; each CLI prints the warning
+    read (`lookback` for `sma_crossover`) and leaves a live key alone; a
+    key that only matters in *combination* with another key is not accused
+    either (the demonstration strategy reads `threshold` only in the
+    `mode == "b"` branch); the walk-forward, CPCV and out-of-sample
+    summaries record the finding, the parameter-optimization path hands it
+    to the caller and the CLI writes it to
+    `parameter_optimization_inert_grid.json`; each CLI prints the warning
     **exactly once** (the analysis functions never print) next to the
     ranking / selection it qualifies; and the measurement changes no number
-    (the ranking with and without the report is identical).
+    (the ranking with and without the report is identical, and the
+    walk-forward summary differs only in the two keys that carry the
+    finding).
   - `test_no_selection_diagnosis.py` - the "no parameter could be selected"
     diagnosis on the standalone paths: the standalone CPCV and walk-forward
     summaries record `summary["no_selection_diagnosis"]` (the same

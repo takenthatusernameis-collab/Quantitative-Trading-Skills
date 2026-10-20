@@ -576,16 +576,33 @@ the data the path prices. Consistency across the four paths matters more
 than strictness, and the out-of-sample path has always warned rather than
 failed.
 
-The measurement is a **screen, not a proof**. A key is reported as inert
-only when every value of that key produces the same behaviour while the other
-grid keys are held at their first value. A key that changes the behaviour in
-that comparison is never reported, so the warning does not accuse a search of
-being empty when it is not; but a key whose effect appears *only* in
-combination with another grid value can still be reported as inert (a false
-accusation). Read the strategy's parameter names before trusting a selection:
+The measurement is a **screen over the data the path prices**, not a proof
+about the strategy. What it compares is exhaustive over the combinations: a
+key is reported as inert only when its values produce the same behaviour in
+**every** combination of the other grid keys' values. Varying one key while
+holding the others at their first value is not enough: a key whose effect
+appears only in *combination* with a non-first value of another key (a
+parameter the strategy reads only inside a branch, say) would be accused of
+being inert while it is live, and a false accusation is worse than no
+accusation because it teaches the reader to ignore the warning. The check
+therefore compares each key across every combination of the other keys'
+values, and a key that changes the behaviour in *one* of them is never
+reported. Read the strategy's parameter names before trusting a selection:
 the parameter names the strategy reads are reported next to the warning
 (`strategy_parameters`), and they are read from the strategy's own source, so
 they cannot drift away from the implementation.
+
+**The bound.** The exhaustive comparison costs `len(values) x
+product(len(other values))` behavioural fingerprints per key, which is
+unbounded in the size of the grid, so at most
+`_INERT_GRID_MAX_COMBINATIONS` (16) combinations of the other values are
+evaluated per key. A grid that fits in the bound is checked exhaustively; a
+grid that does not falls back to the first combination (the other keys held
+at their first value) **and the finding says so** — the message reports that
+the check was bounded and may have missed an interaction between
+parameters. The bound can only weaken an *inert* verdict: a key that shows
+a behavioural difference is live whatever the bound, because one difference
+is proof of liveness, so a bounded check never accuses a live key.
 
 ### Strict Train/Validation/Test Separation
 

@@ -3248,10 +3248,175 @@ def _same_behaviour(left: Optional[tuple], right: Optional[tuple]) -> bool:
     return bool(np.array_equal(left_signals, right_signals, equal_nan=True))
 
 
+# The maximum number of combinations of the *other* grid values that are
+# evaluated for a single key before the check gives up and falls back to
+# comparing the key's values with the other grid keys held at their first
+# value. The exhaustive comparison costs `len(values) x product(len(other
+# values))` behavioural fingerprints per key, which is unbounded in the size
+# of the grid; the bound keeps the measurement affordable on a large grid.
+#
+# The bound only ever weakens the *inert* verdict: a key that shows a
+# behavioural difference in the evaluated combinations is live whatever the
+# bound, because one difference is proof of liveness. A key that shows no
+# difference may therefore be accused on incomplete evidence, and the
+# finding says so when that happens.
+_INERT_GRID_MAX_COMBINATIONS = 16
+
+
+def _other_grid_keys(
+    param_grid: Dict[str, List[Any]],
+    key: str,
+) -> List[str]:
+    """The grid keys other than `key` whose values can be held fixed.
+
+    A key whose values are not a non-empty list cannot be set at all, so it
+    takes no part in the combinations (the strategy is built without it).
+    """
+    return [
+        other
+        for other, other_values in (param_grid or {}).items()
+        if other != key
+        and isinstance(other_values, (list, tuple))
+        and len(other_values) > 0
+    ]
+
+
+def _grid_combination_count(
+    param_grid: Dict[str, List[Any]],
+    other_keys: List[str],
+) -> int:
+    """Number of combinations the values of `other_keys` span."""
+    count = 1
+    for other in other_keys:
+        count *= len(param_grid[other])
+    return count
+
+
+def _key_behaviour_within_combination(
+    strategy_factory: Callable,
+    key: str,
+    values: List[Any],
+    base_params: Dict[str, Any],
+    data: pd.DataFrame,
+) -> str:
+    """Whether `key` changes the behaviour within one combination.
+
+    The key's values are compared against each other while every other grid
+    key is held at the values in `base_params`.
+
+    Returns:
+        ``"live"`` when the values produce different behaviour (so the key
+        changes something in this combination), ``"inert"`` when they all
+        produce the same behaviour, and ``"unknown"`` when the comparison
+        cannot be made (the strategy could not be built, or the behaviour
+        could not be fingerprinted).
+    """
+    fingerprints = []
+    for value in values:
+        params: Dict[str, Any] = dict(base_params)
+        params[key] = value
+        try:
+            strategy = strategy_factory(params)
+        except Exception:
+            fingerprints.append(None)
+            continue
+        fingerprints.append(_strategy_behaviour_fingerprint(strategy, data))
+    if not fingerprints:
+        return "unknown"
+    reference = fingerprints[0]
+    if reference is None:
+        return "unknown"
+    if all(_same_behaviour(reference, other) for other in fingerprints[1:]):
+        return "inert"
+    return "live"
+
+
+def _inert_param_grid_keys_measured(
+    strategy_factory: Callable,
+    param_grid: Dict[str, List[Any]],
+    data: pd.DataFrame,
+    max_combinations: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Measure the inert grid keys, with the bound that shaped the answer.
+
+    A grid key is inert when its values produce the *same* behaviour in
+    **every** combination of the other grid keys' values. Varying one key
+    while holding the others at their first value is not enough: a key whose
+    effect appears only in combination with a non-first value of another key
+    (a parameter the strategy reads only inside a branch, say) would be
+    accused of being inert while it is live. A false accusation is worse
+    than no accusation, because it teaches the reader to ignore the warning.
+
+    The comparison is exhaustive over the combinations of the other keys'
+    values, with an early exit: the first combination that shows a
+    behavioural difference proves the key is live, so the remaining
+    combinations are skipped and a live key costs the same as a single
+    comparison. The cost of an inert key is `len(values) x product(len(other
+    values))` fingerprints, which is unbounded in the size of the grid, so
+    the number of combinations per key is bounded by `max_combinations`.
+    Beyond the bound the check falls back to the first combination (the
+    other grid keys held at their first value) and the key is reported as
+    ``bounded``, so the finding never reports a partial answer silently.
+
+    Returns:
+        A dict with the inert keys, the keys whose check was bounded (a
+        subset of the inert keys: a bounded check that found a difference
+        proves liveness, so it never accuses), the bound that was applied
+        and the number of combinations that were evaluated per key.
+    """
+    cap = (
+        _INERT_GRID_MAX_COMBINATIONS
+        if max_combinations is None
+        else int(max_combinations)
+    )
+    inert: List[str] = []
+    bounded: List[str] = []
+    combinations_evaluated: Dict[str, int] = {}
+    for key, values in (param_grid or {}).items():
+        if not isinstance(values, (list, tuple)) or len(values) < 2:
+            continue
+        other_keys = _other_grid_keys(param_grid, key)
+        n_combinations = _grid_combination_count(param_grid, other_keys)
+        was_bounded = n_combinations > cap
+        value_lists = [list(param_grid[other]) for other in other_keys]
+        if was_bounded:
+            # The combination space does not fit in the bound, so the check
+            # falls back to the first combination (the other grid keys held
+            # at their first value) and the finding says that it did. The
+            # product is consumed lazily: materialising it would cost
+            # `n_combinations` tuples on a large grid.
+            combos = [next(product(*value_lists), ())]
+        else:
+            combos = list(product(*value_lists))
+        combinations_evaluated[key] = len(combos)
+        verdict = "inert"
+        for combo in combos:
+            base_params = dict(zip(other_keys, combo))
+            outcome = _key_behaviour_within_combination(
+                strategy_factory, key, list(values), base_params, data
+            )
+            if outcome != "inert":
+                # A difference proves the key is live; an inconclusive
+                # comparison proves nothing, so the key is not accused.
+                verdict = outcome
+                break
+        if verdict == "inert":
+            inert.append(key)
+            if was_bounded:
+                bounded.append(key)
+    return {
+        "inert": inert,
+        "bounded": bounded,
+        "max_combinations": cap,
+        "combinations_evaluated": combinations_evaluated,
+    }
+
+
 def _inert_param_grid_keys(
     strategy_factory: Callable,
     param_grid: Dict[str, List[Any]],
     data: pd.DataFrame,
+    max_combinations: Optional[int] = None,
 ) -> List[str]:
     """Grid keys that do not change the strategy's behaviour on `data`.
 
@@ -3259,34 +3424,17 @@ def _inert_param_grid_keys(
     book) is inert: the "search" over it cannot change any result, yet the
     artifact would still report it as a "selected parameter". This is a
     null experiment, so it is reported rather than silently ranked.
+
+    The key is inert only when it changes nothing in *every* combination of
+    the other grid keys' values, so a parameter that matters only in
+    combination with another parameter is never accused. See
+    :func:`_inert_param_grid_keys_measured` for the bound that keeps the
+    exhaustive comparison affordable.
     """
-    inert: List[str] = []
-    for key, values in (param_grid or {}).items():
-        if not isinstance(values, (list, tuple)) or len(values) < 2:
-            continue
-        fingerprints = []
-        for value in values:
-            params: Dict[str, Any] = {}
-            for other_key, other_values in (param_grid or {}).items():
-                if other_key == key:
-                    continue
-                if isinstance(other_values, (list, tuple)) and len(other_values) > 0:
-                    params[other_key] = other_values[0]
-            params[key] = value
-            try:
-                strategy = strategy_factory(params)
-            except Exception:
-                fingerprints.append(None)
-                continue
-            fingerprints.append(_strategy_behaviour_fingerprint(strategy, data))
-        if not fingerprints:
-            continue
-        reference = fingerprints[0]
-        if reference is None:
-            continue
-        if all(_same_behaviour(reference, other) for other in fingerprints[1:]):
-            inert.append(key)
-    return inert
+    measured = _inert_param_grid_keys_measured(
+        strategy_factory, param_grid, data, max_combinations
+    )
+    return measured["inert"]
 
 
 def _strategy_parameter_names(strategy: Any) -> List[str]:
@@ -3325,6 +3473,7 @@ def _inert_grid_report(
     param_grid: Dict[str, List[Any]],
     data: pd.DataFrame,
     scope: str = "over the full sample",
+    max_combinations: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Measure the grid keys that are inert, and describe the finding.
 
@@ -3343,9 +3492,14 @@ def _inert_grid_report(
         reads (a diagnostic hint, possibly empty);
       * ``message``: a human-readable description, or None when nothing is
         inert. The same string is written to the artifact and printed by the
-        CLI, so the two never disagree.
+        CLI, so the two never disagree. When the check of an accused key was
+        bounded, the message says so, so a partial answer is never reported
+        as a complete one.
     """
-    inert = _inert_param_grid_keys(strategy_factory, param_grid, data)
+    measured = _inert_param_grid_keys_measured(
+        strategy_factory, param_grid, data, max_combinations
+    )
+    inert = measured["inert"]
     try:
         accepted = _strategy_parameter_names(
             strategy_factory(_first_grid_params(param_grid))
@@ -3355,10 +3509,22 @@ def _inert_grid_report(
     message = None
     if inert:
         hint = f" The strategy reads: {', '.join(accepted)}." if accepted else ""
+        # A bounded check accuses on incomplete evidence, so the accusation
+        # says so. A bounded check that found a difference proves liveness
+        # and never accuses, so it needs no caveat.
+        caveat = ""
+        if measured["bounded"]:
+            caveat = (
+                f" The check for {', '.join(measured['bounded'])} was bounded: "
+                f"the combinations of the other grid values exceed the bound "
+                f"of {measured['max_combinations']}, so only the first was "
+                f"evaluated (the other grid keys held at their first value) "
+                f"and it may have missed an interaction between parameters."
+            )
         message = (
             f"the parameter grid did not change the strategy's behaviour "
             f"{scope} for: {', '.join(inert)}. The search over those parameters "
-            f"is a null experiment, not evidence.{hint}"
+            f"is a null experiment, not evidence.{caveat}{hint}"
         )
     return {
         "inert_grid_params": inert,
