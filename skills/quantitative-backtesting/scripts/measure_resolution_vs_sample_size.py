@@ -357,6 +357,12 @@ def _measure_path(
 
     deflated_sharpe = summary.get("deflated_sharpe") or {}
     deflated_alpha = summary.get("deflated_alpha") or {}
+    benchmark_metrics = summary.get("benchmark_metrics") or []
+    benchmark_alphas = [
+        float(b["alpha"]) for b in benchmark_metrics
+        if isinstance(b, dict) and "alpha" in b and b.get("alpha") is not None
+    ]
+    benchmark_alpha_std = float(np.std(benchmark_alphas, ddof=1)) if len(benchmark_alphas) >= 2 else None
     return {
         "path": path,
         "min_detectable_sharpe": resolution.get("min_detectable_sharpe"),
@@ -366,9 +372,16 @@ def _measure_path(
         # The deflation benchmark: the floor the resolution converges to.
         "expected_max_sharpe": deflated_sharpe.get("expected_max_sharpe"),
         "expected_max_alpha": deflated_alpha.get("expected_max_alpha"),
+        # Driver of the Deflated Alpha floor: alpha* = std(benchmark alphas,
+        # ddof=1) * sqrt(2 ln N) (in Sharpe units, then annualized). The
+        # strategy's own alpha and the dispersion/count of the benchmark
+        # alphas make the floor reproducible from the report.
+        "strategy_alpha": deflated_alpha.get("alpha"),
+        "benchmark_alpha_std": benchmark_alpha_std,
+        "benchmark_alphas": benchmark_alphas,
         "n_test_observations": resolution.get("n_test_observations"),
         "n_parameter_trials": resolution.get("n_parameter_trials"),
-        "n_benchmarks": resolution.get("n_benchmarks"),
+        "n_benchmarks": deflated_alpha.get("n_benchmarks", resolution.get("n_benchmarks")),
         "sharpe_beyond_plausible_bound": resolution.get(
             "sharpe_beyond_plausible_bound"
         ),
