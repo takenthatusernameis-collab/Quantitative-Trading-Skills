@@ -128,6 +128,27 @@ def _resolve_latency_fill_rate(args) -> tuple[int, float]:
     return int(latency), float(fill_rate)
 
 
+def _resolve_min_position_fraction(args) -> Optional[float]:
+    """Resolve `--min-position-fraction` from CLI args with fail-fast validation.
+
+    The flag is opt-in: when None the run is unchanged. When set it must be a
+    fraction in (0, 1]; a run whose verdict rests on windows the strategy
+    traded for a smaller fraction of their executable bars is rejected.
+
+    Returns:
+        The validated fraction, or None when the flag was not set.
+    """
+    value = getattr(args, "min_position_fraction", None)
+    if value is None:
+        return None
+    value = float(value)
+    if value <= 0 or value > 1:
+        raise ValueError(
+            f"--min-position-fraction must be in (0, 1], got {value}"
+        )
+    return value
+
+
 def _run_latency_fill_rate_sweep(
     args,
     runner,
@@ -4561,6 +4582,67 @@ def _thin_evidence_warning(
     }
 
 
+def _thin_evidence_failure(
+    summary: Dict[str, Any],
+    min_position_fraction: Optional[float],
+) -> Optional[Dict[str, Any]]:
+    """Reject a run whose verdict rests on thin evidence.
+
+    When ``--min-position-fraction`` is set and the thin-evidence warning the
+    run would emit has a `details.min_position_fraction_of_executable` below
+    the threshold, record a `thin_evidence_failure` on the summary so the
+    artifact and the console say why the run was rejected. The failure
+    reuses `_selection_window_remedy` for the flag names, so the remedy names
+    the flags of the path that produced the windows.
+
+    Returns the failure record, or None when the run passes (flag unset, no
+    warning, or the warning's thinnest window clears the threshold).
+    """
+    if min_position_fraction is None:
+        return None
+    warning = summary.get("thin_evidence_warning")
+    if not isinstance(warning, dict):
+        return None
+    details = warning.get("details") or {}
+    actual = details.get("min_position_fraction_of_executable")
+    if actual is None:
+        return None
+    if float(actual) >= float(min_position_fraction):
+        return None
+
+    diagnosis = summary.get("partial_selection_diagnosis") or {}
+    diagnosis_details = diagnosis.get("details") or {}
+    context = {"cli_flags": diagnosis_details.get("cli_flags") or {}}
+    validation_method = diagnosis_details.get("validation_method") or ""
+    remedy = _selection_window_remedy(validation_method, context)
+
+    message = (
+        f"The verdict rests on windows the strategy held a position for "
+        f"{float(actual):.0%} of their executable bars at most, below the "
+        f"--min-position-fraction {min_position_fraction:.0%} floor. A "
+        f"verdict measured on windows the strategy barely traded in is weak "
+        f"evidence: it says little about the strategy and more about the "
+        f"windows it was measured on, so the run is rejected. {remedy}."
+    )
+
+    failure = {
+        "cause": "thin_evidence",
+        "message": message,
+        "details": {
+            "min_position_fraction_of_executable": round(float(actual), 4),
+            "min_position_fraction_requested": round(float(min_position_fraction), 4),
+            "n_thin_windows": details.get("n_thin_windows"),
+            "n_windows_with_selected_params": details.get(
+                "n_windows_with_selected_params"
+            ),
+            "thin_windows": details.get("thin_windows"),
+            "warning": warning,
+        },
+    }
+    summary["thin_evidence_failure"] = failure
+    return failure
+
+
 def out_of_sample_validation(
     data: Union[pd.DataFrame, dict],
     strategy_factory: Callable,
@@ -5996,6 +6078,7 @@ def run_cpcv(args) -> int:
                 benchmark_provenance.append(prov)
 
     latency, fill_rate = _resolve_latency_fill_rate(args)
+    min_position_fraction = _resolve_min_position_fraction(args)
 
     impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
 
@@ -6334,6 +6417,16 @@ def run_cpcv(args) -> int:
     _print_thin_evidence_warning(
         results["summary"].get("thin_evidence_warning")
     )
+    # --min-position-fraction rejects a run whose verdict rests on windows
+    # the strategy barely traded in, printing a remedy that names the flags
+    # of the path that produced the windows. The failure is written to the
+    # artifact too (summary.thin_evidence_failure) so a machine reader sees
+    # why the run was rejected.
+    thin_evidence_failed = _thin_evidence_failure(
+        results["summary"], min_position_fraction
+    )
+    if thin_evidence_failed is not None:
+        print(f"REJECTED: {thin_evidence_failed['message']}")
     _total_oos_return = results["summary"]["total_oos_return"]
     print(
         f"Total OOS Return: {'N/A' if _total_oos_return is None else f'{_total_oos_return:.2%}'}"
@@ -6486,7 +6579,7 @@ def run_cpcv(args) -> int:
         )
         print(f"Detailed report saved to: {args.output}/")
 
-    return 0
+    return 1 if thin_evidence_failed else 0
 
 
 def _make_strategy_factory(strategy_type: str):
@@ -7107,6 +7200,7 @@ def run_walk_forward(args) -> int:
                 benchmark_provenance.append(prov)
 
     latency, fill_rate = _resolve_latency_fill_rate(args)
+    min_position_fraction = _resolve_min_position_fraction(args)
 
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
@@ -7428,6 +7522,11 @@ def run_walk_forward(args) -> int:
     _print_thin_evidence_warning(
         results["summary"].get("thin_evidence_warning")
     )
+    thin_evidence_failed = _thin_evidence_failure(
+        results["summary"], min_position_fraction
+    )
+    if thin_evidence_failed is not None:
+        print(f"REJECTED: {thin_evidence_failed['message']}")
     _total_oos_return = results["summary"]["total_oos_return"]
     print(
         f"Total OOS Return: {'N/A' if _total_oos_return is None else f'{_total_oos_return:.2%}'}"
@@ -7584,7 +7683,7 @@ def run_walk_forward(args) -> int:
         )
         print(f"Detailed report saved to: {args.output}/")
 
-    return 0
+    return 1 if thin_evidence_failed else 0
 
 
 def run_parameter_optimization(args) -> int:
@@ -8769,6 +8868,7 @@ def run_out_of_sample_validation(args) -> int:
             benchmark_provenance.append(prov)
 
     latency, fill_rate = _resolve_latency_fill_rate(args)
+    min_position_fraction = _resolve_min_position_fraction(args)
 
     impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
     borrow_costs = [float(c) for c in (args.borrow_costs or [args.borrow_cost])]
@@ -9099,6 +9199,11 @@ def run_out_of_sample_validation(args) -> int:
     _print_thin_evidence_warning(
         results["summary"].get("thin_evidence_warning")
     )
+    thin_evidence_failed = _thin_evidence_failure(
+        results["summary"], min_position_fraction
+    )
+    if thin_evidence_failed is not None:
+        print(f"REJECTED: {thin_evidence_failed['message']}")
 
     # The walk-forward window the validation phase actually ran with (it is
     # shortened when the requested window does not fit the training split).
@@ -9363,7 +9468,7 @@ def run_out_of_sample_validation(args) -> int:
         )
         print(f"Detailed report saved to: {args.output}/")
 
-    return 0
+    return 1 if thin_evidence_failed else 0
 
 
 def main():
@@ -9404,6 +9509,7 @@ def main():
     common_parser.add_argument("--fill-rate", type=float, default=1.0, help="Position-scale limit (0 < r <= 1): the achieved position is fill_rate times the target position on every bar, so all position-change-based costs scale proportionally. It is a position-size (leverage) lever, not a partial-fill execution model. Default 1.0 (full fill, backward compatible).")
     common_parser.add_argument("--fill-rates", type=float, nargs="+", default=None, help="List of fill rates to sweep (overrides --fill-rate).")
     common_parser.add_argument("--latencies", type=int, nargs="+", default=None, help="List of execution latencies (in periods) to sweep (overrides --latency). Delays position execution by each latency after signal generation.")
+    common_parser.add_argument("--min-position-fraction", type=float, default=None, help="Reject a run whose verdict rests on windows the strategy held a position for less than this fraction of each window's executable bars (after warmup). Opt-in: unset means the run is never rejected on this basis.")
     common_parser.add_argument(
         "--panel-pricing",
         type=str,

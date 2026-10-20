@@ -984,6 +984,102 @@ def test_the_cli_prints_the_thin_evidence_warning_next_to_the_verdict():
         assert fold_line < warning_line < verdict_line
 
 
+def test_min_position_fraction_rejects_the_partial_run():
+    """A run whose verdict rests on thin evidence is rejected at the floor.
+
+    The canonical partial run selects a parameter in two of five folds and
+    holds the position for a single bar out of eighteen executable bars in
+    each (1/18 = 6%), so --min-position-fraction 0.1 must reject it with a
+    remedy that names the cpcv flags, and the artifact must carry both the
+    warning and the failure record.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = _run_cli(
+            [
+                "cpcv",
+                "--data", str(SAMPLE_DATA),
+                "--strategy", "sma_crossover",
+                "--param-grid", json.dumps(MEANINGFUL_GRID),
+                "--n-splits", "5",
+                "--test-size", "0.2",
+                "--min-position-fraction", "0.1",
+                "--output", tmpdir,
+            ]
+        )
+        assert result.returncode != 0, result.stdout
+        assert "REJECTED:" in result.stdout
+        artifact = json.loads(
+            (Path(tmpdir) / "cpcv_summary.json").read_text()
+        )
+        warning = artifact["summary"]["thin_evidence_warning"]
+        failure = artifact["summary"]["thin_evidence_failure"]
+        assert set(warning) == {"message", "details"}
+        assert failure["cause"] == "thin_evidence"
+        assert failure["details"]["min_position_fraction_requested"] == 0.1
+        assert failure["details"]["min_position_fraction_of_executable"] == round(
+            1 / 18, 4
+        )
+        assert failure["details"]["n_thin_windows"] == 2
+        assert failure["details"]["n_windows_with_selected_params"] == 2
+        # The remedy names the flags the cpcv subcommand actually accepts.
+        assert "--n-splits" in failure["message"]
+        assert "--test-size" in failure["message"]
+        assert failure["message"] in result.stdout
+
+
+def test_min_position_fraction_default_leaves_the_partial_run_unchanged():
+    """Unset --min-position-fraction changes nothing: the flag is opt-in."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = _run_cli(
+            [
+                "cpcv",
+                "--data", str(SAMPLE_DATA),
+                "--strategy", "sma_crossover",
+                "--param-grid", json.dumps(MEANINGFUL_GRID),
+                "--n-splits", "5",
+                "--test-size", "0.2",
+                "--output", tmpdir,
+            ]
+        )
+        assert result.returncode == 0, result.stderr[-3000:]
+        artifact = json.loads(
+            (Path(tmpdir) / "cpcv_summary.json").read_text()
+        )
+        assert "thin_evidence_failure" not in artifact["summary"]
+        assert "thin_evidence_warning" in artifact["summary"]
+        assert "REJECTED:" not in result.stdout
+
+
+def test_min_position_fraction_does_not_reject_a_fully_traded_run():
+    """A run whose windows traded through passes the floor."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = _run_cli(
+            [
+                "walk-forward",
+                "--data", str(SAMPLE_DATA),
+                "--strategy", "sma_crossover",
+                "--param-grid", json.dumps(MEANINGFUL_GRID),
+                "--min-position-fraction", "0.1",
+                "--output", tmpdir,
+            ]
+        )
+        assert result.returncode == 0, result.stderr[-3000:]
+        artifact = json.loads(
+            (Path(tmpdir) / "walk_forward_summary.json").read_text()
+        )
+        assert "thin_evidence_failure" not in artifact["summary"]
+        assert "REJECTED:" not in result.stdout
+
+
+def test_all_three_subcommands_accept_min_position_fraction():
+    """The flag is registered on cpcv, walk-forward and out-of-sample."""
+    for subcommand in ("cpcv", "walk-forward", "out-of-sample"):
+        flags = _subcommand_flags(subcommand)
+        assert "--min-position-fraction" in flags, (
+            f"{subcommand} does not accept --min-position-fraction"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Test registry
 # ---------------------------------------------------------------------------
@@ -1049,6 +1145,14 @@ TEST_REGISTRY = [
       test_the_thin_evidence_warning_changes_no_number),
     ("test_the_cli_prints_the_thin_evidence_warning_next_to_the_verdict",
       test_the_cli_prints_the_thin_evidence_warning_next_to_the_verdict),
+    ("test_min_position_fraction_rejects_the_partial_run",
+     test_min_position_fraction_rejects_the_partial_run),
+    ("test_min_position_fraction_default_leaves_the_partial_run_unchanged",
+     test_min_position_fraction_default_leaves_the_partial_run_unchanged),
+    ("test_min_position_fraction_does_not_reject_a_fully_traded_run",
+     test_min_position_fraction_does_not_reject_a_fully_traded_run),
+    ("test_all_three_subcommands_accept_min_position_fraction",
+     test_all_three_subcommands_accept_min_position_fraction),
 ]
 
 
