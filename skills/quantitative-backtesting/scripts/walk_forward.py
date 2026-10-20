@@ -984,6 +984,15 @@ def walk_forward_analysis(
             except Exception:
                 pass
 
+    # The resolution of the significance statistics carried by this summary:
+    # the smallest annualized Sharpe / alpha the aggregate Deflated Sharpe
+    # and Deflated Alpha tests could have confirmed at the sample size
+    # actually available. A significance test on a small sample can only
+    # fail, so a reader needs this to tell an informative result from an
+    # unfalsifiable one. A measurement, not a correction: it changes no
+    # verdict and no reported number.
+    summary["test_resolution"] = _build_test_resolution(summary, oos_returns)
+
     summary["bias_controls_engaged"] = bool(pit_results is not None)
 
     # Surface market-impact capacity estimate in the summary when impact is
@@ -2208,6 +2217,218 @@ def minimum_detectable_alpha(
     out["minimum_detectable_alpha"] = float(sr_required * scale)
     out["attainable"] = True
     return out
+
+
+def _format_optional_float(value: Any, fmt: str = "{:.4f}") -> str:
+    """Format a possibly-missing number for the console."""
+    if value is None:
+        return "N/A"
+    try:
+        fvalue = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+    if not np.isfinite(fvalue):
+        return "N/A"
+    return fmt.format(fvalue)
+
+
+# The significance level the reported resolution is stated at: the threshold a
+# "deflated p < 0.10" style criterion uses.
+TEST_RESOLUTION_TARGET_P_VALUE = 0.10
+
+# Plausibility bounds used to flag a significance criterion as beyond the
+# sample's resolution. These are ASSUMPTIONS, not results: they are declared
+# here, reported in every `test_resolution` block and printed with the
+# verdict, so a reader can dispute them. An annualized Sharpe above 2.0 or an
+# annualized alpha above 10% would itself be extraordinary for a liquid
+# equity strategy (in practice a sign of a bug or a data problem rather than
+# of skill), so a criterion that requires more than this cannot discriminate
+# between hypotheses at the sample size actually available: its outcome is a
+# statement about the sample, not about the strategy.
+#
+# They never change a verdict and they never change a reported number.
+PLAUSIBLE_MAX_ANNUALIZED_SHARPE = 2.0
+PLAUSIBLE_MAX_ANNUALIZED_ALPHA = 0.10
+
+
+def _build_test_resolution(
+    summary: Dict[str, Any],
+    returns: Optional[pd.Series],
+    target_p_value: float = TEST_RESOLUTION_TARGET_P_VALUE,
+) -> Dict[str, Any]:
+    """Minimum detectable effect of a summary's significance statistics.
+
+    A significance test on a small sample can only fail: with T observations
+    the threshold "deflated p < 0.10" requires the effect to exceed a certain
+    size. This helper reports that size for the aggregate Deflated Sharpe and
+    Deflated Alpha statistics carried by an analysis summary, so a reader of
+    ``out_of_sample_summary.json`` (or of the console) can tell an
+    informative result from an unfalsifiable one.
+
+    The numbers are measurements, not corrections: no verdict, no p-value and
+    no other reported number is changed here.
+
+    Args:
+        summary: An analysis summary carrying ``deflated_sharpe`` and/or
+            ``deflated_alpha`` (as produced by the walk-forward, CPCV and
+            out-of-sample paths).
+        returns: The per-period return series the statistic was computed on.
+            When it does not match the statistic's observation count the
+            resolution is reported as "not resolvable", never as a number.
+        target_p_value: The p-value threshold the criterion uses.
+
+    Returns:
+        The ``test_resolution`` block: the sample size the statistics were
+        computed on, the number of parameter trials and benchmarks behind
+        them, the smallest annualized Sharpe / alpha each statistic could
+        confirm, the plausibility bounds used to judge those, and the reason
+        a statistic could not be resolved when that is the case.
+    """
+    resolution: Dict[str, Any] = {
+        "n_test_observations": None,
+        "n_parameter_trials": None,
+        "n_benchmarks": None,
+        "target_p_value": float(target_p_value),
+        "min_detectable_sharpe": None,
+        "min_detectable_alpha": None,
+        "observed_annualized_sharpe": None,
+        "observed_annualized_alpha": None,
+        # "resolvable": the minimum detectable effect was computed.
+        # "not_resolvable": the statistic exists but the effect could not be
+        #   computed (see the matching `*_reason`).
+        # "not_applicable": the statistic itself does not exist for this run
+        #   (no deflation requested, or no benchmark set to correct).
+        "sharpe_status": "not_applicable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": None,
+        "alpha_reason": None,
+        "sharpe_beyond_plausible_bound": False,
+        "alpha_beyond_plausible_bound": False,
+        "plausible_max_annualized_sharpe": PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
+        "plausible_max_annualized_alpha": PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
+        "message": "",
+    }
+
+    deflated_sharpe = summary.get("deflated_sharpe")
+    deflated_alpha = summary.get("deflated_alpha")
+
+    if isinstance(deflated_sharpe, dict):
+        resolution["n_test_observations"] = deflated_sharpe.get("n_observations")
+        resolution["n_parameter_trials"] = deflated_sharpe.get("n_trials")
+        resolution["observed_annualized_sharpe"] = deflated_sharpe.get("sharpe_ratio")
+        try:
+            mde = minimum_detectable_sharpe(deflated_sharpe, returns, target_p_value)
+        except Exception as exc:  # pragma: no cover - defensive
+            mde = {"attainable": False, "reason": f"error:{type(exc).__name__}"}
+        if mde.get("attainable"):
+            resolution["sharpe_status"] = "resolvable"
+            value = mde.get("minimum_detectable_sharpe")
+            resolution["min_detectable_sharpe"] = (
+                float(value) if value is not None and np.isfinite(float(value)) else None
+            )
+            if resolution["min_detectable_sharpe"] is not None:
+                resolution["sharpe_beyond_plausible_bound"] = bool(
+                    resolution["min_detectable_sharpe"] > PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+                )
+        else:
+            resolution["sharpe_status"] = "not_resolvable"
+            resolution["sharpe_reason"] = mde.get("reason")
+    elif deflated_sharpe is not None:
+        resolution["sharpe_status"] = "not_resolvable"
+        resolution["sharpe_reason"] = "no_deflated_sharpe"
+
+    if isinstance(deflated_alpha, dict):
+        if resolution["n_test_observations"] is None:
+            resolution["n_test_observations"] = deflated_alpha.get("n_observations")
+        resolution["n_benchmarks"] = deflated_alpha.get("n_benchmarks")
+        resolution["observed_annualized_alpha"] = deflated_alpha.get("alpha")
+        try:
+            mde = minimum_detectable_alpha(deflated_alpha, returns, target_p_value)
+        except Exception as exc:  # pragma: no cover - defensive
+            mde = {"attainable": False, "reason": f"error:{type(exc).__name__}"}
+        if mde.get("attainable"):
+            resolution["alpha_status"] = "resolvable"
+            value = mde.get("minimum_detectable_alpha")
+            resolution["min_detectable_alpha"] = (
+                float(value) if value is not None and np.isfinite(float(value)) else None
+            )
+            if resolution["min_detectable_alpha"] is not None:
+                resolution["alpha_beyond_plausible_bound"] = bool(
+                    resolution["min_detectable_alpha"] > PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+                )
+        else:
+            resolution["alpha_status"] = "not_resolvable"
+            resolution["alpha_reason"] = mde.get("reason")
+    elif deflated_alpha is not None:
+        resolution["alpha_status"] = "not_resolvable"
+        resolution["alpha_reason"] = "no_deflated_alpha"
+
+    resolution["message"] = _test_resolution_message(resolution)
+    return resolution
+
+
+def _test_resolution_message(resolution: Dict[str, Any]) -> str:
+    """One plain-English sentence describing a test-resolution block.
+
+    The artifact carries the same message the console prints, so the two
+    never disagree.
+    """
+    n_obs = resolution.get("n_test_observations")
+    trials = resolution.get("n_parameter_trials")
+    if n_obs is None and trials is None:
+        return (
+            "No significance test was run on this record, so there is no "
+            "test resolution to report."
+        )
+
+    parts = []
+    if n_obs is not None:
+        parts.append(f"{n_obs} test observation(s)")
+    if trials is not None:
+        parts.append(f"{trials} parameter trial(s)")
+    scope = ", ".join(parts) if parts else "this record"
+
+    sentences = []
+    if resolution.get("sharpe_status") == "resolvable":
+        sentences.append(
+            "the Deflated Sharpe test can only confirm an annualized Sharpe "
+            f"of at least {_format_optional_float(resolution.get('min_detectable_sharpe'))} "
+            f"(observed "
+            f"{_format_optional_float(resolution.get('observed_annualized_sharpe'))})"
+        )
+    elif resolution.get("sharpe_status") == "not_resolvable":
+        sentences.append(
+            "the Deflated Sharpe test resolution is not computable "
+            f"({resolution.get('sharpe_reason')})"
+        )
+    if resolution.get("alpha_status") == "resolvable":
+        sentences.append(
+            "the Deflated Alpha test can only confirm an annualized alpha of "
+            f"at least {_format_optional_float(resolution.get('min_detectable_alpha'), '{:.2%}')} "
+            f"(observed "
+            f"{_format_optional_float(resolution.get('observed_annualized_alpha'), '{:.2%}')})"
+        )
+    elif resolution.get("alpha_status") == "not_resolvable":
+        sentences.append(
+            "the Deflated Alpha test resolution is not computable "
+            f"({resolution.get('alpha_reason')})"
+        )
+
+    beyond = []
+    if resolution.get("sharpe_beyond_plausible_bound"):
+        beyond.append("Deflated Sharpe")
+    if resolution.get("alpha_beyond_plausible_bound"):
+        beyond.append("Deflated Alpha")
+
+    message = f"With {scope}: " + "; ".join(sentences) + "."
+    if beyond:
+        message += (
+            " The "
+            + " and ".join(beyond)
+            + " threshold(s) exceed the stated plausibility bound, so at this "
+            "sample size their outcome measures the sample, not the strategy."
+        )
+    return message
 
 
 def _calculate_strategy_returns(
@@ -3441,6 +3662,16 @@ def cpcv_analysis(
                     benchmark_data=bench,
                 )
 
+    # The resolution of the significance statistics carried by this summary:
+    # the smallest annualized Sharpe / alpha the aggregate Deflated Sharpe
+    # and Deflated Alpha tests could have confirmed at the sample size
+    # actually available (the number of fold observations that carried a
+    # position). A significance test on a small sample can only fail, so a
+    # reader needs this to tell an informative result from an unfalsifiable
+    # one. A measurement, not a correction: it changes no verdict and no
+    # reported number.
+    summary["test_resolution"] = _build_test_resolution(summary, oos_returns)
+
     # Add per-fold benchmark metrics to summary
     if fold_benchmark_stats:
         summary['benchmark_metrics_per_fold'] = fold_benchmark_stats
@@ -4217,6 +4448,95 @@ def _print_thin_evidence_warning(
             f"{window.get('test_start')} to {window.get('test_end')}"
         )
         print(f"{indent}  {text}")
+
+
+def _print_test_resolution(
+    resolution: Optional[Dict[str, Any]],
+    indent: str = "  ",
+) -> None:
+    """Print what the significance tests could have detected, next to the verdict.
+
+    A significance test on a small sample can only fail: the p-value a
+    Deflated Sharpe / Deflated Alpha test reports says nothing about whether
+    the effect could have been detected at all. Reporting the smallest
+    confirmable effect next to the p-value is what separates an informative
+    result from an unfalsifiable one.
+
+    The artifact carries the same numbers under
+    ``summary["test_resolution"]``, so the console and the artifact never
+    disagree. These are measurements, not corrections: nothing printed here
+    changes a verdict or a reported number.
+    """
+    if not isinstance(resolution, dict):
+        return
+
+    n_obs = resolution.get("n_test_observations")
+    trials = resolution.get("n_parameter_trials")
+    benches = resolution.get("n_benchmarks")
+    if n_obs is None and trials is None and benches is None:
+        # No significance test was run on this record, so there is no
+        # resolution to report. Say so rather than staying silent: silence
+        # would be indistinguishable from a run that forgot to report it.
+        print(f"{indent}Test resolution: {resolution.get('message')}")
+        return
+
+    print(f"{indent}Test resolution (measurement, not a correction):")
+    scope = []
+    if n_obs is not None:
+        scope.append(f"{n_obs} test observation(s)")
+    if trials is not None:
+        scope.append(f"{trials} parameter trial(s)")
+    if benches is not None:
+        scope.append(f"{benches} benchmark(s)")
+    if scope:
+        print(f"{indent}  {', '.join(scope)}.")
+
+    sharpe_status = resolution.get("sharpe_status")
+    if sharpe_status == "resolvable":
+        print(
+            f"{indent}  Deflated Sharpe: smallest confirmable annualized Sharpe "
+            f"{_format_optional_float(resolution.get('min_detectable_sharpe'))} "
+            f"(observed "
+            f"{_format_optional_float(resolution.get('observed_annualized_sharpe'))})"
+        )
+    elif sharpe_status == "not_resolvable":
+        print(
+            f"{indent}  Deflated Sharpe: resolution not computable "
+            f"({resolution.get('sharpe_reason')})"
+        )
+
+    alpha_status = resolution.get("alpha_status")
+    if alpha_status == "resolvable":
+        print(
+            f"{indent}  Deflated Alpha: smallest confirmable annualized alpha "
+            f"{_format_optional_float(resolution.get('min_detectable_alpha'), '{:.2%}')} "
+            f"(observed "
+            f"{_format_optional_float(resolution.get('observed_annualized_alpha'), '{:.2%}')})"
+        )
+    elif alpha_status == "not_resolvable":
+        print(
+            f"{indent}  Deflated Alpha: resolution not computable "
+            f"({resolution.get('alpha_reason')})"
+        )
+
+    beyond = []
+    if resolution.get("sharpe_beyond_plausible_bound"):
+        beyond.append("Deflated Sharpe")
+    if resolution.get("alpha_beyond_plausible_bound"):
+        beyond.append("Deflated Alpha")
+    if beyond:
+        print(
+            f"{indent}  Beyond the plausibility bound (annualized Sharpe <= "
+            f"{_format_optional_float(resolution.get('plausible_max_annualized_sharpe'), '{:.2f}')}, "
+            f"annualized alpha <= "
+            f"{_format_optional_float(resolution.get('plausible_max_annualized_alpha'), '{:.2%}')}):"
+        )
+        for name in beyond:
+            print(f"{indent}    - {name}")
+        print(
+            f"{indent}  A threshold the sample cannot resolve measures the sample, "
+            f"not the strategy."
+        )
 
 
 def _format_overfitting_risk(value: Any, unknown: str = "unknown") -> str:
@@ -5711,6 +6031,15 @@ def out_of_sample_validation(
             except Exception:
                 pass
 
+    # The resolution of the significance statistics carried by this summary:
+    # the smallest annualized Sharpe / alpha the held-out Deflated Sharpe and
+    # Deflated Alpha tests could have confirmed at the sample size actually
+    # available. A significance test on a small held-out window can only
+    # fail, so a reader needs this to tell an informative result from an
+    # unfalsifiable one. A measurement, not a correction: it changes no
+    # verdict and no reported number.
+    summary["test_resolution"] = _build_test_resolution(summary, test_returns)
+
     # Add benchmark information to summary (only for single benchmark for backward compatibility)
     if test_benchmark and not isinstance(test_benchmark, list):
         summary.update(test_benchmark)
@@ -6754,6 +7083,10 @@ def run_cpcv(args) -> int:
             f"(p-value {dsr['p_value']:.4f}, expected max Sharpe "
             f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
         )
+    # What the significance tests could have detected at the sample size
+    # actually available: the smallest confirmable effect. A measurement, not
+    # a correction -- it changes no verdict and no reported number.
+    _print_test_resolution(results["summary"].get("test_resolution"))
 
     # Save results
     output_dir = Path(args.output)
@@ -7852,6 +8185,10 @@ def run_walk_forward(args) -> int:
             f"(p-value {dsr['p_value']:.4f}, expected max Sharpe "
             f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
         )
+    # What the significance tests could have detected at the sample size
+    # actually available: the smallest confirmable effect. A measurement, not
+    # a correction -- it changes no verdict and no reported number.
+    _print_test_resolution(results["summary"].get("test_resolution"))
 
     # Check for overfitting
     diagnostics = overfitting_check(results)
@@ -9562,6 +9899,11 @@ def run_out_of_sample_validation(args) -> int:
             f"(p-value {dsr['p_value']:.4f}, expected max Sharpe "
             f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
         )
+    # What the held-out significance tests could have detected at the sample
+    # size actually available: the smallest confirmable effect. A
+    # measurement, not a correction -- it changes no verdict and no reported
+    # number.
+    _print_test_resolution(summary.get("test_resolution"))
 
     if results["test_benchmark"]:
         print(

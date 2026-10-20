@@ -1367,3 +1367,64 @@ Two rules keep the two p-values distinguishable, and both are pinned by
   (`len(test_returns)`), which is what the resolution arithmetic needs; the
   example reports it as `test_n_observations` so that "100" is not read as
   100 independent periods.
+
+### The framework's own verdicts report their resolution
+
+The resolution is not only a property of the worked example: the aggregate
+significance statistics carried by the library's own verdicts are reported
+with the resolution next to them.
+
+`walk_forward_analysis`, `cpcv_analysis` and `out_of_sample_validation` each
+attach a `summary["test_resolution"]` block:
+
+| Key | Meaning |
+| --- | --- |
+| `n_test_observations` | the number of return observations the statistic was computed on (`T`) |
+| `n_parameter_trials` | the number of configurations the search evaluated (`N` of the Deflated Sharpe) |
+| `n_benchmarks` | the number of benchmarks the Deflated Alpha was corrected for |
+| `min_detectable_sharpe` | smallest annualized Sharpe the Deflated Sharpe test could confirm at `target_p_value` |
+| `min_detectable_alpha` | smallest annualized alpha the Deflated Alpha test could confirm at `target_p_value` |
+| `observed_annualized_sharpe` / `observed_annualized_alpha` | the observed effect, for comparison with the two above |
+| `sharpe_status` / `alpha_status` | `resolvable`, `not_resolvable` (with a `*_reason`) or `not_applicable` |
+| `sharpe_beyond_plausible_bound` / `alpha_beyond_plausible_bound` | whether the required effect exceeds `PLAUSIBLE_MAX_ANNUALIZED_SHARPE` (2.0) / `PLAUSIBLE_MAX_ANNUALIZED_ALPHA` (0.10) |
+| `message` | the same statement the console prints |
+
+The CLI prints it next to the Deflated Sharpe line, labelled *"measurement, not
+a correction"*. Three properties are deliberate:
+
+- **It changes no number.** The block is built from the statistics the
+  verdict already rests on; no p-value, no verdict and no other reported
+  number moves. `tests/test_test_resolution.py` pins that building the block
+  leaves the summary it was built from untouched.
+- **An unresolvable statistic is never reported as a number.** When the
+  statistic and the return series do not match (for example a fold-level
+  return series that is not the aggregate the statistic was computed on), the
+  block reports `not_resolvable` with the reason (`returns_do_not_match_statistic`,
+  `no_returns`, `target_unattainable`, ...) and a `null` effect.
+- **A run without a significance test says so.** With no deflation requested
+  (or no benchmark set to correct), both statuses are `not_applicable` and the
+  message states that no significance test was run -- silence would be
+  indistinguishable from a run that forgot to report the resolution.
+
+### What the resolution says on the shipped sample
+
+The same measurement on the shipped 504-bar sample, with `--deflate`:
+
+| Path | Test observations | Parameter trials | Smallest confirmable annualized Sharpe | Observed |
+| --- | --- | --- | --- | --- |
+| walk-forward (12/3/3 months) | 189 | 12 | 2.9145 | 1.1613 |
+| CPCV (5 splits, test size 0.5) | 242 | 19 | 2.3573 | 0.1451 |
+| out-of-sample (0.6/0.2/0.2, 2 benchmarks) | 100 | 4 | 2.2878 | 0.8809 |
+
+Every one of these thresholds is an annualized Sharpe above the plausibility
+bound of 2.0. The Deflated Sharpe p-values those runs report (0.5931, 0.8233
+and 0.3427) are therefore statements about the size of the sample, not
+evidence about the strategy: at these sample sizes the test could not have
+confirmed any plausible effect. That is a statement about the design of the
+evaluation (how many held-out observations a strategy needs before its
+significance test can discriminate at all), and it is the reason the
+resolution is reported next to every verdict.
+
+The two-benchmark out-of-sample run also reports a Deflated Alpha resolution:
+the smallest confirmable annualized alpha is **35.68%** (observed 17.29%),
+which is likewise beyond the 10% plausibility bound.

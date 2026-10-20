@@ -51,7 +51,7 @@ This skill provides a comprehensive framework for systematic trading strategy de
 - Parameter sensitivity analysis
 - Overfitting detection (combinatorially purged cross-validation)
 - Multiple-testing correction via the Deflated Sharpe Ratio (Bailey & López de Prado)
-- Test resolution (minimum detectable effect): how large an effect the held-out sample could have detected at all
+- Test resolution (minimum detectable effect): how large an effect the held-out sample could have detected at all (reported by the walk-forward, CPCV and out-of-sample paths as `summary["test_resolution"]`, and printed next to the Deflated Sharpe line)
 
 ### 6. Reporting
 - Automated tear sheet generation
@@ -189,6 +189,16 @@ Risk Metrics:
   nothing could be selected and unchanged when it could, and the diagnosis
   changes no number. See `references/validation_methods.md`, "When No
   Parameter Can Be Selected".
+- `test_test_resolution.py` - Unit tests for the **test resolution** (minimum
+  detectable effect) reporting: the walk-forward, CPCV and out-of-sample paths
+  each attach `summary["test_resolution"]`, the block agrees with the
+  `minimum_detectable_sharpe` / `minimum_detectable_alpha` helpers it is built
+  from, a statistic whose return series does not match is reported as "not
+  resolvable" with a reason instead of a number, a threshold beyond the
+  stated plausibility bound is flagged, the block mutates nothing and carries
+  no verdict, a run without a significance test says so, and the CLI prints it
+  next to the Deflated Sharpe line. See `references/validation_methods.md`,
+  "Test Resolution (Minimum Detectable Effect)".
 
 ### references/
 - `data_schema.md` - Expected data formats and column specifications
@@ -409,6 +419,22 @@ Risk Metrics:
   `tests/test_falsifiable_hypothesis_example.py` and
   `tests/test_walk_forward.py`.
 
+- **The framework's own verdicts now report their resolution too.** The
+  aggregate significance statistics carried by the walk-forward, CPCV and
+  out-of-sample summaries (`summary["deflated_sharpe"]`,
+  `summary["deflated_alpha"]`) are accompanied by
+  `summary["test_resolution"]`: the number of test observations and parameter
+  trials behind them, the smallest annualized Sharpe / alpha each statistic
+  could have confirmed, and whether that threshold exceeds the stated
+  plausibility bound (`PLAUSIBLE_MAX_ANNUALIZED_SHARPE = 2.0`,
+  `PLAUSIBLE_MAX_ANNUALIZED_ALPHA = 0.10`). The CLI prints it next to the
+  Deflated Sharpe line, labelled *"measurement, not a correction"*. A
+  statistic whose return series does not match the one it was computed on is
+  reported as **not resolvable** with a reason, never as a number. The block
+  changes no number: it is reporting-only, and a run without a significance
+  test says so instead of staying silent. Guarded by
+  `tests/test_test_resolution.py`.
+
 - **The CPCV test window is a fraction of each group, so the effective
   out-of-sample fraction is `test_size / n_splits`.** At the default
   `--test-size 0.1 --n-splits 10` that is **1%**, and on the shipped 504-bar
@@ -467,6 +493,7 @@ python3 skills/quantitative-backtesting/tests/test_inert_param_grid.py
 python3 skills/quantitative-backtesting/tests/test_no_selection_diagnosis.py
 python3 skills/quantitative-backtesting/tests/test_examples_coverage.py
 python3 skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py
+python3 skills/quantitative-backtesting/tests/test_test_resolution.py
 ```
 
 - `test_data_loader.py` - CSV/Parquet loading, column/date handling, symbol

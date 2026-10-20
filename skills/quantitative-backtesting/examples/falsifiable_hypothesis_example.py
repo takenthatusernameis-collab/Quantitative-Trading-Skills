@@ -71,6 +71,8 @@ from data_loader import load_data
 from performance import t_critical_value
 from strategy_builder import build_strategy
 from walk_forward import (
+    PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
+    PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
     _annualization_factor,
     minimum_detectable_alpha,
     minimum_detectable_sharpe,
@@ -132,8 +134,9 @@ CRITERION_P_VALUE_THRESHOLD = 0.10
 # equity strategy -- in practice a sign of a bug or a data problem rather
 # than of skill -- so a criterion that requires more than this cannot
 # discriminate between hypotheses at the available sample size.
-PLAUSIBLE_MAX_ANNUALIZED_SHARPE = 2.0
-PLAUSIBLE_MAX_ANNUALIZED_ALPHA = 0.10
+#
+# The values are the framework's own (`walk_forward.PLAUSIBLE_MAX_*`), so the
+# example and the library's aggregate verdicts cannot drift apart.
 
 # Benchmarks tested against. Testing multiple benchmarks is a
 # multiple-testing problem; the Deflated Alpha Ratio (criterion 5) corrects
