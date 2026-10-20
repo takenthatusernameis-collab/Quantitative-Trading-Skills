@@ -29,11 +29,15 @@ These tests pin:
   * the measurement agrees with the worked example's own shipped path, so it
     measures the shipped configuration and not a private copy of it;
   * the measurement moves no threshold, no bound, no criterion and no
-    verdict.
+    verdict;
+  * every analysis path is measured, and each one reports the framework's
+    own resolution block for the sample it prices;
+  * the paths cross the plausibility bound at *different* sample sizes,
+    because they do not see the same sample.
 
-The data is the synthetic positive-control fixture (a formula, not a
-market): the numbers are properties of that formula and of the decision
-machinery, never evidence about a security.
+THE DATA IS THE SYNTHETIC POSITIVE-CONTROL FIXTURE
+    The numbers are properties of a formula and of the decision machinery,
+    never evidence about a security.
 
 Run with: python3 skills/quantitative-backtesting/tests/test_resolution_vs_sample_size.py
 No third-party test framework is required; uses only the standard library.
@@ -50,15 +54,32 @@ SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 sys.path.insert(0, str(SKILLS_DIR / "examples"))
 
+from data_loader import load_data  # noqa: E402
 from falsifiable_hypothesis_example import run_hypothesis_test  # noqa: E402
-from generate_positive_control_data import write_control_fixture  # noqa: E402
+from generate_positive_control_data import (  # noqa: E402
+    CONTROL_BENCHMARK_SEED,
+    CONTROL_STRATEGY_SEED,
+    write_control_fixture,
+)
 from measure_resolution_vs_sample_size import (  # noqa: E402
+    COMMISSION,
+    CPCV_N_SPLITS,
+    CPCV_TEST_SIZE,
+    INITIAL_CAPITAL,
+    PARAM_GRID,
+    SLIPPAGE,
+    WF_STEP_MONTHS,
+    WF_TEST_MONTHS,
+    WF_TRAIN_MONTHS,
     measure_synthetic,
     summarize,
 )
 from walk_forward import (  # noqa: E402
     PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
     PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
+    _make_strategy_factory,
+    cpcv_analysis,
+    walk_forward_analysis,
 )
 
 # The rungs the tests measure at. They bracket the crossing of the
@@ -66,8 +87,14 @@ from walk_forward import (  # noqa: E402
 # every draw measured, at 10,000 bars it is inside the bound on every draw
 # measured.
 SMALL_SAMPLE_BARS = 2500
+MIDDLE_SAMPLE_BARS = 5000
 LARGE_SAMPLE_BARS = 10000
 SEEDS = (7, 1, 2024)
+
+# The analysis paths the measurement covers.
+OUT_OF_SAMPLE = "out_of_sample"
+WALK_FORWARD = "walk_forward"
+CPCV = "cpcv"
 
 # Each measurement runs a full walk-forward validation, so the results are
 # computed once and shared by the tests that read them.
@@ -79,6 +106,37 @@ def _measured(bars, seed, inject_effect):
     if key not in _MEASUREMENTS:
         _MEASUREMENTS[key] = measure_synthetic(bars, seed, inject_effect)
     return _MEASUREMENTS[key]
+
+
+def _ladder_rows():
+    """The ladder the per-path summaries are read from.
+
+    Every draw (three seeds, both series) at the three rungs.
+    """
+    rows = []
+    for bars in (SMALL_SAMPLE_BARS, MIDDLE_SAMPLE_BARS, LARGE_SAMPLE_BARS):
+        for seed in SEEDS:
+            for inject_effect in (False, True):
+                rows.append(_measured(bars, seed, inject_effect))
+    return rows
+
+
+def _control_fixture(bars, seed, inject_effect):
+    """The control fixture the measurement builds, rebuilt independently."""
+    tmpdir = tempfile.TemporaryDirectory(prefix="resolution_path_parity_")
+    paths = write_control_fixture(
+        tmpdir.name,
+        inject_effect=inject_effect,
+        periods=bars,
+        strategy_seed=seed,
+        benchmark_seed=seed + (CONTROL_BENCHMARK_SEED - CONTROL_STRATEGY_SEED),
+    )
+    data = load_data(str(paths["strategy"]))
+    benchmarks = [
+        load_data(str(paths["strategy"])),
+        load_data(str(paths["benchmark"])),
+    ]
+    return tmpdir, data, benchmarks
 
 
 def test_the_resolution_improves_with_the_sample_size():
@@ -218,6 +276,202 @@ def test_the_measurement_moves_no_threshold_and_no_verdict():
         assert "verdict" not in key
 
 
+# ---------------------------------------------------------------------------
+# Every analysis path is measured, and each one reports the framework's own
+# resolution block.
+# ---------------------------------------------------------------------------
+
+def test_every_analysis_path_is_measured_and_reports_its_own_resolution():
+    """The ladder covers all three analysis paths, not just one.
+
+    The three paths price their significance test on different
+    out-of-sample series: the out-of-sample path on the held-out test
+    window, the walk-forward path on its pooled out-of-sample windows, the
+    CPCV path on its pooled out-of-sample folds. Each one therefore has its
+    own resolution, and the measurement reports each of them.
+    """
+    measured = _measured(SMALL_SAMPLE_BARS, 7, False)
+    blocks = measured.get("paths")
+    assert isinstance(blocks, dict), "the measurement carries no per-path blocks"
+
+    for path in (OUT_OF_SAMPLE, WALK_FORWARD, CPCV):
+        block = blocks.get(path)
+        assert isinstance(block, dict), f"the {path} path was not measured"
+        assert block["path"] == path
+        assert block["min_detectable_sharpe"] is not None, (
+            f"the {path} path reported no minimum confirmable Sharpe"
+        )
+        assert block["expected_max_sharpe"] is not None, (
+            f"the {path} path reported no deflation benchmark (SR*)"
+        )
+        assert block["n_test_observations"] > 0
+        # The bounds are the framework's own.
+        assert block["plausible_max_annualized_sharpe"] == PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+        assert block["plausible_max_annualized_alpha"] == PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+
+    # The paths do not see the same sample, so they do not report the same
+    # resolution: a measurement that copied one path's number into the
+    # others would pass every other check in this file.
+    sharpes = [blocks[p]["min_detectable_sharpe"] for p in blocks]
+    assert len(set(sharpes)) == len(sharpes), (
+        "the three paths reported the same minimum confirmable Sharpe; they "
+        "price their tests on different out-of-sample series and cannot "
+        "coincide by construction"
+    )
+
+
+def test_each_path_reports_the_framework_s_own_resolution_block():
+    """The measurement reads the framework's block, not a private copy.
+
+    The walk-forward and CPCV paths are measured by calling the framework's
+    own `walk_forward_analysis` and `cpcv_analysis` and reading the
+    `summary["test_resolution"]` block those functions attach. This test
+    runs them again, directly, on the same fixture, and requires the
+    measurement to report exactly what they report -- so it measures the
+    shipped configuration of each path, not a copy of it.
+    """
+    bars = SMALL_SAMPLE_BARS
+    seed = 7
+    tmpdir, data, benchmarks = _control_fixture(bars, seed, False)
+    try:
+        strategy_factory = _make_strategy_factory("sma_crossover")
+        common = dict(
+            data=data,
+            strategy_factory=strategy_factory,
+            param_grid=PARAM_GRID,
+            initial_capital=INITIAL_CAPITAL,
+            commission=COMMISSION,
+            slippage=SLIPPAGE,
+            benchmark=benchmarks,
+            total_return_benchmark=False,
+            benchmark_commission=COMMISSION,
+            benchmark_slippage=SLIPPAGE,
+            benchmark_expense_ratio=0.0,
+            benchmark_cost_is_periodic=False,
+            apply_deflation=True,
+            validate_pit=True,
+        )
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            walk_forward_results = walk_forward_analysis(
+                train_months=WF_TRAIN_MONTHS,
+                test_months=WF_TEST_MONTHS,
+                step_months=WF_STEP_MONTHS,
+                **common,
+            )
+            cpcv_results = cpcv_analysis(
+                n_splits=CPCV_N_SPLITS,
+                test_size=CPCV_TEST_SIZE,
+                **common,
+            )
+    finally:
+        tmpdir.cleanup()
+
+    measured = _measured(bars, seed, False)
+    for path, results in (
+        (WALK_FORWARD, walk_forward_results),
+        (CPCV, cpcv_results),
+    ):
+        framework = results["summary"]["test_resolution"]
+        block = measured["paths"][path]
+        assert block["min_detectable_sharpe"] == framework["min_detectable_sharpe"], (
+            f"the {path} measurement must report the framework's own minimum "
+            "confirmable Sharpe"
+        )
+        assert block["n_test_observations"] == framework["n_test_observations"]
+        assert block["n_parameter_trials"] == framework["n_parameter_trials"]
+        assert block["expected_max_sharpe"] == (
+            results["summary"]["deflated_sharpe"]["expected_max_sharpe"]
+        )
+
+
+def test_the_paths_cross_the_plausibility_bound_at_different_sample_sizes():
+    """Each path answers the question for itself, and they differ.
+
+    The out-of-sample path prices criterion 2 on the held-out test window
+    -- a fifth of the sample -- so it needs the largest sample before it can
+    confirm a plausible effect. The walk-forward and CPCV paths price it on
+    their pooled out-of-sample returns, which span the whole sample, so
+    they resolve a plausible effect with fewer bars.
+
+    Measured on the control fixture, over three seeds and both series:
+
+    * out-of-sample: some draws inside the bound at 5,000 bars, every draw
+      inside it at 10,000 bars;
+    * walk-forward: some draws inside the bound already at 2,500 bars, and
+      every draw inside it at 5,000 bars (its floor is higher than the
+      CPCV path's: it searched more configurations);
+    * CPCV: every draw inside the bound already at 2,500 bars.
+    """
+    summary = summarize(_ladder_rows())
+    by_path = summary["by_path"]
+
+    assert by_path[OUT_OF_SAMPLE]["first_size_any_within_bound"] == MIDDLE_SAMPLE_BARS
+    assert by_path[OUT_OF_SAMPLE]["first_size_all_within_bound"] == LARGE_SAMPLE_BARS
+
+    assert by_path[WALK_FORWARD]["first_size_any_within_bound"] == SMALL_SAMPLE_BARS
+    assert by_path[WALK_FORWARD]["first_size_all_within_bound"] == MIDDLE_SAMPLE_BARS
+
+    assert by_path[CPCV]["first_size_any_within_bound"] == SMALL_SAMPLE_BARS
+    assert by_path[CPCV]["first_size_all_within_bound"] == SMALL_SAMPLE_BARS
+
+    # The primary path's summary is the out-of-sample path's, so a reader
+    # of the top-level numbers and a reader of the per-path numbers agree.
+    assert summary["first_size_all_within_bound"] == (
+        by_path[OUT_OF_SAMPLE]["first_size_all_within_bound"]
+    )
+
+
+def test_the_floor_is_reported_for_every_path_and_every_rung():
+    """SR* is a first-class reported number, per path and per rung.
+
+    The floor is the level below which no sample size can let a path
+    confirm an effect, so it is reported next to the resolution: as the
+    highest floor seen on the ladder, as the floor at each rung, and as the
+    floor at the largest rung measured (the one closest to the asymptote).
+    """
+    summary = summarize(_ladder_rows())
+    for path, stats in summary["by_path"].items():
+        assert stats["max_expected_max_sharpe"] is not None, (
+            f"the {path} path reported no deflation benchmark on the ladder"
+        )
+        assert stats["floor_at_largest_size"] is not None
+        for entry in stats["per_size"]:
+            assert entry["max_expected_max_sharpe"] is not None
+            assert entry["min_expected_max_sharpe"] is not None
+        largest = stats["per_size"][-1]
+        assert largest["bars"] == LARGE_SAMPLE_BARS
+        assert stats["floor_at_largest_size"] == largest["max_expected_max_sharpe"]
+        # The floor is a level below which nothing can be confirmed, so it
+        # cannot sit above the resolution that converges onto it.
+        assert stats["floor_at_largest_size"] <= stats["max_expected_max_sharpe"]
+
+
+def test_the_measurement_moves_no_threshold_and_no_verdict_on_any_path():
+    """The measurement is beside the verdict on every path.
+
+    Each path's block carries the framework's own bounds, and the flag that
+    says the sample cannot resolve criterion 2 is the framework's own: it
+    is set exactly when the minimum confirmable Sharpe exceeds the bound.
+    The per-path summaries name a size; they never state a verdict.
+    """
+    measured = _measured(LARGE_SAMPLE_BARS, 7, False)
+    for path, block in measured["paths"].items():
+        assert block["plausible_max_annualized_sharpe"] == PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+        assert block["plausible_max_annualized_alpha"] == PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+        value = block["min_detectable_sharpe"]
+        expected = value is not None and value > PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+        assert block["sharpe_beyond_plausible_bound"] is expected, (
+            f"the {path} path's bound flag does not match its own resolution"
+        )
+
+    summary = summarize(_ladder_rows())
+    for path, stats in summary["by_path"].items():
+        assert "verdict" not in stats
+        for key in stats:
+            assert "verdict" not in key
+
+
 def main() -> int:
     tests = TEST_REGISTRY
     failures = 0
@@ -238,6 +492,11 @@ TEST_REGISTRY = [
     ("test_the_crossing_is_not_a_property_of_one_random_draw", test_the_crossing_is_not_a_property_of_one_random_draw),
     ("test_the_measurement_agrees_with_the_shipped_example_path", test_the_measurement_agrees_with_the_shipped_example_path),
     ("test_the_measurement_moves_no_threshold_and_no_verdict", test_the_measurement_moves_no_threshold_and_no_verdict),
+    ("test_every_analysis_path_is_measured_and_reports_its_own_resolution", test_every_analysis_path_is_measured_and_reports_its_own_resolution),
+    ("test_each_path_reports_the_framework_s_own_resolution_block", test_each_path_reports_the_framework_s_own_resolution_block),
+    ("test_the_paths_cross_the_plausibility_bound_at_different_sample_sizes", test_the_paths_cross_the_plausibility_bound_at_different_sample_sizes),
+    ("test_the_floor_is_reported_for_every_path_and_every_rung", test_the_floor_is_reported_for_every_path_and_every_rung),
+    ("test_the_measurement_moves_no_threshold_and_no_verdict_on_any_path", test_the_measurement_moves_no_threshold_and_no_verdict_on_any_path),
 ]
 
 

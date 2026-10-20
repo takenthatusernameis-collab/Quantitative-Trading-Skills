@@ -154,15 +154,20 @@ Risk Metrics:
   annualized Sharpe / alpha the pre-registered significance criteria could
   have confirmed at that sample size) plus the deflation benchmark `SR*`
   (`expected_max_sharpe`) the resolution converges to. It calls
-  `walk_forward.out_of_sample_validation` and
-  `walk_forward._build_test_resolution`; it re-derives nothing and changes
+  `walk_forward.out_of_sample_validation`, `walk_forward.walk_forward_analysis`
+  and `walk_forward.cpcv_analysis`, and reads the resolution block each of
+  them attaches to its own summary; it re-derives nothing and changes
   no threshold, bound, criterion or verdict. `--data FILE` measures the same
-  curve on the first N bars of a real history. The measured answer: the
-  resolution *improves* with the sample and crosses below the 2.0
-  plausibility bound at a few thousand daily bars, so the shipped sample's
-  verdict is a statement about its 504 bars rather than about the criteria.
-  See `references/validation_methods.md`, "How much data does criterion 2
-  need?".
+  curve on the first N bars of a real history; `--paths` restricts the paths
+  measured. The measured answer, per path: the resolution *improves* with
+  the sample and crosses below the 2.0 plausibility bound at a few thousand
+  daily bars, so the shipped sample's verdict is a statement about its 504
+  bars rather than about the criteria. The three paths cross at different
+  sample sizes -- the out-of-sample path (whose criterion 2 is evaluated on
+  the held-out test window) last, at 10,000 bars, the walk-forward path
+  (pooled out-of-sample windows) at 5,000, the CPCV path (pooled
+  out-of-sample folds) at 2,500. See `references/validation_methods.md`,
+  "How much data does criterion 2 need?".
 
 ### tests/
 - `test_walk_forward.py` - Unit tests for walk-forward and parameter optimization
@@ -572,7 +577,12 @@ Risk Metrics:
   block: no sample size can confirm an effect below it, so read that number
   before asking for more data. `scripts/measure_resolution_vs_sample_size.py`
   measures the whole curve (on the synthetic control fixture, or on the
-  first N bars of a real history with `--data`). Guarded by
+  first N bars of a real history with `--data`), **for each analysis path**:
+  the paths price their significance tests on different out-of-sample
+  series, so they cross the bound at different sample sizes — the
+  out-of-sample path (criterion 2 on the held-out test window) at 10,000
+  bars, the walk-forward path (pooled out-of-sample windows) at 5,000, the
+  CPCV path (pooled out-of-sample folds) at 2,500. Guarded by
   `tests/test_resolution_vs_sample_size.py`; the curve and the mechanism are
   in `references/validation_methods.md`, "How much data does criterion 2
   need?".

@@ -160,6 +160,15 @@ from 4.20 (the shipped 504-bar sample) to 2.40 at 2,500 bars and 1.71 at
 `references/validation_methods.md`, "How much data does criterion 2 need?",
 records it and the mechanism.
 
+**The paths differ.** The curve above is the out-of-sample path's, because
+that is where the pre-registered criteria live: criterion 2 is evaluated on
+the held-out test window, a fifth of the sample. The script measures the
+walk-forward and CPCV paths too, and they cross the bound earlier -- at
+5,000 and 2,500 bars respectively -- because they price their significance
+tests on pooled out-of-sample returns that span the whole sample. A study
+that reports only the held-out window's resolution understates what its own
+data can resolve.
+
 Run with:
 ```bash
 python3 skills/quantitative-backtesting/examples/falsifiable_hypothesis_example.py

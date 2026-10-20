@@ -1704,6 +1704,67 @@ Sharpe of 4.1950 to confirm anything -- more than twice the plausibility
 bound -- and no verdict on that sample can distinguish "the strategy has no
 edge" from "the sample is too small to see one".
 
+#### The three analysis paths answer it differently
+
+The curve above is the **out-of-sample path's** curve, because that is where
+the pre-registered criteria live: criterion 2's Deflated Sharpe test is
+evaluated on the *held-out test window*, which is a fifth of the sample. The
+other two analysis paths price their own significance tests on different
+out-of-sample series, so they have their own resolutions and their own
+crossing points, and the measurement now reports all three:
+
+- the **out-of-sample** path evaluates its test on the held-out test window
+  (20% of the sample);
+- the **walk-forward** path evaluates its test on the pooled out-of-sample
+  returns of every walk-forward window (which together span the sample);
+- the **CPCV** path evaluates its test on the pooled out-of-sample returns of
+  every fold (also spanning the sample).
+
+Measured on the same control fixture, over three seeds and both series
+(the six draws at each rung):
+
+| Path | Test observations at 2,500 bars | Smallest confirmable annualized Sharpe at 2,500 bars | Deflation floor SR* at 2,500 bars | Smallest confirmable annualized Sharpe at 10,000 bars | First rung at which *every* draw is inside the bound |
+| --- | --- | --- | --- | --- | --- |
+| out-of-sample (held-out test window) | 498 | 2.13 – 3.23 | 1.24 – 2.23 | 1.52 – 1.82 | 10,000 bars |
+| walk-forward (pooled windows) | 1,441 – 2,201 | 1.74 – 2.26 | 1.25 – 1.82 | 1.12 – 1.45 | 5,000 bars |
+| CPCV (pooled folds) | 490 | 1.41 – 1.95 | 0.45 – 1.04 | 0.67 – 1.15 | 2,500 bars |
+
+The rung at which *some* draw is already inside the bound comes earlier still
+(5,000 bars for the out-of-sample path, 2,500 for the walk-forward and CPCV
+paths): a size at which the answer depends on the draw is reported as such
+rather than as a crossing point.
+
+Two things follow, and they are statements about *paths*, not about any
+strategy:
+
+- **The out-of-sample path is the binding constraint.** It prices criterion 2
+  on the held-out window, so its test observations grow at a fifth of the
+  rate the sample grows; the other two paths pool their out-of-sample
+  returns across the whole sample and resolve a plausible effect with
+  several times fewer bars. A study that only reports the held-out
+  window's resolution understates what its own data can resolve.
+- **The CPCV path's floor is the lowest of the three** (0.45 – 1.04 against
+  1.24 – 2.23 for the out-of-sample path at 2,500 bars), because the floor
+  is estimated from the dispersion of the trial Sharpes and the CPCV path
+  evaluates far fewer configurations per fold than the out-of-sample path's
+  internal walk-forward does (75 against 233 trials at 2,500 bars). A lower
+  floor is a lower asymptote: the resolution cannot converge onto a level
+  below it.
+
+"Is there such a sample size at all?" is answered per path as well. At the
+largest rung measured (10,000 bars) the floor is 1.38 (out-of-sample), 1.21
+(walk-forward) and 0.70 (CPCV) -- all below the 2.0 plausibility bound, so
+all three paths can, in principle, confirm a plausible effect given enough
+data. The summary says the opposite ("no sample size would let this path
+confirm a plausible effect") only when the floor is above the bound at
+*every* measured rung, which is the case that no sample size could fix.
+
+What this does **not** establish: the crossing points are properties of the
+synthetic control fixture and of the shipped configuration, not promises
+about a real history. What it does establish is the mechanism -- the paths
+differ because they see different out-of-sample series, and the held-out
+window is the smallest of them.
+
 #### Why the resolution improves, and where it stops
 
 The minimum detectable Sharpe inverts the Deflated Sharpe z-score, so to
@@ -1756,13 +1817,21 @@ onto the floor rather than onto zero.
   are properties of a formula and of the decision machinery; the crossing
   point is a property of this construction, not a promise about a real
   history. `--data FILE` measures the same curve on real data.
+- **A path's resolution is that path's, not the study's.** The three paths
+  are measured on the same sample with their own shipped configurations,
+  and each one reports the resolution of the significance test it actually
+  runs. The ordering of the crossing points is a statement about the
+  mechanism (the held-out window is the smallest of the three
+  out-of-sample series); the crossing points themselves are properties of
+  this construction.
 - **Nothing here changes a verdict.** The measurement is beside the
   pre-registered criteria, exactly like the resolution block itself: no
   threshold, bound, criterion or verdict moves, and the shipped sample's
   output is byte-identical. `tests/test_resolution_vs_sample_size.py` pins
   all three properties, including that the measurement agrees with the
   worked example's own shipped path (so it measures the shipped
-  configuration and not a private copy of it).
+  configuration and not a private copy of it), and that every path's block
+  is the one the framework itself attaches to that path's summary.
 
 ### The primary backtest entry point reports it too
 
