@@ -53,6 +53,26 @@ WHAT THE NUMBERS MEAN
     plausibility bound. When the floor itself exceeds the plausibility
     bound, the answer is "no sample size at all", and the summary says so.
 
+    CRITERION 5 IS MEASURED THE SAME WAY, IN PARALLEL
+    ``min_detectable_alpha`` is the smallest *annualized* alpha the
+    Deflated Alpha test could have confirmed at the sample size actually
+    available -- the resolution of criterion 5. ``expected_max_alpha`` (the
+    deflation benchmark alpha*, read straight out of the framework's own
+    Deflated Alpha block) is the floor that resolution converges to. The
+    per-path summary reports the alpha crossing alongside the Sharpe one
+    (``per_size_alpha``, ``first_size_all_within_alpha_bound``,
+    ``first_size_any_within_alpha_bound``, ``max_expected_max_alpha``,
+    ``alpha_floor_at_largest_size`` and the ``alpha_floor_*`` flags).
+
+    The two criteria are reported separately because they cross at
+    *different* sample sizes: the alpha bound is the stricter of the two
+    (a 10% annualized alpha is a much smaller effect than a 2.0 annualized
+    Sharpe), so criterion 5's resolution stays above it longer. Measured
+    on the control fixture, the CPCV path's minimum confirmable alpha is
+    still 10-13% at 10,000 bars -- above the bound -- while its minimum
+    confirmable Sharpe is already well under 2.0 there. The report says so
+    explicitly rather than leaving it implicit.
+
 THE DATA IS SYNTHETIC
     By default the measurement runs on the synthetic control fixture
     (``scripts/generate_positive_control_data.py``): a series produced by a
@@ -648,6 +668,21 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
     ``floor_beyond_plausible_bound`` says whether the floor was above the
     plausibility bound at *every* measured rung -- which is the "no sample
     size at all" answer.
+
+    THE ALPHA SIDE IS MIRRORED OFF THE SHARPE SIDE
+    The same machinery is applied to criterion 5 (the minimum confirmable
+    annualized alpha against the framework's own 10% annualized-alpha
+    plausibility bound), and the result is reported in parallel:
+    ``per_size_alpha``, ``first_size_all_within_alpha_bound``,
+    ``first_size_any_within_alpha_bound``, ``max_expected_max_alpha``,
+    ``alpha_floor_at_largest_size`` and the ``alpha_floor_*`` flags. The
+    two criteria are reported separately because they cross at different
+    sample sizes: the alpha bound is the stricter of the two (a 10%
+    annualized alpha is a much smaller effect than a 2.0 annualized
+    Sharpe), so criterion 5's resolution stays above it longer. Measured
+    on the control fixture, the CPCV path's minimum confirmable alpha is
+    still 10-13% at 10,000 bars -- above the bound -- while its minimum
+    confirmable Sharpe is already well under 2.0 there.
     """
     sharpes = []
     floors = []
@@ -673,6 +708,40 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
 
     finite_sharpes = [s for s in sharpes if s is not None]
     finite_floors = [f for f in floors if f is not None]
+
+    # The alpha side is measured the same way, against the framework's own
+    # 10% annualized-alpha plausibility bound. The two criteria are reported
+    # separately because they cross at different sample sizes: the alpha
+    # bound is the stricter of the two (a 10% annualized alpha is a much
+    # smaller effect than a 2.0 annualized Sharpe), so the minimum
+    # confirmable alpha stays above it longer. Measured on the control
+    # fixture, the CPCV path's minimum confirmable alpha is still 10-13% at
+    # 10,000 bars -- above the bound -- while its minimum confirmable Sharpe
+    # is already well under 2.0 there.
+    alphas: List[float] = []
+    alpha_floors: List[float] = []
+    per_size_alpha: Dict[int, Dict[str, Any]] = {}
+    for row in rows:
+        block = _path_block(row, path)
+        bars = row.get("bars")
+        value = block.get("min_detectable_alpha")
+        bucket = per_size_alpha.setdefault(
+            bars, {"values": [], "within": 0, "measured": 0, "floors": []}
+        )
+        bucket["measured"] += 1
+        floor = block.get("expected_max_alpha")
+        if floor is not None:
+            bucket["floors"].append(floor)
+            alpha_floors.append(floor)
+        if value is None:
+            continue
+        bucket["values"].append(value)
+        if value <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA:
+            bucket["within"] += 1
+        alphas.append(value)
+
+    finite_alphas = [a for a in alphas if a is not None]
+    finite_alpha_floors = [f for f in alpha_floors if f is not None]
 
     size_summary = []
     for bars in sorted(per_size):
@@ -704,8 +773,42 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
             }
         )
 
+    alpha_size_summary = []
+    for bars in sorted(per_size_alpha):
+        bucket = per_size_alpha[bars]
+        values = bucket["values"]
+        rung_floors = bucket["floors"]
+        alpha_size_summary.append(
+            {
+                "bars": bars,
+                "min_min_detectable_alpha": min(values) if values else None,
+                "max_min_detectable_alpha": max(values) if values else None,
+                # The deflation floor for alpha (alpha*): the level below
+                # which no sample size can let this path confirm a
+                # plausible alpha, because alpha* is the alpha the
+                # parameter grid would produce from luck alone.
+                "max_expected_max_alpha": max(rung_floors) if rung_floors else None,
+                "min_expected_max_alpha": min(rung_floors) if rung_floors else None,
+                "draws_measured": bucket["measured"],
+                "draws_resolved": len(values),
+                "draws_within_bound": bucket["within"],
+                "all_within_bound": bool(values)
+                and len(values) == bucket["measured"]
+                and all(v <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA for v in values),
+                "any_within_bound": any(
+                    v <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA for v in values
+                ),
+            }
+        )
+
     def _first(predicate):
         for entry in size_summary:
+            if predicate(entry):
+                return entry["bars"]
+        return None
+
+    def _first_alpha(predicate):
+        for entry in alpha_size_summary:
             if predicate(entry):
                 return entry["bars"]
         return None
@@ -727,28 +830,67 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
         f > PLAUSIBLE_MAX_ANNUALIZED_SHARPE for f in rung_floor_maxima
     )
 
+    # The alpha crossing, mirrored off the Sharpe crossing. The alpha floor
+    # (alpha*) is the deflation benchmark for criterion 5, and the bound is
+    # the framework's own 10% annualized alpha.
+    alpha_floor_at_largest = (
+        alpha_size_summary[-1].get("max_expected_max_alpha")
+        if alpha_size_summary
+        else None
+    )
+    alpha_rung_floor_maxima = [
+        entry["max_expected_max_alpha"]
+        for entry in alpha_size_summary
+        if entry.get("max_expected_max_alpha") is not None
+    ]
+    alpha_floor_beyond_bound = bool(alpha_rung_floor_maxima) and all(
+        f > PLAUSIBLE_MAX_ANNUALIZED_ALPHA for f in alpha_rung_floor_maxima
+    )
+
     return {
         "path": path,
         "plausible_max_annualized_sharpe": PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
         "plausible_max_annualized_alpha": PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
         "per_size": size_summary,
+        "per_size_alpha": alpha_size_summary,
         "first_size_all_within_bound": _first(lambda e: e["all_within_bound"]),
         "first_size_any_within_bound": _first(lambda e: e["any_within_bound"]),
+        "first_size_all_within_alpha_bound": _first_alpha(
+            lambda e: e["all_within_bound"]
+        ),
+        "first_size_any_within_alpha_bound": _first_alpha(
+            lambda e: e["any_within_bound"]
+        ),
         "min_min_detectable_sharpe": min(finite_sharpes) if finite_sharpes else None,
         "max_min_detectable_sharpe": max(finite_sharpes) if finite_sharpes else None,
+        "min_min_detectable_alpha": min(finite_alphas) if finite_alphas else None,
+        "max_min_detectable_alpha": max(finite_alphas) if finite_alphas else None,
         "max_expected_max_sharpe": max(finite_floors) if finite_floors else None,
+        "max_expected_max_alpha": (
+            max(finite_alpha_floors) if finite_alpha_floors else None
+        ),
         "floor_at_largest_size": floor_at_largest,
+        "alpha_floor_at_largest_size": alpha_floor_at_largest,
         # The floor was above the plausibility bound at every measured rung:
         # no sample size would ever let this path confirm a plausible effect.
         "floor_beyond_plausible_bound": floor_beyond_bound,
+        "alpha_floor_beyond_plausible_bound": alpha_floor_beyond_bound,
         # The floor is still above the bound at the largest rung measured:
         # more data may bring it under.
         "floor_beyond_plausible_bound_at_largest_size": floor_at_largest is not None
         and floor_at_largest > PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
+        "alpha_floor_beyond_plausible_bound_at_largest_size": (
+            alpha_floor_at_largest is not None
+            and alpha_floor_at_largest > PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+        ),
         "all_rungs_within_bound": bool(finite_sharpes)
         and all(s <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE for s in finite_sharpes),
+        "all_rungs_within_alpha_bound": bool(finite_alphas)
+        and all(a <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA for a in finite_alphas),
         "any_rung_within_bound": bool(finite_sharpes)
         and any(s <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE for s in finite_sharpes),
+        "any_rung_within_alpha_bound": bool(finite_alphas)
+        and any(a <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA for a in finite_alphas),
     }
 
 
@@ -929,6 +1071,73 @@ def print_path_summary(summary: Dict[str, Any], path: str) -> None:
         print(
             "  the floor (SR*) is still above the plausibility bound at the "
             "largest measured sample size: a longer sample may bring it under"
+        )
+    print(
+        f"  smallest measured annualized alpha criterion 5 could confirm: "
+        f"{_fmt(stats.get('min_min_detectable_alpha'), '%.4f')}"
+    )
+    print(
+        f"  highest deflation benchmark (alpha*) seen on the ladder: "
+        f"{_fmt(stats.get('max_expected_max_alpha'), '%.4f')}"
+    )
+    print(
+        f"  deflation benchmark (alpha*) at the largest measured sample size: "
+        f"{_fmt(stats.get('alpha_floor_at_largest_size'), '%.4f')}"
+    )
+    print(
+        f"  plausibility bound for an annualized alpha: "
+        f"{_fmt(stats['plausible_max_annualized_alpha'], '%.2f')}"
+    )
+    if stats.get("first_size_all_within_alpha_bound") is not None:
+        print(
+            f"  first measured sample size at which EVERY draw measured had "
+            f"criterion 5 within the alpha plausibility bound: "
+            f"{stats['first_size_all_within_alpha_bound']} bars"
+        )
+    else:
+        print(
+            "  no measured sample size brought criterion 5 within the "
+            "alpha plausibility bound on every draw measured at that size"
+        )
+    if stats.get("first_size_any_within_alpha_bound") is not None:
+        print(
+            f"  first measured sample size at which SOME draw had criterion 5 "
+            f"within the alpha plausibility bound: "
+            f"{stats['first_size_any_within_alpha_bound']} bars"
+        )
+    if stats.get("alpha_floor_beyond_plausible_bound"):
+        print(
+            "  the alpha floor (alpha*) was above the plausibility bound at "
+            "every measured sample size: no sample size would let this path "
+            "confirm a plausible alpha"
+        )
+    elif stats.get("alpha_floor_beyond_plausible_bound_at_largest_size"):
+        print(
+            "  the alpha floor (alpha*) is still above the plausibility bound "
+            "at the largest measured sample size: a longer sample may bring "
+            "it under"
+        )
+    # The two criteria cross at different sample sizes. The alpha bound is
+    # the stricter of the two -- a 10% annualized alpha is a much smaller
+    # effect than a 2.0 annualized Sharpe -- so criterion 5's resolution
+    # stays above it longer. State it when the measurement shows it: the
+    # first size at which every draw is inside the alpha bound is later than
+    # (or equal to) the Sharpe one, or the first size at which some draw is
+    # inside the alpha bound is later than the Sharpe one.
+    alpha_all = stats.get("first_size_all_within_alpha_bound")
+    alpha_any = stats.get("first_size_any_within_alpha_bound")
+    sharpe_all = stats.get("first_size_all_within_bound")
+    sharpe_any = stats.get("first_size_any_within_bound")
+    later = (
+        (alpha_all is not None and sharpe_all is not None and alpha_all > sharpe_all)
+        or (alpha_any is not None and sharpe_any is not None and alpha_any > sharpe_any)
+    )
+    if later:
+        print(
+            "  the alpha bound is crossed later than the Sharpe bound on this "
+            "path: criterion 5 needs a larger sample than criterion 2 does, "
+            "because a 10% annualized alpha is a much smaller effect than a "
+            "2.0 annualized Sharpe"
         )
 
 

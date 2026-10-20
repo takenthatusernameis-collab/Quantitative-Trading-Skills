@@ -571,6 +571,162 @@ def test_test_frac_sweep_each_split_matches_the_framework_own_block():
         )
 
 
+def _framework_wf_block(bars, seed, inject_effect):
+    """Run the framework's own walk_forward_analysis on the same fixture.
+
+    Returns its summary, so callers can read the framework's own
+    ``summary["test_resolution"]`` and ``summary["deflated_alpha"]`` blocks
+    and compare them with what the measurement reports for the identical
+    configuration.
+    """
+    tmpdir, data, benchmarks = _control_fixture(bars, seed, inject_effect)
+    try:
+        strategy_factory = _make_strategy_factory("sma_crossover")
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            results = walk_forward_analysis(
+                data=data,
+                strategy_factory=strategy_factory,
+                param_grid=PARAM_GRID,
+                train_months=WF_TRAIN_MONTHS,
+                test_months=WF_TEST_MONTHS,
+                step_months=WF_STEP_MONTHS,
+                initial_capital=INITIAL_CAPITAL,
+                commission=COMMISSION,
+                slippage=SLIPPAGE,
+                benchmark=benchmarks,
+                total_return_benchmark=False,
+                benchmark_commission=COMMISSION,
+                benchmark_slippage=SLIPPAGE,
+                benchmark_expense_ratio=0.0,
+                benchmark_cost_is_periodic=False,
+                apply_deflation=True,
+                validate_pit=True,
+            )
+    finally:
+        tmpdir.cleanup()
+    return results.get("summary", {})
+
+
+def _framework_cpcv_block(bars, seed, inject_effect):
+    """Run the framework's own cpcv_analysis on the same fixture.
+
+    Returns its summary, so callers can read the framework's own
+    ``summary["test_resolution"]`` and ``summary["deflated_alpha"]`` blocks
+    and compare them with what the measurement reports for the identical
+    configuration.
+    """
+    tmpdir, data, benchmarks = _control_fixture(bars, seed, inject_effect)
+    try:
+        strategy_factory = _make_strategy_factory("sma_crossover")
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            results = cpcv_analysis(
+                data=data,
+                strategy_factory=strategy_factory,
+                param_grid=PARAM_GRID,
+                n_splits=CPCV_N_SPLITS,
+                test_size=CPCV_TEST_SIZE,
+                initial_capital=INITIAL_CAPITAL,
+                commission=COMMISSION,
+                slippage=SLIPPAGE,
+                benchmark=benchmarks,
+                total_return_benchmark=False,
+                benchmark_commission=COMMISSION,
+                benchmark_slippage=SLIPPAGE,
+                benchmark_expense_ratio=0.0,
+                benchmark_cost_is_periodic=False,
+                apply_deflation=True,
+                validate_pit=True,
+            )
+    finally:
+        tmpdir.cleanup()
+    return results.get("summary", {})
+
+
+def test_each_path_reports_the_framework_s_own_alpha_block():
+    """The measurement reads the framework's alpha block, not a private copy.
+
+    The walk-forward and CPCV paths are measured by calling the framework's
+    own ``walk_forward_analysis`` and ``cpcv_analysis`` and reading the
+    ``summary["test_resolution"]`` block those functions attach. This test
+    runs them again, directly, on the same fixture, and requires the
+    measurement to report exactly what they report for the minimum
+    confirmable annualized alpha and the deflation benchmark alpha* -- so
+    it measures the shipped configuration of each path's criterion 5, not
+    a copy of it.
+    """
+    bars = SMALL_SAMPLE_BARS
+    seed = 7
+    measured = _measured(bars, seed, False)
+    for path, framework in (
+        (WALK_FORWARD, _framework_wf_block(bars, seed, False)),
+        (CPCV, _framework_cpcv_block(bars, seed, False)),
+    ):
+        resolution = framework.get("test_resolution")
+        assert isinstance(resolution, dict), (
+            f"the framework did not attach a test_resolution block to its {path} summary"
+        )
+        block = measured["paths"][path]
+        assert block["min_detectable_alpha"] == resolution["min_detectable_alpha"], (
+            f"the {path} measurement must report the framework's own minimum "
+            "confirmable annualized alpha"
+        )
+        assert block["expected_max_alpha"] == (
+            framework["deflated_alpha"]["expected_max_alpha"]
+        ), (
+            f"the {path} measurement must report the framework's own deflation "
+            "benchmark alpha*"
+        )
+
+
+def test_the_alpha_bound_is_crossed_later_than_the_sharpe_bound():
+    """Criterion 5 needs a larger sample than criterion 2 on some paths.
+
+    The alpha plausibility bound (10% annualized alpha) is much stricter
+    than the Sharpe one (2.0 annualized Sharpe), so the minimum confirmable
+    alpha stays above it longer. Measured on the control fixture, over
+    three seeds and both series:
+
+    * out-of-sample: criterion 5 crosses the bound at the same sample sizes
+      as criterion 2 (5,000 bars on some draws, 10,000 bars on every draw);
+    * walk-forward: criterion 5 is crossed on some draws already at 2,500
+      bars, but never on every draw measured, and its alpha floor (alpha*)
+      is above the bound at every measured rung -- so no measured sample
+      size would let this path confirm a plausible alpha on every draw;
+    * CPCV: criterion 5 is crossed on some draws at 5,000 bars, later than
+      criterion 2 (which is crossed on every draw already at 2,500 bars),
+      and never on every draw measured.
+    """
+    summary = summarize(_ladder_rows())
+    by_path = summary["by_path"]
+
+    # The out-of-sample path crosses the alpha bound at the same sample
+    # sizes as the Sharpe bound: 5,000 bars on some draws, 10,000 bars on
+    # every draw.
+    assert by_path[OUT_OF_SAMPLE]["first_size_all_within_alpha_bound"] == LARGE_SAMPLE_BARS
+    assert by_path[OUT_OF_SAMPLE]["first_size_any_within_alpha_bound"] == MIDDLE_SAMPLE_BARS
+
+    # The walk-forward path crosses the alpha bound on some draws already
+    # at 2,500 bars, but never on every draw measured, and its alpha floor
+    # (alpha*) is above the bound at every measured rung -- so no measured
+    # sample size would let this path confirm a plausible alpha on every
+    # draw.
+    assert by_path[WALK_FORWARD]["first_size_any_within_alpha_bound"] == SMALL_SAMPLE_BARS
+    assert by_path[WALK_FORWARD]["first_size_all_within_alpha_bound"] is None
+    assert by_path[WALK_FORWARD]["alpha_floor_beyond_plausible_bound"] is True
+    assert by_path[WALK_FORWARD]["alpha_floor_beyond_plausible_bound_at_largest_size"] is True
+
+    # The CPCV path crosses the alpha bound on some draws at 5,000 bars --
+    # later than the Sharpe bound, which it crosses on every draw already at
+    # 2,500 bars -- and never on every draw measured.
+    assert by_path[CPCV]["first_size_any_within_alpha_bound"] == MIDDLE_SAMPLE_BARS
+    assert by_path[CPCV]["first_size_all_within_alpha_bound"] is None
+    assert by_path[CPCV]["first_size_any_within_alpha_bound"] > (
+        by_path[CPCV]["first_size_any_within_bound"]
+    )
+
+
 def test_shipped_default_split_is_unchanged():
     """The shipped 0.6 / 0.2 / 0.2 split remains the default and its numbers match."""
     assert TRAIN_FRAC == 0.6
@@ -616,6 +772,8 @@ TEST_REGISTRY = [
     ("test_the_measurement_moves_no_threshold_and_no_verdict", test_the_measurement_moves_no_threshold_and_no_verdict),
     ("test_every_analysis_path_is_measured_and_reports_its_own_resolution", test_every_analysis_path_is_measured_and_reports_its_own_resolution),
     ("test_each_path_reports_the_framework_s_own_resolution_block", test_each_path_reports_the_framework_s_own_resolution_block),
+    ("test_each_path_reports_the_framework_s_own_alpha_block", test_each_path_reports_the_framework_s_own_alpha_block),
+    ("test_the_alpha_bound_is_crossed_later_than_the_sharpe_bound", test_the_alpha_bound_is_crossed_later_than_the_sharpe_bound),
     ("test_the_paths_cross_the_plausibility_bound_at_different_sample_sizes", test_the_paths_cross_the_plausibility_bound_at_different_sample_sizes),
     ("test_the_floor_is_reported_for_every_path_and_every_rung", test_the_floor_is_reported_for_every_path_and_every_rung),
     ("test_the_measurement_moves_no_threshold_and_no_verdict_on_any_path", test_the_measurement_moves_no_threshold_and_no_verdict_on_any_path),
