@@ -1,149 +1,127 @@
-# HANDOFF_NEXT
+# HANDOFF — next session
 
-## The one precise next task
+Read `HANDOFF.md` first: it records what the last session changed, what it
+verified, and what it deliberately left alone.
 
-**Diagnose the *partial* selection: when some folds / periods select a
-parameter and others do not, say why the flat ones stayed flat — and say how
-many windows the verdict rests on.**
+## State of the work
 
-## Why (evidence, on the current HEAD)
+The last session completed the **partial selection diagnosis** (the task
+this file used to carry). A run in which only *some* windows selected a
+parameter now records `summary["partial_selection_diagnosis"]` with a
+per-window breakdown, and the overfitting-risk verdict keeps its
+categorical value but gains a reason that states how many windows it
+rests on. The cause of every flat window is **measured inside the search**
+(`selection_outcomes` on the period / fold record), not inferred from the
+empty result.
 
-`cpcv --n-splits 5 --test-size 0.2` on the shipped sample selects in
-**2 of 5** folds:
+The all-flat case (`summary["no_selection_diagnosis"]`) is unchanged, as
+the previous handoff required.
 
-```
-best_params_per_fold: [{'fast_period': 10, 'slow_period': 20}, None, None,
-                        {'fast_period': 10, 'slow_period': 20}, None]
-folds_with_position: 2
-no_selection_diagnosis: None
-overfitting_risk: low
-```
+## The next task
 
-The artifact reports the count and says nothing about the three flat folds.
-The library shows they are **not** short-window folds: every fold carries the
-same 20 test bars, and the flat folds simply produced no position
-(`test_returns` empty, `test_sharpe: None`). So the cause is a *strategy*
-fact (the signal never triggers on that window), not a window fact — and
-those two call for completely different remedies, exactly as the
-already-fixed "no selection at all" case showed.
+**Flag a run whose evidence is too thin to support the verdict it
+carries.**
 
-Two concrete harms:
+The partial diagnosis now *reports* the amount of evidence
+(`details["traded_windows"][*]["position_bars"]` and
+`details["min_traded_position_bars"]`), but nothing acts on it. The
+canonical case shows why this matters: in
+`cpcv --n-splits 5 --test-size 0.2` on the shipped sample, the two folds
+that selected a parameter held the position for **1 bar out of 20** each,
+so the run's out-of-sample record is a flat one
+(`total_oos_return: 0.0`, `oos_sharpe: 0.0`) and the `low`
+overfitting-risk verdict rests on two bars of trading.
 
-1. **A reader cannot interpret the count.** "2 of 5 folds selected" is
-   compatible with "3 folds were too short to trade" (a design problem) and
-   with "the strategy is flat on 60% of the sample" (a strategy finding).
-   The artifact supports both readings.
-2. **The categorical verdict is reported on a minority of the evidence.**
-   `overfitting_risk: low` is derived from the parameter stability of the
-   2 folds that selected, with no statement that 3 folds contributed
-   nothing. The previous session already established the principle that a
-   verdict which no measurement supports must not be categorical (CPCV said
-   `high` and walk-forward said `low` for the same state; both became
-   `null` with a reason).
+The task: decide, measure and state a **minimum evidence threshold** for a
+selection to count as evidence, and report a run that falls below it as
+what it is.
 
-## Scope
+Constraints and evidence to build on:
 
-1. **Extend the existing vocabulary, do not invent a second one.**
-   `_diagnose_no_selection` (`scripts/walk_forward.py:3601`) already
-   distinguishes `no_validation_windows` from
-   `no_position_in_validation_window` and names the flags the path's own
-   subcommand accepts. Reuse it *per window* for the flat windows, and
-   report the result as a **partial** diagnosis (a new key on the summary,
-   e.g. `partial_selection_diagnosis`) only when **some** windows selected
-   and **some** did not. The all-flat case must keep using
-   `no_selection_diagnosis` unchanged.
-2. **Say what the flat windows were.** For each flat fold / period, report
-   the cause from the same vocabulary (window too short vs. no position) and
-   the evidence for it (the window's bar count, the empty test returns).
-   A per-window breakdown is the point: the count alone is what is missing
-   today.
-3. **Qualify the verdict.** When the verdict rests on fewer windows than
-   exist, the artifact must say so — either by adding the count to the
-   existing reason field or by extending the message. Do **not** remove the
-   categorical verdict where a measurement supports it (a run in which every
-   window selected keeps its verdict unchanged), and do not change the
-   verdict's *value* on the runs that already have one: the constraint from
-   the previous sessions was that no number moves, and the same reasoning
-   applies here.
-4. **Cover all four paths** the way the "no selection at all" diagnosis
-   does: `walk_forward_analysis`, `cpcv_analysis`, and the out-of-sample
-   path (whose validation phase runs inside the training split). The
-   `optimize` path has no folds / periods, so it is out of scope.
-5. **Demonstrate first**: a test that asserts the artifact says nothing
-   about the flat folds today, and says why after the fix.
-6. **Update the documentation**: `references/validation_methods.md`, "When
-   No Parameter Can Be Selected" (add the partial case, the per-window
-   causes, and the qualifying of the verdict) and `SKILL.md` (the
-   research-integrity tip and the test-inventory entry).
-7. **Extend the regression tests** (`tests/test_no_selection_diagnosis.py`):
-   the demonstration, the partial diagnosis on the standalone paths, the
-   per-path remedy flags (the existing helper
-   `test_the_remedy_names_flags_the_path_actually_accepts` checks every
-   flag named in a message against the subcommand's `--help` output — the
-   partial message must pass it too), the CLI/artifact agreement, and the
-   standing invariant that the diagnosis changes no number.
+- The measurement already exists: `position_bars` is recorded per window
+  by the search (the selected combination's count, and the maximum over
+  the grid). The out-of-sample path's *validation* and *test* windows do
+  not carry it yet — `out_of_sample_validation` computes
+  `val_returns` / `test_returns` directly, so the same count would have
+  to be added there.
+- Do **not** change any number: the threshold is a reporting statement,
+  like the other diagnoses, not a filter that drops windows from a
+  result. A run that fails the threshold must still report every number
+  it produced.
+- The threshold has to be *measured*, not chosen to look good: the natural
+  candidate is the fraction of the window the strategy held a position
+  for, and the natural reference is the execution warm-up the framework
+  already reports (`execution_warmup_bars`,
+  `summary["warmup_convention"]`), because a window in which the strategy
+  is only tradable for a few bars after the warm-up cannot support a
+  verdict about the strategy.
+- Keep the same vocabulary discipline the last session used: a new finding
+  gets a new key and an explicit cause, and the existing
+  `no_selection_diagnosis` / `partial_selection_diagnosis` keys keep
+  their meaning.
+- The evidence the next session should produce: the threshold and the
+  measurement behind it; the runs it fires on (the canonical partial CPCV
+  run is the obvious one); a demonstration that the artifact says nothing
+  today; and a numeric parity check against HEAD
+  (`/home/runner/work/_temp/kilo-tmp/kilo/partial_parity.py` is the
+  harness to extend — it compares every artifact key of ten CLI cases
+  against the pre-fix code and fails on any value that moved).
 
-## Constraints for the next session
+## Also worth doing, in order of value
 
-- **Do not change any return, cost, impact, capacity or selection number.**
-  The diagnosis is a measurement.
-- Keep the `no_selection_diagnosis` key, its shape
-  (`{cause, message, details}`) and the all-flat behaviour exactly as they
-  are. The new finding is an *addition* for the partial case.
-- The full **16-file** suite must stay green; pyflakes must not add new
-  warnings on the changed files (`scripts/walk_forward.py` is at 5,
-  `scripts/reporting.py` at 2, `tests/test_cpcv.py` at 4, and
-  `tests/test_inert_param_grid.py` at 0 — all pre-existing).
-- **Do not "fix" the CPCV defaults.** The effective out-of-sample fraction
-  (`test_size / n_splits` = 1% at the defaults, 5-bar fold windows on the
-  shipped sample) is a design question that changes every CPCV number; it is
-  now diagnosed and documented, not patched.
-- `matplotlib` must be installed before trusting a green suite; revert
-  `examples/example_output/tear_sheet.{html,json}` and `data_provenance.json`
-  after any suite run.
-- Do not commit unless explicitly asked — leave the working tree inspectable.
+1. **Correct the all-flat message, which asserts a cause it does not
+   measure.** `no_selection_diagnosis.message` says "no parameter
+   combination took a position in any of them", but the new
+   `selection_outcomes` tally shows that a window can also be unusable
+   because its training split produced a constant return series (the
+   in-sample Sharpe is not estimable). The previous session's handoff
+   required the all-flat case to stay exactly as it was, so it was left
+   alone deliberately; now that the measurement exists, the all-flat
+   cause can be derived from it instead of assumed.
+2. **Make the "too short" claim mechanism-based.** The diagnosis
+   compares a flat window's length with the shortest window in which the
+   strategy traded; a window one bar shorter is reported as "the window
+   length cannot be ruled out". The framework has no generic measure of a
+   strategy's indicator warm-up, so it cannot say "the warm-up is longer
+   than the window" the way the all-flat message does. A warm-up
+   measurement (e.g. the first bar at which a combination can hold a
+   position) would make the claim mechanism-based instead of comparative.
+3. **Extend the reporting surface to the `monte-carlo` path**, which
+   inherits the same partial-selection exposure and records nothing.
 
-## Context that is already settled (do not re-litigate)
+## Constraints that carry over
 
-- **Every path that can select nothing now says why**, with one vocabulary:
-  `summary["no_selection_diagnosis"]` (`{cause, message, details}`) on
-  `cpcv_analysis`, `walk_forward_analysis` and the out-of-sample failure
-  summary; the cause is `no_validation_windows` or
-  `no_position_in_validation_window`. The remedy names the flags the path's
-  own subcommand accepts, and the CPCV message states the effective
-  out-of-sample fraction.
-- **The overfitting-risk verdict is `null` ("not applicable") when nothing
-  could be selected**, with an `overfitting_risk_reason`; a run that did
-  select keeps its categorical verdict.
-- **The inert-parameter-grid check is now exhaustive** over the
-  combinations of the other grid keys' values, bounded at 16 combinations
-  per key, with the bound stated in the finding. It accuses a key only when
-  the key changes nothing in *every* combination, so a parameter that
-  matters only in combination is never accused. The reporting surface did
-  not change (same keys, same sidecar, same CLI warning position).
-  See `HANDOFF.md` for the evidence.
-- Inert parameter grids are detected on all four analysis paths
-  (`walk-forward`, `cpcv`, `optimize`, `out-of-sample`), recorded in the
-  artifacts and printed once by the CLI. Keep the split: the library
-  measures (`_inert_grid_report`), the CLI prints
-  (`_print_inert_grid_warning`).
-- The impact model is still linear in the participation rate (no
-  temporary/permanent split, no gap risk), and the parity harness does not
-  exist. Both are still open.
+- The `optimize` path stays out of scope for the selection diagnoses: it
+  has no windows, so there is nothing to diagnose.
+- The framework's "grid search" vocabulary is load-bearing: a grid whose
+  values do not change the strategy's behaviour is a null experiment, and
+  the inert-grid detector reports it on every path that selects
+  (`summary["inert_grid_params"]`). A new finding must not be confused
+  with it.
+- The reporting surface is deliberately small. A new key is a change to
+  the contract; the last session added exactly one key
+  (`partial_selection_diagnosis`) and one reason field
+  (`overfitting_risk_reason`).
+- The example outputs under `skills/quantitative-backtesting/examples/`
+  are regenerated by the test suite (the timestamp and the matplotlib
+  plot files change on every run). Revert them before handing the work
+  over: `git checkout -- skills/quantitative-backtesting/examples/`.
 
-## Alternative tasks, if the primary one is blocked
+## Where the code is
 
-- **Measure the inert grid per window instead of over the full sample.** The
-  selection happens inside each fold / period, so a key that is live over
-  the whole sample but inert in every training window is reported as live
-  although each fold's search over it is a null experiment. Not
-  demonstrated; a per-window measurement changes the reporting surface.
-- **Build the parity harness** (`baseline_capture.py` / `book_cap_probe.py`)
-  that captures a baseline run and compares the framework against an
-  independent re-implementation of the same methodology (the net-exposure vs
-  book pricing gap). Larger scope; needs a precise definition of what
-  "parity" means before any code is written.
-- **The `monte-carlo` path** picks its "best params" from
-  `parameter_optimization` and records and prints none of the findings the
-  other paths record (inert grid, diagnosis). Small, but it is a
-  consistency gap rather than a new measurement.
+- `skills/quantitative-backtesting/scripts/walk_forward.py`
+  - `_diagnose_partial_selection` — the per-window diagnosis.
+  - `_diagnose_no_selection` — the all-flat diagnosis (unchanged).
+  - `_selection_window_remedy`, `_selection_training_remedy`,
+    `_effective_oos_fraction_sentence` — the shared remedies.
+  - `_window_position_bars` / `_window_takes_position` — the position test
+    and the bar count.
+  - `selection_outcomes`, `position_bars`, `max_position_bars` — the
+    measurements recorded on the period / fold records.
+  - `overfitting_check` — the walk-forward verdict and its reason.
+- `skills/quantitative-backtesting/tests/test_no_selection_diagnosis.py` —
+  24 tests, including the partial-selection ones and the pinned
+  demonstration.
+- `skills/quantitative-backtesting/references/validation_methods.md` —
+  "When No Parameter Can Be Selected" and "When Only Some Windows Select
+  a Parameter".

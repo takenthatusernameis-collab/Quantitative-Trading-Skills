@@ -344,6 +344,29 @@ Risk Metrics:
   `--wf-train-months` / `--wf-test-months` for `out-of-sample`), so the
   suggested fix can actually be applied. The diagnosis is a measurement: it
   changes no return, cost, impact, capacity or selection number.
+- **A run in which only *some* windows select a parameter says which windows
+  were flat and why.** "2 of 5 folds selected" is compatible with "the three
+  flat folds were too short to trade" (a design problem) and with "the
+  strategy never triggers on 60% of the sample" (a finding about the
+  strategy), and the two need opposite remedies, so the count alone says
+  nothing. Such a run records `summary["partial_selection_diagnosis"]` (the
+  same `{cause, message, details}` shape) with a per-window breakdown: the
+  cause, the window's length, its empty out-of-sample record, and the tally
+  of what happened to every combination. The cause is **measured inside the
+  search** (`selection_outcomes` on the period / fold record), not inferred
+  from the empty result: a window in which no combination took a position
+  (`no_position_in_validation_window`) and a window in which every
+  combination took a position but the *training* split produced a constant
+  return series (`no_estimable_training_sharpe`) look identical from the
+  outside and need opposite remedies. The diagnosis also separates "the flat
+  window was too short" from "the signal never triggered on it" by comparing
+  the flat window's length with the shortest window in which the strategy
+  did trade. The categorical overfitting-risk verdict keeps its value, and
+  gains an `overfitting_risk_reason` that states how many of the windows it
+  rests on. The all-flat case is unchanged (`no_selection_diagnosis`). See
+  `references/validation_methods.md`, "When Only Some Windows Select a
+  Parameter".
+
 - **The CPCV test window is a fraction of each group, so the effective
   out-of-sample fraction is `test_size / n_splits`.** At the default
   `--test-size 0.1 --n-splits 10` that is **1%**, and on the shipped 504-bar
@@ -720,7 +743,18 @@ python3 skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_exampl
     against its `--help` output); a run that does select a parameter carries
     no diagnosis and keeps its categorical overfitting verdict, while a run
     that cannot select reports `null` / "unknown" plus a reason; and the
-    diagnosis changes no number.
+    diagnosis changes no number. The same file covers the **partial**
+    selection (some windows selected, some did not): the run's facts are
+    pinned so the demonstration cannot rot into a hypothetical, the artifact
+    records `summary["partial_selection_diagnosis"]` with a per-window
+    breakdown (cause, reason, window length, empty out-of-sample record,
+    outcome tally), the cause is the one the search's own tally measured
+    (`no_position_in_validation_window` vs.
+    `no_estimable_training_sharpe`), the flat folds are shown not to be
+    short windows, the categorical overfitting verdict keeps its value and
+    gains a reason that states how many windows it rests on, the remedy
+    names flags the path accepts, and the all-flat case still uses
+    `no_selection_diagnosis`.
 
 The canonical rendered outputs in `test_output/` are regenerated from
 `assets/example_data/sample_ohlcv.csv` via

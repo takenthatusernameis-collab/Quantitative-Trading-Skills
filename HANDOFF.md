@@ -2,215 +2,249 @@
 
 ## What changed this session
 
-**Completed the task assigned in `HANDOFF_NEXT.md`: the inert-parameter-grid
-detector no longer falsely accuses a parameter that only matters in
-combination with another parameter.** The check now compares each grid key
-across *every* combination of the other grid keys' values instead of only
-the combination that holds them at their first value, with a bounded cost
-and an explicit statement in the finding when the bound was reached.
+**Completed the task assigned in `HANDOFF_NEXT.md`: a run in which only
+*some* windows selected a parameter now says which windows were flat, why
+(measured in the search, not inferred), and how many windows the
+overfitting-risk verdict rests on.**
 
 ### The defect, demonstrated before it was fixed
 
-A strategy that reads a parameter only inside a branch is the ordinary way a
-parameter's effect becomes conditional on another parameter. The
-demonstration strategy in the new test reads `threshold` only when
-`mode == "b"`:
+`cpcv --n-splits 5 --test-size 0.2` on the shipped sample selects a
+parameter in **2 of 5** folds. Before this session the artifact said
+exactly that much and nothing more:
 
-```python
-mode "a": long when close > 3-bar mean
-mode "b": long when (close - 3-bar mean) > threshold
+```
+$ python3 .../walk_forward.py cpcv --data assets/example_data/sample_ohlcv.csv \
+      --strategy sma_crossover --param-grid '{"fast_period":[5,10],"slow_period":[20,30]}' \
+      --n-splits 5 --test-size 0.2
+...
+folds_with_position: 2      overfitting_risk: low      (no reason, no cause)
 ```
 
-On the six-bar fixture, the two modes agree at `threshold = 0.05` and
-differ at `threshold = 0.1`. The old rule varied one key while holding the
-other at its **first** value, so it compared `(mode=a, threshold=0.05)` with
-`(mode=b, threshold=0.05)` — no difference — and accused `mode` of being
-inert; and it compared `(mode=a, threshold=0.05)` with
-`(mode=a, threshold=0.1)` — no difference — and accused `threshold` of being
-inert. **Both live parameters were accused, twice over.** A false accusation
-is worse than no accusation: it teaches the reader to ignore the warning.
+Verified against the pre-fix code (`HEAD:skills/.../walk_forward.py`):
+the summary carried **no key at all** that named a cause, a reason or a
+per-window breakdown for the three flat folds. "2 of 5 folds selected" is
+compatible with two opposite readings — "the three flat folds were too
+short to trade" (a design problem) and "the strategy never triggers on
+60% of the sample" (a finding about the strategy) — and the two need
+opposite remedies. A categorical `overfitting_risk: low` was reported on
+the basis of two folds out of five with no caveat.
 
-The evidence is pinned in the test file itself: the old rule is re-implemented
-verbatim in `tests/test_inert_param_grid.py` (`_first_value_inert_keys`) and
-asserted to accuse `["mode", "threshold"]`, so the demonstration cannot rot
-into a hypothetical.
+The demonstration is pinned in the test file itself
+(`test_the_pre_fix_artifact_named_no_cause_for_the_flat_folds`): the
+summary with the new keys removed is asserted to contain no cause/reason/
+diagnosis key and to contain the count, so the demonstration stays true
+after the fix and fails loudly if the pre-fix information ever changes.
+
+### The inference the handoff expected turned out to be wrong
+
+The handoff recorded the library's reading of the flat folds as "no
+position" (`test_returns` empty). That is **not** what the empty result
+proves, and the session's own fixture shows why: a window can select
+nothing because *no combination took a position in it* (the search's
+position guard rejected every combination) **or** because *every
+combination took a position but the training split produced a constant
+return series*, so the in-sample Sharpe the selection ranks on is
+undefined and nothing can be ranked. The two look identical from the
+outside and need opposite remedies (lengthen the window vs. give the
+training split more history).
+
+So the cause is now **measured inside the search**: the grid search
+records a tally of what happened to every combination
+(`selection_outcomes` on the period / fold record), and the diagnosis
+reports the cause that tally attributes to each window.
 
 ### Changes
 
 `skills/quantitative-backtesting/scripts/walk_forward.py`
 
-- **`_inert_param_grid_keys_measured`** (new, `scripts/walk_forward.py:3334`) —
-  the measurement, with the bound that shaped the answer. For each key it
-  enumerates the combinations of the *other* keys' values and compares the
-  key's values inside each combination. **Early exit**: the first
-  combination that shows a behavioural difference proves the key is live,
-  so the remaining combinations are skipped and a live key costs exactly
-  what it cost before. A key is accused only when it is inert in *every*
-  combination, so a parameter that matters only in combination is never
-  accused. An *inconclusive* comparison (the strategy could not be built,
-  or could not be fingerprinted) never produces an accusation — the same
-  conservative direction the old rule took when the first value could not
-  be built.
-- **The bound** — `_INERT_GRID_MAX_COMBINATIONS = 16` combinations of the
-  other values per key. The exhaustive comparison costs
-  `len(values) x product(len(other values))` fingerprints per key, which is
-  unbounded in the size of the grid. A grid that fits in the bound is
-  checked exhaustively; a grid that does not **falls back to the first
-  combination** (the old first-value behaviour) and the finding says so.
-  The product is consumed lazily, so a large grid does not materialise
-  millions of tuples.
-  The bound can only weaken an *inert* verdict: a key that shows a
-  behavioural difference is live whatever the bound (one difference is proof
-  of liveness), so a bounded check never accuses a live key.
-- **`_inert_param_grid_keys`** — the same signature plus an optional
-  `max_combinations`; it is now a thin wrapper over the measured helper.
-- **`_inert_grid_report`** (`scripts/walk_forward.py:3471`) — the same three
-  keys (`inert_grid_params`, `strategy_parameters`, `message`) and the same
-  wording, **plus** a caveat sentence when the check of an accused key was
-  bounded: *"The check for X was bounded: the combinations of the other grid
-  values exceed the bound of 16, so only the first was evaluated (the other
-  grid keys held at their first value) and it may have missed an interaction
-  between parameters."*
-- **Nothing else moved.** The reporting surface is unchanged: the same
-  summary keys, the same `parameter_optimization_inert_grid.json` sidecar,
-  the same CLI warning position, and the same message text whenever the
-  bound was not reached.
+- **`_diagnose_partial_selection`** (new) — the per-window diagnosis. It
+  returns `None` unless the run is in the partial state (some windows
+  selected, some did not), so the all-flat case keeps using
+  `no_selection_diagnosis` unchanged, and a run in which every window
+  selected carries no partial diagnosis. Per flat window it reports the
+  cause, the reason, the window's length, its training-split length, its
+  empty out-of-sample record (`test_returns_bars`, `test_sharpe`), the
+  most bars any combination could have held a position for, the calendar
+  boundaries, the outcome tally and a one-line statement. The cause
+  vocabulary is the one the "no parameter could be selected" diagnosis
+  already uses, extended with the two causes it could not tell apart:
+  `no_estimable_training_sharpe` (every combination took a position, the
+  training Sharpe is not estimable) and `all_combinations_failed` (every
+  combination raised).
+- **The search now measures two things it used to throw away**
+  (`walk_forward_analysis` and `cpcv_analysis`): `selection_outcomes`
+  (the tally of `eligible` / `flat` / `degenerate_training` / `failed`
+  combinations) and `position_bars` / `max_position_bars` (the bars the
+  strategy actually held a position — the *amount of evidence* a window
+  contributes). Both are pure measurements: they change no return, Sharpe,
+  stability, capacity or selection number.
+- **`_window_position_bars`** (new) / **`_window_takes_position`** (now a
+  thin wrapper over it) — the position test now also reports *how many*
+  bars the strategy held a position. The book-pricing branch keeps the
+  original semantics exactly (a panel book that cannot be held is no
+  position; the scalar signal test is not a fallback there).
+- **The verdict is qualified, not changed.** The CPCV summary and the
+  walk-forward `overfitting_check` keep the categorical verdict
+  (`overfitting_risk: low`) and gain an `overfitting_risk_reason` that
+  states how many of the windows it rests on and points at
+  `summary["partial_selection_diagnosis"]`. A run that selected in every
+  window keeps no reason at all, and the all-flat case keeps its "not
+  applicable" reason.
+- **`_selection_window_remedy` / `_selection_training_remedy` /
+  `_effective_oos_fraction_sentence`** (new, shared) — the remedies and
+  the CPCV effective-fraction sentence, extracted from
+  `_diagnose_no_selection` so both diagnoses name the same knobs and the
+  same flags. The `no_selection_diagnosis` message text is unchanged
+  (byte-identical).
+- **`_print_partial_selection_diagnosis`** (new) — the CLI prints the
+  message and one line per flat window, next to the fold / period count,
+  so the console and the artifact carry the same strings.
 
-`skills/quantitative-backtesting/tests/test_inert_param_grid.py` — **11 new
-tests (16 → 27)**: the behavioural fact behind the demonstration, the old
-rule's false accusation, the exoneration of both keys, the continued
-accusation of a key that is inert in *every* combination, the pinned
-verdicts of the shipped strategies, the bound (message caveat, the fallback,
-a bounded check that never accuses a live key), the unchanged report keys,
-and the invariant that the measurement moves no number on the walk-forward
-path (the summary differs only in the two keys that carry the finding).
+`skills/quantitative-backtesting/tests/test_no_selection_diagnosis.py` —
+**12 new tests (12 → 24)**: the pinned facts of the partial run, the
+pre-fix demonstration, the per-window breakdown, the "the flat folds are
+not short windows" measurement, the qualified-but-unchanged verdict, the
+walk-forward and out-of-sample paths (with a deterministic flat-then-rising
+fixture that produces both causes), the remedy's flags against each
+subcommand's `--help`, the all-selected and all-flat cases, the
+"changes no number" invariant, and the CLI/artifact agreement.
 
-`skills/quantitative-backtesting/references/validation_methods.md` — "Inert
-Parameter Grids": the "screen, not a proof" paragraph replaced by the
-exhaustive statement (a key is inert only when it changes nothing in *every*
-combination) and a new "The bound" paragraph (16 combinations per key, the
-fallback, the caveat, and why the bound can only weaken an inert verdict).
+`skills/quantitative-backtesting/references/validation_methods.md` — a new
+section "When Only Some Windows Select a Parameter" (the partial key, the
+cause table, the per-window record fields, the traded-window record, and
+how "too short" and "never triggered" are separated by a measurement).
 
 `skills/quantitative-backtesting/SKILL.md` — the research-integrity tip and
-both `test_inert_param_grid.py` entries (inventory and coverage) describe
-the exhaustive comparison and the bound.
+the `test_no_selection_diagnosis.py` inventory entry.
 
 ## What was actually verified
 
-- **The demonstration fails without the fix.** With the exhaustive
-  comparison reverted to the first-value rule, `test_inert_param_grid.py`
-  reports **25/27** — `test_a_key_that_matters_only_in_combination_is_not_accused`
-  and `test_the_bound_is_a_bound_and_not_a_silent_truncation` fail. With the
-  fix: **27/27**.
-- **Numeric parity with HEAD (`75936b3`) on ten CLI cases — 10/10
-  byte-identical.** Every artifact key of every artifact is equal, including
-  the `inert_grid_params` and `inert_grid_message` of the runs that *do*
-  find an inert grid. No return, Sharpe, stability, capacity or selection
-  number changed anywhere. Script and artifacts:
-  `/home/runner/work/_temp/kilo-tmp/kilo/parity2/parity_check.py` and
-  `parity2/{head_out,new_out}/`.
+- **The demonstration is real.** Against the pre-fix code the partial
+  CPCV run's summary keys were
+  `['avg_fold_return', ..., 'folds_with_position', ..., 'overfitting_risk', ...]`
+  — **no** key naming a cause, a reason or a diagnosis — and
+  `overfitting_risk: low` with no reason. After the fix the same run
+  carries `partial_selection_diagnosis` (per-window breakdown) and
+  `overfitting_risk_reason`, and the verdict value is unchanged.
+- **Numeric parity with HEAD (`62b67d3`) on ten CLI cases — 10/10
+  identical.** Every artifact key that exists on both sides holds the same
+  value; the only additions are the new diagnosis keys
+  (`summary.partial_selection_diagnosis.*`,
+  `summary.overfitting_risk_reason`, `diagnostics.overfitting_risk_reason`).
+  Script: `/home/runner/work/_temp/kilo-tmp/kilo/partial_parity.py`.
 
   | Case | Difference found |
   | ---- | ---------------- |
   | `optimize` (live grid) | **none** |
   | `optimize` (inert grid) | **none** |
-  | `optimize` (mixed grid) | **none** |
-  | `optimize --impact-coefficients 0.0 0.0001` (inert grid, sweep) | **none** |
   | `walk-forward` (live grid) | **none** |
-  | `walk-forward` (inert grid) | **none** |
+  | `walk-forward` (inert grid) | **none** (adds the diagnosis only) |
   | `cpcv` (live grid) | **none** |
   | `cpcv` (inert grid) | **none** |
+  | `cpcv --n-splits 5 --test-size 0.2` (the partial case) | **none** (adds the diagnosis only) |
   | `out-of-sample` (walk-forward, inert grid) | **none** |
   | `out-of-sample` (walk-forward, live grid) | **none** |
+  | `out-of-sample` (cpcv, partial configuration) | **none** |
 
-- **The shipped strategies keep their verdicts.** The old rule (re-implemented
-  verbatim) and the new exhaustive check agree on **78/78** comparisons
-  (6 strategies x 13 grids): `/home/runner/work/_temp/kilo-tmp/kilo/parity_inert.py`.
-  The reason is structural, not lucky: **no shipped strategy reads a
-  parameter conditionally on another parameter** (checked by scanning
-  `scripts/strategy_builder.py`), so no shipped grid can exhibit the
-  interaction the fix is about. The fix therefore changes **no** shipped
-  verdict — it removes a *latent* false-accusation capability.
+- **The panel / book-pricing path is byte-identical to HEAD** for both
+  pricing conventions on the committed panel fixture
+  (`/home/runner/work/_temp/kilo-tmp/kilo/panel_parity.py`). This is the
+  check that caught a real defect during the session: the first version of
+  `_window_position_bars` fell back to the scalar signal test when the
+  held book was `None`, which the original `_window_takes_position` did
+  not do (it returned "no position"). The fix restored the original
+  semantics; the pinned panel reference (`test_panel_reference_pinned.py`)
+  passed either way, so the parity check is the one that mattered.
 - **The full suite is green — 16 files**:
   `test_cpcv` 29/29, `test_data_loader` 32/32, `test_examples_coverage` 7/7,
   `test_execution_warmup` 8/8, `test_falsifiable_hypothesis_example` 3/3,
-  `test_generate_sample_data` 2/2, `test_inert_param_grid` **27/27**,
-  `test_monte_carlo` 20/20, `test_no_selection_diagnosis` 12/12,
+  `test_generate_sample_data` 2/2, `test_inert_param_grid` 27/27,
+  `test_monte_carlo` 20/20, `test_no_selection_diagnosis` **24/24**,
   `test_out_of_sample_window` 10/10, `test_panel_reference_pinned` 2/2,
   `test_performance` 33/33, `test_reporting` OK, `test_run_backtest` 104/104,
   `test_strategy_builder` 33/33, `test_walk_forward` 177/177.
 - **pyflakes unchanged**: `scripts/walk_forward.py` 5 warnings (the same as
   HEAD: 1 unused import + 4 "f-string is missing placeholders"),
-  `scripts/reporting.py` 2 (same as HEAD), `tests/test_cpcv.py` 4 (same as
-  HEAD), the new test file **0**.
-- **The bounded path was exercised end to end**: `optimize` with a six-key
-  grid prints the caveat once, next to the ranking, and the sidecar carries
-  the same message.
+  `scripts/reporting.py` 2 (same as HEAD), `scripts/strategy_builder.py` 2
+  (same as HEAD), `scripts/monte_carlo.py` 1 (same as HEAD),
+  `tests/test_cpcv.py` 4 (same as HEAD), `tests/test_no_selection_diagnosis.py`
+  **0**.
 - The suite rewrites `examples/example_output/tear_sheet.{html,json}` and
   `data_provenance.json`; they were reverted, so the working tree holds no
   example-output changes.
 
 ## What remains unresolved
 
-- **Partial selection is still undiagnosed.** Verified this session:
-  `cpcv --n-splits 5 --test-size 0.2` on the shipped sample selects in
-  **2 of 5** folds (`best_params_per_fold` =
-  `[params, None, None, params, None]`, `folds_with_position: 2`), and the
-  artifact says **nothing** about the three flat folds. The library shows
-  the flat folds are *not* short-window folds: they carry the same 20 test
-  bars as the selecting folds and simply produced no position
-  (`test_returns` empty). `no_selection_diagnosis` is correctly absent (some
-  fold selected), and `overfitting_risk: low` is reported on the basis of
-  2 folds out of 5 with no caveat. This is the next task.
-- **The `monte-carlo` path** picks its "best params" from
-  `parameter_optimization` and therefore has the same null-experiment
-  exposure, but records and prints nothing.
-- **The inert check is measured over the full sample**, while the selection
-  happens inside each fold / period. A key that is live over the whole
-  sample but inert in *every* training window would therefore be reported
-  as live, although each fold's search over it is a null experiment. Not
-  demonstrated; a per-window measurement would change the reporting
-  surface.
+- **The "too short" vs "never triggered" distinction is a comparison, not a
+  mechanism.** The diagnosis compares a flat window's length with the
+  shortest window in which the strategy traded; a window that is *one bar*
+  shorter is reported as "the window length cannot be ruled out". The
+  framework has no generic measure of a strategy's indicator warm-up, so
+  it cannot say "the warm-up is longer than the window" the way the
+  all-flat message does. Not demonstrated to be wrong, but the claim is
+  weaker than the all-flat message's.
+- **The all-flat message still asserts a cause it does not measure.**
+  `no_selection_diagnosis.message` says "no parameter combination took a
+  position in any of them", which the new tally shows is not always the
+  reason (a window can also be unusable because its training split is
+  degenerate). The handoff for this session required the all-flat case to
+  stay exactly as it was, so it was left unchanged — deliberately, not
+  overlooked. The fix now has the measurement needed to correct it
+  (`selection_outcomes`).
+- **The evidence the verdict rests on is thinner than the window count
+  suggests.** In the canonical partial case the two selecting folds held
+  the position for **1 bar out of 20** each, so the run's out-of-sample
+  record is a flat one (`total_oos_return: 0.0`, `oos_sharpe: 0.0`). The
+  new artifact reports this
+  (`details["traded_windows"][*]["position_bars"]`,
+  `details["min_traded_position_bars"]`), but nothing yet *acts* on it: a
+  run whose evidence is a handful of bars is not flagged as such.
+- **The `monte-carlo` path** still picks its "best params" from
+  `parameter_optimization` and records and prints nothing; it inherits the
+  same partial-selection exposure.
+- **The inert check is still measured over the full sample**, while the
+  selection happens inside each fold / period (unchanged from before).
 - Unchanged from before: the impact model is still linear in the
-  participation rate (no temporary/permanent split, no gap risk); the parity
-  harness (`baseline_capture.py` / `book_cap_probe.py`) does not exist; an
-  explicitly requested walk-forward window is still adapted rather than
-  enforced; the CPCV default is still the 1% effective out-of-sample
-  fraction (diagnosed and documented, deliberately not changed).
+  participation rate; the parity harness (`baseline_capture.py` /
+  `book_cap_probe.py`) does not exist; an explicitly requested walk-forward
+  window is still adapted rather than enforced; the CPCV default is still
+  the 1% effective out-of-sample fraction (diagnosed and documented,
+  deliberately not changed).
 
 ## Approaches that have already failed (do not repeat)
 
-- **Keeping the first-value comparison and only documenting the limitation.**
-  That is what the previous session did: the limitation was described in
-  `references/validation_methods.md` and left in place, because it had
-  never been *demonstrated*. The demonstration (an interacting strategy) is
-  cheap and settles it — the false accusation is real, and it fires on
-  **both** keys of the grid at once.
-- **Evaluating the first `cap` combinations and reporting the result.** That
-  is a partial answer presented as a complete one, which is exactly what
-  the handoff forbade. The fallback is the *whole* first combination (the
-  old behaviour) plus an explicit statement that the check was bounded.
-- **Materialising `itertools.product` before slicing it.** The combination
-  count of a 8-key x 5-value grid is 5 ** 7 = 78 125 per key; building the
-  list first is a memory blow-up on a large grid. The product is consumed
-  lazily (`next(product(...), ())`).
-- **Caching fingerprints across keys.** The same parameter set is evaluated
-  once per key it belongs to, so a cache would help — but it changes the
-  cost model and the bound's meaning for a saving that was never measured.
-  Left alone; the bound makes the cost affordable without it.
+- **Inferring the per-window cause from the empty result.** The handoff's
+  reading ("no position", because `test_returns` is empty) is not
+  entailed: the session's own fixture has a window where every
+  combination *did* take a position and the window still selected
+  nothing, because the training split produced a constant return series.
+  Any implementation that infers the cause from the empty result will
+  mislabel that window. The cause has to be counted in the search.
+- **Re-running the grid search for the flat windows to find out why.**
+  This duplicates the selection logic, so the diagnosis would drift from
+  the search whenever the search changes, and it would have to re-derive
+  the cost model. Counting the outcome inside the search is both cheaper
+  and exact.
+- **Comparing the flat window's length with the traded windows' length
+  only.** The comparison is necessary but not sufficient: it separates
+  "shorter" from "not shorter", not "the length is the cause" from "the
+  length is irrelevant". The window-length remedy is therefore stated as
+  a knob to reach for, not as the fix, whenever the measurement does not
+  support it.
 - (unchanged from before) Printing the warning from inside the analysis
-  functions; making the optimize artifact a dict; hard-failing on an inert
-  grid; changing the CPCV defaults; adding a new artifact key to the
-  reporting surface.
+  functions; hard-failing on an inert grid; changing the CPCV defaults;
+  adding a new artifact key to the reporting surface outside the
+  diagnosis.
 
 ## Git state
 
 Working tree (not committed — the harness commits the session's work together
-with these handoff files, as in `75936b3`):
+with these handoff files, as in `62b67d3`):
 
 - modified: `skills/quantitative-backtesting/scripts/walk_forward.py`,
   `references/validation_methods.md`, `SKILL.md`,
-  `tests/test_inert_param_grid.py`
+  `tests/test_no_selection_diagnosis.py`
 - new: nothing (the new tests live in the existing test file)
 
-HEAD is `75936b3`.
+HEAD is `62b67d3`.

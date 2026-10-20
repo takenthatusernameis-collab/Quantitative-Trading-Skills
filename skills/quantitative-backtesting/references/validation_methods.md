@@ -487,6 +487,88 @@ The CLI prints the diagnosis next to the fold / period count
 (`No parameter could be selected: <message>`), so the console and the
 artifact carry the same string.
 
+#### When Only Some Windows Select a Parameter
+
+"2 of 5 folds selected" is not a finding on its own. It is compatible with
+"the other three folds were too short to trade" (a design problem) and with
+"the strategy never triggers on 60% of the sample" (a finding about the
+strategy), and the two call for completely different remedies. A run in
+which **some** windows selected a parameter and others did not therefore
+records its own diagnosis, under a separate key
+(`summary["partial_selection_diagnosis"]`, the same
+`{cause, message, details}` shape), and the categorical overfitting-risk
+verdict keeps its value but gains an `overfitting_risk_reason` that states
+how many windows it rests on.
+
+The all-flat case is unchanged: it keeps using `summary["no_selection_diagnosis"]`,
+and the partial key is only present when the run is in the partial state.
+
+| Path | Recorded in | Notes |
+| ---- | ----------- | ----- |
+| `out-of-sample` | `summary["partial_selection_diagnosis"]` | The validation phase runs inside the training split, so the selected parameter was chosen from the windows that could select one |
+| `cpcv` (standalone) | `summary["partial_selection_diagnosis"]` | The whole sample is the data the selection ran on |
+| `walk-forward` (standalone) | `summary["partial_selection_diagnosis"]` | The whole sample is the data the selection ran on |
+
+##### The cause is measured in the search, not inferred
+
+A window that selected nothing looks the same from the outside whether the
+strategy never traded in it or whether the training split made the ranking
+impossible, and the two need opposite remedies. The grid search therefore
+records a tally of what happened to every combination
+(`selection_outcomes` on the period / fold record) and the diagnosis reports
+the cause that tally attributes to each window:
+
+| `cause` | Meaning | Remedy |
+| ------- | ------- | ------ |
+| `no_position_in_validation_window` | No combination took a position in the window, so the search had nothing to rank | Shorten the indicator lookbacks, lengthen the test window, or raise the test-size fraction / lower the number of splits — but only if the window is the short one (see below) |
+| `no_estimable_training_sharpe` | Every combination took a position, but the training split produced a constant return series, so the in-sample Sharpe the selection ranks on is undefined | Give the training split more history (`--train-months` / `--n-splits`), or use a strategy that does not stay flat over it |
+| `all_combinations_failed` | Every combination raised an error while it was evaluated | Check the values in the parameter grid |
+
+`no_position_in_validation_window` is the vocabulary the "no parameter
+could be selected" diagnosis already used. The other two are the causes
+that diagnosis could not tell apart, because an empty result looks the
+same for all three: a window in which nothing traded, a window whose
+training split cannot be ranked, and a grid whose combinations all fail.
+
+##### The per-window breakdown
+
+`details["flat_windows"]` carries one record per flat window:
+
+| Key | Meaning |
+| --- | ------- |
+| `window` / `fold` | The index of the flat fold / period |
+| `cause` | The cause the search's tally attributes to the window |
+| `reason` | `window_too_short`, `signal_never_triggered`, `training_sharpe_not_estimable` or `all_combinations_failed` |
+| `bars` / `train_bars` | The length of the out-of-sample window and of its training split |
+| `test_returns_bars` / `test_sharpe` | The empty out-of-sample record of the window (0 bars, no Sharpe) |
+| `max_position_bars` | The most bars any combination could have held a position for in the window (0 when the strategy never traded in it) |
+| `test_start` / `test_end` | The window's calendar boundaries |
+| `outcome_tally` | How many combinations ended in each outcome |
+| `text` | The one-line statement the CLI prints for this window |
+
+`details["traded_windows"]` carries the same evidence for the windows the
+verdict rests on, so the two can be read together.
+
+##### "Too short" and "never triggered" are separated by a measurement
+
+For a flat window whose cause is `no_position_in_validation_window`, the
+diagnosis compares the window's length with the shortest window in which
+the strategy did trade:
+
+- the flat window is **shorter** than every traded window → the window
+  length cannot be ruled out as the cause (`reason: window_too_short`);
+- the flat window is **at least as long** as the shortest traded window →
+  the length does not by itself explain the failure: the signal never
+  triggered on it (`reason: signal_never_triggered`).
+
+The comparison is a statement about the windows, not a claim about the
+strategy's warm-up, and it is bounded by what the run measured: the
+diagnosis also reports how many bars the strategy actually held a position
+in the windows that did trade
+(`details["min_traded_position_bars"]`), because a verdict measured on
+windows in which the strategy held a position for a single bar is a
+different statement from one measured on windows it traded throughout.
+
 #### The remedy names the flags the path actually accepts
 
 The same setting is spelled differently on the different subcommands, so the

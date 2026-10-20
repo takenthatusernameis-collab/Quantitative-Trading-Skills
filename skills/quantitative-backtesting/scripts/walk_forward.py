@@ -37,7 +37,6 @@ from utils import (
     aggregate_book_diagnostics,
     book_capacity_estimate,
     book_cost_components,
-    book_is_active,
     book_market_impact_cost,
     book_return_from_held,
     build_market_model,
@@ -55,6 +54,51 @@ from utils import (
 )
 from reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
+
+
+# The outcome of ONE parameter combination inside ONE validation window.
+#
+# The grid search does not simply rank the combinations: it skips a
+# combination that takes no position in the window, and it cannot rank one
+# whose training return series is constant (the in-sample Sharpe it ranks
+# on is undefined). A window in which nothing could be selected therefore
+# has a *reason*, and the reason is not always the same one: a window can
+# be flat (no combination trades in it) while another window trades in
+# every combination and is still unusable because the training split
+# produced a constant return series.
+#
+# The tally of these outcomes is measured inside the search itself (see
+# `selection_outcomes` on the period / fold record) and is what the
+# partial-selection diagnosis reports, so the diagnosis states a measured
+# cause instead of an inferred one.
+_COMBO_ELIGIBLE = "eligible"
+_COMBO_FLAT = "flat"
+_COMBO_DEGENERATE_TRAINING = "degenerate_training"
+_COMBO_FAILED = "failed"
+
+# The cause each outcome maps to in the selection diagnosis. The first two
+# are the vocabulary the "no parameter could be selected" diagnosis already
+# uses; the last two are the causes that diagnosis could not tell apart.
+_COMBO_OUTCOME_CAUSES = {
+    _COMBO_FLAT: "no_position_in_validation_window",
+    _COMBO_DEGENERATE_TRAINING: "no_estimable_training_sharpe",
+    _COMBO_FAILED: "all_combinations_failed",
+}
+
+# What each cause means, in the words the diagnosis uses.
+_PARTIAL_CAUSE_TEXT = {
+    "no_position_in_validation_window": (
+        "no parameter combination took a position in the window"
+    ),
+    "no_estimable_training_sharpe": (
+        "every combination took a position, but the training split produced "
+        "a constant return series, so the in-sample Sharpe the selection "
+        "ranks on is not estimable"
+    ),
+    "all_combinations_failed": (
+        "every parameter combination failed to build or to be evaluated"
+    ),
+}
 
 
 def _resolve_latency_fill_rate(args) -> tuple[int, float]:
@@ -583,8 +627,28 @@ def walk_forward_analysis(
         param_names = list(param_grid.keys())
         param_values = list(param_grid.values())
 
+        # Why each combination did or did not produce a candidate. The
+        # tally is measured here, in the search itself, so the
+        # partial-selection diagnosis can report a measured cause instead
+        # of inferring one from an empty result.
+        selection_outcomes = {
+            _COMBO_ELIGIBLE: 0,
+            _COMBO_FLAT: 0,
+            _COMBO_DEGENERATE_TRAINING: 0,
+            _COMBO_FAILED: 0,
+        }
+        # The bars the strategy actually held a position: for the selected
+        # combination, and the most any combination could have held. The
+        # diagnosis reports them next to the window's length, because a
+        # window in which the strategy held a position for one bar out of
+        # twenty carries far less evidence than one in which it held it
+        # throughout.
+        best_position_bars = 0
+        max_position_bars = 0
+
         for combo in product(*param_values):
             params = dict(zip(param_names, combo))
+            outcome = _COMBO_FAILED
 
             try:
                 strategy = strategy_factory(params)
@@ -603,7 +667,7 @@ def walk_forward_analysis(
                     if panel_pricing == "book"
                     else None
                 )
-                if not _window_takes_position(
+                position_bars = _window_position_bars(
                     strategy,
                     test_signals,
                     test_data,
@@ -611,54 +675,71 @@ def walk_forward_analysis(
                     latency=latency,
                     fill_rate=fill_rate,
                     book_weights=test_book_weights,
-                ):
-                    continue
-
-                # Calculate returns for this parameter set
-                test_returns = _calculate_strategy_returns(
-                    test_data, test_signals, commission, slippage,
-                    impact_coefficient, adv_window, borrow_cost, funding_cost,
-                    latency, fill_rate,
-                    initial_capital=initial_capital,
-                    panel_pricing=panel_pricing,
-                    impact_aggregation=impact_aggregation,
-                    book_weights=test_book_weights,
                 )
-
-                # Evaluate on training set
-                train_returns = _calculate_strategy_returns(
-                    train_data, train_signals, commission, slippage,
-                    impact_coefficient, adv_window, borrow_cost, funding_cost,
-                    latency, fill_rate,
-                    initial_capital=initial_capital,
-                    panel_pricing=panel_pricing,
-                    impact_aggregation=impact_aggregation,
-                    book_weights=(
-                        strategy_target_weights(strategy, train_data)
-                        if panel_pricing == "book"
-                        else None
-                    ),
-                )
-
-                if len(train_returns) > 1 and not _is_constant_returns(train_returns):
-                    ann_factor = _annualization_factor(train_returns.index)
-                    excess = train_returns - 0.02 / ann_factor
-                    sharpe = excess.mean() / excess.std() * np.sqrt(ann_factor)
+                if position_bars > max_position_bars:
+                    max_position_bars = position_bars
+                if position_bars == 0:
+                    outcome = _COMBO_FLAT
                 else:
-                    sharpe = -np.inf
+                    # Calculate returns for this parameter set
+                    test_returns = _calculate_strategy_returns(
+                        test_data, test_signals, commission, slippage,
+                        impact_coefficient, adv_window, borrow_cost, funding_cost,
+                        latency, fill_rate,
+                        initial_capital=initial_capital,
+                        panel_pricing=panel_pricing,
+                        impact_aggregation=impact_aggregation,
+                        book_weights=test_book_weights,
+                    )
 
-                if apply_deflation and np.isfinite(sharpe):
-                    period_trial_sharpes.append(float(sharpe))
+                    # Evaluate on training set
+                    train_returns = _calculate_strategy_returns(
+                        train_data, train_signals, commission, slippage,
+                        impact_coefficient, adv_window, borrow_cost, funding_cost,
+                        latency, fill_rate,
+                        initial_capital=initial_capital,
+                        panel_pricing=panel_pricing,
+                        impact_aggregation=impact_aggregation,
+                        book_weights=(
+                            strategy_target_weights(strategy, train_data)
+                            if panel_pricing == "book"
+                            else None
+                        ),
+                    )
 
-                if sharpe > best_sharpe:
-                    best_sharpe = sharpe
-                    best_params = params
-                    best_test_returns = test_returns
-                    if apply_deflation:
-                        best_train_returns = train_returns
+                    if len(train_returns) > 1 and not _is_constant_returns(train_returns):
+                        ann_factor = _annualization_factor(train_returns.index)
+                        excess = train_returns - 0.02 / ann_factor
+                        sharpe = excess.mean() / excess.std() * np.sqrt(ann_factor)
+                        outcome = _COMBO_ELIGIBLE
+                    else:
+                        # A constant (or too short) training return series has
+                        # no Sharpe, so the combination cannot be ranked. It is
+                        # counted separately: a window in which every
+                        # combination lands here is unusable for a reason
+                        # that has nothing to do with the window.
+                        sharpe = -np.inf
+                        outcome = _COMBO_DEGENERATE_TRAINING
+
+                    if apply_deflation and np.isfinite(sharpe):
+                        period_trial_sharpes.append(float(sharpe))
+
+                    if sharpe > best_sharpe:
+                        best_sharpe = sharpe
+                        best_params = params
+                        best_test_returns = test_returns
+                        best_position_bars = position_bars
+                        if apply_deflation:
+                            best_train_returns = train_returns
 
             except Exception:
-                continue
+                outcome = _COMBO_FAILED
+
+            selection_outcomes[outcome] += 1
+
+        period["selection_outcomes"] = selection_outcomes
+        period["max_position_bars"] = int(max_position_bars)
+        period["position_bars"] = int(best_position_bars) if best_params is not None else None
 
         best_params_per_period.append(best_params)
         all_trial_sharpes.extend(period_trial_sharpes)
@@ -970,6 +1051,35 @@ def walk_forward_analysis(
                 },
             },
         )
+    else:
+        # A run in which *some* periods could select a parameter and others
+        # could not has to say which periods were flat and why: the count
+        # alone is compatible with "the flat periods were too short to
+        # trade" (a design problem) and with "the strategy never triggers
+        # on that part of the sample" (a finding about the strategy), and
+        # the two need opposite remedies. The measurement changes no
+        # number.
+        partial_diagnosis = _diagnose_partial_selection(
+            validation_results={"periods": periods},
+            validation_method="walk_forward",
+            param_grid=param_grid,
+            train_data=data,
+            context={
+                "analysis_path": "walk_forward",
+                "window_noun": "period",
+                "selection_basis": "overfitting_risk_verdict",
+                "train_months": train_months,
+                "test_months": test_months,
+                "step_months": step_months,
+                "cli_flags": {
+                    "train_months": "--train-months",
+                    "test_months": "--test-months",
+                    "step_months": "--step-months",
+                },
+            },
+        )
+        if partial_diagnosis is not None:
+            summary["partial_selection_diagnosis"] = partial_diagnosis
     # The execution warmup this path applied, so a consumer of the summary
     # knows how many leading bars of every window are not tradable without
     # having to re-derive the convention from the return series.
@@ -1308,6 +1418,24 @@ def overfitting_check(
             diagnostics["overfitting_risk"] = "medium"
         else:
             diagnostics["overfitting_risk"] = "low"
+        # A run in which only some periods could select a parameter has a
+        # verdict that rests on fewer periods than the run has. The
+        # categorical verdict is unchanged (the measurement supports it),
+        # but its basis is stated: a reader must not read "low risk" as
+        # "measured on every period".
+        partial = wf_summary.get("partial_selection_diagnosis")
+        if isinstance(partial, dict):
+            details = partial.get("details") or {}
+            diagnostics["overfitting_risk_reason"] = (
+                f"the '{diagnostics['overfitting_risk']}' verdict rests on "
+                f"the parameter stability of the "
+                f"{details.get('n_windows_with_selected_params')} of the "
+                f"{details.get('n_validation_windows')} out-of-sample "
+                f"{details.get('window_noun', 'period')}s that selected a "
+                f"parameter; the other {details.get('n_flat_windows')} "
+                f"produced no selection and contributed nothing to it (see "
+                f"summary['partial_selection_diagnosis'])"
+            )
     else:
         # No period selected a parameter, so there is no parameter
         # instability to measure: the risk verdict is *not applicable*, not
@@ -1337,6 +1465,52 @@ def signals_active(signals: pd.Series) -> bool:
     return bool((signals.notna() & (signals != 0)).any())
 
 
+def _window_position_bars(
+    strategy,
+    signals: pd.Series,
+    data,
+    panel_pricing: str = "net-exposure",
+    latency: int = 0,
+    fill_rate: float = 1.0,
+    book_weights: Optional[pd.DataFrame] = None,
+) -> int:
+    """How many bars of the window does the strategy hold a position?
+
+    The count is the *amount of evidence* a window contributes: a window in
+    which the strategy holds a position for one bar out of twenty says far
+    less about the strategy than one in which it holds it throughout, and a
+    window in which it never holds a position says nothing at all. The
+    selection diagnosis reports the count next to the window's length so
+    the two can be read together.
+
+    Under the ``net-exposure`` pricing convention the count is the number
+    of bars with a non-flat signal. Under the ``book`` pricing convention
+    it is the number of bars with a non-empty held book (a market-neutral
+    book is a position: its *net* exposure is flat but its gross book is
+    not). A strategy that exposes no book falls back to the scalar count.
+    """
+    if panel_pricing == "book":
+        if book_weights is None:
+            book_weights = strategy_target_weights(strategy, data)
+        if book_weights is not None:
+            market = build_market_model(data)
+            if market["is_panel"]:
+                held = held_book_weights(
+                    book_weights,
+                    market,
+                    lag=1 + latency,
+                    fill_rate=fill_rate,
+                )
+                if held is None:
+                    # No usable book: the strategy holds no position. The
+                    # scalar signal test is *not* a fallback here -- a
+                    # panel book that cannot be held is not a position.
+                    return 0
+                return int((held.abs().sum(axis=1) > 0).sum())
+    # NaN != 0 evaluates to True in pandas, so NaN bars are excluded.
+    return int((signals.notna() & (signals != 0)).sum())
+
+
 def _window_takes_position(
     strategy,
     signals: pd.Series,
@@ -1355,20 +1529,20 @@ def _window_takes_position(
     market-neutral book has a flat *net* exposure but a non-zero *gross*
     book, so it does hold a position and must not be skipped by the grid
     search. A strategy that exposes no book falls back to the scalar test.
+
+    The test is the "more than zero bars" reading of
+    :func:`_window_position_bars`, which measures the same thing and also
+    reports how many bars the position was held.
     """
-    if panel_pricing == "book":
-        if book_weights is None:
-            book_weights = strategy_target_weights(strategy, data)
-        if book_weights is not None:
-            market = build_market_model(data)
-            if market["is_panel"]:
-                return book_is_active(
-                    book_weights,
-                    market,
-                    lag=1 + latency,
-                    fill_rate=fill_rate,
-                )
-    return signals_active(signals)
+    return _window_position_bars(
+        strategy,
+        signals,
+        data,
+        panel_pricing=panel_pricing,
+        latency=latency,
+        fill_rate=fill_rate,
+        book_weights=book_weights,
+    ) > 0
 
 
 def _is_constant_returns(returns: pd.Series) -> bool:
@@ -2631,8 +2805,22 @@ def cpcv_analysis(
         param_names = list(param_grid.keys())
         param_values = list(param_grid.values())
 
+        # Why each combination did or did not produce a candidate (see the
+        # walk-forward path for the same tally).
+        selection_outcomes = {
+            _COMBO_ELIGIBLE: 0,
+            _COMBO_FLAT: 0,
+            _COMBO_DEGENERATE_TRAINING: 0,
+            _COMBO_FAILED: 0,
+        }
+        # The bars the strategy actually held a position (see the
+        # walk-forward path for the same measurement).
+        best_position_bars = 0
+        max_position_bars = 0
+
         for combo in product(*param_values):
             params = dict(zip(param_names, combo))
+            outcome = _COMBO_FAILED
 
             try:
                 strategy = strategy_factory(params)
@@ -2647,7 +2835,7 @@ def cpcv_analysis(
                     if panel_pricing == "book"
                     else None
                 )
-                if not _window_takes_position(
+                position_bars = _window_position_bars(
                     strategy,
                     test_signals,
                     test_data,
@@ -2655,54 +2843,68 @@ def cpcv_analysis(
                     latency=latency,
                     fill_rate=fill_rate,
                     book_weights=test_book_weights,
-                ):
-                    continue
-
-                # Calculate returns for this parameter set
-                test_returns = _calculate_strategy_returns(
-                    test_data, test_signals, commission, slippage,
-                    impact_coefficient, adv_window, borrow_cost, funding_cost,
-                    latency, fill_rate,
-                    initial_capital=initial_capital,
-                    panel_pricing=panel_pricing,
-                    impact_aggregation=impact_aggregation,
-                    book_weights=test_book_weights,
                 )
-
-                # Evaluate on training set
-                train_returns = _calculate_strategy_returns(
-                    train_data, train_signals, commission, slippage,
-                    impact_coefficient, adv_window, borrow_cost, funding_cost,
-                    latency, fill_rate,
-                    initial_capital=initial_capital,
-                    panel_pricing=panel_pricing,
-                    impact_aggregation=impact_aggregation,
-                    book_weights=(
-                        strategy_target_weights(strategy, train_data)
-                        if panel_pricing == "book"
-                        else None
-                    ),
-                )
-
-                if len(train_returns) > 1 and not _is_constant_returns(train_returns):
-                    ann_factor = _annualization_factor(train_returns.index)
-                    excess = train_returns - 0.02 / ann_factor
-                    sharpe = excess.mean() / excess.std() * np.sqrt(ann_factor)
+                if position_bars > max_position_bars:
+                    max_position_bars = position_bars
+                if position_bars == 0:
+                    outcome = _COMBO_FLAT
                 else:
-                    sharpe = -np.inf
+                    # Calculate returns for this parameter set
+                    test_returns = _calculate_strategy_returns(
+                        test_data, test_signals, commission, slippage,
+                        impact_coefficient, adv_window, borrow_cost, funding_cost,
+                        latency, fill_rate,
+                        initial_capital=initial_capital,
+                        panel_pricing=panel_pricing,
+                        impact_aggregation=impact_aggregation,
+                        book_weights=test_book_weights,
+                    )
 
-                if apply_deflation and np.isfinite(sharpe):
-                    fold_trial_sharpes.append(float(sharpe))
+                    # Evaluate on training set
+                    train_returns = _calculate_strategy_returns(
+                        train_data, train_signals, commission, slippage,
+                        impact_coefficient, adv_window, borrow_cost, funding_cost,
+                        latency, fill_rate,
+                        initial_capital=initial_capital,
+                        panel_pricing=panel_pricing,
+                        impact_aggregation=impact_aggregation,
+                        book_weights=(
+                            strategy_target_weights(strategy, train_data)
+                            if panel_pricing == "book"
+                            else None
+                        ),
+                    )
 
-                if sharpe > best_sharpe:
-                    best_sharpe = sharpe
-                    best_params = params
-                    best_test_returns = test_returns
-                    if apply_deflation:
-                        best_train_returns = train_returns
+                    if len(train_returns) > 1 and not _is_constant_returns(train_returns):
+                        ann_factor = _annualization_factor(train_returns.index)
+                        excess = train_returns - 0.02 / ann_factor
+                        sharpe = excess.mean() / excess.std() * np.sqrt(ann_factor)
+                        outcome = _COMBO_ELIGIBLE
+                    else:
+                        # A constant (or too short) training return series has
+                        # no Sharpe, so the combination cannot be ranked.
+                        sharpe = -np.inf
+                        outcome = _COMBO_DEGENERATE_TRAINING
+
+                    if apply_deflation and np.isfinite(sharpe):
+                        fold_trial_sharpes.append(float(sharpe))
+
+                    if sharpe > best_sharpe:
+                        best_sharpe = sharpe
+                        best_params = params
+                        best_test_returns = test_returns
+                        best_position_bars = position_bars
+                        if apply_deflation:
+                            best_train_returns = train_returns
 
             except Exception:
-                continue
+                outcome = _COMBO_FAILED
+
+            selection_outcomes[outcome] += 1
+
+        fold["selection_outcomes"] = selection_outcomes
+        fold["max_position_bars"] = int(max_position_bars)
+        fold["position_bars"] = int(best_position_bars) if best_params is not None else None
 
         best_params_per_fold.append(best_params)
         all_trial_sharpes.extend(fold_trial_sharpes)
@@ -3010,6 +3212,56 @@ def cpcv_analysis(
                 },
             },
         )
+    else:
+        # A run in which *some* folds could select a parameter and others
+        # could not has to say which folds were flat and why: the count
+        # alone is compatible with "the flat folds were too short to
+        # trade" (a design problem) and with "the strategy never triggers
+        # on that part of the sample" (a finding about the strategy), and
+        # the two need opposite remedies. The measurement changes no
+        # number.
+        partial_diagnosis = _diagnose_partial_selection(
+            validation_results={"folds": folds},
+            validation_method="cpcv",
+            param_grid=param_grid,
+            train_data=data,
+            context={
+                "analysis_path": "cpcv",
+                "window_noun": "fold",
+                "selection_basis": "overfitting_risk_verdict",
+                "cpcv_n_splits": n_splits,
+                "cpcv_test_size": test_size,
+                "cpcv_purge_size": purge_size,
+                "cpcv_embargo_size": embargo_size,
+                "cli_flags": {
+                    "n_splits": "--n-splits",
+                    "test_size": "--test-size",
+                },
+            },
+        )
+        if partial_diagnosis is not None:
+            summary["partial_selection_diagnosis"] = partial_diagnosis
+            # The overfitting-risk verdict is a statement about the
+            # parameter stability across the folds that selected a
+            # parameter. When only some folds selected one, the verdict
+            # rests on fewer windows than the run has, and the artifact
+            # has to say so: the categorical verdict itself is unchanged
+            # (the measurement supports it), but its basis is stated.
+            if summary.get("overfitting_risk") is not None and (
+                "overfitting_risk_reason" not in summary
+            ):
+                details = partial_diagnosis["details"]
+                summary["overfitting_risk_reason"] = (
+                    f"the '{summary['overfitting_risk']}' verdict rests on "
+                    f"the parameter stability of the "
+                    f"{details['n_windows_with_selected_params']} of the "
+                    f"{details['n_validation_windows']} out-of-sample "
+                    f"{details.get('window_noun', 'fold')}s that selected a "
+                    f"parameter; the other "
+                    f"{details['n_flat_windows']} produced no selection and "
+                    f"contributed nothing to it (see "
+                    f"summary['partial_selection_diagnosis'])"
+                )
     # The execution warmup this path applied (see the walk-forward summary
     # for the same key).
     summary.update(
@@ -3567,6 +3819,35 @@ def _print_no_selection_diagnosis(
     print(f"{indent}No parameter could be selected: {message}")
 
 
+def _print_partial_selection_diagnosis(
+    diagnosis: Optional[Dict[str, Any]],
+    indent: str = "  ",
+) -> None:
+    """Print the flat windows of a partially flat run, one line per window.
+
+    A run in which some windows could select a parameter and others could
+    not has to say which windows were flat and why: the count alone is
+    compatible with "the flat windows were too short to trade" (a design
+    problem) and with "the strategy never triggers on that part of the
+    sample" (a finding about the strategy). The artifact carries the same
+    strings under ``summary["partial_selection_diagnosis"]``, so the
+    console and the artifact never disagree. Nothing is printed when
+    every window selected a parameter, or when none did (that is the
+    "no parameter could be selected" diagnosis).
+    """
+    if not isinstance(diagnosis, dict):
+        return
+    message = diagnosis.get("message")
+    if not message:
+        return
+    print(f"{indent}Partial selection: {message}")
+    details = diagnosis.get("details") or {}
+    for window in details.get("flat_windows") or []:
+        text = window.get("text")
+        if text:
+            print(f"{indent}  {text}")
+
+
 def _format_overfitting_risk(value: Any, unknown: str = "unknown") -> str:
     """Format the overfitting-risk verdict, including the 'not applicable' case.
 
@@ -3596,6 +3877,94 @@ def _print_overfitting_risk(
     reason = summary.get("overfitting_risk_reason")
     if reason:
         print(f"{indent}Reason: {reason}")
+
+
+def _selection_window_remedy(
+    validation_method: str,
+    context: Optional[Dict[str, Any]],
+) -> str:
+    """The remedy for "the windows did not give the strategy room to trade".
+
+    The remedy has to name the flags of the path that produced the
+    windows: the standalone `cpcv` and `walk-forward` subcommands and the
+    `out-of-sample` subcommand spell the same settings differently, and a
+    remedy that names a flag the user cannot pass is not a remedy.
+
+    Shared by the "no parameter could be selected" diagnosis and the
+    partial-selection diagnosis, so both name the same knobs.
+    """
+    flags = (context or {}).get("cli_flags") or {}
+    if validation_method == "cpcv":
+        test_size_flag = flags.get("test_size", "--test-size")
+        n_splits_flag = flags.get("n_splits", "--n-splits")
+        return (
+            f"raise {test_size_flag} (it is the fraction of each group "
+            f"used as the test set) or lower {n_splits_flag} so a fold's "
+            f"test window holds enough bars for the strategy to take a "
+            f"position"
+        )
+    test_months_flag = flags.get("test_months", "--test-months")
+    return (
+        "shorten the indicator lookbacks in the parameter grid, use a "
+        f"longer {test_months_flag} window, or give the training "
+        "split more history"
+    )
+
+
+def _selection_training_remedy(
+    validation_method: str,
+    context: Optional[Dict[str, Any]],
+) -> str:
+    """The remedy for "the training split produced no estimable Sharpe".
+
+    The training split is what the selection ranks on, so a training split
+    with a constant return series cannot be repaired by changing the
+    out-of-sample window: the training split needs more history (or a
+    strategy that is not flat over it). The flags are the ones the path's
+    own subcommand accepts.
+    """
+    flags = (context or {}).get("cli_flags") or {}
+    if validation_method == "cpcv":
+        n_splits_flag = flags.get("n_splits", "--n-splits")
+        return (
+            f"raise {n_splits_flag} so every fold trains on more of the "
+            f"sample, or use a strategy that does not stay flat over the "
+            f"training split"
+        )
+    train_months_flag = flags.get("train_months", "--train-months")
+    return (
+        f"raise {train_months_flag} so the training split covers more "
+        f"history, or use a strategy that does not stay flat over it"
+    )
+
+
+def _effective_oos_fraction_sentence(
+    validation_method: str,
+    context: Optional[Dict[str, Any]],
+) -> str:
+    """The sentence that states CPCV's effective out-of-sample fraction.
+
+    CPCV splits the data into groups and takes a *fraction of each
+    group* as the test set, so the effective out-of-sample fraction is
+    test_size / n_splits -- not the fraction the flag name suggests. It is
+    the usual reason a CPCV window is too short to trade, so the sentence
+    is stated whenever the CPCV configuration is known.
+    """
+    if validation_method != "cpcv":
+        return ""
+    flags = (context or {}).get("cli_flags") or {}
+    test_size_flag = flags.get("test_size", "--test-size")
+    n_splits_flag = flags.get("n_splits", "--n-splits")
+    n_splits = (context or {}).get("cpcv_n_splits")
+    test_size = (context or {}).get("cpcv_test_size")
+    if not n_splits or test_size is None:
+        return ""
+    return (
+        f" With {test_size_flag} {test_size} and {n_splits_flag} "
+        f"{n_splits}, the effective out-of-sample fraction is "
+        f"{test_size}/{n_splits} = {test_size / n_splits:.4g} of the "
+        f"data, because the test size is the fraction of each group."
+    )
 
 
 def _diagnose_no_selection(
@@ -3670,28 +4039,12 @@ def _diagnose_no_selection(
     else:
         cause = "no_position_in_validation_window"
         longest = max(window_bars) if window_bars else 0
-        # The remedy has to name the flags of the path that produced the
+        # The remedy names the flags of the path that produced the
         # windows: the standalone `cpcv` and `walk-forward` subcommands and
         # the `out-of-sample` subcommand spell the same settings
         # differently, and a remedy that names a flag the user cannot pass
         # is not a remedy.
-        flags = (context or {}).get("cli_flags") or {}
-        if validation_method == "cpcv":
-            test_size_flag = flags.get("test_size", "--test-size")
-            n_splits_flag = flags.get("n_splits", "--n-splits")
-            remedy = (
-                f"raise {test_size_flag} (it is the fraction of each group "
-                f"used as the test set) or lower {n_splits_flag} so a fold's "
-                f"test window holds enough bars for the strategy to take a "
-                f"position"
-            )
-        else:
-            test_months_flag = flags.get("test_months", "--test-months")
-            remedy = (
-                "shorten the indicator lookbacks in the parameter grid, use a "
-                f"longer {test_months_flag} window, or give the training "
-                "split more history"
-            )
+        remedy = _selection_window_remedy(validation_method, context)
         message = (
             f"The {validation_method} analysis produced {n_windows} "
             f"out-of-sample window(s) but no parameter combination took a "
@@ -3704,16 +4057,323 @@ def _diagnose_no_selection(
         # group* as the test set, so the effective out-of-sample fraction is
         # test_size / n_splits -- not the fraction the flag name suggests.
         # State it, because it is the usual reason the window is too short.
-        n_splits = (context or {}).get("cpcv_n_splits")
-        test_size = (context or {}).get("cpcv_test_size")
-        if n_splits and test_size is not None:
-            message += (
-                f" With {test_size_flag} {test_size} and {n_splits_flag} "
-                f"{n_splits}, the effective out-of-sample fraction is "
-                f"{test_size}/{n_splits} = {test_size / n_splits:.4g} of the "
-                f"data, because the test size is the fraction of each group."
-            )
+        message += _effective_oos_fraction_sentence(validation_method, context)
     return {"cause": cause, "message": message, "details": details}
+
+
+def _window_date_text(value: Any) -> str:
+    """The date of a window boundary, as text.
+
+    The window records carry ``pandas`` timestamps; the artifact has to be
+    JSON-serialisable and readable, so the date part is what is reported.
+    """
+    if value is None:
+        return "unknown"
+    try:
+        return str(pd.Timestamp(value).date())
+    except Exception:
+        return str(value)
+
+
+def _diagnose_partial_selection(
+    validation_results: Dict[str, Any],
+    validation_method: str,
+    param_grid: Dict[str, List[Any]],
+    train_data: pd.DataFrame,
+    wf_window: Optional[Dict[str, Any]] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Explain the windows in which no parameter could be selected.
+
+    "2 of 5 folds selected" is not a finding on its own. It is compatible
+    with "the other three folds were too short to trade" (a design
+    problem) and with "the strategy never triggers on 60% of the sample"
+    (a finding about the strategy), and the two call for completely
+    different remedies. The count alone therefore does not say what
+    happened, so every flat window is reported with the cause the grid
+    search itself measured and the evidence for it.
+
+    The cause vocabulary is the one the "no parameter could be selected"
+    diagnosis already uses, extended with the two causes that diagnosis
+    cannot tell apart:
+
+    * ``no_position_in_validation_window`` -- no combination took a
+      position in the window. The window is either shorter than every
+      window in which the strategy did trade (``window_too_short``, a
+      window fact) or at least as long as the shortest one
+      (``signal_never_triggered``, a strategy fact);
+    * ``no_estimable_training_sharpe`` -- every combination took a
+      position, but the training split produced a constant return series,
+      so the in-sample Sharpe the selection ranks on is undefined;
+    * ``all_combinations_failed`` -- every combination failed to build or
+      to be evaluated.
+
+    The per-window cause is the one the search's own tally attributes to
+    the window (recorded on the period / fold record as
+    ``selection_outcomes``), so the diagnosis states a *measured* cause
+    instead of inferring one from an empty result: a window with no
+    selection and no position and a window with no selection but a
+    constant training series look identical from the outside and need
+    opposite remedies.
+
+    Returns ``None`` when the run is not in the partial state: a run in
+    which every window selected a parameter has nothing to explain, and a
+    run in which no window selected one is the ``no_selection_diagnosis``
+    case, not this one.
+    """
+    windows = (
+        (validation_results.get("periods") or [])
+        if validation_method == "walk_forward"
+        else (validation_results.get("folds") or [])
+    )
+    n_windows = len(windows)
+    selected = [w for w in windows if w.get("best_params") is not None]
+    n_with_params = len(selected)
+    if n_windows == 0 or n_with_params == 0 or n_with_params == n_windows:
+        return None
+
+    flat = [
+        (index, window)
+        for index, window in enumerate(windows)
+        if window.get("best_params") is None
+    ]
+
+    # The bars of the windows in which the strategy did trade. The
+    # comparison against the flat windows separates "the window was too
+    # short to trade" (a window fact) from "the signal never triggered on
+    # the window" (a strategy fact).
+    traded_bars = [
+        int(len(w["test_data"]))
+        for w in selected
+        if w.get("test_data") is not None
+    ]
+    min_traded_bars = min(traded_bars) if traded_bars else None
+    traded_position_bars = [
+        int(w["position_bars"])
+        for w in selected
+        if w.get("position_bars") is not None
+    ]
+    min_traded_position_bars = min(traded_position_bars) if traded_position_bars else None
+
+    noun = (context or {}).get("window_noun") or (
+        "fold" if validation_method == "cpcv" else "period"
+    )
+
+    flat_records: List[Dict[str, Any]] = []
+    for index, window in flat:
+        outcomes = window.get("selection_outcomes") or {}
+        tally = {
+            cause: int(outcomes.get(outcome, 0))
+            for outcome, cause in _COMBO_OUTCOME_CAUSES.items()
+        }
+        # The cause the search's own tally attributes to this window. A tie
+        # is broken by the order the causes are listed in, so the verdict
+        # is deterministic.
+        if any(tally.values()):
+            cause = max(tally, key=lambda key: tally[key])
+        else:
+            # No tally (a window record without one): fall back to the
+            # vocabulary's default cause.
+            cause = "no_position_in_validation_window"
+
+        test_data = window.get("test_data")
+        train_window = window.get("train_data")
+        bars = int(len(test_data)) if test_data is not None else 0
+        train_bars = int(len(train_window)) if train_window is not None else 0
+        test_returns = window.get("test_returns")
+        returns_bars = 0 if test_returns is None else int(len(test_returns))
+        max_position_bars = window.get("max_position_bars")
+
+        if cause == "no_position_in_validation_window":
+            if min_traded_bars is not None and bars < min_traded_bars:
+                reason = "window_too_short"
+            else:
+                reason = "signal_never_triggered"
+        elif cause == "no_estimable_training_sharpe":
+            reason = "training_sharpe_not_estimable"
+        else:
+            reason = "all_combinations_failed"
+
+        if reason == "window_too_short":
+            length_clause = (
+                f"the window is shorter than every window in which the "
+                f"strategy traded ({bars} bars against {min_traded_bars} "
+                f"bars), so the window length cannot be ruled out as the "
+                f"cause"
+            )
+        elif reason == "signal_never_triggered":
+            length_clause = (
+                f"the window holds at least as many bars as the shortest "
+                f"window in which the strategy traded ({min_traded_bars} "
+                f"bars), so its length does not by itself explain the "
+                f"failure: the signal never triggered on it"
+            )
+        elif reason == "training_sharpe_not_estimable":
+            length_clause = (
+                f"the training split of this window holds {train_bars} bars "
+                f"and produced a constant return series, so the in-sample "
+                f"Sharpe the selection ranks on is undefined"
+            )
+        else:
+            length_clause = (
+                "every parameter combination raised an error while it was "
+                "evaluated"
+            )
+
+        text = (
+            f"{noun.capitalize()} {index} ({bars} bars, "
+            f"{_window_date_text(window.get('test_start'))} to "
+            f"{_window_date_text(window.get('test_end'))}): "
+            f"{_PARTIAL_CAUSE_TEXT[cause]} ({returns_bars} out-of-sample "
+            f"return bars"
+        )
+        if max_position_bars is not None:
+            text += f", {max_position_bars} bars with a position"
+        text += f"); {length_clause}."
+
+        flat_records.append({
+            "window": index,
+            "fold": window.get("fold"),
+            "cause": cause,
+            "reason": reason,
+            "bars": bars,
+            "train_bars": train_bars,
+            "test_returns_bars": returns_bars,
+            "test_sharpe": window.get("test_sharpe"),
+            "max_position_bars": max_position_bars,
+            "test_start": _window_date_text(window.get("test_start")),
+            "test_end": _window_date_text(window.get("test_end")),
+            "outcome_tally": tally,
+            "text": text,
+        })
+
+    n_flat = len(flat_records)
+    cause_counts: Dict[str, int] = {}
+    for record in flat_records:
+        cause_counts[record["cause"]] = cause_counts.get(record["cause"], 0) + 1
+    dominant = max(cause_counts, key=lambda key: cause_counts[key])
+
+    if len(cause_counts) == 1:
+        cause_clause = (
+            f"Every flat {noun} has the same cause ({dominant}): "
+            f"{_PARTIAL_CAUSE_TEXT[dominant]}."
+        )
+    else:
+        parts = ", ".join(
+            f"{count} with cause {cause}" for cause, count in sorted(cause_counts.items())
+        )
+        cause_clause = (
+            f"The flat {noun}s do not share one cause ({parts})."
+        )
+
+    basis = (context or {}).get("selection_basis") or "the result"
+    if basis == "overfitting_risk_verdict":
+        basis_clause = (
+            f"the overfitting-risk verdict rests on {n_with_params} of the "
+            f"{n_windows} out-of-sample {noun}s"
+        )
+    elif basis == "selected_parameter":
+        basis_clause = (
+            f"the selected parameter was chosen from the {n_with_params} of "
+            f"the {n_windows} validation {noun}s that could select one"
+        )
+    else:
+        basis_clause = (
+            f"the result rests on {n_with_params} of the {n_windows} "
+            f"out-of-sample {noun}s"
+        )
+    if min_traded_position_bars is not None:
+        basis_clause += (
+            f", and the thinnest of them held a position for only "
+            f"{min_traded_position_bars} "
+            f"{'bar' if min_traded_position_bars == 1 else 'bars'}"
+        )
+    basis_clause += "."
+
+    remedy_parts: List[str] = []
+    flat_causes = {record["cause"] for record in flat_records}
+    if "no_position_in_validation_window" in flat_causes:
+        if all(
+            record["reason"] == "signal_never_triggered"
+            for record in flat_records
+            if record["cause"] == "no_position_in_validation_window"
+        ):
+            remedy_parts.append(
+                "To give the strategy room to trade, "
+                f"{_selection_window_remedy(validation_method, context)} -- but "
+                f"the flat {noun}s are already as long as the {noun}s in which "
+                f"the strategy traded, so if the signal never triggers on that "
+                f"stretch of the sample, no window length will change the "
+                f"outcome."
+            )
+        else:
+            remedy_parts.append(
+                "To give the strategy room to trade, "
+                f"{_selection_window_remedy(validation_method, context)}."
+            )
+    if "no_estimable_training_sharpe" in flat_causes:
+        remedy_parts.append(
+            f"The training split is what is broken in at least one flat "
+            f"{noun}: "
+            f"{_selection_training_remedy(validation_method, context)}."
+        )
+    if "all_combinations_failed" in flat_causes:
+        remedy_parts.append(
+            f"The parameter grid itself is the problem in at least one flat "
+            f"{noun}: every combination failed, so the values in the grid "
+            f"have to be checked before any result of this run can be read."
+        )
+    remedy_clause = " ".join(remedy_parts)
+
+    message = (
+        f"The {validation_method} analysis selected a parameter in "
+        f"{n_with_params} of its {n_windows} out-of-sample {noun}s; the "
+        f"other {n_flat} produced no selection. {cause_clause} So "
+        f"{basis_clause} {remedy_clause}"
+    )
+
+    # The windows the verdict rests on: how many bars they held and how
+    # many of them carried a position. A verdict measured on two windows
+    # that traded for a single bar each is a different statement from a
+    # verdict measured on two windows the strategy traded throughout.
+    traded_records = [
+        {
+            "window": index,
+            "bars": int(len(w["test_data"])) if w.get("test_data") is not None else 0,
+            "position_bars": w.get("position_bars"),
+            "test_sharpe": w.get("test_sharpe"),
+            "test_start": _window_date_text(w.get("test_start")),
+            "test_end": _window_date_text(w.get("test_end")),
+        }
+        for index, w in enumerate(windows)
+        if w.get("best_params") is not None
+    ]
+
+    details: Dict[str, Any] = {
+        "validation_method": validation_method,
+        "n_validation_windows": n_windows,
+        "n_windows_with_selected_params": n_with_params,
+        "n_flat_windows": n_flat,
+        "flat_windows": flat_records,
+        "traded_windows": traded_records,
+        "flat_window_causes": cause_counts,
+        "dominant_cause": dominant,
+        "min_traded_window_bars": min_traded_bars,
+        "min_traded_position_bars": min_traded_position_bars,
+        "traded_window_bars": traded_bars,
+        "train_split_bars": int(len(train_data)) if train_data is not None else 0,
+        "param_grid": param_grid,
+    }
+    if wf_window is not None:
+        details["walk_forward_window"] = wf_window
+    if context:
+        details.update(context)
+
+    return {
+        "cause": dominant,
+        "message": message,
+        "details": details,
+    }
 
 
 def out_of_sample_validation(
@@ -3990,6 +4650,34 @@ def out_of_sample_validation(
     )
     inert_grid_params = inert_report["inert_grid_params"]
 
+    # The validation phase runs inside the training split, so the CPCV
+    # configuration that produced its windows is the one the diagnosis
+    # has to state: the effective out-of-sample fraction is
+    # test_size / n_splits, not the fraction the flag name suggests.
+    _diagnosis_context = {"analysis_path": "out_of_sample"}
+    if validation_method == "cpcv":
+        _diagnosis_context.update({
+            "cpcv_n_splits": cpcv_n_splits,
+            "cpcv_test_size": cpcv_test_size,
+            "cpcv_purge_size": cpcv_purge_size,
+            "cpcv_embargo_size": cpcv_embargo_size,
+            "cli_flags": {
+                "n_splits": "--cpcv-n-splits",
+                "test_size": "--cpcv-test-size",
+            },
+        })
+    else:
+        _diagnosis_context.update({
+            "walk_forward_train_months": walk_forward_train_months,
+            "walk_forward_test_months": walk_forward_test_months,
+            "walk_forward_step_months": walk_forward_step_months,
+            "cli_flags": {
+                "train_months": "--wf-train-months",
+                "test_months": "--wf-test-months",
+                "step_months": "--wf-step-months",
+            },
+        })
+
     # Phase 2: SELECTION - Select best parameters based on criterion
     selected_params = _select_parameters(
         validation_results=validation_results,
@@ -4001,29 +4689,6 @@ def out_of_sample_validation(
         # configuration that produced its windows is the one the diagnosis
         # has to state: the effective out-of-sample fraction is
         # test_size / n_splits, not the fraction the flag name suggests.
-        _diagnosis_context = {"analysis_path": "out_of_sample"}
-        if validation_method == "cpcv":
-            _diagnosis_context.update({
-                "cpcv_n_splits": cpcv_n_splits,
-                "cpcv_test_size": cpcv_test_size,
-                "cpcv_purge_size": cpcv_purge_size,
-                "cpcv_embargo_size": cpcv_embargo_size,
-                "cli_flags": {
-                    "n_splits": "--cpcv-n-splits",
-                    "test_size": "--cpcv-test-size",
-                },
-            })
-        else:
-            _diagnosis_context.update({
-                "walk_forward_train_months": walk_forward_train_months,
-                "walk_forward_test_months": walk_forward_test_months,
-                "walk_forward_step_months": walk_forward_step_months,
-                "cli_flags": {
-                    "train_months": "--wf-train-months",
-                    "test_months": "--wf-test-months",
-                    "step_months": "--wf-step-months",
-                },
-            })
         diagnosis = _diagnose_no_selection(
             validation_results=validation_results,
             validation_method=validation_method,
@@ -4318,6 +4983,26 @@ def out_of_sample_validation(
             validation_results, validation_method, selected_params
         ),
     }
+
+    # A validation phase in which *some* windows could select a parameter and
+    # others could not has to say which windows were flat and why: the
+    # selected parameter was then chosen from fewer windows than the
+    # validation phase had, and the count alone does not say what happened
+    # in the flat ones. The measurement changes no number.
+    _partial_diagnosis = _diagnose_partial_selection(
+        validation_results=validation_results,
+        validation_method=validation_method,
+        param_grid=param_grid,
+        train_data=train_data,
+        wf_window=wf_window,
+        context=dict(
+            _diagnosis_context,
+            window_noun="fold" if validation_method == "cpcv" else "period",
+            selection_basis="selected_parameter",
+        ),
+    )
+    if _partial_diagnosis is not None:
+        summary["partial_selection_diagnosis"] = _partial_diagnosis
 
     # Add multiple benchmark information to summary if applicable
     if isinstance(test_benchmark, list):
@@ -5435,6 +6120,11 @@ def run_cpcv(args) -> int:
     _print_no_selection_diagnosis(
         results["summary"].get("no_selection_diagnosis")
     )
+    # A run in which only some folds could select a parameter says which
+    # folds were flat and why, next to the fold count.
+    _print_partial_selection_diagnosis(
+        results["summary"].get("partial_selection_diagnosis")
+    )
     _total_oos_return = results["summary"]["total_oos_return"]
     print(
         f"Total OOS Return: {'N/A' if _total_oos_return is None else f'{_total_oos_return:.2%}'}"
@@ -6517,6 +7207,11 @@ def run_walk_forward(args) -> int:
     # console and the artifact carry the same diagnosis.
     _print_no_selection_diagnosis(
         results["summary"].get("no_selection_diagnosis")
+    )
+    # A run in which only some periods could select a parameter says which
+    # periods were flat and why, next to the period count.
+    _print_partial_selection_diagnosis(
+        results["summary"].get("partial_selection_diagnosis")
     )
     _total_oos_return = results["summary"]["total_oos_return"]
     print(
@@ -8176,6 +8871,12 @@ def run_out_of_sample_validation(args) -> int:
     # selection over it a null experiment: say so next to the selection, not
     # only in the summary JSON.
     _print_inert_grid_warning(results["summary"].get("inert_grid_message"))
+    # A validation phase in which only some windows could select a parameter
+    # says which windows were flat and why: the selected parameter was then
+    # chosen from fewer windows than the validation phase had.
+    _print_partial_selection_diagnosis(
+        results["summary"].get("partial_selection_diagnosis")
+    )
 
     # The walk-forward window the validation phase actually ran with (it is
     # shortened when the requested window does not fit the training split).
