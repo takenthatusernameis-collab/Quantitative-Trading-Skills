@@ -24,12 +24,33 @@ easy to break silently:
   * the resolution analysis is a measurement: it must not change any criterion
     outcome or the verdict.
 
+THE POSITIVE CONTROL (a check on the test machinery, not on any market)
+    Everything above is a "can only fail" demonstration: on the shipped
+    sample the resolution thresholds sit beyond the plausibility bound, so
+    the verdict is largely a statement about the size of the held-out
+    sample. That does not show the machinery CAN say yes when it should.
+
+    The tests below close that gap with a SYNTHETIC fixture
+    (`scripts/generate_positive_control_data.py`): a series built by a
+    known formula with a known injected effect, plus a no-effect control
+    built from the identical draws with the effect removed. The example's
+    own criteria machinery must return SUPPORTED on the effect series and
+    NOT SUPPORTED on the no-effect series.
+
+    This is a check on the decision machinery only. The fixture is produced
+    by a formula, describes no real security, and the numbers it produces
+    are properties of that formula and of the test machinery -- never
+    evidence about a market.
+
 Run with: python3 skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py
 No third-party test framework is required; uses only the standard library.
 """
 
+import contextlib
+import io
 import subprocess
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -41,6 +62,17 @@ sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 sys.path.insert(0, str(SKILLS_DIR / "examples"))
 
 from falsifiable_hypothesis_example import run_hypothesis_test  # noqa: E402
+from generate_positive_control_data import (  # noqa: E402
+    CONTROL_BENCHMARK_SEED,
+    CONTROL_DRIFT,
+    CONTROL_PERIODS,
+    CONTROL_REGIME_BARS,
+    CONTROL_STRATEGY_SEED,
+    CONTROL_VOLATILITY,
+    FIXTURE_PURPOSE,
+    generate_control_series,
+    write_control_fixture,
+)
 
 
 def _sample_paths():
@@ -252,6 +284,250 @@ def test_the_example_prints_the_resolution_and_the_reading_note():
     assert "VERDICT:" in out
 
 
+# ---------------------------------------------------------------------------
+# The positive control
+# ---------------------------------------------------------------------------
+#
+# A check on the test machinery, NOT on any strategy or market. The fixture
+# is a synthetic series produced by a known formula with a known injected
+# effect (see `scripts/generate_positive_control_data.py`), plus a no-effect
+# control built from the identical draws with the effect removed.
+#
+# What the control establishes:
+#   * the example's own criteria machinery can return SUPPORTED when the
+#     effect is real and the sample is large enough (the shipped sample only
+#     ever shows that it can fail);
+#   * the same machinery returns NOT SUPPORTED on the matched no-effect
+#     series, so the SUPPORTED verdict is not the machinery answering yes
+#     unconditionally;
+#   * the SUPPORTED verdict rests on an effect that EXCEEDS the framework's
+#     own reported minimum detectable effect, so it is a power statement and
+#     not an accident.
+#
+# What it does NOT establish: anything about real securities. The numbers
+# below are properties of a formula and of the decision machinery.
+
+# The control runs a full walk-forward validation per case, so each result is
+# computed once and shared by the tests that read it.
+_CONTROL_RESULTS = {}
+
+
+def _control_result(inject_effect, strategy_seed=None, benchmark_seed=None):
+    """Run the example's criteria machinery on the synthetic control fixture.
+
+    The fixture is written into a temporary directory because the example
+    resolves its benchmark set from the directory of the data file it is
+    given, and the fixture's file names are fixed by that list.
+    """
+    key = (bool(inject_effect), strategy_seed, benchmark_seed)
+    if key in _CONTROL_RESULTS:
+        return _CONTROL_RESULTS[key]
+
+    kwargs = {}
+    if strategy_seed is not None:
+        kwargs["strategy_seed"] = strategy_seed
+    if benchmark_seed is not None:
+        kwargs["benchmark_seed"] = benchmark_seed
+
+    buffer = io.StringIO()
+    with tempfile.TemporaryDirectory(prefix="positive_control_") as tmpdir:
+        paths = write_control_fixture(tmpdir, inject_effect=inject_effect, **kwargs)
+        with contextlib.redirect_stdout(buffer):
+            result = run_hypothesis_test(paths["strategy"])
+    result["_console"] = buffer.getvalue()
+    _CONTROL_RESULTS[key] = result
+    return result
+
+
+def _criterion(result, name):
+    for criterion in result["criteria"]:
+        if criterion["name"] == name:
+            return criterion
+    raise AssertionError(f"criterion {name} missing from the result")
+
+
+def test_the_synthetic_positive_control_returns_supported():
+    """The machinery can say yes: on a series with a known injected effect the
+    example's own pre-registered criteria return SUPPORTED.
+
+    This is the half the shipped sample cannot show. On the shipped sample
+    the resolution thresholds sit beyond the plausibility bound, so the
+    verdict there is largely a statement about the sample size; here the
+    thresholds are inside the sample's resolution AND the effect clears them.
+    """
+    result = _control_result(inject_effect=True)
+    console = result.get("_console", "")
+
+    assert result["verdict"] == "SUPPORTED", (
+        "the positive control must be SUPPORTED\n"
+        f"observed: {result['observed']}\n"
+        f"console tail:\n{console[-3000:]}"
+    )
+    assert result["all_pass"] is True
+    failed = [c["name"] for c in result["criteria"] if not c["passed"]]
+    assert not failed, f"criteria failed on the positive control: {failed}"
+
+    # The same machinery, the same split, the same bias controls: the
+    # SUPPORTED verdict was produced by the shipped code path, not by a
+    # shortcut around it.
+    sep = result["separation_check"]
+    assert sep.get("disjoint") is True
+    assert sep.get("chronological") is True
+    assert sep.get("train_test_overlap") == 0
+    assert result["pit_passed"] is True
+    assert result["bias_controls_engaged"] is True
+
+
+def test_the_positive_control_effect_clears_the_reported_minimum_detectable_effect():
+    """The SUPPORTED verdict rests on an effect the test could have detected.
+
+    The framework reports, for each significance criterion, the smallest
+    effect that criterion could have confirmed at the sample size actually
+    available. On the control the observed effect is above that threshold,
+    so the verdict is a power statement rather than luck -- and the control
+    is the first case in this repository where the significance criteria are
+    demonstrably *within* the sample's resolution.
+    """
+    result = _control_result(inject_effect=True)
+    obs = result["observed"]
+    res = result["resolution"]
+
+    assert res["n_test_observations"] > 0
+    assert res["n_parameter_trials"] > 0
+    assert res["n_benchmarks"] >= 2
+
+    # Criterion 2 (deflated Sharpe): the observed Sharpe is above the
+    # smallest one the deflated test could have confirmed.
+    assert res["min_detectable_sharpe"] > 0
+    assert obs["oos_sharpe"] > res["min_detectable_sharpe"], (
+        "the observed Sharpe must exceed the reported minimum detectable "
+        f"effect ({obs['oos_sharpe']} vs {res['min_detectable_sharpe']})"
+    )
+    # Criteria 3 and 5 (raw and deflated benchmark alpha): same statement.
+    assert res["min_detectable_alpha"] > 0
+    assert obs["benchmark_alpha"] > res["min_detectable_alpha"]
+    assert res["min_detectable_benchmark_alpha"] > 0
+    assert obs["benchmark_alpha"] > res["min_detectable_benchmark_alpha"]
+
+    # Every criterion was inside the sample's resolution: the thresholds did
+    # not exceed the framework's own plausibility bounds, so the verdict is
+    # informative rather than a statement about the sample size.
+    assert res["criteria_beyond_resolution"] == [], (
+        "on the positive control every criterion must be within the sample's "
+        f"resolution, got {res['criteria_beyond_resolution']}"
+    )
+    assert result["criteria_beyond_resolution"] == []
+
+
+def test_the_no_effect_control_returns_not_supported():
+    """The negative side: the identical construction with the effect removed
+    must NOT be SUPPORTED.
+
+    A control that only asserted the positive case would pass even if the
+    criteria always returned SUPPORTED.
+    """
+    result = _control_result(inject_effect=False)
+    console = result.get("_console", "")
+
+    assert result["verdict"] == "NOT SUPPORTED", (
+        "the no-effect control must not be SUPPORTED\n"
+        f"observed: {result['observed']}\n"
+        f"console tail:\n{console[-3000:]}"
+    )
+    assert result["all_pass"] is False
+    # The significance criteria are the ones that must fail: with no effect
+    # there is nothing for them to detect.
+    assert _criterion(result, "deflated_sharpe_pvalue_lt_0.10")["passed"] is False
+    assert _criterion(result, "deflated_alpha_ratio_gt_0.90")["passed"] is False
+
+
+def test_the_control_pair_differs_only_by_the_injected_effect():
+    """The effect series and the no-effect control are the same construction.
+
+    They share the noise draws and the OHLC micro-structure; the only
+    difference is the injected regime drift. That is what makes the pair a
+    control rather than two unrelated samples, so the property is asserted
+    rather than assumed.
+    """
+    with_effect = generate_control_series(inject_effect=True)
+    without_effect = generate_control_series(inject_effect=False)
+
+    assert len(with_effect) == len(without_effect) == CONTROL_PERIODS
+    assert list(with_effect["date"]) == list(without_effect["date"])
+
+    # The log-return paths differ by exactly the regime drift.
+    drift = np.where(
+        (np.arange(CONTROL_PERIODS) // CONTROL_REGIME_BARS) % 2 == 0,
+        CONTROL_DRIFT,
+        -CONTROL_DRIFT,
+    )
+    log_effect = np.diff(np.log(with_effect["close"].to_numpy()))
+    log_control = np.diff(np.log(without_effect["close"].to_numpy()))
+    difference = log_effect - log_control
+    assert np.allclose(difference, drift[1:], atol=1e-12), (
+        "the no-effect control must be the effect series with exactly the "
+        "injected drift removed"
+    )
+
+    # The noise is identical: the difference is the drift, nothing else.
+    noise_effect = log_effect - drift[1:]
+    noise_control = log_control
+    assert np.allclose(noise_effect, noise_control, atol=1e-12)
+
+
+def test_the_control_verdict_is_not_a_property_of_one_seed():
+    """The verdict survives a change of the random draw.
+
+    A control pinned to a single seed could be a lucky seed. The effect
+    series must be SUPPORTED and the no-effect series NOT SUPPORTED on other
+    seeds as well.
+    """
+    for seed in (1, 2024):
+        effect = _control_result(
+            inject_effect=True, strategy_seed=seed, benchmark_seed=seed + 1000
+        )
+        assert effect["verdict"] == "SUPPORTED", (
+            f"the positive control must be SUPPORTED on seed {seed}; "
+            f"observed: {effect['observed']}"
+        )
+        control = _control_result(
+            inject_effect=False, strategy_seed=seed, benchmark_seed=seed + 1000
+        )
+        assert control["verdict"] == "NOT SUPPORTED", (
+            f"the no-effect control must not be SUPPORTED on seed {seed}; "
+            f"observed: {control['observed']}"
+        )
+
+
+def test_the_control_fixture_is_labelled_as_synthetic_and_carries_no_security():
+    """The fixture must never read as a claim about a real security.
+
+    Two guards: the generator states its purpose (synthetic, machinery check,
+    not evidence), and the generated data carries no security identifier at
+    all -- only prices and volume.
+    """
+    assert "SYNTHETIC" in FIXTURE_PURPOSE
+    assert "not evidence" in FIXTURE_PURPOSE.lower()
+    assert "TEST-MACHINERY" in FIXTURE_PURPOSE
+
+    series = generate_control_series()
+    assert set(series.columns) == {"date", "open", "high", "low", "close", "volume"}
+    # No symbol / ticker / name column: the series identifies nothing.
+    for identifier in ("symbol", "ticker", "name", "isin", "security"):
+        assert identifier not in series.columns
+
+    with tempfile.TemporaryDirectory(prefix="positive_control_") as tmpdir:
+        paths = write_control_fixture(tmpdir)
+        strategy = pd.read_csv(paths["strategy"])
+        benchmark = pd.read_csv(paths["benchmark"])
+    assert list(strategy.columns) == list(benchmark.columns)
+    assert len(strategy) == len(benchmark) == CONTROL_PERIODS
+    # The pinned seeds are the ones the control is documented with.
+    assert CONTROL_STRATEGY_SEED != CONTROL_BENCHMARK_SEED
+    assert CONTROL_VOLATILITY > 0
+    assert CONTROL_DRIFT > 0
+
+
 def main() -> int:
     tests = TEST_REGISTRY
     failures = 0
@@ -276,7 +552,14 @@ TEST_REGISTRY = [
     ("test_the_resolution_does_not_change_the_verdict", test_the_resolution_does_not_change_the_verdict),
     ("test_the_test_window_is_reported_in_observations_not_periods", test_the_test_window_is_reported_in_observations_not_periods),
     ("test_the_example_prints_the_resolution_and_the_reading_note", test_the_example_prints_the_resolution_and_the_reading_note),
+    ("test_the_synthetic_positive_control_returns_supported", test_the_synthetic_positive_control_returns_supported),
+    ("test_the_positive_control_effect_clears_the_reported_minimum_detectable_effect", test_the_positive_control_effect_clears_the_reported_minimum_detectable_effect),
+    ("test_the_no_effect_control_returns_not_supported", test_the_no_effect_control_returns_not_supported),
+    ("test_the_control_pair_differs_only_by_the_injected_effect", test_the_control_pair_differs_only_by_the_injected_effect),
+    ("test_the_control_verdict_is_not_a_property_of_one_seed", test_the_control_verdict_is_not_a_property_of_one_seed),
+    ("test_the_control_fixture_is_labelled_as_synthetic_and_carries_no_security", test_the_control_fixture_is_labelled_as_synthetic_and_carries_no_security),
 ]
+
 
 if __name__ == "__main__":
     import sys

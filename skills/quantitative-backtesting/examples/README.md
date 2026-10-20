@@ -139,6 +139,18 @@ section shows that the three statistical criteria need effects the 100 test
 observations cannot resolve — so that verdict is largely a statement about the
 size of the held-out sample rather than about the strategy.
 
+**The positive control.** A verdict that can only ever be `NOT SUPPORTED`
+would be no evidence of a test at all, so the example's machinery is also run
+against a **synthetic** series with a known injected effect (and against a
+matched no-effect control) in
+`tests/test_falsifiable_hypothesis_example.py`. On the effect series the same
+criteria return `SUPPORTED`, on the no-effect series they return `NOT
+SUPPORTED`, and on the effect series the observed effect also exceeds the
+framework's own reported minimum detectable effect. The control is a check on
+the decision machinery: its data is produced by a formula
+(`scripts/generate_positive_control_data.py`), describes no real security, and
+says nothing about any market.
+
 Run with:
 ```bash
 python3 skills/quantitative-backtesting/examples/falsifiable_hypothesis_example.py
