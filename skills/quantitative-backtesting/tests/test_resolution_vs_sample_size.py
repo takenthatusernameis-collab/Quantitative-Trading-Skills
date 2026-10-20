@@ -569,6 +569,16 @@ def test_test_frac_sweep_each_split_matches_the_framework_own_block():
             f"test_frac={test_frac}: the measured deflation floor (SR*) must "
             "equal the framework's own Deflated Sharpe block"
         )
+        assert block["min_detectable_alpha"] == framework["min_detectable_alpha"], (
+            f"test_frac={test_frac}: the measured minimum confirmable alpha "
+            "must equal the framework's own block"
+        )
+        assert block["expected_max_alpha"] == (
+            framework_summary["deflated_alpha"]["expected_max_alpha"]
+        ), (
+            f"test_frac={test_frac}: the measured deflation floor (alpha*) must "
+            "equal the framework's own Deflated Alpha block"
+        )
 
 
 def _framework_wf_block(bars, seed, inject_effect):
