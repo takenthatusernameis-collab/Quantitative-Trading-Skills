@@ -151,6 +151,18 @@ Risk Metrics:
   reported return series, so the metadata cannot drift away from the
   behaviour it describes. See `references/validation_methods.md`,
   "Recording the Warmup Convention".
+- `test_out_of_sample_window.py` - Unit tests for the out-of-sample
+  validation window and its diagnosis: the walk-forward window is shortened
+  to the largest value that still yields a period when the requested one
+  does not fit the training split (and left untouched when it does), the
+  adaptation is recorded in `summary["walk_forward_window"]`, a validation
+  phase that cannot select reports its **cause**
+  (`summary["no_selection_diagnosis"]`) instead of one generic sentence,
+  the CLI writes that diagnosis to `out_of_sample_summary.json` and exits
+  non-zero, and an inert parameter grid is reported as the null experiment
+  it is (`summary["inert_grid_params"]`). See
+  `references/validation_methods.md`, "The Walk-Forward Window Inside the
+  Training Split".
 
 ### references/
 - `data_schema.md` - Expected data formats and column specifications
@@ -294,6 +306,9 @@ Risk Metrics:
 - Run `--validate-point-in-time` on every backtest to screen for temporal-order violations, duplicate timestamps, and signal/next-return correlation (a look-ahead indicator); add `--point-in-time-strict` to make violations fail the run
 - The definitive look-ahead test in `validate_point_in_time` is the **next-period correlation** between signal changes and `close[t+1] - close[t]`: a signal at time `t` must not predict the return at `t+1`, because no future information is available at time `t`. The contemporaneous (same-bar) correlation between signal changes and `close[t] - close[t-1]` is NOT used as a violation: a signal generated at time `t` is legitimately allowed to use `close[t]`, and `close[t]` is a component of the same-bar return, so any `close[t]`-based strategy (SMA crossover, mean reversion, Donchian) shows non-trivial same-bar correlation by construction. Only the next-period test can distinguish a legitimate `close[t]`-based signal from a genuinely forward-looking one.
 - The out-of-sample validation framework (`walk_forward.py out-of-sample`) enforces a **strict chronological train/validation/test split** via `_verify_split_separation`: the three splits must be pairwise disjoint and ordered (`train_end < val_start`, `val_end < test_start`), and the check result is recorded in `train_val_test_split.separation_check`. A leak here would silently produce an in-sample-optimistic result indistinguishable from a genuine out-of-sample one, so the check is a correctness guard, not a cosmetic one.
+- The **validation phase runs inside the training split**, so the walk-forward window has to fit it: one period needs `train_months + test_months` of calendar span. A window that does not fit yields **zero** periods, so no parameter can be selected — which is why the default 12 + 3 month window aborted on the shipped one-year sample. The window is now resolved against the training split before the phase runs (`_resolve_walk_forward_window`): a window that fits is used unchanged, a window that does not fit is shortened **on the training side only** (the out-of-sample test window and the validation/test splits are never touched), and the resolution is printed and recorded in `summary["walk_forward_window"]` (`requested` / `effective` / `adapted` / `train_span_months` / `effective_periods` / `reason`). An adapted window is a methodology choice, so it is never implicit.
+- A validation phase that still selects nothing now **names its cause** instead of reporting "No valid parameters selected from validation phase": `summary["no_selection_diagnosis"].cause` is `no_validation_windows` (the window does not fit the training split) or `no_position_in_validation_window` (every grid combination stayed flat over the out-of-sample window — typically an indicator warm-up longer than the window). The CLI prints the diagnosis and writes it to `out_of_sample_summary.json`, so a failed run still leaves a machine-readable record of why it failed.
+- A parameter grid whose values do **not** change the strategy's behaviour on the training split is a null experiment: the "search" over it cannot change any result, yet the artifact would report it as a selected parameter. The out-of-sample path detects it (`_inert_param_grid_keys`), warns, and records it in `summary["inert_grid_params"]`. Check the strategy's parameter names before trusting a selection — `sma_crossover` reads `fast_period` and `slow_period`, so a grid over `lookback` searches nothing.
 - The `--selection-criterion` flag (`best_oos_sharpe` default, or `most_stable` / `best_avg_sharpe`) chooses the final parameters from the validation phase. **Only `most_stable` selects on in-sample behavior** (how often each combo won the grid search); `best_oos_sharpe` and `best_avg_sharpe` select on each period/fold's **out-of-sample** test Sharpe (`test_sharpe`), never on `best_sharpe`, which is the in-sample training Sharpe the grid search ranked by. Selecting on `best_sharpe` would pick the combo that overfit its training window — the exact selection bias this framework exists to avoid. Each walk-forward period and CPCV fold now carries a `test_sharpe` key (OOS test Sharpe of the selected combo; `None` on degenerate/empty test windows), and the OOS summary carries `selected_params_avg_test_sharpe` (mean OOS test Sharpe of the selected combo across the periods/folds that chose it).
 - For multi-symbol universes, run `--multi-symbol` to detect survivorship bias (late entries, early exits, insufficient history, data gaps) and review `survivorship_bias.json` before trusting panel results. The flag is accepted by every walk-forward subcommand (`walk-forward`, `optimize`, `cpcv`, `monte-carlo`, `out-of-sample`) as well as `run_backtest`; when set, the survivorship-bias report is persisted as `survivorship_bias.json` in the output directory and threaded into the summary JSON (`survivorship_bias`, `bias_controls_engaged=True`) so panel runs are auditable on the same file name across all CLIs.
 - The CLI writes `data_provenance.json` (source path, checksum, filters, transformations, validation outcome) next to the results so every backtest is reproducible and auditable
@@ -330,6 +345,7 @@ python3 skills/quantitative-backtesting/tests/test_cpcv.py
 python3 skills/quantitative-backtesting/tests/test_monte_carlo.py
 python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
 python3 skills/quantitative-backtesting/tests/test_execution_warmup.py
+python3 skills/quantitative-backtesting/tests/test_out_of_sample_window.py
 python3 skills/quantitative-backtesting/tests/test_examples_coverage.py
 python3 skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py
 ```
@@ -616,7 +632,15 @@ python3 skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_exampl
      numpy/pandas build. See `references/validation_methods.md` under "The
      Warmup Bars of a Window" and "Reproducing the Pinned CPCV Number".
   - `test_generate_sample_data.py` - Sample data generation creates valid OHLCV
-  CSV with expected shape and constraints.
+    CSV with expected shape and constraints.
+  - `test_out_of_sample_window.py` - the out-of-sample validation window and
+    its diagnosis: the window is shortened on the training side only when
+    the requested one does not fit the training split (and left untouched
+    when it does), the adaptation is recorded in
+    `summary["walk_forward_window"]`, a validation phase that cannot select
+    reports its cause in `summary["no_selection_diagnosis"]` and the CLI
+    writes that diagnosis to `out_of_sample_summary.json`, and an inert
+    parameter grid is reported in `summary["inert_grid_params"]`.
 
 The canonical rendered outputs in `test_output/` are regenerated from
 `assets/example_data/sample_ohlcv.csv` via

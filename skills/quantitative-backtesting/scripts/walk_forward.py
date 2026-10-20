@@ -2976,6 +2976,316 @@ def _calculate_cpcv_summary(
     return summary
 
 
+def _walk_forward_window_periods(
+    data: pd.DataFrame,
+    train_months: int,
+    test_months: int,
+    step_months: int,
+) -> int:
+    """Number of walk-forward periods a window yields on `data`.
+
+    Mirrors the period generator inside `walk_forward_analysis` exactly (same
+    calendar arithmetic, same "non-empty train and test slice" condition), so
+    a caller can ask "does this window fit this sample?" without paying for
+    the grid search.
+    """
+    if data is None or len(data) == 0:
+        return 0
+    start_date = data.index.min()
+    end_date = data.index.max()
+    count = 0
+    train_end = start_date + pd.DateOffset(months=train_months)
+    test_start = train_end
+    while test_start + pd.DateOffset(months=test_months) <= end_date:
+        test_end = test_start + pd.DateOffset(months=test_months)
+        train_slice = data[data.index < train_end]
+        test_slice = data[(data.index >= test_start) & (data.index < test_end)]
+        if len(train_slice) > 0 and len(test_slice) > 0:
+            count += 1
+        train_end = train_end + pd.DateOffset(months=step_months)
+        test_start = train_end
+    return count
+
+
+def _resolve_walk_forward_window(
+    data: pd.DataFrame,
+    train_months: int,
+    test_months: int,
+    step_months: int,
+) -> Dict[str, Any]:
+    """Resolve the walk-forward window that is actually used on a training split.
+
+    The walk-forward validation phase runs *inside* the training split, so the
+    window has to fit the training split: a single period needs
+    ``train_months + test_months`` of calendar span. When the requested window
+    does not fit -- e.g. the default 12 + 3 months on a one-year training
+    split -- the validation phase silently produces **zero** periods, no
+    parameter can be selected, and the run aborts with a "no valid parameters"
+    message that hides the real cause.
+
+    The resolver keeps the requested window whenever it fits, and otherwise
+    shrinks **only the training window** (never the out-of-sample test window
+    of the walk-forward phase, and never the validation / test splits of the
+    out-of-sample framework) to the largest value that still yields at least
+    one period. The effective window is returned so the caller can print it
+    and record it in the result artifact: an adapted window is a methodology
+    choice, not a detail, so it must be visible in the output.
+    """
+    requested = {
+        "train_months": int(train_months),
+        "test_months": int(test_months),
+        "step_months": int(step_months),
+    }
+    span_days = 0
+    if data is not None and len(data) > 0:
+        span_days = int((data.index.max() - data.index.min()).days)
+    span_months = span_days / 30.4375
+
+    requested_periods = _walk_forward_window_periods(
+        data, train_months, test_months, step_months
+    )
+    resolution: Dict[str, Any] = {
+        "requested": requested,
+        "effective": dict(requested),
+        "adapted": False,
+        "train_span_months": round(float(span_months), 4),
+        "requested_periods": int(requested_periods),
+        "effective_periods": int(requested_periods),
+        "reason": None,
+    }
+    if requested_periods > 0:
+        return resolution
+
+    # The requested window does not fit: shrink the training window to the
+    # largest value that still produces at least one period.
+    for candidate in range(int(train_months) - 1, 0, -1):
+        if _walk_forward_window_periods(data, candidate, test_months, step_months) > 0:
+            resolution["effective"] = {
+                "train_months": candidate,
+                "test_months": int(test_months),
+                "step_months": int(step_months),
+            }
+            resolution["adapted"] = True
+            resolution["effective_periods"] = _walk_forward_window_periods(
+                data, candidate, test_months, step_months
+            )
+            resolution["reason"] = (
+                f"the training split spans {span_months:.1f} months, which cannot "
+                f"hold the requested walk-forward window "
+                f"(train {int(train_months)} + test {int(test_months)} = "
+                f"{int(train_months) + int(test_months)} months); the training "
+                f"window was shortened to {candidate} month(s) so the validation "
+                f"phase can run"
+            )
+            return resolution
+
+    resolution["reason"] = (
+        f"the training split spans only {span_months:.1f} months, which cannot "
+        f"hold even a 1-month training window plus a {int(test_months)}-month "
+        f"out-of-sample window; no walk-forward period can be built"
+    )
+    return resolution
+
+
+def _strategy_behaviour_fingerprint(
+    strategy: Any,
+    data: pd.DataFrame,
+) -> Optional[tuple]:
+    """Behavioural fingerprint of a strategy on `data`.
+
+    The fingerprint is the signal series plus the strategy's optional book
+    (per-asset target weights). Two parameter settings with the same
+    fingerprint are behaviourally identical on this data, so a grid search
+    between them is a null experiment.
+    """
+    try:
+        signals = strategy.generate_signals(data)
+        signal_values = np.asarray(pd.Series(signals).to_numpy(), dtype=float)
+    except Exception:
+        return None
+    try:
+        weights = strategy_target_weights(strategy, data)
+    except Exception:
+        weights = None
+    if weights is None:
+        weight_values = None
+    else:
+        try:
+            weight_values = np.asarray(weights, dtype=float)
+        except Exception:
+            weight_values = None
+    return (signal_values, weight_values)
+
+
+def _same_behaviour(left: Optional[tuple], right: Optional[tuple]) -> bool:
+    """Whether two behavioural fingerprints describe the same strategy."""
+    if left is None or right is None:
+        return left is None and right is None
+    left_signals, left_weights = left
+    right_signals, right_weights = right
+    if left_weights is None or right_weights is None:
+        if left_weights is not right_weights:
+            return False
+    elif left_weights.shape != right_weights.shape:
+        return False
+    elif not np.array_equal(left_weights, right_weights, equal_nan=True):
+        return False
+    if left_signals.shape != right_signals.shape:
+        return False
+    return bool(np.array_equal(left_signals, right_signals, equal_nan=True))
+
+
+def _inert_param_grid_keys(
+    strategy_factory: Callable,
+    param_grid: Dict[str, List[Any]],
+    data: pd.DataFrame,
+) -> List[str]:
+    """Grid keys that do not change the strategy's behaviour on `data`.
+
+    A grid key whose values all produce the *same* signals (and the same
+    book) is inert: the "search" over it cannot change any result, yet the
+    artifact would still report it as a "selected parameter". This is a
+    null experiment, so it is reported rather than silently ranked.
+    """
+    inert: List[str] = []
+    for key, values in (param_grid or {}).items():
+        if not isinstance(values, (list, tuple)) or len(values) < 2:
+            continue
+        fingerprints = []
+        for value in values:
+            params: Dict[str, Any] = {}
+            for other_key, other_values in (param_grid or {}).items():
+                if other_key == key:
+                    continue
+                if isinstance(other_values, (list, tuple)) and len(other_values) > 0:
+                    params[other_key] = other_values[0]
+            params[key] = value
+            try:
+                strategy = strategy_factory(params)
+            except Exception:
+                fingerprints.append(None)
+                continue
+            fingerprints.append(_strategy_behaviour_fingerprint(strategy, data))
+        if not fingerprints:
+            continue
+        reference = fingerprints[0]
+        if reference is None:
+            continue
+        if all(_same_behaviour(reference, other) for other in fingerprints[1:]):
+            inert.append(key)
+    return inert
+
+
+def _strategy_parameter_names(strategy: Any) -> List[str]:
+    """Parameter names a strategy actually reads (diagnostic hint only).
+
+    The names are read from the strategy's own source, so they reflect the
+    implementation rather than a hand-maintained registry that could drift.
+    A strategy that reads its parameters from somewhere else simply yields an
+    empty list, which only weakens the hint, never the checks.
+    """
+    try:
+        import inspect
+        import re as _re
+
+        source = inspect.getsource(type(strategy).generate_signals)
+        names = _re.findall(
+            r"parameters\.get\(\s*[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']",
+            source,
+        )
+        return sorted(set(names))
+    except Exception:
+        return []
+
+
+def _first_grid_params(param_grid: Dict[str, List[Any]]) -> Dict[str, Any]:
+    """One concrete parameter set from a grid (the first value of every key)."""
+    params: Dict[str, Any] = {}
+    for key, values in (param_grid or {}).items():
+        if isinstance(values, (list, tuple)) and len(values) > 0:
+            params[key] = values[0]
+    return params
+
+
+def _diagnose_no_selection(
+    validation_results: Dict[str, Any],
+    validation_method: str,
+    param_grid: Dict[str, List[Any]],
+    train_data: pd.DataFrame,
+    wf_window: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Explain why the validation phase selected no parameters.
+
+    "No valid parameters selected from validation phase" is a symptom, not a
+    diagnosis: the two usual causes (the walk-forward window does not fit the
+    training split, and every grid combination stays flat over the
+    out-of-sample window) call for completely different remedies, so the
+    cause is reported explicitly instead of being collapsed into one message.
+    """
+    windows = (
+        (validation_results.get("periods") or [])
+        if validation_method == "walk_forward"
+        else (validation_results.get("folds") or [])
+    )
+    n_windows = len(windows)
+    n_with_params = len([w for w in windows if w.get("best_params") is not None])
+
+    window_bars: List[int] = []
+    for window in windows:
+        test_data = window.get("test_data")
+        if test_data is not None:
+            window_bars.append(int(len(test_data)))
+
+    details: Dict[str, Any] = {
+        "validation_method": validation_method,
+        "n_validation_windows": n_windows,
+        "n_windows_with_selected_params": n_with_params,
+        "train_split_bars": int(len(train_data)) if train_data is not None else 0,
+        "param_grid": param_grid,
+    }
+    if window_bars:
+        details["validation_window_bars"] = window_bars
+    if wf_window is not None:
+        details["walk_forward_window"] = wf_window
+
+    if n_windows == 0:
+        cause = "no_validation_windows"
+        if wf_window is not None and wf_window.get("reason"):
+            message = (
+                "The walk-forward validation phase produced no out-of-sample "
+                f"period: {wf_window['reason']}."
+            )
+        else:
+            message = (
+                "The validation phase produced no out-of-sample window, so no "
+                "parameter could be selected."
+            )
+    else:
+        cause = "no_position_in_validation_window"
+        longest = max(window_bars) if window_bars else 0
+        if validation_method == "cpcv":
+            remedy = (
+                "raise --cpcv-test-size (it is the fraction of each group used "
+                "as the test set) or lower --cpcv-n-splits so a fold's test "
+                "window holds enough bars for the strategy to take a position"
+            )
+        else:
+            remedy = (
+                "shorten the indicator lookbacks in the parameter grid, use a "
+                "longer --wf-test-months window, or give the training split "
+                "more history"
+            )
+        message = (
+            f"The {validation_method} validation phase produced {n_windows} "
+            f"out-of-sample window(s) but no parameter combination took a "
+            f"position in any of them (the longest window holds {longest} "
+            f"bars). A combination is skipped when the strategy stays flat "
+            f"over the whole window, which usually means the indicator "
+            f"warm-up is longer than the window: {remedy}."
+        )
+    return {"cause": cause, "message": message, "details": details}
+
+
 def out_of_sample_validation(
     data: Union[pd.DataFrame, dict],
     strategy_factory: Callable,
@@ -3165,14 +3475,39 @@ def out_of_sample_validation(
     split_info["separation_check"] = separation_check
 
     # Phase 1: VALIDATION - Run walk-forward or CPCV on training data
+    wf_window = None
     if validation_method == "walk_forward":
+        # The walk-forward window has to fit the *training split* (the
+        # validation phase runs inside it). When the requested window is
+        # longer than the training split it produces zero periods, so no
+        # parameter can be selected and the run aborts with a message that
+        # hides the cause. The window is therefore resolved against the
+        # training split first: unchanged when it fits, otherwise shortened
+        # on the training side only, and the resolution is reported and
+        # recorded (an adapted window is a methodology choice).
+        wf_window = _resolve_walk_forward_window(
+            train_data,
+            walk_forward_train_months,
+            walk_forward_test_months,
+            walk_forward_step_months,
+        )
+        if wf_window["adapted"]:
+            print(
+                f"Walk-forward window adapted to the training split: "
+                f"train {wf_window['requested']['train_months']} -> "
+                f"{wf_window['effective']['train_months']} month(s) "
+                f"(test {wf_window['effective']['test_months']}, "
+                f"step {wf_window['effective']['step_months']}), "
+                f"{wf_window['effective_periods']} period(s). "
+                f"Reason: {wf_window['reason']}"
+            )
         validation_results = walk_forward_analysis(
             data=train_data,
             strategy_factory=strategy_factory,
             param_grid=param_grid,
-            train_months=walk_forward_train_months,
-            test_months=walk_forward_test_months,
-            step_months=walk_forward_step_months,
+            train_months=wf_window["effective"]["train_months"],
+            test_months=wf_window["effective"]["test_months"],
+            step_months=wf_window["effective"]["step_months"],
             initial_capital=initial_capital,
             commission=commission,
             slippage=slippage,
@@ -3213,6 +3548,33 @@ def out_of_sample_validation(
         )
     else:
         raise ValueError(f"Unknown validation_method: {validation_method}. Use 'walk_forward' or 'cpcv'.")
+
+    # A grid key whose values do not change the strategy's behaviour is a
+    # null experiment: the "search" over it cannot change any result, yet the
+    # artifact would still report it as a selected parameter. The finding is
+    # recorded and reported so the selection is never mistaken for evidence.
+    inert_grid_params = _inert_param_grid_keys(
+        strategy_factory, param_grid, train_data
+    )
+    if inert_grid_params:
+        try:
+            accepted = _strategy_parameter_names(
+                strategy_factory(_first_grid_params(param_grid))
+            )
+        except Exception:
+            accepted = []
+        hint = (
+            f" The strategy reads: {', '.join(accepted)}."
+            if accepted
+            else ""
+        )
+        print(
+            "WARNING: the parameter grid did not change the strategy's "
+            f"behaviour on the training split for: "
+            f"{', '.join(inert_grid_params)}. The selection over those "
+            f"parameters is a null experiment.{hint}"
+        )
+
     # Phase 2: SELECTION - Select best parameters based on criterion
     selected_params = _select_parameters(
         validation_results=validation_results,
@@ -3220,6 +3582,14 @@ def out_of_sample_validation(
         criterion=selection_criterion,
     )
     if selected_params is None:
+        diagnosis = _diagnose_no_selection(
+            validation_results=validation_results,
+            validation_method=validation_method,
+            param_grid=param_grid,
+            train_data=train_data,
+            wf_window=wf_window,
+        )
+        print(f"No valid parameters selected from validation phase: {diagnosis['message']}")
         return {
             "train_val_test_split": split_info,
             "validation_results": validation_results,
@@ -3228,7 +3598,10 @@ def out_of_sample_validation(
             "test_performance": None,
             "test_benchmark": None,
             "summary": {
-                "error": "No valid parameters found in validation phase",
+                "error": diagnosis["message"],
+                "no_selection_diagnosis": diagnosis,
+                "inert_grid_params": inert_grid_params,
+                "walk_forward_window": wf_window,
                 "train_val_test_split": split_info,
             },
         }
@@ -3651,6 +4024,13 @@ def out_of_sample_validation(
     # P&L.
     summary["panel_pricing"] = panel_pricing
     summary["impact_aggregation"] = impact_aggregation
+    # The walk-forward window the validation phase actually ran with, and
+    # whether it had to be shortened to fit the training split. Recorded so a
+    # result is never read without knowing the window that produced it.
+    summary["walk_forward_window"] = wf_window
+    # Grid keys that did not change the strategy's behaviour on the training
+    # split: a selection over them is a null experiment.
+    summary["inert_grid_params"] = inert_grid_params
     # The execution warmup this path applied (see the walk-forward summary
     # for the same key).
     summary.update(
@@ -7232,10 +7612,75 @@ def run_out_of_sample_validation(args) -> int:
 
     selected = results["selected_params"]
     if selected is None:
-        print("No valid parameters selected from validation phase.")
+        error = results["summary"].get("error") or (
+            "No valid parameters selected from validation phase."
+        )
+        print(f"No valid parameters selected from validation phase.\n{error}")
+        # The failure is written out as an artifact too: a run that cannot
+        # select parameters still has to leave a machine-readable record of
+        # why, next to the split it used.
+        failure_dir = Path(args.output)
+        failure_dir.mkdir(parents=True, exist_ok=True)
+        failure_path = failure_dir / "out_of_sample_summary.json"
+        with open(failure_path, "w") as f:
+            json.dump(
+                {
+                    "summary": results["summary"],
+                    "train_val_test_split": results["train_val_test_split"],
+                    "selected_params": None,
+                    "validation_performance": None,
+                    "test_performance": None,
+                    "test_benchmark": None,
+                    "config": {
+                        "strategy": args.strategy,
+                        "symbol": args.symbol,
+                        "train_frac": args.train_frac,
+                        "val_frac": args.val_frac,
+                        "test_frac": args.test_frac,
+                        "validation_method": args.validation_method,
+                        "selection_criterion": args.selection_criterion,
+                        "param_grid": param_grid,
+                        "wf_train_months": args.wf_train_months,
+                        "wf_test_months": args.wf_test_months,
+                        "wf_step_months": args.wf_step_months,
+                        "cpcv_n_splits": args.cpcv_n_splits,
+                        "cpcv_test_size": args.cpcv_test_size,
+                    },
+                },
+                f,
+                indent=2,
+                default=str,
+            )
+        print(f"Failure diagnosis saved to: {failure_path}")
         return 1
 
     print(f"\nSelected Parameters: {selected}")
+    # A grid key that did not change the strategy's behaviour makes the
+    # selection over it a null experiment: say so next to the selection, not
+    # only in the summary JSON.
+    inert_grid_params = results["summary"].get("inert_grid_params") or []
+    if inert_grid_params:
+        print(
+            f"  WARNING: inert parameter(s) on the training split: "
+            f"{', '.join(inert_grid_params)} -- the selection over them is a "
+            f"null experiment, not evidence."
+        )
+
+    # The walk-forward window the validation phase actually ran with (it is
+    # shortened when the requested window does not fit the training split).
+    wf_window = results["summary"].get("walk_forward_window")
+    if wf_window:
+        effective = wf_window["effective"]
+        requested = wf_window["requested"]
+        adapted = " (adapted to the training split)" if wf_window.get("adapted") else ""
+        print(
+            f"  Validation-phase walk-forward window{adapted}: "
+            f"train {effective['train_months']} / test {effective['test_months']} / "
+            f"step {effective['step_months']} month(s) "
+            f"(requested {requested['train_months']} / {requested['test_months']} / "
+            f"{requested['step_months']}), "
+            f"{wf_window.get('effective_periods')} period(s)"
+        )
 
     val_perf = results["validation_performance"]
     print(f"\nValidation Performance:")

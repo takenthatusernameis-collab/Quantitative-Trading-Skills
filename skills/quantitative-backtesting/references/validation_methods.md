@@ -414,6 +414,76 @@ evaluation:
 3. **TEST**: Final evaluation on the held-out test set, which has never
    been used in any optimization or selection step.
 
+### The Walk-Forward Window Inside the Training Split
+
+The validation phase of `out_of_sample_validation` runs **inside** the
+training split, so the walk-forward window has to fit the training split: a
+single period needs `train_months + test_months` of calendar span before it
+can exist at all.
+
+When the requested window does not fit, the validation phase produces
+**zero** periods, no parameter can be selected, and the run aborts with
+"No valid parameters selected from validation phase" — a message that hides
+the real cause. The default window (12 + 3 months) does not fit the
+one-year training split the CLI carves out of the shipped
+`assets/example_data/sample_ohlcv.csv`, which is exactly how that path
+failed.
+
+The window is therefore resolved against the training split before the
+validation phase runs (`_resolve_walk_forward_window`):
+
+- a requested window that fits is used **unchanged** — the runs that already
+  worked keep their methodology and their numbers;
+- a requested window that does not fit is shortened **on the training side
+  only**, to the largest value that still yields at least one period. The
+  out-of-sample test window of the validation phase (`test_months`) and the
+  validation / test splits of the out-of-sample framework are never touched,
+  so the out-of-sample guarantee is unaffected;
+- a training split too short for *any* window is reported, not guessed.
+
+The resolution is a methodology choice, so it is never implicit: it is
+printed by the CLI ("Walk-forward window adapted to the training split"),
+and recorded in the result artifact under `summary["walk_forward_window"]`:
+
+| Key | Meaning |
+| --- | ------- |
+| `requested` | The window the caller asked for |
+| `effective` | The window the validation phase actually ran with |
+| `adapted` | Whether the training window had to be shortened |
+| `train_span_months` | Calendar span of the training split |
+| `requested_periods` / `effective_periods` | Periods each window yields |
+| `reason` | Why the window was adapted (or why it could not be) |
+
+### When No Parameter Can Be Selected
+
+"No valid parameters selected from validation phase" is a symptom, not a
+diagnosis. The two usual causes need completely different remedies, so the
+cause is reported explicitly (`summary["no_selection_diagnosis"]`, with a
+`cause`, a human-readable `message` and a structured `details` dict):
+
+| `cause` | Meaning | Remedy |
+| ------- | ------- | ------ |
+| `no_validation_windows` | The validation phase produced no out-of-sample window at all (the walk-forward window does not fit the training split) | Give the training split more history, or shorten `--wf-train-months` / `--wf-test-months` |
+| `no_position_in_validation_window` | Windows were built, but every grid combination stayed flat over them (the indicator warm-up is longer than the window) | Shorten the indicator lookbacks in the grid, lengthen `--wf-test-months`, or raise `--cpcv-test-size` / lower `--cpcv-n-splits` |
+
+The CLI prints the diagnosis and writes it to
+`out_of_sample_summary.json`, so a failed run still leaves a
+machine-readable record of why it failed next to the split it used.
+
+### Inert Parameter Grids
+
+A grid key whose values all produce the **same** signals (and the same book)
+on the training split is inert: the "search" over it cannot change any
+result, yet the artifact would still report it as a selected parameter. The
+out-of-sample path detects this (`_inert_param_grid_keys`), prints a warning
+and records the finding in `summary["inert_grid_params"]`, so a selection
+over inert parameters is never mistaken for evidence.
+
+This is a behavioural check, not a name check: it catches the common trap of
+a grid over a parameter the strategy does not read (e.g. `lookback` for
+`sma_crossover`, which reads `fast_period` and `slow_period`), and it does
+not flag a parameter that is merely unused on one particular sample.
+
 ### Strict Train/Validation/Test Separation
 
 The framework depends on the held-out test set having **never** been
