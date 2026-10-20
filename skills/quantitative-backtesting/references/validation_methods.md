@@ -1825,12 +1825,59 @@ strategy:
   below it.
 
 "Is there such a sample size at all?" is answered per path as well. At the
-largest rung measured (10,000 bars) the floor is 1.38 (out-of-sample), 1.21
-(walk-forward) and 0.70 (CPCV) -- all below the 2.0 plausibility bound, so
-all three paths can, in principle, confirm a plausible effect given enough
-data. The summary says the opposite ("no sample size would let this path
-confirm a plausible effect") only when the floor is above the bound at
-*every* measured rung, which is the case that no sample size could fix.
+largest rung measured (50,000 bars) the Sharpe floor (SR*) is 0.93
+(out-of-sample), 0.87 (walk-forward) and 0.66 (CPCV) -- all below the 2.0
+plausibility bound, so all three paths can, in principle, confirm a
+plausible effect given enough data. The summary prints the opposite
+conclusion ("no sample size would let this path confirm a plausible
+effect") only when the floor is above the bound at *every* measured rung.
+
+**That conclusion is a statement about the measured range, and the
+measurement says so.** The floor is estimated from trial Sharpes (criterion
+2) or benchmark alphas (criterion 5) that are themselves estimated on more
+data as the sample grows, so it falls with the sample size; a ladder that
+stops before the crossing cannot settle the question, and a conclusion
+phrased as "no sample size" claims more than the ladder supports. Measured
+on the same fixture, over the same six draws at each rung (three seeds and
+both series), the alpha floor (alpha*) of the walk-forward path is above
+the 10% bound at every rung up to 10,000 bars and **under** it at 25,000:
+
+| Path | alpha\* at 2,500 bars | at 5,000 | at 10,000 | at 25,000 | at 50,000 | First rung at which *every* draw is inside the alpha bound |
+| --- | --- | --- | --- | --- | --- | --- |
+| out-of-sample (held-out test window) | 0.0019 – 0.0133 | 0.0185 – 0.0334 | 0.0050 – 0.0361 | 0.0004 – 0.0065 | 0.0003 – 0.0108 | 10,000 bars |
+| walk-forward (pooled windows) | 0.0011 – 0.1583 | 0.0026 – 0.1150 | 0.0036 – 0.1047 | 0.0038 – 0.0872 | 0.0047 – 0.0844 | 50,000 bars |
+| CPCV (pooled folds) | 0.0106 – 0.4864 | 0.0048 – 0.1228 | 0.0050 – 0.0737 | 0.0024 – 0.0073 | 0.0006 – 0.0159 | 25,000 bars |
+
+The range at each rung is over the six draws; the upper end is the worst
+draw, and the flag that says "the floor was above the bound at every
+measured rung" is set by that worst draw. So:
+
+- **The absolute conclusion does not survive a larger sample.** On the
+  2,500-10,000-bar ladder the walk-forward path's alpha floor is above the
+  10% bound at every rung measured, and the summary said "no sample size
+  would let this path confirm a plausible alpha". At 25,000 bars the floor
+  is 0.0872 on the worst draw -- under the bound -- and at 50,000 bars the
+  walk-forward path's minimum confirmable alpha is 0.0125 to 0.0936, under
+  the bound on **every** draw. The tool now scopes that conclusion to the
+  rungs measured and names the largest one ("no *measured* sample size
+  would let this path confirm a plausible alpha (up to 10,000 bars)"), and
+  it reports the case the old code dropped: a floor that has come under
+  the bound no longer blocks the criterion, and the summary says so.
+- **Criterion 5 crosses later than criterion 2 on every path.** The alpha
+  floor sets the asymptote the alpha resolution converges onto, and a 10%
+  annualized alpha is a much smaller effect than a 2.0 annualized Sharpe,
+  so the resolution has to fall further before it clears the bound.
+- **The CPCV path's alpha floor is the lowest of the three** and crosses
+  first (25,000 bars); the walk-forward path's is the highest and crosses
+  last (50,000 bars). The out-of-sample path crosses at 10,000 bars, the
+  same rung at which it crosses criterion 2.
+
+The measured ladder behind this table is captured with its provenance --
+command, commit, environment and fixture construction -- in
+`tests/fixtures/resolution_ladder_2500_to_50000.json`, and
+`tests/test_resolution_vs_sample_size.py` re-measures the 25,000-bar rung
+from scratch so the fixture is checked against a fresh run of the framework
+rather than against itself.
 
 What this does **not** establish: the crossing points are properties of the
 synthetic control fixture and of the shipped configuration, not promises

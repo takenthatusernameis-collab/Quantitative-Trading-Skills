@@ -51,7 +51,16 @@ WHAT THE NUMBERS MEAN
     data's trial-Sharpe dispersion) and the sample size at which the
     ``1 / sqrt(T)`` term has shrunk enough for the total to fall under the
     plausibility bound. When the floor itself exceeds the plausibility
-    bound, the answer is "no sample size at all", and the summary says so.
+    bound at every rung measured, the answer is "no *measured* sample
+    size", and the summary says so -- naming the largest rung it measured,
+    because the floor is estimated from trial Sharpes (criterion 2) or
+    benchmark alphas (criterion 5) that are themselves estimated on more
+    data as the sample grows, and a ladder that stops short of the
+    crossing supports a statement about the ladder, not about every sample
+    size. Measured on the control fixture, the walk-forward path's alpha
+    floor was above the 10% bound at every rung up to 10,000 bars and
+    under it at 25,000: the absolute reading was falsified by the next
+    rung.
 
     CRITERION 5 IS MEASURED THE SAME WAY, IN PARALLEL
     ``min_detectable_alpha`` is the smallest *annualized* alpha the
@@ -69,9 +78,9 @@ WHAT THE NUMBERS MEAN
     (a 10% annualized alpha is a much smaller effect than a 2.0 annualized
     Sharpe), so criterion 5's resolution stays above it longer. Measured
     on the control fixture, the CPCV path's minimum confirmable alpha is
-    still 10-13% at 10,000 bars -- above the bound -- while its minimum
-    confirmable Sharpe is already well under 2.0 there. The report says so
-    explicitly rather than leaving it implicit.
+    still 10-13% at 10,000 bars -- above the bound -- and is under it on
+    every draw at 25,000; the walk-forward path needs 50,000. The report
+    says so explicitly rather than leaving it implicit.
 
 THE DATA IS SYNTHETIC
     By default the measurement runs on the synthetic control fixture
@@ -195,8 +204,14 @@ PATH_LABELS = {
 # The ladder of sample sizes (business-day bars) the resolution is measured
 # at. The default ladder brackets the crossing of the plausibility bound
 # measured on the control's construction: criterion 2 is still out of reach
-# at 2,500 bars and inside it by 10,000.
-DEFAULT_SIZES: Sequence[int] = (500, 1000, 2500, 5000, 10000)
+# at 2,500 bars and inside it by 10,000. It goes on to 25,000 and 50,000
+# because criterion 5 crosses later than criterion 2 -- the walk-forward
+# path's alpha floor comes under the 10% bound at 25,000 bars and every
+# draw is inside the bound at 50,000 -- and a ladder that stopped at 10,000
+# would report "no measured sample size" for a path that has one. The
+# rungs cost minutes each (the two largest are minutes per draw), so the
+# default run takes a while; pass --sizes to measure a narrower ladder.
+DEFAULT_SIZES: Sequence[int] = (500, 1000, 2500, 5000, 10000, 25000, 50000)
 
 # The seeds the measurement is repeated over. The crossing point moves a
 # little with the draw, so a single seed would report a number that reads
@@ -690,8 +705,12 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
     estimated on more data, so the rung closest to the asymptote is the
     largest one measured. ``floor_at_largest_size`` is that number, and
     ``floor_beyond_plausible_bound`` says whether the floor was above the
-    plausibility bound at *every* measured rung -- which is the "no sample
-    size at all" answer.
+    plausibility bound at *every* measured rung -- which is the "no
+    *measured* sample size" answer. The flag is a statement about the
+    measured range, not about every sample size: the floor falls as the
+    sample grows, so a ladder that stops short of the crossing cannot
+    settle the question, and the summary says "no measured sample size"
+    and names the largest rung measured rather than claiming more.
 
     THE ALPHA SIDE IS MIRRORED OFF THE SHARPE SIDE
     The same machinery is applied to criterion 5 (the minimum confirmable
@@ -705,8 +724,9 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
     annualized alpha is a much smaller effect than a 2.0 annualized
     Sharpe), so criterion 5's resolution stays above it longer. Measured
     on the control fixture, the CPCV path's minimum confirmable alpha is
-    still 10-13% at 10,000 bars -- above the bound -- while its minimum
-    confirmable Sharpe is already well under 2.0 there.
+    still 10-13% at 10,000 bars -- above the bound -- and under it on
+    every draw at 25,000, while its minimum confirmable Sharpe is already
+    well under 2.0 at 10,000.
     """
     sharpes = []
     floors = []
@@ -740,8 +760,9 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
     # smaller effect than a 2.0 annualized Sharpe), so the minimum
     # confirmable alpha stays above it longer. Measured on the control
     # fixture, the CPCV path's minimum confirmable alpha is still 10-13% at
-    # 10,000 bars -- above the bound -- while its minimum confirmable Sharpe
-    # is already well under 2.0 there.
+    # 10,000 bars -- above the bound -- and under it on every draw at
+    # 25,000, while its minimum confirmable Sharpe is already well under
+    # 2.0 at 10,000.
     alphas: List[float] = []
     alpha_floors: List[float] = []
     per_size_alpha: Dict[int, Dict[str, Any]] = {}
@@ -809,8 +830,11 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
                 "max_min_detectable_alpha": max(values) if values else None,
                 # The deflation floor for alpha (alpha*): the level below
                 # which no sample size can let this path confirm a
-                # plausible alpha, because alpha* is the alpha the
-                # parameter grid would produce from luck alone.
+                # plausible alpha. The framework estimates it as the
+                # dispersion of the benchmark alphas scaled by the expected
+                # maximum of N draws (N the number of benchmarks), so it
+                # tracks the strategy's own alpha gap to its benchmark set
+                # rather than the size of the parameter grid.
                 "max_expected_max_alpha": max(rung_floors) if rung_floors else None,
                 "min_expected_max_alpha": min(rung_floors) if rung_floors else None,
                 "draws_measured": bucket["measured"],
@@ -842,9 +866,11 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
     floor_at_largest = (
         size_summary[-1].get("max_expected_max_sharpe") if size_summary else None
     )
-    # The floor is above the bound at every rung: the floor never comes
-    # under the bound, so no sample size would ever let this path confirm a
-    # plausible effect.
+    # The floor is above the bound at every rung measured: the floor never
+    # comes under the bound on this ladder, so no *measured* sample size
+    # would let this path confirm a plausible effect. The flag is about the
+    # measured range: the floor falls as the sample grows, so a longer
+    # ladder can overturn it (and does, on the control fixture).
     rung_floor_maxima = [
         entry["max_expected_max_sharpe"]
         for entry in size_summary
@@ -875,6 +901,10 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
         "path": path,
         "plausible_max_annualized_sharpe": PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
         "plausible_max_annualized_alpha": PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
+        # The largest rung this path was measured at. Every conclusion drawn
+        # from the ladder is a statement about the measured range, so the
+        # range is reported with it.
+        "largest_measured_size": size_summary[-1]["bars"] if size_summary else None,
         "per_size": size_summary,
         "per_size_alpha": alpha_size_summary,
         "first_size_all_within_bound": _first(lambda e: e["all_within_bound"]),
@@ -1081,6 +1111,72 @@ def print_table(rows: Sequence[Dict[str, Any]], path: str = PRIMARY_PATH) -> Non
         )
 
 
+def _print_floor_status(
+    stats: Dict[str, Any],
+    label: str,
+    criterion: int,
+    floor_key: str,
+    beyond_key: str,
+    beyond_at_largest_key: str,
+) -> None:
+    """Print where one criterion's deflation floor stands.
+
+    The floor is the level below which no sample size can let the path
+    confirm an effect, so where the floor sits relative to the plausibility
+    bound is the answer to "is there such a sample size at all?". Three
+    cases, and all three are reported:
+
+    * the floor was above the bound at every measured rung -- no
+      **measured** sample size would let this path confirm a plausible
+      effect. The conclusion is scoped to the measured range and the
+      largest rung measured is named: the floor falls as the sample grows
+      (it is estimated from trial Sharpes or benchmark alphas that are
+      themselves estimated on more data), so a ladder that stops short of
+      the crossing supports a statement about the ladder, not about every
+      sample size. Measured on the control fixture, the walk-forward path's
+      alpha floor was above the 10% bound at every rung up to 10,000 bars
+      and under it at 25,000 -- the absolute wording was falsified by the
+      next rung;
+    * the floor is still above the bound at the largest measured rung -- a
+      longer sample may bring it under;
+    * the floor is at or under the bound at the largest measured rung -- the
+      floor no longer blocks this criterion there.
+
+    The third case used to print nothing at all: the two branches that
+    existed both required the floor to be *above* the bound, so a floor
+    that had come under it was silently dropped from the summary -- the
+    one case in which the floor stops being the reason a criterion cannot
+    be satisfied.
+    """
+    largest = stats.get("largest_measured_size")
+    floor = stats.get(floor_key)
+    if floor is None:
+        print(
+            f"  the {label} floor could not be measured on this path: the "
+            f"deflation benchmark is missing from the summary"
+        )
+        return
+    if stats.get(beyond_key):
+        print(
+            f"  the {label} floor was above the plausibility bound at every "
+            f"measured sample size (up to {largest} bars): no measured "
+            f"sample size would let this path confirm a plausible "
+            f"{'effect' if criterion == 2 else 'alpha'}"
+        )
+    elif stats.get(beyond_at_largest_key):
+        print(
+            f"  the {label} floor is still above the plausibility bound at "
+            f"the largest measured sample size ({largest} bars): a longer "
+            f"sample may bring it under"
+        )
+    else:
+        print(
+            f"  the {label} floor is at or under the plausibility bound at "
+            f"the largest measured sample size ({largest} bars): the floor "
+            f"does not block criterion {criterion} at that size"
+        )
+
+
 def print_path_summary(summary: Dict[str, Any], path: str) -> None:
     """Print one path's summary: its crossing point and its floor."""
     by_path = summary.get("by_path") or {}
@@ -1120,17 +1216,14 @@ def print_path_summary(summary: Dict[str, Any], path: str) -> None:
             f"within the plausibility bound: "
             f"{stats['first_size_any_within_bound']} bars"
         )
-    if stats.get("floor_beyond_plausible_bound"):
-        print(
-            "  the floor (SR*) was above the plausibility bound at every "
-            "measured sample size: no sample size would let this path "
-            "confirm a plausible effect"
-        )
-    elif stats.get("floor_beyond_plausible_bound_at_largest_size"):
-        print(
-            "  the floor (SR*) is still above the plausibility bound at the "
-            "largest measured sample size: a longer sample may bring it under"
-        )
+    _print_floor_status(
+        stats,
+        label="Sharpe (SR*)",
+        criterion=2,
+        floor_key="floor_at_largest_size",
+        beyond_key="floor_beyond_plausible_bound",
+        beyond_at_largest_key="floor_beyond_plausible_bound_at_largest_size",
+    )
     print(
         f"  smallest measured annualized alpha criterion 5 could confirm: "
         f"{_fmt(stats.get('min_min_detectable_alpha'), '%.4f')}"
@@ -1164,18 +1257,14 @@ def print_path_summary(summary: Dict[str, Any], path: str) -> None:
             f"within the alpha plausibility bound: "
             f"{stats['first_size_any_within_alpha_bound']} bars"
         )
-    if stats.get("alpha_floor_beyond_plausible_bound"):
-        print(
-            "  the alpha floor (alpha*) was above the plausibility bound at "
-            "every measured sample size: no sample size would let this path "
-            "confirm a plausible alpha"
-        )
-    elif stats.get("alpha_floor_beyond_plausible_bound_at_largest_size"):
-        print(
-            "  the alpha floor (alpha*) is still above the plausibility bound "
-            "at the largest measured sample size: a longer sample may bring "
-            "it under"
-        )
+    _print_floor_status(
+        stats,
+        label="alpha (alpha*)",
+        criterion=5,
+        floor_key="alpha_floor_at_largest_size",
+        beyond_key="alpha_floor_beyond_plausible_bound",
+        beyond_at_largest_key="alpha_floor_beyond_plausible_bound_at_largest_size",
+    )
     # The two criteria cross at different sample sizes. The alpha bound is
     # the stricter of the two -- a 10% annualized alpha is a much smaller
     # effect than a 2.0 annualized Sharpe -- so criterion 5's resolution
@@ -1279,7 +1368,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--sizes",
         default=",".join(str(s) for s in DEFAULT_SIZES),
-        help="Comma-separated sample sizes (business-day bars) to measure at.",
+        help=(
+            "Comma-separated sample sizes (business-day bars) to measure at. "
+            "The default ladder brackets the measured crossing of the "
+            "plausibility bounds (criterion 2 by 10,000 bars, criterion 5 "
+            "by 50,000) and takes a while -- the largest rungs are minutes "
+            "per draw -- so pass a narrower ladder to measure less."
+        ),
     )
     parser.add_argument(
         "--seeds",

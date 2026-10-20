@@ -171,7 +171,17 @@ Risk Metrics:
   at different sample sizes -- the out-of-sample path (whose criterion 2 is
   evaluated on the held-out test window) last, at 10,000 bars, the
   walk-forward path (pooled out-of-sample windows) at 5,000, the CPCV path
-  (pooled out-of-sample folds) at 2,500. On the positive control the
+  (pooled out-of-sample folds) at 2,500. Criterion 5 (the Deflated Alpha
+  test) crosses later on every path, because a 10% annualized alpha is a
+  much smaller effect than a 2.0 annualized Sharpe: 10,000 bars for the
+  out-of-sample path, 25,000 for CPCV and 50,000 for walk-forward, measured
+  over three seeds and both series. The conclusion the summary draws from
+  the floor is scoped to the rungs measured and names the largest one ("no
+  *measured* sample size would let this path confirm a plausible alpha (up
+  to N bars)"): the floor falls as the sample grows, so a ladder that stops
+  before the crossing cannot settle "is there such a sample size at all?"
+  -- and the measured walk-forward alpha floor, above the 10% bound at every
+  rung up to 10,000 bars, is under it at 25,000. On the positive control the
   machinery *can* say yes: its observed statistic clears the plausibility
   bounds on every draw, while the null calibration's does not. See
   `references/validation_methods.md`, "How much data does criterion 2
@@ -590,7 +600,14 @@ Risk Metrics:
   series, so they cross the bound at different sample sizes — the
   out-of-sample path (criterion 2 on the held-out test window) at 10,000
   bars, the walk-forward path (pooled out-of-sample windows) at 5,000, the
-  CPCV path (pooled out-of-sample folds) at 2,500. Guarded by
+  CPCV path (pooled out-of-sample folds) at 2,500. Criterion 5 crosses
+  later on every path (10,000 / 50,000 / 25,000 bars respectively), because
+  a 10% annualized alpha is a much smaller effect than a 2.0 annualized
+  Sharpe. The summary's conclusion from the floor is scoped to the rungs
+  measured and names the largest one: the floor falls as the sample grows,
+  so "no **measured** sample size" is what a ladder can support — the
+  walk-forward alpha floor is above the 10% bound at every rung up to
+  10,000 bars and under it at 25,000. Guarded by
   `tests/test_resolution_vs_sample_size.py`; the curve and the mechanism are
   in `references/validation_methods.md`, "How much data does criterion 2
   need?".

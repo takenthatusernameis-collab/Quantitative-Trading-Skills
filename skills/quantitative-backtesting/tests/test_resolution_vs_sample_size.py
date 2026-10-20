@@ -56,6 +56,7 @@ No third-party test framework is required; uses only the standard library.
 
 import contextlib
 import io
+import json
 import sys
 import tempfile
 import traceback
@@ -76,6 +77,7 @@ from measure_resolution_vs_sample_size import (  # noqa: E402
     COMMISSION,
     CPCV_N_SPLITS,
     CPCV_TEST_SIZE,
+    DEFAULT_SIZES,
     INITIAL_CAPITAL,
     PARAM_GRID,
     SELECTION_CRITERION,
@@ -89,6 +91,7 @@ from measure_resolution_vs_sample_size import (  # noqa: E402
     main as measurement_main,
     measure_synthetic,
     measure_test_frac_sweep,
+    print_path_summary,
     summarize,
     _summarize_test_frac_sweep,
 )
@@ -783,11 +786,18 @@ def test_the_alpha_bound_is_crossed_later_than_the_sharpe_bound():
       as criterion 2 (5,000 bars on some draws, 10,000 bars on every draw);
     * walk-forward: criterion 5 is crossed on some draws already at 2,500
       bars, but never on every draw measured, and its alpha floor (alpha*)
-      is above the bound at every measured rung -- so no measured sample
-      size would let this path confirm a plausible alpha on every draw;
+      is above the bound at every rung of THIS ladder -- so no sample size
+      measured here would let this path confirm a plausible alpha on every
+      draw;
     * CPCV: criterion 5 is crossed on some draws at 5,000 bars, later than
       criterion 2 (which is crossed on every draw already at 2,500 bars),
       and never on every draw measured.
+
+    "Every rung of THIS ladder" is load-bearing: the ladder above stops at
+    10,000 bars, and the walk-forward path's alpha floor comes under the
+    10% bound at 25,000 bars. The flag is a statement about the rungs
+    measured, not about every sample size, and the section below measures
+    the longer ladder that settles it.
     """
     summary = summarize(_ladder_rows())
     by_path = summary["by_path"]
@@ -1220,6 +1230,296 @@ def test_the_sweep_refuses_to_report_a_real_history_it_did_not_measure():
     )
 
 
+# ---------------------------------------------------------------------------
+# THE FLOOR'S VERDICT IS SCOPED TO THE MEASURED RANGE.
+#
+# The tool answers "is there a sample size at which this path could confirm
+# a plausible effect?" from the ladder it measured. The floor (SR*, alpha*)
+# is the level below which no sample size can confirm an effect, so a floor
+# above the plausibility bound used to be printed as an absolute conclusion:
+# "no sample size would let this path confirm a plausible alpha".
+#
+# Measured on the control fixture, that conclusion is FALSIFIED by the next
+# rung: the walk-forward path's alpha floor is above the 10% bound at every
+# rung up to 10,000 bars and under it at 25,000. So the conclusion is scoped
+# to the measured range and the largest rung measured is named, and the case
+# where the floor has come under the bound -- the one case in which the
+# floor stops being the reason a criterion cannot be satisfied -- is
+# reported instead of being silently dropped.
+#
+# The measured ladder this rests on is captured in
+# ``tests/fixtures/resolution_ladder_2500_to_50000.json`` with its
+# provenance (command, commit, environment, fixture construction), and one
+# rung of it is re-measured live below.
+# ---------------------------------------------------------------------------
+
+LADDER_FIXTURE = (
+    SKILLS_DIR / "tests" / "fixtures" / "resolution_ladder_2500_to_50000.json"
+)
+
+
+def _load_ladder_fixture():
+    """The measured ladder, with its provenance."""
+    with open(LADDER_FIXTURE, "r") as handle:
+        return json.load(handle)
+
+
+def _floor_rows(path, rungs):
+    """Rows carrying only a floor and a resolution, one row per rung.
+
+    ``rungs`` is a sequence of ``(bars, floor, min_detectable_sharpe,
+    min_detectable_alpha)``. The floor is used for both criteria, so the
+    Sharpe and the alpha side can be driven independently.
+    """
+    rows = []
+    for bars, floor, mde_sharpe, mde_alpha in rungs:
+        rows.append(
+            {
+                "bars": bars,
+                "seed": 7,
+                "series": "effect",
+                "paths": {
+                    path: {
+                        "min_detectable_sharpe": mde_sharpe,
+                        "min_detectable_alpha": mde_alpha,
+                        "expected_max_sharpe": floor,
+                        "expected_max_alpha": floor,
+                    }
+                },
+            }
+        )
+    return rows
+
+
+def _printed_summary(rows, path):
+    """The summary the tool prints for one path, as text."""
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        print_path_summary(summarize(rows), path)
+    return buffer.getvalue()
+
+
+def test_the_floor_conclusion_is_scoped_to_the_measured_range():
+    """A floor above the bound is a statement about the ladder, not about
+    every sample size.
+
+    The floor falls as the sample grows -- it is estimated from trial
+    Sharpes (criterion 2) or benchmark alphas (criterion 5) that are
+    themselves estimated on more data -- so a ladder that stops short of the
+    crossing cannot settle "is there such a sample size at all?". The
+    printed conclusion is therefore scoped to the rungs measured, and names
+    the largest one.
+    """
+    rows = _floor_rows(
+        WALK_FORWARD,
+        [
+            (2500, 2.5, 3.1, 0.20),
+            (10000, 2.5, 2.6, 0.15),
+        ],
+    )
+    output = _printed_summary(rows, WALK_FORWARD)
+
+    assert "no measured sample size would let this path confirm a plausible alpha" in output, (
+        "the conclusion must be scoped to the sample sizes actually measured"
+    )
+    assert "no sample size would let this path confirm a plausible alpha" not in output, (
+        "an unscoped conclusion claims more than the ladder supports: the "
+        "measured walk-forward alpha floor is under the 10% bound at 25,000 "
+        "bars, so 'no sample size' is false"
+    )
+    assert "no measured sample size would let this path confirm a plausible effect" in output, (
+        "the Sharpe floor's conclusion must be scoped the same way"
+    )
+    assert "no sample size would let this path confirm a plausible effect" not in output
+    assert "(up to 10000 bars)" in output, (
+        "the conclusion must name the largest rung it measured"
+    )
+
+
+def test_the_summary_reports_the_floor_when_it_stops_blocking_the_path():
+    """A floor that has come under the bound is reported, not dropped.
+
+    Both branches the summary used to print required the floor to be *above*
+    the plausibility bound, so a floor that had come under it -- the one
+    case in which the floor is no longer the reason a criterion cannot be
+    satisfied -- was silently absent from the summary. The path's criterion
+    5 can confirm a plausible alpha at 50,000 bars, and the summary has to
+    say so.
+    """
+    rows = _floor_rows(
+        WALK_FORWARD,
+        [
+            (25000, 0.087, 0.10, 0.1002),
+            (50000, 0.084, 0.09, 0.0936),
+        ],
+    )
+    output = _printed_summary(rows, WALK_FORWARD)
+
+    assert "does not block criterion 5" in output, (
+        "the summary must report that the alpha floor no longer blocks "
+        "criterion 5 at the largest measured sample size"
+    )
+    assert "50000 bars" in output
+    assert "does not block criterion 2" in output, (
+        "the same must hold for the Sharpe floor"
+    )
+    assert "no sample size would let this path confirm a plausible alpha" not in output
+    assert "no sample size would let this path confirm a plausible effect" not in output
+
+    # And the flags the message is read from say the same thing.
+    stats = summarize(rows)["by_path"][WALK_FORWARD]
+    assert stats["alpha_floor_beyond_plausible_bound"] is False
+    assert stats["alpha_floor_beyond_plausible_bound_at_largest_size"] is False
+    assert stats["alpha_floor_at_largest_size"] < PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+    assert stats["largest_measured_size"] == 50000
+
+
+def test_the_measured_ladder_finds_the_alpha_crossing_the_shorter_ladder_missed():
+    """The longer ladder settles what the shorter one could not.
+
+    On the ladder that stops at 10,000 bars, the walk-forward path's alpha
+    floor is above the 10% plausibility bound at every rung measured. On
+    the ladder that goes on to 25,000 and 50,000 bars it is not: the floor
+    comes under the bound at 25,000 bars, and at 50,000 bars every draw
+    measured is inside the bound. The shorter ladder's answer was a
+    statement about the rungs it measured, not about the path.
+
+    The numbers are the measured ones, captured with their provenance in
+    ``tests/fixtures/resolution_ladder_2500_to_50000.json``.
+    """
+    fixture = _load_ladder_fixture()
+    rows = fixture["rows"]
+
+    # The fixture says what it is and where it came from.
+    provenance = fixture["provenance"]
+    assert provenance["measured"]["sizes"] == [2500, 5000, 10000, 25000, 50000]
+    assert provenance["measured"]["seeds"] == [7, 1, 2024]
+    assert provenance["measured"]["draws_per_rung"] == 6
+    assert "measure_resolution_vs_sample_size.py" in provenance["command"]
+    assert provenance["script_commit"]
+    assert len(rows) == 5 * 6
+
+    short = [row for row in rows if row["bars"] <= LARGE_SAMPLE_BARS]
+    full = rows
+
+    short_summary = summarize(short)["by_path"]
+    full_summary = summarize(full)["by_path"]
+
+    # The shorter ladder: the walk-forward alpha floor is above the bound at
+    # every rung measured. This is the same verdict the live ladder reaches
+    # (the test below measures the same rungs), so the fixture is a faithful
+    # record of the measurement and not a different one.
+    assert short_summary[WALK_FORWARD]["alpha_floor_beyond_plausible_bound"] is True
+    assert short_summary[WALK_FORWARD]["alpha_floor_beyond_plausible_bound_at_largest_size"] is True
+    assert short_summary[WALK_FORWARD]["first_size_all_within_alpha_bound"] is None
+
+    # The longer ladder: the floor comes under the bound and the path
+    # confirms a plausible alpha on every draw at 50,000 bars.
+    walk = full_summary[WALK_FORWARD]
+    assert walk["alpha_floor_beyond_plausible_bound"] is False, (
+        "the walk-forward alpha floor is under the 10% bound at the larger "
+        "rungs, so the 'above the bound at every rung' verdict does not hold "
+        "on the longer ladder"
+    )
+    assert walk["alpha_floor_at_largest_size"] < PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+    assert walk["first_size_all_within_alpha_bound"] == 50000, (
+        "criterion 5 on the walk-forward path is inside the alpha bound on "
+        "every draw measured at 50,000 bars"
+    )
+    assert walk["largest_measured_size"] == 50000
+
+    # The CPCV path crosses the alpha bound earlier than the walk-forward
+    # path, and the out-of-sample path earlier than both.
+    assert full_summary[CPCV]["first_size_all_within_alpha_bound"] == 25000
+    assert full_summary[OUT_OF_SAMPLE]["first_size_all_within_alpha_bound"] == 10000
+    assert full_summary[OUT_OF_SAMPLE]["first_size_all_within_bound"] == 10000
+
+    # Criterion 2 is crossed by every path well before criterion 5.
+    assert full_summary[WALK_FORWARD]["first_size_all_within_bound"] == 5000
+    assert full_summary[CPCV]["first_size_all_within_bound"] == 2500
+
+
+def test_the_measured_ladder_is_the_frameworks_own_numbers():
+    """The captured ladder is the framework's own blocks, at its own bounds.
+
+    Every number in the fixture is the block the framework attaches to its
+    own summary, so the fixture is checked against the framework's own
+    bound flags and against the bounds the framework uses now: if a
+    plausibility bound ever moves, this test fails and the fixture is
+    visibly stale rather than quietly wrong.
+    """
+    fixture = _load_ladder_fixture()
+    provenance = fixture["provenance"]
+
+    assert provenance["plausibility_bounds"]["plausible_max_annualized_sharpe"] == (
+        PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+    )
+    assert provenance["plausibility_bounds"]["plausible_max_annualized_alpha"] == (
+        PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+    )
+
+    for row in fixture["rows"]:
+        for path, block in row["paths"].items():
+            sharpe = block["min_detectable_sharpe"]
+            alpha = block["min_detectable_alpha"]
+            assert block["sharpe_beyond_plausible_bound"] == (
+                sharpe is not None and sharpe > PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+            ), f"{path} at {row['bars']} bars: the framework's own bound flag does not match its own resolution"
+            assert block["alpha_beyond_plausible_bound"] == (
+                alpha is not None and alpha > PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+            ), f"{path} at {row['bars']} bars: the framework's own bound flag does not match its own resolution"
+            # The floor cannot sit above the resolution that converges onto it.
+            assert block["expected_max_sharpe"] <= block["min_detectable_sharpe"]
+            assert block["expected_max_alpha"] <= block["min_detectable_alpha"]
+
+
+def test_the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars():
+    """Live re-measurement of the rung the shorter ladder could not see.
+
+    One rung of the captured ladder is measured again from scratch, so the
+    fixture is checked against a fresh run of the framework rather than
+    against itself. The walk-forward path's alpha floor is under the 10%
+    plausibility bound at 25,000 bars -- which is the measurement that
+    falsifies the absolute "no sample size" conclusion.
+    """
+    measured = measure_synthetic(25000, 7, True, paths=(WALK_FORWARD,))
+    block = measured["paths"][WALK_FORWARD]
+
+    assert block["expected_max_alpha"] < PLAUSIBLE_MAX_ANNUALIZED_ALPHA, (
+        "the walk-forward alpha floor is under the 10% bound at 25,000 bars"
+    )
+    assert block["min_detectable_alpha"] < PLAUSIBLE_MAX_ANNUALIZED_ALPHA, (
+        "the walk-forward path can confirm a plausible alpha at 25,000 bars"
+    )
+    assert block["n_test_observations"] > 10000, (
+        "the walk-forward path prices its test on the pooled out-of-sample "
+        "windows, so it has more test observations than the sample"
+    )
+
+    # The floor is still under the bound on the null calibration, so this is
+    # a property of the path and the sample, not of the injected effect.
+    null = measure_synthetic(25000, 7, False, paths=(WALK_FORWARD,))
+    assert null["paths"][WALK_FORWARD]["expected_max_alpha"] < (
+        PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+    )
+
+
+def test_the_default_ladder_brackets_the_measured_alpha_crossing():
+    """The default ladder reaches the rungs where the crossings happen.
+
+    The default ladder used to stop at 10,000 bars, which is before the
+    criterion 5 crossings: the walk-forward path confirms a plausible alpha
+    at 50,000 bars and the CPCV path at 25,000. A default ladder that
+    cannot see the crossing reports "no measured sample size" for a path
+    that has one, so the default ladder carries the rungs where the
+    crossings were measured.
+    """
+    assert 10000 in DEFAULT_SIZES, "criterion 2 crosses at 10,000 bars"
+    assert 25000 in DEFAULT_SIZES, "the CPCV alpha crossing is at 25,000 bars"
+    assert 50000 in DEFAULT_SIZES, "the walk-forward alpha crossing is at 50,000 bars"
+    assert max(DEFAULT_SIZES) >= 50000
+
+
 def main() -> int:
     tests = TEST_REGISTRY
     failures = 0
@@ -1257,6 +1557,12 @@ TEST_REGISTRY = [
     ("test_the_sweep_names_the_series_it_measured", test_the_sweep_names_the_series_it_measured),
     ("test_the_sweep_refuses_to_report_a_real_history_it_did_not_measure", test_the_sweep_refuses_to_report_a_real_history_it_did_not_measure),
     ("test_shipped_default_split_is_unchanged", test_shipped_default_split_is_unchanged),
+    ("test_the_floor_conclusion_is_scoped_to_the_measured_range", test_the_floor_conclusion_is_scoped_to_the_measured_range),
+    ("test_the_summary_reports_the_floor_when_it_stops_blocking_the_path", test_the_summary_reports_the_floor_when_it_stops_blocking_the_path),
+    ("test_the_measured_ladder_finds_the_alpha_crossing_the_shorter_ladder_missed", test_the_measured_ladder_finds_the_alpha_crossing_the_shorter_ladder_missed),
+    ("test_the_measured_ladder_is_the_frameworks_own_numbers", test_the_measured_ladder_is_the_frameworks_own_numbers),
+    ("test_the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars", test_the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars),
+    ("test_the_default_ladder_brackets_the_measured_alpha_crossing", test_the_default_ladder_brackets_the_measured_alpha_crossing),
 ]
 
 
