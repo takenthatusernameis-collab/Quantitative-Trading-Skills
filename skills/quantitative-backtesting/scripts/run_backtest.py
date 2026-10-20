@@ -47,7 +47,7 @@ from utils import (
     strategy_target_weights,
     WARMUP_CONVENTION_RUN_BACKTEST,
 )
-from walk_forward import estimate_capacity
+from walk_forward import estimate_capacity, deflated_sharpe_ratio, minimum_detectable_sharpe
 
 
 def parse_args():

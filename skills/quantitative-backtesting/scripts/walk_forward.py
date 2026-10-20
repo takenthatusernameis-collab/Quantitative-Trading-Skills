@@ -936,6 +936,12 @@ def walk_forward_analysis(
             summary["benchmark_metrics"] = correction["per_benchmark"]
             if correction["deflated_alpha"] is not None:
                 summary["deflated_alpha"] = correction["deflated_alpha"]
+                try:
+                    summary["minimum_detectable_alpha"] = minimum_detectable_alpha(
+                        summary["deflated_alpha"], oos_returns
+                    )
+                except Exception:
+                    pass
         else:
             # Single benchmark (DataFrame or single-element list): backward compat
             bench = benchmark[0] if isinstance(benchmark, list) else benchmark
@@ -969,6 +975,14 @@ def walk_forward_analysis(
             n_trials=max(total_evaluated_trials, 1),
             trial_sharpes=all_trial_sharpes if all_trial_sharpes else None,
         )
+        # Report minimum detectable effect alongside the deflated statistic
+        if summary.get("deflated_sharpe") is not None:
+            try:
+                summary["minimum_detectable_sharpe"] = minimum_detectable_sharpe(
+                    summary["deflated_sharpe"], oos_returns
+                )
+            except Exception:
+                pass
 
     summary["bias_controls_engaged"] = bool(pit_results is not None)
 
@@ -3383,6 +3397,13 @@ def cpcv_analysis(
             n_trials=max(total_evaluated_trials, 1),
             trial_sharpes=all_trial_sharpes if all_trial_sharpes else None,
         )
+        if summary.get("deflated_sharpe") is not None:
+            try:
+                summary["minimum_detectable_sharpe"] = minimum_detectable_sharpe(
+                    summary["deflated_sharpe"], oos_returns
+                )
+            except Exception:
+                pass
 
     # Benchmark comparison on combined OOS returns
     if benchmark is not None and len(oos_returns) > 0:
@@ -3401,6 +3422,12 @@ def cpcv_analysis(
             summary["benchmark_metrics"] = correction["per_benchmark"]
             if correction["deflated_alpha"] is not None:
                 summary["deflated_alpha"] = correction["deflated_alpha"]
+                try:
+                    summary["minimum_detectable_alpha"] = minimum_detectable_alpha(
+                        summary["deflated_alpha"], oos_returns
+                    )
+                except Exception:
+                    pass
         else:
             # Single benchmark (DataFrame or single-element list): backward compat
             bench = benchmark[0] if isinstance(benchmark, list) else benchmark
@@ -5602,6 +5629,12 @@ def out_of_sample_validation(
             aggregate_da = correction_result["deflated_alpha"]
             if aggregate_da is not None:
                 summary["deflated_alpha"] = aggregate_da
+                try:
+                    summary["minimum_detectable_alpha"] = minimum_detectable_alpha(
+                        summary["deflated_alpha"], test_returns
+                    )
+                except Exception:
+                    pass
                 primary_bench = (
                     per_benchmark[0]
                     if per_benchmark and per_benchmark[0] is not None
@@ -5656,6 +5689,13 @@ def out_of_sample_validation(
             n_trials=total_trials,
             trial_sharpes=pooled_trial_sharpes if pooled_trial_sharpes else None,
         )
+        if summary.get("deflated_sharpe") is not None:
+            try:
+                summary["minimum_detectable_sharpe"] = minimum_detectable_sharpe(
+                    summary["deflated_sharpe"], test_returns
+                )
+            except Exception:
+                pass
     elif apply_deflation and len(test_returns) > 1:
         summary["deflated_sharpe"] = deflated_sharpe_ratio(
             sharpe_ratio=test_sharpe,
@@ -5663,6 +5703,13 @@ def out_of_sample_validation(
             n_trials=1,
             trial_sharpes=None,
         )
+        if summary.get("deflated_sharpe") is not None:
+            try:
+                summary["minimum_detectable_sharpe"] = minimum_detectable_sharpe(
+                    summary["deflated_sharpe"], test_returns
+                )
+            except Exception:
+                pass
 
     # Add benchmark information to summary (only for single benchmark for backward compatibility)
     if test_benchmark and not isinstance(test_benchmark, list):
