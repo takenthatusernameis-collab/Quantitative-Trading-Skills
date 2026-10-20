@@ -159,15 +159,23 @@ Risk Metrics:
   them attaches to its own summary; it re-derives nothing and changes
   no threshold, bound, criterion or verdict. `--data FILE` measures the same
   curve on the first N bars of a real history; `--paths` restricts the paths
-  measured. The measured answer, per path: the resolution *improves* with
-  the sample and crosses below the 2.0 plausibility bound at a few thousand
-  daily bars, so the shipped sample's verdict is a statement about its 504
-  bars rather than about the criteria. The three paths cross at different
-  sample sizes -- the out-of-sample path (whose criterion 2 is evaluated on
-  the held-out test window) last, at 10,000 bars, the walk-forward path
-  (pooled out-of-sample windows) at 5,000, the CPCV path (pooled
-  out-of-sample folds) at 2,500. See `references/validation_methods.md`,
-  "How much data does criterion 2 need?".
+  measured. `--test-fracs 0.1,0.2,0.3` sweeps the held-out fraction at a
+  fixed sample size instead (`val_frac` stays 0.2, `train_frac = 0.8 -
+  test_frac`); that sweep runs on the control fixture, names the series it
+  measured (the no-effect null calibration or the effect positive control)
+  and refuses `--data` rather than reporting the fixture's numbers under a
+  real history's name. The measured answer, per path: the resolution
+  *improves* with the sample and crosses below the 2.0 plausibility bound at
+  a few thousand daily bars, so the shipped sample's verdict is a statement
+  about its 504 bars rather than about the criteria. The three paths cross
+  at different sample sizes -- the out-of-sample path (whose criterion 2 is
+  evaluated on the held-out test window) last, at 10,000 bars, the
+  walk-forward path (pooled out-of-sample windows) at 5,000, the CPCV path
+  (pooled out-of-sample folds) at 2,500. On the positive control the
+  machinery *can* say yes: its observed statistic clears the plausibility
+  bounds on every draw, while the null calibration's does not. See
+  `references/validation_methods.md`, "How much data does criterion 2
+  need?".
 
 ### tests/
 - `test_walk_forward.py` - Unit tests for walk-forward and parameter optimization

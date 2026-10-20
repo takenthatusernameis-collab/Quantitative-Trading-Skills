@@ -88,6 +88,16 @@ THE DATA IS SYNTHETIC
     rung is the *first* N bars of that history, so the curve is the
     resolution the framework would have reported on a sample of that size.
 
+THE HELD-OUT-FRACTION SWEEP NAMES ITS SERIES
+    ``--test-fracs`` sweeps the held-out fraction at a fixed sample size
+    (``val_frac`` stays 0.2, ``train_frac = 0.8 - test_frac``). The sweep
+    measures the synthetic control fixture, and it says which series it
+    measured: the no-effect series is the null calibration and the effect
+    series is the positive control's own configuration, and their numbers
+    answer different questions. ``--series both`` (the default) measures
+    both and prints both, so a reader is never left guessing whether a
+    table is the null or the control.
+
 Usage
     python3 skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py
     python3 skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py \
@@ -96,6 +106,8 @@ Usage
         --paths walk_forward,cpcv
     python3 skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py \
         --data path/to/history.csv --sizes 2500,5000,10000,25000
+    python3 skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py \
+        --sizes 10000 --test-fracs 0.1,0.2,0.3 --series effect
 """
 
 import argparse
@@ -585,7 +597,19 @@ def measure_test_frac_sweep(
     raises the deflation floor SR* because the trial Sharpes it is estimated
     from are then estimated on less data. Where the two effects cross is the
     answer to "how much of the data should be held out?".
+
+    One series at a time: the no-effect series is the null calibration and
+    the effect series is the positive control, and their numbers answer
+    different questions, so the series is named rather than defaulted.
+    ``inject_effect=None`` is refused instead of silently measuring the
+    no-effect series.
     """
+    if inject_effect is None:
+        raise ValueError(
+            "the sweep measures one series at a time: pass inject_effect=True "
+            "(the effect series) or inject_effect=False (the no-effect "
+            "series). None would silently measure the no-effect series."
+        )
     rows: List[Dict[str, Any]] = []
     for test_frac in test_fracs:
         train_frac = 0.8 - test_frac
@@ -1287,7 +1311,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             "size (val_frac stays 0.2, train_frac = 0.8 - test_frac, so the "
             "three always sum to 1). When set, the ladder is replaced by this "
             "sweep at the single --size given; the shipped 0.6/0.2/0.2 split "
-            "remains the default and is unchanged."
+            "remains the default and is unchanged. The sweep measures the "
+            "synthetic control fixture -- it cannot be combined with --data "
+            "-- and it names the series it measured (--series both, the "
+            "default, measures the null calibration and the positive "
+            "control and prints both)."
         ),
     )
     parser.add_argument(
@@ -1321,21 +1349,23 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     inject = {"both": None, "effect": True, "no_effect": False}[args.series]
 
-    print(MEASUREMENT_NOTE)
+    # The banner. With --json it goes to stderr, so the JSON a caller parses
+    # is the JSON the tool produced and nothing else.
+    banner = io.StringIO()
+    banner.write(MEASUREMENT_NOTE + "\n")
     if args.data:
-        print(f"Source: {args.data} (each rung is the first N bars)")
+        banner.write(f"Source: {args.data} (each rung is the first N bars)\n")
     else:
-        print(
+        banner.write(
             "Source: synthetic control fixture (a formula, not a market). "
             "The no-effect series is the null calibration; the effect "
-            "series is the control's own configuration."
+            "series is the control's own configuration.\n"
         )
-    print()
-
-    rows = measure_ladder(
-        sizes, seeds=seeds, inject_effect=inject, data_path=args.data, paths=paths
-    )
-    summary = summarize(rows)
+    banner.write("\n")
+    if args.json:
+        sys.stderr.write(banner.getvalue())
+    else:
+        sys.stdout.write(banner.getvalue())
 
     if args.test_fracs:
         test_fracs = [float(t) for t in args.test_fracs.split(",") if t.strip()]
@@ -1347,41 +1377,70 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
         if len(sizes) != 1:
             parser.error("--test-fracs requires exactly one --size (fixed sample size)")
+        if args.data:
+            parser.error(
+                "--test-fracs sweeps the synthetic control fixture and cannot "
+                "be combined with --data: the sweep would report the "
+                "fixture's numbers under the real history's name. Measure a "
+                "real history with --sizes (the ladder) instead."
+            )
         size = sizes[0]
-        rows = measure_test_frac_sweep(
-            size,
-            seeds=seeds,
-            test_fracs=test_fracs,
-            inject_effect=inject,
+
+        # The sweep measures the series the flag asks for, and names it.
+        # "both" measures the null calibration and the positive control and
+        # prints both: their numbers answer different questions, and a
+        # table that does not say which one it is cannot be read.
+        series_to_measure = (
+            [("no_effect", False), ("effect", True)]
+            if inject is None
+            else [("effect" if inject else "no_effect", inject)]
         )
-        stats, first_all, first_any, first_all_alpha, first_any_alpha = _summarize_test_frac_sweep(rows)
+        sweeps: Dict[str, Dict[str, Any]] = {}
+        for label, inject_effect in series_to_measure:
+            rows = measure_test_frac_sweep(
+                size,
+                seeds=seeds,
+                test_fracs=test_fracs,
+                inject_effect=inject_effect,
+            )
+            stats, first_all, first_any, first_all_alpha, first_any_alpha = (
+                _summarize_test_frac_sweep(rows)
+            )
+            sweeps[label] = {
+                "rows": rows,
+                "sweep": {
+                    "series": label,
+                    "stats": stats,
+                    "first_all_within_bound": first_all,
+                    "first_any_within_bound": first_any,
+                    "first_all_within_alpha_bound": first_all_alpha,
+                    "first_any_within_alpha_bound": first_any_alpha,
+                },
+            }
+            if args.json:
+                continue
+            print(
+                f"PATH: {PATH_OUT_OF_SAMPLE} -- held-out fraction sweep at "
+                f"{size} bars (val_frac = {VAL_FRAC:.1%}, train_frac = 0.8 - "
+                f"test_frac) -- series: {label}"
+            )
+            print_test_frac_sweep(
+                stats, first_all, first_any, first_all_alpha, first_any_alpha
+            )
+            print()
 
         if args.json:
-            print(
-                json.dumps(
-                    {
-                        "rows": rows,
-                        "sweep": {
-                            "stats": stats,
-                            "first_all_within_bound": first_all,
-                            "first_any_within_bound": first_any,
-                            "first_all_within_alpha_bound": first_all_alpha,
-                            "first_any_within_alpha_bound": first_any_alpha,
-                        },
-                    },
-                    indent=2,
-                    default=str,
-                )
-            )
-            return 0
-        print(
-            f"PATH: {PATH_OUT_OF_SAMPLE} -- held-out fraction sweep at {size} bars "
-            f"(val_frac = {VAL_FRAC:.1%}, train_frac = 0.8 - test_frac)"
-        )
-        print_test_frac_sweep(
-            stats, first_all, first_any, first_all_alpha, first_any_alpha
-        )
+            if len(sweeps) == 1:
+                label, payload = next(iter(sweeps.items()))
+                print(json.dumps({"series": label, **payload}, indent=2, default=str))
+            else:
+                print(json.dumps({"sweeps": sweeps}, indent=2, default=str))
         return 0
+
+    rows = measure_ladder(
+        sizes, seeds=seeds, inject_effect=inject, data_path=args.data, paths=paths
+    )
+    summary = summarize(rows)
 
     if args.json:
         print(json.dumps({"rows": rows, "summary": summary}, indent=2, default=str))

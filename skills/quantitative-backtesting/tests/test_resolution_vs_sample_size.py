@@ -33,7 +33,18 @@ These tests pin:
   * every analysis path is measured, and each one reports the framework's
     own resolution block for the sample it prices;
   * the paths cross the plausibility bound at *different* sample sizes,
-    because they do not see the same sample.
+    because they do not see the same sample;
+  * the held-out-fraction sweep on the POSITIVE CONTROL (the effect series),
+    measured against the framework's own blocks on a directly re-run
+    analysis;
+  * the control DISCRIMINATES: on the same fixture, at the same split, on
+    the same seed, the effect series' observed statistic clears the
+    framework's plausibility bounds and the null series' does not, while
+    the two series' minimum confirmable effects are nearly the same -- the
+    resolution is a property of the sample, the observed statistic is what
+    carries the edge;
+  * the sweep says which series it measured, and refuses to report a real
+    history it did not measure.
 
 THE DATA IS THE SYNTHETIC POSITIVE-CONTROL FIXTURE
     The numbers are properties of a formula and of the decision machinery,
@@ -75,6 +86,7 @@ from measure_resolution_vs_sample_size import (  # noqa: E402
     WF_STEP_MONTHS,
     WF_TEST_MONTHS,
     WF_TRAIN_MONTHS,
+    main as measurement_main,
     measure_synthetic,
     measure_test_frac_sweep,
     summarize,
@@ -829,6 +841,385 @@ def test_shipped_default_split_is_unchanged():
     )
 
 
+# ---------------------------------------------------------------------------
+# The held-out-fraction sweep on the POSITIVE CONTROL, and what the control
+# and the null calibration together show.
+#
+# The sweep on the null series is measured above. This section measures the
+# same sweep on the effect series -- the series the machinery has to be able
+# to confirm -- and pins the two together:
+#
+#   * the resolution (the smallest effect the significance tests could have
+#     confirmed) is nearly the SAME on both series, so it is a property of
+#     the sample -- its size, its trial count, its realized volatility --
+#     and not of whether the strategy has an edge;
+#   * the OBSERVED statistic is what separates them, so the machinery
+#     discriminates: the control's observed Sharpe is above the framework's
+#     plausibility bound and the null's is not, on the same fixture at the
+#     same split on the same seed;
+#   * every number is the framework's own block, re-run directly, and no
+#     threshold, bound, criterion or verdict moves.
+#
+# The fixture is a formula, not a market: these are properties of a
+# construction and of the decision machinery, never evidence about a
+# security.
+# ---------------------------------------------------------------------------
+
+# Measurements at a given split, computed once and shared by the tests that
+# read them (each point is a full walk-forward validation).
+_SPLIT_MEASUREMENTS = {}
+
+
+def _measured_split(bars, seed, inject_effect, train_frac, val_frac, test_frac):
+    """One measurement at one split, on the out-of-sample path only.
+
+    The sweep measures the out-of-sample path -- the path the pre-registered
+    criteria are evaluated on -- so this measures that path only; the other
+    two paths are measured by the ladder tests above.
+    """
+    key = (bars, seed, bool(inject_effect), train_frac, val_frac, test_frac)
+    if key not in _SPLIT_MEASUREMENTS:
+        _SPLIT_MEASUREMENTS[key] = measure_synthetic(
+            bars,
+            seed,
+            bool(inject_effect),
+            train_frac=train_frac,
+            val_frac=val_frac,
+            test_frac=test_frac,
+            paths=(OUT_OF_SAMPLE,),
+        )
+    return _SPLIT_MEASUREMENTS[key]
+
+
+def _sweep_rows(bars, seeds, test_fracs, inject_effect):
+    """The rows a held-out-fraction sweep is made of, read from the cache."""
+    rows = []
+    for test_frac in test_fracs:
+        for seed in seeds:
+            rows.append(
+                _measured_split(
+                    bars, seed, inject_effect, 0.8 - test_frac, VAL_FRAC, test_frac
+                )
+            )
+    return rows
+
+
+def test_the_effect_series_sweep_matches_the_framework_own_block():
+    """The control's swept numbers are the framework's own blocks.
+
+    The effect series is the one the machinery has to be able to confirm, so
+    the sweep measured on it must be the framework's own `test_resolution`,
+    `deflated_sharpe` and `deflated_alpha` blocks -- not a private copy of
+    them. This test re-runs the framework's out-of-sample path directly, on
+    the same fixture at the same split, and requires the measurement to
+    report exactly what the framework reports: the minimum confirmable
+    effect, the deflation floors, the observation count, the observed
+    statistic and the bound flags. No threshold, bound, criterion or verdict
+    moves.
+    """
+    for bars in (MIDDLE_SAMPLE_BARS, LARGE_SAMPLE_BARS):
+        for test_frac in (0.1, 0.2, 0.3):
+            train_frac = 0.8 - test_frac
+            measured = _measured_split(
+                bars, 7, True, train_frac, VAL_FRAC, test_frac
+            )
+            block = measured["paths"][OUT_OF_SAMPLE]
+            framework_summary, _ = _framework_oos_block(
+                bars, 7, True, train_frac, VAL_FRAC, test_frac
+            )
+            framework = framework_summary.get("test_resolution")
+            assert isinstance(framework, dict), (
+                f"{bars} bars test_frac={test_frac}: the framework did not "
+                "attach a test_resolution block to its summary"
+            )
+            assert block["min_detectable_sharpe"] == framework["min_detectable_sharpe"], (
+                f"{bars} bars test_frac={test_frac}: the measured minimum "
+                "confirmable Sharpe must equal the framework's own block"
+            )
+            assert block["min_detectable_alpha"] == framework["min_detectable_alpha"], (
+                f"{bars} bars test_frac={test_frac}: the measured minimum "
+                "confirmable alpha must equal the framework's own block"
+            )
+            assert block["n_test_observations"] == framework["n_test_observations"]
+            assert block["expected_max_sharpe"] == (
+                framework_summary["deflated_sharpe"]["expected_max_sharpe"]
+            ), (
+                f"{bars} bars test_frac={test_frac}: the measured deflation "
+                "floor (SR*) must equal the framework's own Deflated Sharpe block"
+            )
+            assert block["expected_max_alpha"] == (
+                framework_summary["deflated_alpha"]["expected_max_alpha"]
+            ), (
+                f"{bars} bars test_frac={test_frac}: the measured deflation "
+                "floor (alpha*) must equal the framework's own Deflated Alpha block"
+            )
+            assert block["observed_annualized_sharpe"] == (
+                framework["observed_annualized_sharpe"]
+            )
+            assert block["observed_annualized_alpha"] == (
+                framework["observed_annualized_alpha"]
+            )
+            # The bound flag is the framework's own comparison, not a
+            # recomputed one: the measurement cannot move it.
+            assert block["sharpe_beyond_plausible_bound"] == (
+                framework["min_detectable_sharpe"] > PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+            )
+            assert block["alpha_beyond_plausible_bound"] == (
+                framework["min_detectable_alpha"] > PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+            )
+            # And the bounds the sweep compares against stay where they are.
+            assert block["plausible_max_annualized_sharpe"] == PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+            assert block["plausible_max_annualized_alpha"] == PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+
+
+def test_the_control_discriminates_the_effect_series_from_the_null():
+    """Same fixture, same split, same seed: the observed statistic separates.
+
+    The control's job is to show the machinery can say yes, and the null
+    calibration's job is to show it does not say yes for free. Measured
+    here on the resolution machinery, at every swept held-out fraction and
+    on every seed:
+
+    * the effect series' observed annualized Sharpe is ABOVE the framework's
+      plausibility bound (2.0) and its observed annualized alpha is above
+      the alpha bound (10%);
+    * the null series' observed statistics are not: the null's Sharpe never
+      reaches the bound (its best draw is 0.34) and its alpha never reaches
+      5.1% (the bound is 10%);
+    * while the two series' MINIMUM CONFIRMABLE effects are nearly the same
+      -- within 0.5 annualized Sharpe and within 0.08 annualized alpha at
+      every swept point (the measured worst cases are 0.398 and 0.050).
+
+    That is the finding: the resolution is a property of the sample, and
+    the observed statistic is what carries the edge. A machinery that could
+    not tell the two apart would report the same resolution for both --
+    which is exactly what it does -- but it must NOT report the same
+    observed statistic, and it does not.
+
+    No verdict moves: the measurement reports a resolution and an observed
+    statistic, never a verdict, and the bounds it compares them against are
+    the framework's own.
+    """
+    for bars in (MIDDLE_SAMPLE_BARS, LARGE_SAMPLE_BARS):
+        for test_frac in (0.1, 0.2, 0.3):
+            for seed in SEEDS:
+                effect = _measured_split(
+                    bars, seed, True, 0.8 - test_frac, VAL_FRAC, test_frac
+                )["paths"][OUT_OF_SAMPLE]
+                null = _measured_split(
+                    bars, seed, False, 0.8 - test_frac, VAL_FRAC, test_frac
+                )["paths"][OUT_OF_SAMPLE]
+                where = f"{bars} bars test_frac={test_frac} seed={seed}"
+
+                # The control's observed effect clears the framework's own
+                # plausibility bounds...
+                assert effect["observed_annualized_sharpe"] > (
+                    PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+                ), (
+                    f"{where}: the control's observed annualized Sharpe must "
+                    f"exceed the plausibility bound, got "
+                    f"{effect['observed_annualized_sharpe']}"
+                )
+                assert effect["observed_annualized_alpha"] > (
+                    PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+                ), (
+                    f"{where}: the control's observed annualized alpha must "
+                    f"exceed the alpha bound, got "
+                    f"{effect['observed_annualized_alpha']}"
+                )
+
+                # ...and the null's does not.
+                assert null["observed_annualized_sharpe"] <= (
+                    PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+                ), (
+                    f"{where}: the null series' observed annualized Sharpe "
+                    "must not reach the plausibility bound, got "
+                    f"{null['observed_annualized_sharpe']}"
+                )
+                assert null["observed_annualized_alpha"] <= (
+                    PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+                ), (
+                    f"{where}: the null series' observed annualized alpha "
+                    "must not reach the alpha bound, got "
+                    f"{null['observed_annualized_alpha']}"
+                )
+
+                # The two observed statistics are far apart.
+                assert (
+                    effect["observed_annualized_sharpe"]
+                    - null["observed_annualized_sharpe"]
+                ) > 1.0, (
+                    f"{where}: the control's and the null's observed "
+                    "annualized Sharpe must differ by more than 1.0, got "
+                    f"{effect['observed_annualized_sharpe']} and "
+                    f"{null['observed_annualized_sharpe']}"
+                )
+
+                # The resolution barely moves between the two samples: it is
+                # a property of the sample, not of the edge.
+                assert abs(
+                    effect["min_detectable_sharpe"] - null["min_detectable_sharpe"]
+                ) < 0.5, (
+                    f"{where}: the minimum confirmable Sharpe must be nearly "
+                    "the same on the control and on the null, got "
+                    f"{effect['min_detectable_sharpe']} and "
+                    f"{null['min_detectable_sharpe']}"
+                )
+                assert abs(
+                    effect["min_detectable_alpha"] - null["min_detectable_alpha"]
+                ) < 0.08, (
+                    f"{where}: the minimum confirmable alpha must be nearly "
+                    "the same on the control and on the null, got "
+                    f"{effect['min_detectable_alpha']} and "
+                    f"{null['min_detectable_alpha']}"
+                )
+
+                # No verdict moves: the measurement reports numbers, and the
+                # bounds it compares them against are the framework's own.
+                assert PLAUSIBLE_MAX_ANNUALIZED_SHARPE == 2.0
+                assert PLAUSIBLE_MAX_ANNUALIZED_ALPHA == 0.10
+                assert effect["plausible_max_annualized_sharpe"] == (
+                    PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+                )
+                assert effect["plausible_max_annualized_alpha"] == (
+                    PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+                )
+
+
+def test_the_effect_series_sweep_crossings_are_pinned():
+    """The control's crossings, measured on the effect series.
+
+    The null series' crossings are pinned above; this is the same sweep on
+    the positive control, so the two can be compared:
+
+    * at 5,000 bars no swept held-out fraction brings EVERY draw inside the
+      Sharpe bound -- the control's own sample cannot resolve a plausible
+      effect at that size either -- while fraction 0.2 already brings SOME
+      draw inside it, and at fraction 0.1 every draw is still beyond both
+      bounds;
+    * at 10,000 bars every draw is inside the Sharpe bound at every swept
+      fraction, and the alpha bound is inside for every draw from fraction
+      0.2 on (at 0.1 one draw is still beyond it).
+
+    The alpha crossing at 5,000 bars is a hair's breadth: seed 1's minimum
+    confirmable alpha is 0.1041 against the 0.10 bound at fraction 0.2 and
+    0.0999 at fraction 0.3. It is reported rather than pinned, because a
+    pin that thin would fail on a rounding difference rather than on a
+    change of substance.
+    """
+    for bars in (MIDDLE_SAMPLE_BARS, LARGE_SAMPLE_BARS):
+        rows = _sweep_rows(bars, SEEDS, (0.1, 0.2, 0.3), True)
+        stats, first_all, first_any, first_all_alpha, first_any_alpha = (
+            _summarize_test_frac_sweep(rows)
+        )
+        by_frac = {entry["test_frac"]: entry for entry in stats}
+
+        if bars == MIDDLE_SAMPLE_BARS:
+            assert first_any == 0.2, (
+                "at 5,000 bars some draw must be inside the Sharpe bound from "
+                f"the 0.2 held-out fraction on, got {first_any}"
+            )
+            assert first_all is None, (
+                "at 5,000 bars no held-out fraction may bring every draw "
+                f"inside the Sharpe bound, got {first_all}"
+            )
+            assert by_frac[0.1]["all_within_alpha_bound"] is False, (
+                "at 5,000 bars every draw must still be beyond the alpha bound "
+                "at the 0.1 held-out fraction"
+            )
+        else:
+            assert first_all == 0.1, (
+                "at 10,000 bars every draw must be inside the Sharpe bound at "
+                f"every swept held-out fraction, got {first_all}"
+            )
+            assert first_any == 0.1
+            assert first_all_alpha == 0.2, (
+                "at 10,000 bars the alpha bound must be inside for every draw "
+                f"from the 0.2 held-out fraction on, got {first_all_alpha}"
+            )
+            assert first_any_alpha == 0.1, (
+                "at 10,000 bars some draw must be inside the alpha bound at "
+                f"the 0.1 held-out fraction, got {first_any_alpha}"
+            )
+
+        # The reported crossings agree with the per-fraction flags: no
+        # verdict moves between the flags and the summary.
+        flag_all = [e["test_frac"] for e in stats if e["all_within_alpha_bound"]]
+        flag_any = [e["test_frac"] for e in stats if e["any_within_alpha_bound"]]
+        assert (first_all_alpha is None) == (not flag_all)
+        assert (first_any_alpha is None) == (not flag_any)
+        if first_all_alpha is not None:
+            assert first_all_alpha == min(flag_all)
+        if first_any_alpha is not None:
+            assert first_any_alpha == min(flag_any)
+
+
+def test_the_sweep_names_the_series_it_measured():
+    """A sweep table says which series it is.
+
+    The null calibration and the positive control answer different
+    questions, and a table that does not name its series can be read as
+    the wrong one. The default (``--series both``) therefore measures both
+    and prints both, each labeled, and the labels are the ones the rows
+    themselves carry.
+    """
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        exit_code = measurement_main(
+            ["--sizes", "2500", "--seeds", "7", "--test-fracs", "0.2"]
+        )
+    output = buffer.getvalue()
+
+    assert exit_code == 0
+    assert "series: no_effect" in output, (
+        "the sweep must label the no-effect (null calibration) table"
+    )
+    assert "series: effect" in output, (
+        "the sweep must label the effect (positive control) table"
+    )
+    assert output.count("held-out fraction sweep") == 2, (
+        "the default sweep must measure both series and print both tables"
+    )
+
+    # A single-series sweep says so too, and says which one.
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        exit_code = measurement_main(
+            ["--sizes", "2500", "--seeds", "7", "--test-fracs", "0.2", "--series", "effect"]
+        )
+    output = buffer.getvalue()
+    assert exit_code == 0
+    assert "series: effect" in output
+    assert "series: no_effect" not in output
+
+
+def test_the_sweep_refuses_to_report_a_real_history_it_did_not_measure():
+    """The sweep measures the control fixture, and says so.
+
+    The held-out-fraction sweep is defined on the synthetic control
+    fixture. Combining it with ``--data`` would print the fixture's
+    numbers under the real history's name, so the combination is refused
+    instead.
+    """
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    raised = False
+    try:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            measurement_main(
+                ["--sizes", "2500", "--test-fracs", "0.2", "--data", "history.csv"]
+            )
+    except SystemExit as exc:
+        raised = True
+        assert exc.code == 2, (
+            f"the refusal must be an argparse error (exit 2), got {exc.code}"
+        )
+    assert raised, (
+        "the sweep must refuse --data instead of reporting the control "
+        "fixture's numbers under the real history's name"
+    )
+
+
 def main() -> int:
     tests = TEST_REGISTRY
     failures = 0
@@ -860,6 +1251,11 @@ TEST_REGISTRY = [
     ("test_test_frac_sweep_each_split_matches_the_framework_own_block", test_test_frac_sweep_each_split_matches_the_framework_own_block),
     ("test_test_frac_sweep_at_larger_sizes_matches_the_framework_own_block", test_test_frac_sweep_at_larger_sizes_matches_the_framework_own_block),
     ("test_test_frac_sweep_alpha_crossings_match_the_per_fraction_flags", test_test_frac_sweep_alpha_crossings_match_the_per_fraction_flags),
+    ("test_the_effect_series_sweep_matches_the_framework_own_block", test_the_effect_series_sweep_matches_the_framework_own_block),
+    ("test_the_control_discriminates_the_effect_series_from_the_null", test_the_control_discriminates_the_effect_series_from_the_null),
+    ("test_the_effect_series_sweep_crossings_are_pinned", test_the_effect_series_sweep_crossings_are_pinned),
+    ("test_the_sweep_names_the_series_it_measured", test_the_sweep_names_the_series_it_measured),
+    ("test_the_sweep_refuses_to_report_a_real_history_it_did_not_measure", test_the_sweep_refuses_to_report_a_real_history_it_did_not_measure),
     ("test_shipped_default_split_is_unchanged", test_shipped_default_split_is_unchanged),
 ]
 

@@ -1705,6 +1705,78 @@ Sharpe of 4.1950 to confirm anything -- more than twice the plausibility
 bound -- and no verdict on that sample can distinguish "the strategy has no
 edge" from "the sample is too small to see one".
 
+#### How much of the data should be held out?
+
+The ladder above answers "how long a history". The next question is the
+split: the out-of-sample path prices criterion 2 on the *held-out* window,
+so the held-out fraction is a lever on the resolution, and it pulls in two
+directions at once. A larger held-out window gives the test more
+observations (better resolution) but shortens the training window, which
+raises the deflation floor SR* because the trial Sharpes it is estimated
+from are then estimated on less data.
+
+`measure_resolution_vs_sample_size.py --test-fracs` measures that
+trade-off on the control fixture, sweeping `test_frac` with
+`val_frac = 0.2` and `train_frac = 0.8 - test_frac` (the shipped
+0.6/0.2/0.2 split is the `test_frac = 0.2` column). Each table names the
+series it measured -- the no-effect series is the null calibration and the
+effect series is the positive control -- because the two answer different
+questions.
+
+Measured at 10,000 bars (three seeds; ranges are over the draws):
+
+| Series | Held-out | Test obs. | Smallest confirmable Sharpe | SR* | Smallest confirmable alpha | alpha* | Observed Sharpe | Observed alpha |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| no-effect | 10% | 998 | 1.66 to 1.95 | 1.02 to 1.28 | 7.5% to 12.8% | 1.1% to 5.1% | -1.28 to 0.22 | -6.0% to 5.1% |
+| no-effect | 20% | 1,998 | 1.52 to 1.81 | 1.06 to 1.35 | 5.5% to 8.6% | 0.5% to 3.5% | -0.63 to 0.34 | -4.2% to 1.7% |
+| no-effect | 30% | 2,998 | 1.48 to 1.84 | 1.10 to 1.45 | 4.6% to 7.5% | 0.5% to 3.2% | -0.88 to 0.05 | -4.9% to -1.2% |
+| effect | 10% | 998 | 1.75 to 1.95 | 1.12 to 1.32 | 7.9% to 14.0% | 0.5% to 6.1% | 2.70 to 3.65 | 38.5% to 44.5% |
+| effect | 20% | 1,998 | 1.60 to 1.82 | 1.16 to 1.38 | 6.1% to 9.0% | 0.8% to 3.6% | 3.39 to 3.56 | 40.4% to 42.0% |
+| effect | 30% | 2,998 | 1.54 to 1.82 | 1.18 to 1.45 | 5.4% to 7.4% | 1.0% to 3.0% | 3.18 to 3.45 | 39.1% to 41.3% |
+
+And at 5,000 bars:
+
+| Series | Held-out | Test obs. | Smallest confirmable Sharpe | Smallest confirmable alpha | Observed Sharpe | Observed alpha | Every draw inside the Sharpe bound? | Every draw inside the alpha bound? |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| no-effect | 10% | 498 | 2.17 to 2.59 | 10.8% to 13.4% | -2.04 to -0.21 | -9.2% to 1.1% | no | no |
+| no-effect | 20% | 998 | 1.91 to 2.37 | 9.2% to 9.3% | -0.76 to -0.04 | -4.3% to 4.1% | no | yes |
+| no-effect | 30% | 1,498 | 1.84 to 2.35 | 7.4% to 9.3% | -0.65 to -0.17 | -4.8% to 2.0% | no | yes |
+| effect | 10% | 498 | 2.08 to 2.44 | 11.8% to 18.4% | 2.51 to 3.72 | 40.4% to 44.9% | no | no |
+| effect | 20% | 998 | 1.84 to 2.18 | 9.5% to 10.4% | 2.83 to 3.65 | 36.4% to 45.0% | no | no (two of three) |
+| effect | 30% | 1,498 | 1.76 to 2.18 | 7.1% to 10.0% | 2.75 to 3.50 | 37.0% to 41.1% | no | yes |
+
+What the sweep shows:
+
+- **The trade-off resolves in favour of holding out more, on this
+  construction.** At 10,000 bars, moving the held-out fraction from 10% to
+  30% cuts the minimum confirmable Sharpe from 1.75 to 1.95 down to 1.54
+  to 1.82 (control) and from 1.66 to 1.95 down to 1.48 to 1.84 (null),
+  while the floor SR* rises only slightly (1.12 to 1.32 against 1.18 to
+  1.45 on the control). The extra test observations outweigh the shorter
+  training window.
+- **The two series' resolutions are nearly the same.** At every swept
+  point the two minimum confirmable Sharpes are within 0.40 annualized
+  points of each other and the two minimum confirmable alphas within 5.1
+  percentage points. The resolution is a property of the *sample* -- its
+  size, its trial count and its realized volatility -- not of whether the
+  strategy has an edge.
+- **What separates the series is the observed statistic.** The control's
+  observed annualized Sharpe is 2.51 - 3.72 (above the framework's 2.0
+  plausibility bound) and its observed annualized alpha is 36% - 45%
+  (above the 10% bound), on every draw and at every swept fraction; the
+  null's observed Sharpe never reaches 0.35 and its observed alpha never
+  reaches 5.1%. This is the discrimination the positive control is for.
+- **The alpha bound is the stricter of the two.** At 10,000 bars the
+  Sharpe bound is already inside for every draw at a 10% held-out
+  fraction, while the alpha bound needs 20%.
+
+One number is a near-tie and is reported rather than pinned: at 5,000 bars
+the effect series' seed-1 minimum confirmable alpha is 10.41% against the
+10% bound at a 20% held-out fraction, and 9.99% at 30%. A pin that thin
+would fail on a rounding difference rather than on a change of substance,
+so `tests/test_resolution_vs_sample_size.py` pins the crossings that are
+not near-ties and leaves this one to the numbers above.
+
 #### The three analysis paths answer it differently
 
 The curve above is the **out-of-sample path's** curve, because that is where
@@ -1818,6 +1890,11 @@ onto the floor rather than onto zero.
   are properties of a formula and of the decision machinery; the crossing
   point is a property of this construction, not a promise about a real
   history. `--data FILE` measures the same curve on real data.
+- **The held-out-fraction sweep is measured on the same fixture, on both
+  series.** The sweep's numbers (and the near-tie reported above) are
+  properties of this construction too. The sweep measures the fixture, so
+  it cannot be combined with `--data`: the combination is refused rather
+  than reporting the fixture's numbers under a real history's name.
 - **A path's resolution is that path's, not the study's.** The three paths
   are measured on the same sample with their own shipped configurations,
   and each one reports the resolution of the significance test it actually
