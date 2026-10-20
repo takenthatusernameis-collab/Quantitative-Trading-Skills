@@ -1706,6 +1706,11 @@ def _calculate_strategy_returns(
     volume = market["volume"]
     is_panel = market["is_panel"]
 
+    # Execution warmup: intentional two-bar warmup (see validation_methods.md,
+    # "The Warmup Bars of a Window"). shift(1 + latency) leaves the first
+    # `1 + latency` position undefined and positions.diff() is undefined on
+    # the following bar, so both bars are non-tradable and dropped.
+    EXECUTION_WARMUP_BARS = 2
     positions = signals.shift(1 + latency) * fill_rate  # Trade at next period's open, delayed by execution latency; partial fills scale achieved exposure
 
     # Borrow and funding costs are annualized rates applied per period.
