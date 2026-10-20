@@ -199,19 +199,22 @@ def _run_framework(call, **kwargs) -> Dict[str, Any]:
     return results
 
 
-def _run_validation(data, benchmarks) -> Dict[str, Any]:
-    """Run the shipped out-of-sample validation on one prepared sample.
+def _run_validation(
+    data, benchmarks, train_frac=TRAIN_FRAC, val_frac=VAL_FRAC, test_frac=TEST_FRAC
+) -> Dict[str, Any]:
+    """Run the out-of-sample validation on one prepared sample.
 
-    The framework's own path, with the worked example's configuration.
+    Defaults to the shipped 0.6/0.2/0.2 split; passing other fractions sweeps
+    the held-out fraction (train_frac = 0.8 - test_frac, val_frac = 0.2).
     """
     return _run_framework(
         out_of_sample_validation,
         data=data,
         strategy_factory=_STRATEGY_FACTORY,
         param_grid=PARAM_GRID,
-        train_frac=TRAIN_FRAC,
-        val_frac=VAL_FRAC,
-        test_frac=TEST_FRAC,
+        train_frac=train_frac,
+        val_frac=val_frac,
+        test_frac=test_frac,
         validation_method="walk_forward",
         walk_forward_train_months=WF_TRAIN_MONTHS,
         walk_forward_test_months=WF_TEST_MONTHS,
@@ -340,6 +343,9 @@ def _measure_sample(
     data,
     benchmarks,
     paths: Sequence[str] = PATHS,
+    train_frac: float = TRAIN_FRAC,
+    val_frac: float = VAL_FRAC,
+    test_frac: float = TEST_FRAC,
 ) -> Dict[str, Any]:
     """Measure the resolution on one prepared sample, for every path.
 
@@ -350,7 +356,7 @@ def _measure_sample(
     The top-level fields are the primary (out-of-sample) path's fields;
     ``paths`` carries every measured path's own block.
     """
-    results = _run_validation(data, benchmarks)
+    results = _run_validation(data, benchmarks, train_frac=train_frac, val_frac=val_frac, test_frac=test_frac)
     summary = results.get("summary", {})
     test_performance = results.get("test_performance") or {}
     test_returns = test_performance.get("test_returns")
@@ -434,6 +440,9 @@ def measure_synthetic(
     seed: int,
     inject_effect: bool,
     paths: Sequence[str] = PATHS,
+    train_frac: float = TRAIN_FRAC,
+    val_frac: float = VAL_FRAC,
+    test_frac: float = TEST_FRAC,
 ) -> Dict[str, Any]:
     """Measure the resolution on a synthetic control fixture of `bars` bars.
 
@@ -457,13 +466,16 @@ def measure_synthetic(
             load_data(str(fixture_paths["strategy"])),
             load_data(str(fixture_paths["benchmark"])),
         ]
-        measured = _measure_sample(data, benchmarks, paths=paths)
+        measured = _measure_sample(data, benchmarks, paths=paths, train_frac=train_frac, val_frac=val_frac, test_frac=test_frac)
     measured.update(
         {
             "bars": bars,
             "seed": seed,
             "series": "effect" if inject_effect else "no_effect",
             "source": "synthetic control fixture",
+            "train_frac": train_frac,
+            "val_frac": val_frac,
+            "test_frac": test_frac,
         }
     )
     return measured
