@@ -2,78 +2,63 @@
 
 ## The one precise next task
 
-Decide — deliberately, with the number change accepted — whether the **second
-warmup bar** of every priced window should be dropped, and make the warmup
-convention explicit in the code rather than an emergent property of the cost
-term.
+**Surface the execution warmup convention in backtest results/metadata** so the
+two-bar warmup is observable to consumers (not just buried in docs/comments),
+and make it consistent across the CLIs without changing any pinned numbers.
 
 ### Why
 
-`scripts/walk_forward.py:1709` builds the position series as
-`positions = signals.shift(1 + latency) * fill_rate`, so `positions[0]` is
-`NaN` (the lag-1 execution warmup). The cost term at
-`scripts/walk_forward.py:1769-1770` is
-`costs = positions.diff().abs() * (commission + slippage)`, and
-`positions.diff()` inherits that `NaN` on the **second** bar as well
-(`positions[1] - positions[0]`), so `NaN * 0.0 = NaN` and every window loses
-its first **two** bars rather than one.
+- The warmup convention is now explicit in `walk_forward.py` (non-book path)
+  and documented in `references/validation_methods.md`, but `results` from
+  `run_backtest.py` and the summaries from `walk_forward.py`/`cpcv_analysis`
+  do not record how many bars were dropped or which convention was used.
+- The cross-path parity tests pin that `run_backtest` and `walk_forward`
+  drop a different number of warmup bars for the net-exposure path (run_backtest
+  opens the position on the first executable bar; walk_forward drops the
+  undefined bars) — this difference must remain intact and must stay test-covered.
+- Making the convention explicit in metadata aids reproducibility and prevents
+  confusion when comparing runs across entry points.
 
-The second bar is a flat-position bar (the strategy's signal is still warming
-up), so its return is `0.0`. Measured consequences:
+### Concrete steps
 
-- the compounded OOS return is **unaffected** (the dropped bar multiplies the
-  product by `1.0`) — re-running CPCV with
-  `position_changes.fillna(0.0) * (commission + slippage)` gives the same
-  total (`0.005399536978800024`) but 24 usable bars per fold instead of 23
-  (96 OOS bars instead of 92);
-- the **training** sample used to select parameters loses one observation,
-  and fold 0's selection is a close call (training Sharpes 2.681 / 2.747 /
-  2.738 for lookback 15 / 20 / 30 — a 0.34% margin between the best and the
-  runner-up), so a change here can flip the selected parameter in that fold
-  and move the OOS result materially.
+1. **Define a stable metadata key** (e.g., `execution_warmup_bars` and/or
+   `warmup_convention`) in the results/config dicts.
+   - In `walk_forward._calculate_strategy_returns` (and any place that drops
+     bars due to warmup), record `execution_warmup_bars` in the returned info if
+     possible, or thread it through to callers.
+   - In `run_backtest.py`, record it in `results["config"]` / `results` metadata
+     (e.g., `"warmup_convention": "run_backtest_open_first_executable"` vs
+     `"walk_forward_drop_undefined"`), without changing return series.
+   - For walk-forward/CPCV/monte-carlo/out-of-sample summaries, add the same
+     metadata when relevant.
 
-The convention is now **documented** and **pinned** (this session), not
-changed: `references/validation_methods.md` -> "The Warmup Bars of a Window",
-and the invariants `CPCV_OOS_BAR_COUNT` / `WALK_FORWARD_OOS_BAR_COUNT` /
-`test_cpcv_pinned_number_is_reproducible_from_first_principles`.
+2. **Keep behavior unchanged**: do not alter the dropping/reindexing logic.
+   All existing pins must hold:
+   - CPCV: `CPCV_OOS_RETURN_REFERENCE`, `CPCV_OOS_BAR_COUNT` (92), selected
+     lookbacks unchanged; `test_cpcv_pinned_number_is_reproducible_from_first_principles`
+     must pass.
+   - Walk-forward bar counts and pinned numbers unchanged.
+   - Cross-path parity: `test_run_backtest_panel_matches_walk_forward_return_calculator`
+     and `test_run_backtest_dict_panel_matches_walk_forward_return_calculator`
+     must still pass (the warmup difference must remain).
 
-### Evidence
+3. **Document briefly** in the skill docs or references if helpful, but keep
+   changes minimal and reversible.
 
-- `scripts/walk_forward.py:1709` (the lag) and `scripts/walk_forward.py:1769-1770`
-  (the cost term) — the two lines whose interaction drops the bar.
-- `tests/test_cpcv.py` -> `CPCV_OOS_BAR_COUNT = 92` with the comment
-  "23 usable bars" per 25-bar test window; `_independent_cpcv_oos_return`
-  re-derives the same two-bar drop independently.
-- Negative test (reverted, `git diff scripts/` is clean): changing
-  `costs = position_changes * (commission + slippage)` to
-  `costs = position_changes.fillna(0.0) * (commission + slippage)` makes
-  `cpcv_normal_run_keeps_current_numbers` and
-  `cpcv_pinned_number_is_reproducible_from_first_principles` fail on the
-  usable-bar count (23 -> 24 per fold) while the compounded return stays
-  identical.
-- The same perturbation on the execution lag
-  (`shift(1 + latency)` -> `shift(2 + latency)`) fails all three CPCV
-  guards, including the value guard.
+### Evidence to look at
+
+- `skills/quantitative-backtesting/scripts/walk_forward.py:1713-1714,1774-1778,1844-1846`
+- `skills/quantitative-backtesting/scripts/run_backtest.py:335,381-400,449`
+- `skills/quantitative-backtesting/tests/test_run_backtest.py:1382-1455` (cross-path parity)
+- `skills/quantitative-backtesting/tests/test_cpcv.py` (pinned numbers and first-principles reproduction)
+- `skills/quantitative-backtesting/references/validation_methods.md` ("The Warmup Bars of a Window")
 
 ### Constraints
 
-- This is a **number-changing** decision. If the second bar is kept, the
-  pinned values (`CPCV_OOS_RETURN_REFERENCE`,
-  `WALK_FORWARD_OOS_RETURN_REFERENCE`), the usable-bar counts
-  (`CPCV_OOS_BAR_COUNT`, `WALK_FORWARD_OOS_BAR_COUNT`), the
-  `test_output/` snapshot and the walk-forward numbers must be re-derived and
-  re-pinned **in the same commit**, and reported as a methodology change with
-  the before/after numbers — not as a bug fix.
-- If the convention is kept as-is, make it explicit in the code (a named
-  constant, or an explicit drop of the undefined warmup bars on the position
-  series) so the two-bar drop is intentional rather than emergent from NaN
-  propagation through a zero cost.
-- Do not weaken the new guards to accommodate the change: the
-  first-principles reproduction test and the structural bar-count pins are
-  what make the pinned number meaningful.
-
-### Verification
-
-Re-run the whole suite (all 11 files must exit 0; `test_cpcv` is 29/29 and
-`test_walk_forward` 177/177 today) and re-derive the pinned values with
-`tests/test_cpcv.py` -> `_independent_cpcv_oos_return` before re-pinning.
+- **No behavior change.** Metadata only. Do not "fix" the warmup difference
+  between entry points — it is intentional and pinned.
+- **Preserve all pinned values.** Run the full quant test suite (all files
+  under `skills/quantitative-backtesting/tests/`) before and after; every test
+  must pass.
+- **Keep it bounded.** Add metadata fields only where they are cheap and
+  don't require restructuring the return pipelines.

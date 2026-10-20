@@ -378,7 +378,11 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
         if market_impact is not None:
             costs = costs + market_impact
     else:
-        # Transaction costs: apply on position changes
+        # Transaction costs: apply on position changes. run_backtest uses a
+        # different warmup convention to walk_forward.py (it opens the
+        # position on the first executable bar rather than dropping the
+        # warmup bars) -- this difference is intentional and pinned by
+        # cross-path parity tests.
         position_changes = positions.diff().abs()
         costs = position_changes * (args.commission + args.slippage)
 

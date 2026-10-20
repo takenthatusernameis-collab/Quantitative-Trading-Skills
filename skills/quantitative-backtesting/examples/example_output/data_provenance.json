@@ -1,6 +1,6 @@
 {
   "source_path": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv",
-  "load_timestamp": "2026-10-19T19:49:52.293687Z",
+  "load_timestamp": "2026-10-20T01:45:06.462988Z",
   "file_format": ".csv",
   "file_size_bytes": 46812,
   "symbol_filter": "SPY",

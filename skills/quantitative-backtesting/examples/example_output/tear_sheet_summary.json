@@ -21,7 +21,7 @@
     "benchmark_slippage": 0.0,
     "benchmark_expense_ratio": 0.0,
     "benchmark_cost_is_periodic": false,
-    "correlation_with_benchmark": 0.6930563056767791,
+    "correlation_with_benchmark": 0.6930563056767804,
     "alpha": -0.09261244506834217,
     "beta": 0.4799306106674326,
     "tracking_error": 0.1654197393375446,
@@ -33,8 +33,5 @@
     "tail_ratio": 0.928418262963775,
     "initial_capital": null
   },
-  "plot_files": [
-    "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/examples/example_output/equity_curve.png",
-    "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/examples/example_output/returns_distribution.png"
-  ]
+  "plot_files": []
 }

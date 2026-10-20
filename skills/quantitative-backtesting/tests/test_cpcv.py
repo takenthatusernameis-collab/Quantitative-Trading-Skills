@@ -879,10 +879,10 @@ def _independent_cpcv_oos_return(panel, n_splits=4, test_size=0.2, lookbacks=(15
         return signal
 
     def window_returns(close, signal):
-    positions = signal.shift(1)
-    asset_returns = close.pct_change().mean(axis=1)
-    costs = positions.diff().abs() * (commission + slippage)
-    return (positions * asset_returns - costs).dropna()
+        positions = signal.shift(1)
+        asset_returns = close.pct_change().mean(axis=1)
+        costs = positions.diff().abs() * (commission + slippage)
+        return (positions * asset_returns - costs).dropna()
 
     oos_series = []
     for test_group in range(n_splits):
