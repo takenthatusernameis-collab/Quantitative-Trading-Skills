@@ -52,6 +52,9 @@ from utils import (
     DEFAULT_IMPACT_AGGREGATION,
     EXECUTION_WARMUP_BARS,
     WARMUP_CONVENTION_WALK_FORWARD,
+    _print_sweep_resolution_note,
+    _sweep_resolution_fields,
+    _sweep_sharpe_below_resolution,
 )
 from reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
@@ -150,6 +153,17 @@ def _resolve_min_position_fraction(args) -> Optional[float]:
     return value
 
 
+def _resolution_cells(row: Dict[str, Any]) -> List[str]:
+    """The minSR and note console cells for one sweep row.
+
+    Reuses the shared resolution semantics (`_sweep_resolution_fields`) so the
+    latency / fill-rate sweep tables print the same threshold beside the swept
+    Sharpe as the cost sweep tables.
+    """
+    minSR_txt, note = _sweep_resolution_fields(row)
+    return [minSR_txt, note]
+
+
 def _run_latency_fill_rate_sweep(
     args,
     runner,
@@ -198,10 +212,12 @@ def _run_latency_fill_rate_sweep(
                 f, indent=2, default=str,
             )
         print(f"\nLatency sweep ({len(latency_values)} latencies) saved to: {sweep_path}")
-        print(" | ".join(latency_header))
-        print("-" * len(" | ".join(latency_header)))
+        latency_header_with_resolution = list(latency_header) + ["minSR", "note"]
+        print(" | ".join(latency_header_with_resolution))
+        print("-" * len(" | ".join(latency_header_with_resolution)))
         for row in sweep_rows:
-            print(" | ".join(row_cells(row, "latency")))
+            print(" | ".join(row_cells(row, "latency") + _resolution_cells(row)))
+        _print_sweep_resolution_note(sweep_rows)
         return True
 
     if len(fill_rate_values) > 1:
@@ -213,10 +229,12 @@ def _run_latency_fill_rate_sweep(
                 f, indent=2, default=str,
             )
         print(f"\nFill-rate sweep ({len(fill_rate_values)} fill rates) saved to: {sweep_path}")
-        print(" | ".join(fill_rate_header))
-        print("-" * len(" | ".join(fill_rate_header)))
+        fill_rate_header_with_resolution = list(fill_rate_header) + ["minSR", "note"]
+        print(" | ".join(fill_rate_header_with_resolution))
+        print("-" * len(" | ".join(fill_rate_header_with_resolution)))
         for row in sweep_rows:
-            print(" | ".join(row_cells(row, "fill_rate")))
+            print(" | ".join(row_cells(row, "fill_rate") + _resolution_cells(row)))
+        _print_sweep_resolution_note(sweep_rows)
         return True
 
     return False
@@ -6352,6 +6370,17 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         # through so a panel walk-forward sweep is traceable to the universe
         # selection risk flagged at load time.
         "survivorship_bias": survivorship,
+        # Test resolution of this sweep point's own statistics: the walk-forward
+        # analysis builds summary["test_resolution"] on its out-of-sample
+        # returns, the same series its Deflated Sharpe was computed on. The flag
+        # compares this point's OOS Sharpe against that resolution on magnitudes;
+        # it is a statement about the sample, not a verdict on the point, and is
+        # None ("unknown") when the run carried no significance test.
+        "test_resolution": summary.get("test_resolution"),
+        "sharpe_below_resolution": _sweep_sharpe_below_resolution(
+            None if summary.get("oos_sharpe") is None else float(summary["oos_sharpe"]),
+            summary.get("test_resolution"),
+        ),
     }
 
 
@@ -6470,6 +6499,15 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         # through so a panel optimization sweep is traceable to the universe
         # selection risk flagged at load time.
         "survivorship_bias": survivorship,
+        # Parameter optimization's top_sharpe is an in-sample selection
+        # statistic over the grid: the resolution that belongs to it is the
+        # resolution of the selection itself (the trials searched), not of a
+        # held-out series, and this helper holds no held-out returns to build
+        # one on. The sweep therefore reports the number as explicitly
+        # unresolved: no resolution block, and the flag is None ("unknown"),
+        # never "not below".
+        "test_resolution": None,
+        "sharpe_below_resolution": None,
     }
 
 
@@ -6594,6 +6632,17 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         # through so a panel out-of-sample sweep is traceable to the universe
         # selection risk flagged at load time.
         "survivorship_bias": survivorship,
+        # Test resolution of this sweep point's own statistics: the out-of-sample
+        # validation builds summary["test_resolution"] on its held-out test
+        # returns, the same series its Deflated Sharpe was computed on. The flag
+        # compares this point's test Sharpe against that resolution on magnitudes;
+        # it is a statement about the sample, not a verdict on the point, and is
+        # None ("unknown") when the run carried no significance test.
+        "test_resolution": summary.get("test_resolution"),
+        "sharpe_below_resolution": _sweep_sharpe_below_resolution(
+            None if test_perf.get("test_sharpe") is None else float(test_perf["test_sharpe"]),
+            summary.get("test_resolution"),
+        ),
     }
 
 
@@ -6712,6 +6761,17 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         # through so a panel CPCV sweep is traceable to the universe selection
         # risk flagged at load time.
         "survivorship_bias": survivorship,
+        # Test resolution of this sweep point's own statistics: the CPCV
+        # analysis builds summary["test_resolution"] on its pooled out-of-sample
+        # returns, the same series its Deflated Sharpe was computed on. The flag
+        # compares this point's OOS Sharpe against that resolution on magnitudes;
+        # it is a statement about the sample, not a verdict on the point, and is
+        # None ("unknown") when the run carried no significance test.
+        "test_resolution": summary.get("test_resolution"),
+        "sharpe_below_resolution": _sweep_sharpe_below_resolution(
+            None if summary.get("oos_sharpe") is None else float(summary["oos_sharpe"]),
+            summary.get("test_resolution"),
+        ),
     }
 
 
@@ -6773,16 +6833,18 @@ def run_cpcv(args) -> int:
                 default=str,
             )
         print(f"\nMarket impact sweep ({len(impact_coefficients)} coefficients) saved to: {sweep_path}")
-        print("Impact coefficient | Total OOS Return | OOS Sharpe | Avg Param Stability | Overfitting Risk | Deflated Sharpe | N Folds")
+        print("Impact coefficient | Total OOS Return | OOS Sharpe | minSR | note | Avg Param Stability | Overfitting Risk | Deflated Sharpe | N Folds")
         print("-" * 112)
         for row in sweep_rows:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['impact_coefficient']:>17} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
-                f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
+                f"{oos_sharpe_txt:>10} | {minSR_txt:>9} | {note:>16} | {row['avg_param_stability']:>17.4f} | "
                 f"{_format_overfitting_risk(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     borrow_costs = [float(c) for c in (args.borrow_costs or [args.borrow_cost])]
@@ -6812,16 +6874,18 @@ def run_cpcv(args) -> int:
                 default=str,
             )
         print(f"\nBorrow-cost sweep ({len(borrow_costs)} costs) saved to: {sweep_path}")
-        print("Borrow Cost | Total OOS Return | OOS Sharpe | Avg Param Stability | Overfitting Risk | Deflated Sharpe | N Folds")
+        print("Borrow Cost | Total OOS Return | OOS Sharpe | minSR | note | Avg Param Stability | Overfitting Risk | Deflated Sharpe | N Folds")
         print("-" * 112)
         for row in sweep_rows:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['borrow_cost']:>13.4f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
-                f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
+                f"{oos_sharpe_txt:>10} | {minSR_txt:>9} | {note:>16} | {row['avg_param_stability']:>17.4f} | "
                 f"{_format_overfitting_risk(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     # Funding-cost sensitivity sweep for CPCV: re-run the CPCV pipeline for
@@ -6848,16 +6912,18 @@ def run_cpcv(args) -> int:
                 default=str,
             )
         print(f"\nFunding-cost sweep ({len(funding_costs)} costs) saved to: {sweep_path}")
-        print("Funding Cost | Total OOS Return | OOS Sharpe | Avg Param Stability | Overfitting Risk | Deflated Sharpe | N Folds")
+        print("Funding Cost | Total OOS Return | OOS Sharpe | minSR | note | Avg Param Stability | Overfitting Risk | Deflated Sharpe | N Folds")
         print("-" * 112)
         for row in sweep_rows:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['funding_cost']:>13.4f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
-                f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
+                f"{oos_sharpe_txt:>10} | {minSR_txt:>9} | {note:>16} | {row['avg_param_stability']:>17.4f} | "
                 f"{_format_overfitting_risk(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     borrow_costs = [float(c) for c in (args.borrow_costs or [args.borrow_cost])]
@@ -6924,16 +6990,18 @@ def run_cpcv(args) -> int:
                 default=str,
             )
         print(f"\nCommission sweep ({len(commissions)} rates) saved to: {sweep_path}")
-        print("Commission | Total OOS Return | OOS Sharpe | Avg Param Stability | Overfitting Risk | Deflated Sharpe | N Folds")
+        print("Commission | Total OOS Return | OOS Sharpe | minSR | note | Avg Param Stability | Overfitting Risk | Deflated Sharpe | N Folds")
         print("-" * 112)
         for row in sweep_rows:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['commission']:>13.6f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
-                f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
+                f"{oos_sharpe_txt:>10} | {minSR_txt:>9} | {note:>16} | {row['avg_param_stability']:>17.4f} | "
                 f"{_format_overfitting_risk(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     # Slippage sensitivity sweep for CPCV: re-run the CPCV pipeline for each
@@ -6962,16 +7030,18 @@ def run_cpcv(args) -> int:
                 default=str,
             )
         print(f"\nSlippage sweep ({len(slippages)} rates) saved to: {sweep_path}")
-        print("Slippage | Total OOS Return | OOS Sharpe | Avg Param Stability | Overfitting Risk | Deflated Sharpe | N Folds")
+        print("Slippage | Total OOS Return | OOS Sharpe | minSR | note | Avg Param Stability | Overfitting Risk | Deflated Sharpe | N Folds")
         print("-" * 112)
         for row in sweep_rows:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['slippage']:>13.6f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
-                f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
+                f"{oos_sharpe_txt:>10} | {minSR_txt:>9} | {note:>16} | {row['avg_param_stability']:>17.4f} | "
                 f"{_format_overfitting_risk(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     param_grid = _parse_param_grid(args.param_grid)
@@ -7938,15 +8008,17 @@ def run_walk_forward(args) -> int:
                 default=str,
             )
         print(f"\nMarket impact sweep ({len(impact_coefficients)} coefficients) saved to: {sweep_path}")
-        print("Impact coefficient | Total OOS Return | OOS Sharpe | Deflated Sharpe | N Periods")
+        print("Impact coefficient | Total OOS Return | OOS Sharpe | minSR | note | Deflated Sharpe | N Periods")
         print("-" * 90)
         for row in sweep_rows:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['impact_coefficient']:>17} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
-                f"{oos_sharpe_txt:>10} | {dsr_txt:>15} | {row['n_periods']:>9}"
+                f"{oos_sharpe_txt:>10} | {minSR_txt:>9} | {note:>16} | {dsr_txt:>15} | {row['n_periods']:>9}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     if len(borrow_costs) > 1:
@@ -7970,15 +8042,17 @@ def run_walk_forward(args) -> int:
                 default=str,
             )
         print(f"\nBorrow-cost sweep ({len(borrow_costs)} costs) saved to: {sweep_path}")
-        print("Borrow Cost | Total OOS Return | OOS Sharpe | Deflated Sharpe | N Periods")
+        print("Borrow Cost | Total OOS Return | OOS Sharpe | minSR | note | Deflated Sharpe | N Periods")
         print("-" * 90)
         for row in sweep_rows:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['borrow_cost']:>13.4f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
-                f"{oos_sharpe_txt:>10} | {dsr_txt:>15} | {row['n_periods']:>9}"
+                f"{oos_sharpe_txt:>10} | {minSR_txt:>9} | {note:>16} | {dsr_txt:>15} | {row['n_periods']:>9}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     if len(funding_costs) > 1:
@@ -8002,15 +8076,17 @@ def run_walk_forward(args) -> int:
                 default=str,
             )
         print(f"\nFunding-cost sweep ({len(funding_costs)} costs) saved to: {sweep_path}")
-        print("Funding Cost | Total OOS Return | OOS Sharpe | Deflated Sharpe | N Periods")
+        print("Funding Cost | Total OOS Return | OOS Sharpe | minSR | note | Deflated Sharpe | N Periods")
         print("-" * 90)
         for row in sweep_rows:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['funding_cost']:>13.4f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
-                f"{oos_sharpe_txt:>10} | {dsr_txt:>15} | {row['n_periods']:>9}"
+                f"{oos_sharpe_txt:>10} | {minSR_txt:>9} | {note:>16} | {dsr_txt:>15} | {row['n_periods']:>9}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     commissions = [float(c) for c in (args.commissions or [args.commission])]
@@ -8042,15 +8118,17 @@ def run_walk_forward(args) -> int:
                 default=str,
             )
         print(f"\nCommission sweep ({len(commissions)} rates) saved to: {sweep_path}")
-        print("Commission | Total OOS Return | OOS Sharpe | Deflated Sharpe | N Periods")
+        print("Commission | Total OOS Return | OOS Sharpe | minSR | note | Deflated Sharpe | N Periods")
         print("-" * 90)
         for row in sweep_rows:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['commission']:>13.6f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
-                f"{oos_sharpe_txt:>10} | {dsr_txt:>15} | {row['n_periods']:>9}"
+                f"{oos_sharpe_txt:>10} | {minSR_txt:>9} | {note:>16} | {dsr_txt:>15} | {row['n_periods']:>9}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     # Slippage sensitivity sweep for walk-forward: re-run the walk-forward
@@ -8079,15 +8157,17 @@ def run_walk_forward(args) -> int:
                 default=str,
             )
         print(f"\nSlippage sweep ({len(slippages)} rates) saved to: {sweep_path}")
-        print("Slippage | Total OOS Return | OOS Sharpe | Deflated Sharpe | N Periods")
+        print("Slippage | Total OOS Return | OOS Sharpe | minSR | note | Deflated Sharpe | N Periods")
         print("-" * 90)
         for row in sweep_rows:
             oos_sharpe_txt = "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['slippage']:>13.6f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
-                f"{oos_sharpe_txt:>10} | {dsr_txt:>15} | {row['n_periods']:>9}"
+                f"{oos_sharpe_txt:>10} | {minSR_txt:>9} | {note:>16} | {dsr_txt:>15} | {row['n_periods']:>9}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     results = walk_forward_analysis(
@@ -8428,14 +8508,16 @@ def run_parameter_optimization(args) -> int:
                 default=str,
             )
         print(f"\nMarket impact sweep ({len(impact_coefficients)} coefficients) saved to: {sweep_path}")
-        print("Impact coefficient | Top Sharpe | Top Total Return | N Combos")
+        print("Impact coefficient | Top Sharpe | minSR | note | Top Total Return | N Combos")
         print("-" * 70)
         for row in sweep_rows:
             sharpe_txt = "N/A" if row["top_sharpe"] is None else f"{row['top_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             print(
-                f"{row['impact_coefficient']:>17} | {sharpe_txt:>10} | "
+                f"{row['impact_coefficient']:>17} | {sharpe_txt:>10} | {minSR_txt:>9} | {note:>16} | "
                 f"{row['top_total_return']:>16.4f} | {row['n_combos']:>7}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     if len(borrow_costs) > 1:
@@ -8460,14 +8542,16 @@ def run_parameter_optimization(args) -> int:
                 default=str,
             )
         print(f"\nBorrow-cost sweep ({len(borrow_costs)} costs) saved to: {sweep_path}")
-        print("Borrow Cost | Top Sharpe | Top Total Return | N Combos")
+        print("Borrow Cost | Top Sharpe | minSR | note | Top Total Return | N Combos")
         print("-" * 70)
         for row in sweep_rows:
             sharpe_txt = "N/A" if row["top_sharpe"] is None else f"{row['top_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             print(
-                f"{row['borrow_cost']:>13.4f} | {sharpe_txt:>10} | "
+                f"{row['borrow_cost']:>13.4f} | {sharpe_txt:>10} | {minSR_txt:>9} | {note:>16} | "
                 f"{row['top_total_return']:>16.4f} | {row['n_combos']:>7}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     if len(funding_costs) > 1:
@@ -8492,14 +8576,16 @@ def run_parameter_optimization(args) -> int:
                 default=str,
             )
         print(f"\nFunding-cost sweep ({len(funding_costs)} costs) saved to: {sweep_path}")
-        print("Funding Cost | Top Sharpe | Top Total Return | N Combos")
+        print("Funding Cost | Top Sharpe | minSR | note | Top Total Return | N Combos")
         print("-" * 70)
         for row in sweep_rows:
             sharpe_txt = "N/A" if row["top_sharpe"] is None else f"{row['top_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             print(
-                f"{row['funding_cost']:>13.4f} | {sharpe_txt:>10} | "
+                f"{row['funding_cost']:>13.4f} | {sharpe_txt:>10} | {minSR_txt:>9} | {note:>16} | "
                 f"{row['top_total_return']:>16.4f} | {row['n_combos']:>7}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     # Execution-latency / partial-fill sweeps for parameter optimization:
@@ -8562,14 +8648,16 @@ def run_parameter_optimization(args) -> int:
                 default=str,
             )
         print(f"\nCommission sweep ({len(commissions)} rates) saved to: {sweep_path}")
-        print("Commission | Top Sharpe | Top Total Return | N Combos")
+        print("Commission | Top Sharpe | minSR | note | Top Total Return | N Combos")
         print("-" * 70)
         for row in sweep_rows:
             sharpe_txt = "N/A" if row["top_sharpe"] is None else f"{row['top_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             print(
-                f"{row['commission']:>13.6f} | {sharpe_txt:>10} | "
+                f"{row['commission']:>13.6f} | {sharpe_txt:>10} | {minSR_txt:>9} | {note:>16} | "
                 f"{row['top_total_return']:>16.4f} | {row['n_combos']:>7}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     # Slippage sensitivity sweep for parameter optimization: re-run the
@@ -8599,14 +8687,16 @@ def run_parameter_optimization(args) -> int:
                 default=str,
             )
         print(f"\nSlippage sweep ({len(slippages)} rates) saved to: {sweep_path}")
-        print("Slippage | Top Sharpe | Top Total Return | N Combos")
+        print("Slippage | Top Sharpe | minSR | note | Top Total Return | N Combos")
         print("-" * 70)
         for row in sweep_rows:
             sharpe_txt = "N/A" if row["top_sharpe"] is None else f"{row['top_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             print(
-                f"{row['slippage']:>13.6f} | {sharpe_txt:>10} | "
+                f"{row['slippage']:>13.6f} | {sharpe_txt:>10} | {minSR_txt:>9} | {note:>16} | "
                 f"{row['top_total_return']:>16.4f} | {row['n_combos']:>7}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     param_grid = _parse_param_grid(args.param_grid)
@@ -8931,6 +9021,14 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     )
 
     sm = mc_results["summary"]
+    mc_sharpe = float(sm.get("sharpe_ratio", {}).get("mean", 0.0))
+    # The Monte Carlo point's Deflated Sharpe was computed on `returns`
+    # (via calculate_metrics over base_results), so the resolution of that
+    # statistic is built on the same series it was computed on and shares its
+    # observation count -- never re-derived elsewhere.
+    resolution = (
+        _build_test_resolution({"deflated_sharpe": dsr}, returns) if dsr is not None else None
+    )
     return {
         "impact_coefficient": float(impact_coefficient),
         "borrow_cost": float(borrow_cost),
@@ -8940,7 +9038,7 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         "latency": int(latency),
         "fill_rate": float(fill_rate),
         "total_return": float(sm.get("total_return", {}).get("mean", 0.0)),
-        "sharpe_ratio": float(sm.get("sharpe_ratio", {}).get("mean", 0.0)),
+        "sharpe_ratio": mc_sharpe,
         "max_drawdown": float(sm.get("max_drawdown", {}).get("mean", 0.0)),
         "probability_of_ruin": float(mc_results["probability_of_ruin"]),
         "deflated_sharpe": (float(dsr["deflated_sharpe_ratio"]) if dsr is not None else None),
@@ -8948,6 +9046,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
             int(dsr["n_trials"]) if dsr is not None and dsr.get("n_trials") is not None else None
         ),
         "n_simulations": int(mc_results["n_simulations"]),
+        "test_resolution": resolution,
+        "sharpe_below_resolution": _sweep_sharpe_below_resolution(mc_sharpe, resolution),
         # Bias-controls engagement flag (point-in-time validation + multiple-
         # testing deflation). Propagated from the CLI args so the sweep artifact
         # is traceable to the same signal as the single-run Monte Carlo JSON.
@@ -9016,14 +9116,16 @@ def run_monte_carlo(args) -> int:
                 default=str,
             )
         print(f"\nMarket impact sweep ({len(impact_coefficients)} coefficients) saved to: {sweep_path}")
-        print("Impact coefficient | Total Return | Sharpe Ratio | Max Drawdown | Prob. of Ruin | Deflated Sharpe")
+        print("Impact coefficient | Total Return | Sharpe Ratio | minSR | note | Max Drawdown | Prob. of Ruin | Deflated Sharpe")
         print("-" * 96)
         for row in sweep_rows:
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
-                f"{row['impact_coefficient']:>17} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | "
+                f"{row['impact_coefficient']:>17} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | {minSR_txt:>9} | {note:>16} | "
                 f"{row['max_drawdown']:>12.4f} | {row['probability_of_ruin']:>13.2%} | {dsr_txt:>15}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     borrow_costs = [float(c) for c in (args.borrow_costs or [args.borrow_cost])]
@@ -9053,14 +9155,16 @@ def run_monte_carlo(args) -> int:
                 default=str,
             )
         print(f"\nBorrow-cost sweep ({len(borrow_costs)} costs) saved to: {sweep_path}")
-        print("Borrow Cost | Total Return | Sharpe Ratio | Max Drawdown | Prob. of Ruin | Deflated Sharpe")
+        print("Borrow Cost | Total Return | Sharpe Ratio | minSR | note | Max Drawdown | Prob. of Ruin | Deflated Sharpe")
         print("-" * 96)
         for row in sweep_rows:
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
-                f"{row['borrow_cost']:>13.4f} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | "
+                f"{row['borrow_cost']:>13.4f} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | {minSR_txt:>9} | {note:>16} | "
                 f"{row['max_drawdown']:>12.4f} | {row['probability_of_ruin']:>13.2%} | {dsr_txt:>15}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     # Funding-cost sensitivity sweep: re-run the pipeline for each funding cost
@@ -9087,14 +9191,16 @@ def run_monte_carlo(args) -> int:
                 default=str,
             )
         print(f"\nFunding-cost sweep ({len(funding_costs)} costs) saved to: {sweep_path}")
-        print("Funding Cost | Total Return | Sharpe Ratio | Max Drawdown | Prob. of Ruin | Deflated Sharpe")
+        print("Funding Cost | Total Return | Sharpe Ratio | minSR | note | Max Drawdown | Prob. of Ruin | Deflated Sharpe")
         print("-" * 96)
         for row in sweep_rows:
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
-                f"{row['funding_cost']:>13.4f} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | "
+                f"{row['funding_cost']:>13.4f} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | {minSR_txt:>9} | {note:>16} | "
                 f"{row['max_drawdown']:>12.4f} | {row['probability_of_ruin']:>13.2%} | {dsr_txt:>15}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     # Execution-latency / partial-fill sweeps for Monte Carlo: re-run the
@@ -9156,14 +9262,16 @@ def run_monte_carlo(args) -> int:
                 default=str,
             )
         print(f"\nCommission sweep ({len(commissions)} rates) saved to: {sweep_path}")
-        print("Commission | Total Return | Sharpe Ratio | Max Drawdown | Prob. of Ruin | Deflated Sharpe")
+        print("Commission | Total Return | Sharpe Ratio | minSR | note | Max Drawdown | Prob. of Ruin | Deflated Sharpe")
         print("-" * 96)
         for row in sweep_rows:
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
-                f"{row['commission']:>13.6f} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | "
+                f"{row['commission']:>13.6f} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | {minSR_txt:>9} | {note:>16} | "
                 f"{row['max_drawdown']:>12.4f} | {row['probability_of_ruin']:>13.2%} | {dsr_txt:>15}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     # Slippage sensitivity sweep: re-run the pipeline for each slippage rate
@@ -9191,14 +9299,16 @@ def run_monte_carlo(args) -> int:
                 default=str,
             )
         print(f"\nSlippage sweep ({len(slippages)} rates) saved to: {sweep_path}")
-        print("Slippage | Total Return | Sharpe Ratio | Max Drawdown | Prob. of Ruin | Deflated Sharpe")
+        print("Slippage | Total Return | Sharpe Ratio | minSR | note | Max Drawdown | Prob. of Ruin | Deflated Sharpe")
         print("-" * 96)
         for row in sweep_rows:
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
-                f"{row['slippage']:>13.6f} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | "
+                f"{row['slippage']:>13.6f} | {row['total_return']:>12.4f} | {row['sharpe_ratio']:>12.4f} | {minSR_txt:>9} | {note:>16} | "
                 f"{row['max_drawdown']:>12.4f} | {row['probability_of_ruin']:>13.2%} | {dsr_txt:>15}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     # First run a backtest to get base returns
@@ -9579,15 +9689,17 @@ def run_out_of_sample_validation(args) -> int:
                 default=str,
             )
         print(f"\nMarket impact sweep ({len(impact_coefficients)} coefficients) saved to: {sweep_path}")
-        print("Impact coefficient | Test Total Return | Test Sharpe | Deflated Sharpe")
+        print("Impact coefficient | Test Total Return | Test Sharpe | minSR | note | Deflated Sharpe")
         print("-" * 74)
         for row in sweep_rows:
             sharpe_txt = "N/A" if row["test_sharpe"] is None else f"{row['test_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['impact_coefficient']:>17} | {row['test_total_return']:>16.4f} | "
-                f"{sharpe_txt:>11} | {dsr_txt:>15}"
+                f"{sharpe_txt:>11} | {minSR_txt:>9} | {note:>16} | {dsr_txt:>15}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     if len(borrow_costs) > 1:
@@ -9611,15 +9723,17 @@ def run_out_of_sample_validation(args) -> int:
                 default=str,
             )
         print(f"\nBorrow-cost sweep ({len(borrow_costs)} costs) saved to: {sweep_path}")
-        print("Borrow Cost | Test Total Return | Test Sharpe | Deflated Sharpe")
+        print("Borrow Cost | Test Total Return | Test Sharpe | minSR | note | Deflated Sharpe")
         print("-" * 74)
         for row in sweep_rows:
             sharpe_txt = "N/A" if row["test_sharpe"] is None else f"{row['test_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['borrow_cost']:>13.4f} | {row['test_total_return']:>16.4f} | "
-                f"{sharpe_txt:>11} | {dsr_txt:>15}"
+                f"{sharpe_txt:>11} | {minSR_txt:>9} | {note:>16} | {dsr_txt:>15}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     if len(funding_costs) > 1:
@@ -9643,15 +9757,17 @@ def run_out_of_sample_validation(args) -> int:
                 default=str,
             )
         print(f"\nFunding-cost sweep ({len(funding_costs)} costs) saved to: {sweep_path}")
-        print("Funding Cost | Test Total Return | Test Sharpe | Deflated Sharpe")
+        print("Funding Cost | Test Total Return | Test Sharpe | minSR | note | Deflated Sharpe")
         print("-" * 74)
         for row in sweep_rows:
             sharpe_txt = "N/A" if row["test_sharpe"] is None else f"{row['test_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['funding_cost']:>13.4f} | {row['test_total_return']:>16.4f} | "
-                f"{sharpe_txt:>11} | {dsr_txt:>15}"
+                f"{sharpe_txt:>11} | {minSR_txt:>9} | {note:>16} | {dsr_txt:>15}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     # Execution-latency / partial-fill sweeps for out-of-sample validation:
@@ -9712,15 +9828,17 @@ def run_out_of_sample_validation(args) -> int:
                 default=str,
             )
         print(f"\nCommission sweep ({len(commissions)} rates) saved to: {sweep_path}")
-        print("Commission | Test Total Return | Test Sharpe | Deflated Sharpe")
+        print("Commission | Test Total Return | Test Sharpe | minSR | note | Deflated Sharpe")
         print("-" * 74)
         for row in sweep_rows:
             sharpe_txt = "N/A" if row["test_sharpe"] is None else f"{row['test_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['commission']:>13.6f} | {row['test_total_return']:>16.4f} | "
-                f"{sharpe_txt:>11} | {dsr_txt:>15}"
+                f"{sharpe_txt:>11} | {minSR_txt:>9} | {note:>16} | {dsr_txt:>15}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     # Slippage sensitivity sweep for out-of-sample validation: re-run the
@@ -9749,15 +9867,17 @@ def run_out_of_sample_validation(args) -> int:
                 default=str,
             )
         print(f"\nSlippage sweep ({len(slippages)} rates) saved to: {sweep_path}")
-        print("Slippage | Test Total Return | Test Sharpe | Deflated Sharpe")
+        print("Slippage | Test Total Return | Test Sharpe | minSR | note | Deflated Sharpe")
         print("-" * 74)
         for row in sweep_rows:
             sharpe_txt = "N/A" if row["test_sharpe"] is None else f"{row['test_sharpe']:.4f}"
+            minSR_txt, note = _sweep_resolution_fields(row)
             dsr_txt = "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}"
             print(
                 f"{row['slippage']:>13.6f} | {row['test_total_return']:>16.4f} | "
-                f"{sharpe_txt:>11} | {dsr_txt:>15}"
+                f"{sharpe_txt:>11} | {minSR_txt:>9} | {note:>16} | {dsr_txt:>15}"
             )
+        _print_sweep_resolution_note(sweep_rows)
         return 0
 
     param_grid = _parse_param_grid(args.param_grid)

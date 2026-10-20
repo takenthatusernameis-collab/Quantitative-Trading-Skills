@@ -521,15 +521,23 @@ Risk Metrics:
   the framework's own `_build_test_resolution` from the statistics
   `calculate_metrics` produced for that coefficient, and the sweep table
   prints that threshold beside the Sharpe (`minSR`) and marks the points the
-  sample cannot distinguish from zero (`below resolution`). The comparison is
-  on magnitudes — `|Sharpe| < minSR` — so a large *negative* Sharpe is not
-  flagged; and "below resolution" is a statement about the sample, not a
-  negative result about the strategy. A sweep run without `--n-trials` carries
-  no significance test, so the columns are `n/a` and the console says so. The
-  sweep point and the single run at the same coefficient report the same
-  numbers and the same block. Guarded by `tests/test_test_resolution.py`;
-  the section is `references/validation_methods.md`, "Cost sweeps report the
-  resolution of every point".
+  sample cannot distinguish from zero (`below resolution`). The same
+  treatment now covers every sweep point of the walk-forward, CPCV,
+  out-of-sample and monte-carlo cost sweeps (`oos_sharpe`, `test_sharpe`,
+  `oos_sharpe` and `sharpe_ratio` respectively), each carrying the resolution
+  of its own statistics plus `sharpe_below_resolution`. Parameter
+  optimization's `top_sharpe` is an in-sample selection statistic over the
+  grid with no held-out series to build a resolution on, so its sweep reports
+  it as explicitly unresolved (`null` block, `null` flag, `n/a` in the table)
+  rather than fabricating a number. The comparison is on magnitudes —
+  `|Sharpe| < minSR` — so a large *negative* Sharpe is not flagged; and
+  "below resolution" is a statement about the sample, not a negative result
+  about the strategy. A sweep run without `--n-trials` carries no significance
+  test, so the columns are `n/a` and the console says so. The sweep point and
+  the single run at the same coefficient report the same numbers and the same
+  block. Guarded by `tests/test_test_resolution.py`; the section is
+  `references/validation_methods.md`, "Cost sweeps report the resolution of
+  every point".
 
 - **The significance machinery is only half-demonstrated by a sample it
   cannot resolve.** On the shipped samples every significance threshold sits

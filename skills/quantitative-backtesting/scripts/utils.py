@@ -3,9 +3,10 @@
 Shared utility functions for the quantitative backtesting toolkit.
 """
 
+import math
 import numpy as np
 import pandas as pd
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional, Tuple
 
 
 # Panel pricing modes.
@@ -1789,3 +1790,138 @@ def _annualization_factor(index: pd.Index) -> float:
         return freq_map.get(base, 252)
     except Exception:
         return 252
+
+
+def _sweep_sharpe_below_resolution(
+    sharpe_ratio: Any,
+    resolution: Any,
+) -> Optional[bool]:
+    """Whether a sweep point's Sharpe is below the sample's resolution.
+
+    The minimum detectable effect is the smallest *magnitude* the point's own
+    significance test could have confirmed, so the comparison is on
+    magnitudes: a Sharpe of -3.0 against a resolution of 2.5 is
+    distinguishable from zero, a Sharpe of +0.3 against the same resolution is
+    not. A signed comparison would flag the first and pass the second, which
+    is backwards.
+
+    ``sharpe_ratio`` is the Sharpe the sweep point reports -- the number the
+    reader compares against the threshold. When it is missing, the observed
+    effect the block carries is used instead.
+
+    Returns True/False when the resolution is known, and None when it is not
+    (no significance test was run, or the resolution could not be computed):
+    "unknown", never a silent "no".
+    """
+    if not isinstance(resolution, dict):
+        return None
+    if resolution.get("sharpe_status") != "resolvable":
+        return None
+    threshold = resolution.get("min_detectable_sharpe")
+    if sharpe_ratio is None:
+        sharpe_ratio = resolution.get("observed_annualized_sharpe")
+    if threshold is None or sharpe_ratio is None:
+        return None
+    try:
+        threshold = float(threshold)
+        observed = float(sharpe_ratio)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(threshold) and math.isfinite(observed)):
+        return None
+    return abs(observed) < threshold
+
+
+def _sweep_resolution_fields(result: Dict[str, Any]) -> Tuple[str, str]:
+    """The console fields for one sweep point's test resolution.
+
+    Returns ``(min_detectable_sharpe_text, note_text)``:
+
+    * the smallest annualized Sharpe this sweep point's own significance test
+      could confirm, or ``"n/a"`` when the run carried no significance test;
+    * ``"below resolution"`` when the point's Sharpe cannot be distinguished
+      from zero at that resolution, ``"resolvable"`` when it can, and
+      ``"n/a"`` when there is no resolution to judge it against.
+
+    Both fields are reporting only: no swept number, cost or verdict is
+    changed by them.
+    """
+    resolution = result.get("test_resolution")
+    below = _sweep_sharpe_below_resolution(result.get("sharpe_ratio"), resolution)
+    if below is None:
+        return "n/a", "n/a"
+    try:
+        threshold_text = f"{float(resolution.get('min_detectable_sharpe')):.4f}"
+    except (TypeError, ValueError):
+        return "n/a", "n/a"
+    return threshold_text, ("below resolution" if below else "resolvable")
+
+
+def _print_sweep_resolution_note(results: List[Dict[str, Any]]) -> None:
+    """Explain the resolution columns of a sweep table.
+
+    The wording is the single-run path's: the block is a measurement, not a
+    correction. Nothing printed here changes a swept number or a verdict.
+    """
+    resolutions = [
+        r.get("test_resolution") for r in results
+        if isinstance(r.get("test_resolution"), dict)
+    ]
+    if not resolutions:
+        return
+
+    # A significance test was run when the block carries its scope.
+    tested = [
+        res for res in resolutions
+        if not (
+            res.get("n_test_observations") is None
+            and res.get("n_parameter_trials") is None
+            and res.get("n_benchmarks") is None
+        )
+    ]
+    if not tested:
+        print(
+            "\nTest resolution (measurement, not a correction): no significance "
+            "test was run on these sweep points, so there is no resolution to "
+            "report and the minSR column is n/a."
+        )
+        return
+
+    scope_text = ""
+    scopes = {
+        (res.get("n_test_observations"), res.get("n_parameter_trials"))
+        for res in tested
+    }
+    if len(scopes) == 1:
+        n_obs, trials = next(iter(scopes))
+        parts = []
+        if n_obs is not None:
+            parts.append(f"{n_obs} test observation(s)")
+        if trials is not None:
+            parts.append(f"{trials} parameter trial(s)")
+        if parts:
+            scope_text = "With " + ", ".join(parts) + ", "
+
+    print(
+        "\nTest resolution (measurement, not a correction): "
+        f"{scope_text}minSR is the smallest annualized Sharpe each sweep "
+        "point's own significance test could confirm at this sample size. A "
+        "point marked 'below resolution' has a Sharpe the sample cannot "
+        "distinguish from zero: its outcome measures the sample, not the "
+        "strategy."
+    )
+
+    bounds = {res.get("plausible_max_annualized_sharpe") for res in tested}
+    beyond = any(res.get("sharpe_beyond_plausible_bound") for res in tested)
+    if beyond and len(bounds) == 1:
+        bound = next(iter(bounds))
+        try:
+            bound_text = f"{float(bound):.2f}"
+        except (TypeError, ValueError):
+            bound_text = None
+        if bound_text is not None:
+            print(
+                "The threshold exceeds the stated plausibility bound (annualized "
+                f"Sharpe <= {bound_text}), so at this sample size it measures "
+                "the sample, not the strategy."
+            )

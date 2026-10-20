@@ -1478,6 +1478,40 @@ sweep inherits the same look-ahead, survivorship and cost-model limitations the
 single run has. It only states what the sample could have resolved at the
 swept coefficient.
 
+### The other analysis paths report the same resolution
+
+The same defect -- a sweep that reports a Sharpe per cost level without the
+resolution of the statistics that produced it -- existed in the other four
+CLIs, and it is closed the same way:
+
+| Path | Swept Sharpe | Resolution carried by each sweep point |
+| --- | --- | --- |
+| walk-forward | `oos_sharpe` | `summary["test_resolution"]`, built on the path's out-of-sample returns |
+| out-of-sample | `test_sharpe` | `summary["test_resolution"]`, built on the path's held-out test returns |
+| CPCV | `oos_sharpe` | `summary["test_resolution"]`, built on the path's pooled out-of-sample returns |
+| monte-carlo | `sharpe_ratio` | a block built by `_build_test_resolution({"deflated_sharpe": dsr}, returns)` on the base returns the Deflated Sharpe was computed on (the path had no block at all) |
+| parameter optimization | `top_sharpe` | none: `top_sharpe` is an in-sample selection statistic over the grid, and no held-out returns exist in the sweep helper to build one on, so the sweep reports it as explicitly unresolved -- `test_resolution: null`, `sharpe_below_resolution: null`, `n/a` in the table -- never a fabricated number |
+
+Every sweep point of the first four paths carries the `test_resolution` block
+of its own statistics plus `sharpe_below_resolution` (`true` / `false` /
+`null`), with exactly the semantics of `run_backtest.py`'s sweeps: the
+comparison is on magnitudes (`|Sharpe| < minSR`), no resolution means `null`
+("unknown"), and the console prints `minSR` beside the swept Sharpe, a `note`
+(`below resolution` / `resolvable` / `n/a`) and the shared "Test resolution
+(measurement, not a correction)" note under each table. Monte Carlo's swept
+Sharpe is the simulation mean while its resolution belongs to the base-series
+Deflated Sharpe the correction was computed on -- the block and the flag
+describe different objects, and the write-up states that instead of eliding the
+distinction.
+
+No swept number moves: returns, Sharpe, drawdown, Deflated Sharpe and every
+pre-existing artifact key are unchanged, and the single-run artifacts and the
+shipped `test_output/` snapshot are byte-identical. Guarded by
+`tests/test_test_resolution.py` (the "The other CLIs' cost sweeps" checks:
+each path's points carry their own resolution, the tables print the threshold
+beside the Sharpe, parameter optimization is explicitly unresolved, and a sweep
+without a significance test says so).
+
 ### What the resolution says on the shipped sample
 
 The same measurement on the shipped 504-bar sample, with `--deflate`:

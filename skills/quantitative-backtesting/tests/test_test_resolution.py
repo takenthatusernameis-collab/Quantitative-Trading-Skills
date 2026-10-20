@@ -857,6 +857,239 @@ def test_the_sweep_point_resolution_carries_no_verdict():
 
 
 # ---------------------------------------------------------------------------
+# The other CLIs' cost sweeps (walk-forward, CPCV, out-of-sample,
+# monte-carlo, parameter optimization)
+# ---------------------------------------------------------------------------
+
+def _run_walk_forward_cli(subcmd, extra_args, tmp):
+    """Run a walk_forward.py subcommand CLI and return its CompletedProcess."""
+    argv = [
+        sys.executable, str(WALK_FORWARD_CLI), subcmd,
+        "--data", str(SAMPLE_DATA),
+        "--symbol", "SPY",
+        "--strategy", "sma_crossover",
+        "--param-grid", json.dumps(MEANINGFUL_GRID),
+        "--output", tmp,
+    ] + list(extra_args)
+    result = subprocess.run(
+        argv, capture_output=True, text=True, timeout=1800,
+    )
+    assert result.returncode == 0, (
+        f"walk-forward {subcmd} CLI exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-3000:]}\nstderr:\n{result.stderr[-3000:]}"
+    )
+    return result
+
+
+def _sweep_payload(tmp, name):
+    return json.loads((Path(tmp) / name).read_text())["results"]
+
+
+def test_walk_forward_sweep_points_carry_their_own_resolution():
+    """Each walk-forward sweep point reports its OOS Sharpe's resolution."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _run_walk_forward_cli(
+            "walk-forward",
+            ["--train-months", "12", "--test-months", "3", "--step-months", "3",
+             "--deflate", "--commissions", "0.0002", "0.002"],
+            tmp,
+        )
+        points = _sweep_payload(tmp, "walk_forward_commission_sweep.json")
+    assert len(points) == 2
+    for point in points:
+        resolution = point.get("test_resolution")
+        assert isinstance(resolution, dict), "sweep point has no test_resolution"
+        assert resolution["sharpe_status"] == "resolvable"
+        assert resolution["min_detectable_sharpe"] is not None
+        assert resolution["min_detectable_sharpe"] > 0
+        assert resolution["n_test_observations"] is not None
+        # The block describes this point's own statistics: the observed effect
+        # is the point's own OOS Sharpe.
+        assert resolution["observed_annualized_sharpe"] == point["oos_sharpe"]
+        expected = abs(point["oos_sharpe"]) < resolution["min_detectable_sharpe"]
+        assert point["sharpe_below_resolution"] is expected
+
+
+def test_walk_forward_sweep_table_prints_the_threshold_next_to_the_sharpe():
+    with tempfile.TemporaryDirectory() as tmp:
+        result = _run_walk_forward_cli(
+            "walk-forward",
+            ["--train-months", "12", "--test-months", "3", "--step-months", "3",
+             "--deflate", "--commissions", "0.0002", "0.002"],
+            tmp,
+        )
+        points = _sweep_payload(tmp, "walk_forward_commission_sweep.json")
+    stdout = result.stdout
+    assert "minSR" in stdout, "the sweep table has no resolution column"
+    assert "Test resolution (measurement, not a correction)" in stdout
+    for point in points:
+        assert f"{point['test_resolution']['min_detectable_sharpe']:.4f}" in stdout
+        assert f"{point['oos_sharpe']:.4f}" in stdout
+    assert "below resolution" in stdout
+    assert "cannot distinguish from zero" in stdout
+
+
+def test_out_of_sample_sweep_points_carry_their_own_resolution():
+    """Each out-of-sample sweep point reports its test Sharpe's resolution."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _run_walk_forward_cli(
+            "out-of-sample",
+            ["--deflate", "--commissions", "0.0002", "0.002"],
+            tmp,
+        )
+        points = _sweep_payload(tmp, "out_of_sample_commission_sweep.json")
+    assert len(points) == 2
+    for point in points:
+        resolution = point.get("test_resolution")
+        assert isinstance(resolution, dict), "sweep point has no test_resolution"
+        assert resolution["sharpe_status"] == "resolvable"
+        assert resolution["min_detectable_sharpe"] is not None
+        assert resolution["min_detectable_sharpe"] > 0
+        assert resolution["observed_annualized_sharpe"] == point["test_sharpe"]
+        expected = abs(point["test_sharpe"]) < resolution["min_detectable_sharpe"]
+        assert point["sharpe_below_resolution"] is expected
+
+
+def test_out_of_sample_sweep_table_prints_the_threshold_next_to_the_sharpe():
+    with tempfile.TemporaryDirectory() as tmp:
+        result = _run_walk_forward_cli(
+            "out-of-sample",
+            ["--deflate", "--commissions", "0.0002", "0.002"],
+            tmp,
+        )
+        points = _sweep_payload(tmp, "out_of_sample_commission_sweep.json")
+    stdout = result.stdout
+    assert "minSR" in stdout
+    assert "Test resolution (measurement, not a correction)" in stdout
+    for point in points:
+        assert f"{point['test_resolution']['min_detectable_sharpe']:.4f}" in stdout
+        assert f"{point['test_sharpe']:.4f}" in stdout
+
+
+def test_cpcv_sweep_points_carry_their_own_resolution():
+    """Each CPCV sweep point reports its OOS Sharpe's resolution."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _run_walk_forward_cli(
+            "cpcv",
+            ["--deflate", "--n-splits", "5", "--test-size", "0.2",
+             "--commissions", "0.0002", "0.002"],
+            tmp,
+        )
+        points = _sweep_payload(tmp, "cpcv_commission_sweep.json")
+    assert len(points) == 2
+    for point in points:
+        resolution = point.get("test_resolution")
+        assert isinstance(resolution, dict), "sweep point has no test_resolution"
+        assert resolution["sharpe_status"] == "resolvable"
+        assert resolution["min_detectable_sharpe"] is not None
+        assert resolution["min_detectable_sharpe"] > 0
+        assert resolution["observed_annualized_sharpe"] == point["oos_sharpe"]
+        expected = abs(point["oos_sharpe"]) < resolution["min_detectable_sharpe"]
+        assert point["sharpe_below_resolution"] is expected
+
+
+def test_cpcv_sweep_table_prints_the_threshold_next_to_the_sharpe():
+    with tempfile.TemporaryDirectory() as tmp:
+        result = _run_walk_forward_cli(
+            "cpcv",
+            ["--deflate", "--n-splits", "5", "--test-size", "0.2",
+             "--commissions", "0.0002", "0.002"],
+            tmp,
+        )
+        points = _sweep_payload(tmp, "cpcv_commission_sweep.json")
+    stdout = result.stdout
+    assert "minSR" in stdout
+    assert "Test resolution (measurement, not a correction)" in stdout
+    for point in points:
+        assert f"{point['test_resolution']['min_detectable_sharpe']:.4f}" in stdout
+        assert f"{point['oos_sharpe']:.4f}" in stdout
+
+
+def test_monte_carlo_sweep_points_build_their_own_resolution():
+    """Monte Carlo has no pre-existing block; the sweep builds one on the base
+    returns the Deflated Sharpe was computed on."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _run_walk_forward_cli(
+            "monte-carlo",
+            ["--n-simulations", "30", "--n-trials", "300",
+             "--commissions", "0.0002", "0.002"],
+            tmp,
+        )
+        points = _sweep_payload(tmp, "monte_carlo_commission_sweep.json")
+    assert len(points) == 2
+    for point in points:
+        resolution = point.get("test_resolution")
+        assert isinstance(resolution, dict), "sweep point has no test_resolution"
+        assert resolution["sharpe_status"] == "resolvable"
+        assert resolution["min_detectable_sharpe"] is not None
+        assert resolution["min_detectable_sharpe"] > 0
+        assert resolution["n_test_observations"] is not None
+        # Monte Carlo's swept Sharpe is the simulation mean, while the
+        # resolution belongs to the base-series Deflated Sharpe statistic the
+        # correction was computed on, so the observed effect in the block need
+        # not equal the swept Sharpe printed in the table. The flag compares
+        # the printed Sharpe against the threshold on magnitudes.
+        expected = abs(point["sharpe_ratio"]) < resolution["min_detectable_sharpe"]
+        assert point["sharpe_below_resolution"] is expected
+
+
+def test_monte_carlo_sweep_table_prints_the_threshold_next_to_the_sharpe():
+    with tempfile.TemporaryDirectory() as tmp:
+        result = _run_walk_forward_cli(
+            "monte-carlo",
+            ["--n-simulations", "30", "--n-trials", "300",
+             "--commissions", "0.0002", "0.002"],
+            tmp,
+        )
+        points = _sweep_payload(tmp, "monte_carlo_commission_sweep.json")
+    stdout = result.stdout
+    assert "minSR" in stdout
+    assert "Test resolution (measurement, not a correction)" in stdout
+    for point in points:
+        assert f"{point['test_resolution']['min_detectable_sharpe']:.4f}" in stdout
+        assert f"{point['sharpe_ratio']:.4f}" in stdout
+
+
+def test_parameter_optimization_sweep_is_explicitly_unresolved():
+    """top_sharpe is an in-sample selection statistic over the grid: no
+    held-out series exists to build its resolution on, so the sweep reports
+    it as explicitly unresolved (None block, None flag, n/a console) rather
+    than fabricating a number."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result = _run_walk_forward_cli(
+            "optimize",
+            ["--commissions", "0.0002", "0.002"],
+            tmp,
+        )
+        points = _sweep_payload(tmp, "parameter_optimization_commission_sweep.json")
+    assert len(points) == 2
+    for point in points:
+        assert point["test_resolution"] is None
+        assert point["sharpe_below_resolution"] is None
+    assert "n/a" in result.stdout
+
+
+def test_sweep_without_a_significance_test_says_so():
+    """No deflation means no resolution anywhere: not_applicable blocks,
+    n/a columns, and an explicit console note instead of silence."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result = _run_walk_forward_cli(
+            "out-of-sample",
+            ["--commissions", "0.0002", "0.002"],
+            tmp,
+        )
+        points = _sweep_payload(tmp, "out_of_sample_commission_sweep.json")
+    assert "no significance test was run" in result.stdout
+    assert "n/a" in result.stdout
+    for point in points:
+        resolution = point["test_resolution"]
+        assert resolution["sharpe_status"] == "not_applicable"
+        assert resolution["min_detectable_sharpe"] is None
+        # Unknown, not "not below".
+        assert point["sharpe_below_resolution"] is None
+
+
+# ---------------------------------------------------------------------------
 # Test registry
 # ---------------------------------------------------------------------------
 
@@ -917,6 +1150,26 @@ TEST_REGISTRY = [
      test_a_sweep_without_a_significance_test_says_so),
     ("test_the_sweep_point_resolution_carries_no_verdict",
      test_the_sweep_point_resolution_carries_no_verdict),
+    ("test_walk_forward_sweep_points_carry_their_own_resolution",
+     test_walk_forward_sweep_points_carry_their_own_resolution),
+    ("test_walk_forward_sweep_table_prints_the_threshold_next_to_the_sharpe",
+     test_walk_forward_sweep_table_prints_the_threshold_next_to_the_sharpe),
+    ("test_out_of_sample_sweep_points_carry_their_own_resolution",
+     test_out_of_sample_sweep_points_carry_their_own_resolution),
+    ("test_out_of_sample_sweep_table_prints_the_threshold_next_to_the_sharpe",
+     test_out_of_sample_sweep_table_prints_the_threshold_next_to_the_sharpe),
+    ("test_cpcv_sweep_points_carry_their_own_resolution",
+     test_cpcv_sweep_points_carry_their_own_resolution),
+    ("test_cpcv_sweep_table_prints_the_threshold_next_to_the_sharpe",
+     test_cpcv_sweep_table_prints_the_threshold_next_to_the_sharpe),
+    ("test_monte_carlo_sweep_points_build_their_own_resolution",
+     test_monte_carlo_sweep_points_build_their_own_resolution),
+    ("test_monte_carlo_sweep_table_prints_the_threshold_next_to_the_sharpe",
+     test_monte_carlo_sweep_table_prints_the_threshold_next_to_the_sharpe),
+    ("test_parameter_optimization_sweep_is_explicitly_unresolved",
+     test_parameter_optimization_sweep_is_explicitly_unresolved),
+    ("test_sweep_without_a_significance_test_says_so",
+     test_sweep_without_a_significance_test_says_so),
 ]
 
 
