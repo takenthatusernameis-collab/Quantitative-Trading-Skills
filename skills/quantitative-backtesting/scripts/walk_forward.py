@@ -939,6 +939,25 @@ def walk_forward_analysis(
     # was priced.
     summary["panel_pricing"] = panel_pricing
     summary["impact_aggregation"] = impact_aggregation
+    inert_grid_params = _inert_param_grid_keys(strategy_factory, param_grid, data)
+    summary["inert_grid_params"] = inert_grid_params
+    if inert_grid_params:
+        try:
+            accepted = _strategy_parameter_names(
+                strategy_factory(_first_grid_params(param_grid))
+            )
+        except Exception:
+            accepted = []
+        hint = (
+            f" The strategy reads: {', '.join(accepted)}."
+            if accepted
+            else ""
+        )
+        print(
+            "WARNING: the parameter grid did not change the strategy's "
+            f"behaviour for: {', '.join(inert_grid_params)}. The selection "
+            f"over those parameters is a null experiment.{hint}"
+        )
     # The execution warmup this path applied, so a consumer of the summary
     # knows how many leading bars of every window are not tradable without
     # having to re-derive the convention from the return series.
@@ -1168,6 +1187,25 @@ def parameter_optimization(
                     results[-1]["_returns"] = returns
         except Exception:
             continue
+
+    inert_grid_params = _inert_param_grid_keys(strategy_factory, param_grid, data)
+    if inert_grid_params:
+        try:
+            accepted = _strategy_parameter_names(
+                strategy_factory(_first_grid_params(param_grid))
+            )
+        except Exception:
+            accepted = []
+        hint = (
+            f" The strategy reads: {', '.join(accepted)}."
+            if accepted
+            else ""
+        )
+        print(
+            "WARNING: the parameter grid did not change the strategy's "
+            f"behaviour for: {', '.join(inert_grid_params)}. The ranking "
+            f"over those parameters is a null experiment.{hint}"
+        )
 
     results.sort(key=lambda x: x["sharpe_ratio"], reverse=True)
 
@@ -2916,6 +2954,25 @@ def cpcv_analysis(
     # The pricing convention that produced the reported out-of-sample P&L.
     summary["panel_pricing"] = panel_pricing
     summary["impact_aggregation"] = impact_aggregation
+    inert_grid_params = _inert_param_grid_keys(strategy_factory, param_grid, data)
+    summary["inert_grid_params"] = inert_grid_params
+    if inert_grid_params:
+        try:
+            accepted = _strategy_parameter_names(
+                strategy_factory(_first_grid_params(param_grid))
+            )
+        except Exception:
+            accepted = []
+        hint = (
+            f" The strategy reads: {', '.join(accepted)}."
+            if accepted
+            else ""
+        )
+        print(
+            "WARNING: the parameter grid did not change the strategy's "
+            f"behaviour for: {', '.join(inert_grid_params)}. The selection "
+            f"over those parameters is a null experiment.{hint}"
+        )
     # The execution warmup this path applied (see the walk-forward summary
     # for the same key).
     summary.update(
