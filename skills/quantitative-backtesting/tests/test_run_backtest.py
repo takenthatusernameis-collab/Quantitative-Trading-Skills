@@ -772,6 +772,50 @@ def test_run_backtest_fill_rate_reduces_trading_costs():
     )
 
 
+def test_run_backtest_fill_rate_scales_position_elementwise():
+    """fill_rate is a position-scale (leverage) limit, not a partial-fill model.
+
+    The achieved position is reset to fill_rate * target_position every bar
+    (`positions = signals.shift(1 + latency) * fill_rate`), so
+    fill_rate=0.5 must produce a per-bar return series that is exactly
+    0.5 x the fill_rate=1.0 series on every bar, and every
+    position-change-based cost must scale linearly with the fill rate.
+
+    The Sharpe ratio is NOT scale-invariant: the 2%/yr risk-free rate is
+    subtracted from the scaled return and is not scaled with it, so
+    sharpe(fill_rate=0.5) != 0.5 * sharpe(fill_rate=1.0). A fill-rate sweep
+    is therefore a leverage (de-risking) sweep, not an execution-realism
+    sweep. Documented in references/validation_methods.md under
+    "Fill rate: decided convention".
+    """
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    common = dict(commission=0.0002, slippage=0.0001, risk_free_rate=0.02)
+
+    full = run_backtest(data, strategy, _Args(fill_rate=1.0, **common))
+    half = run_backtest(data, strategy, _Args(fill_rate=0.5, **common))
+
+    # Elementwise scaling of the per-bar return series.
+    np.testing.assert_allclose(
+        half["returns"].to_numpy(),
+        0.5 * full["returns"].to_numpy(),
+        err_msg="fill_rate=0.5 returns are not exactly 0.5 x fill_rate=1.0 returns",
+    )
+
+    # Position-change-based costs scale linearly with the fill rate.
+    assert np.isclose(
+        half["returns"].sum(), full["returns"].sum() * 0.5, rtol=1e-6, atol=1e-12,
+    ), f"expected returns to halve with fill_rate=0.5: {half['returns'].sum()} vs {full['returns'].sum() * 0.5}"
+
+    # Sharpe is not scale-invariant (the risk-free rate is not scaled with
+    # the returns): halving the position does not halve the Sharpe.
+    full_metrics = calculate_metrics(full, risk_free_rate=0.02)
+    half_metrics = calculate_metrics(half, risk_free_rate=0.02)
+    assert not np.isclose(
+        half_metrics["sharpe_ratio"], 0.5 * full_metrics["sharpe_ratio"], rtol=1e-6,
+    ), f"expected Sharpe to be non-scale-invariant: {half_metrics['sharpe_ratio']} vs {0.5 * full_metrics['sharpe_ratio']}"
+
+
 def test_run_backtest_market_impact_scales_with_equity_not_price():
     """run_backtest market impact uses equity-scaled notional, not raw price.
 
@@ -3644,6 +3688,7 @@ TEST_REGISTRY = [
     ("test_run_backtest_fill_rate_one_identical_to_default", test_run_backtest_fill_rate_one_identical_to_default),
     ("test_run_backtest_fill_rate_scales_borrow_cost_with_position", test_run_backtest_fill_rate_scales_borrow_cost_with_position),
     ("test_run_backtest_fill_rate_reduces_trading_costs", test_run_backtest_fill_rate_reduces_trading_costs),
+    ("test_run_backtest_fill_rate_scales_position_elementwise", test_run_backtest_fill_rate_scales_position_elementwise),
     ("test_run_backtest_fill_rate_invalid_values_rejected", test_run_backtest_fill_rate_invalid_values_rejected),
     ("test_cli_run_backtest_fill_rate_sweep", test_cli_run_backtest_fill_rate_sweep),
     ("test_parse_args_accepts_latencies", test_parse_args_accepts_latencies),

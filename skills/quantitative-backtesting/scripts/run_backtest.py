@@ -86,7 +86,7 @@ def parse_args():
     parser.add_argument("--benchmark-expense-ratio", type=float, default=None, help="Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%). Defaults to 0 (applies to all benchmarks).")
     parser.add_argument("--benchmark-cost-is-periodic", action="store_true", help="If set, apply benchmark trading costs (commission+slippage) as periodic deductions each period instead of as a round-trip cost on total return (applies to all benchmarks).")
     parser.add_argument("--latency", type=int, default=0, help="Execution latency in periods (0 = no delay, 1 = one period delay). Delays position execution by latency periods after signal generation.")
-    parser.add_argument("--fill-rate", type=float, default=1.0, help="Execution fill rate (0 < r <= 1); only this fraction of each targeted position change is filled, scaling the achieved position and all transaction costs proportionally. Default 1.0 (full fill, backward compatible).")
+    parser.add_argument("--fill-rate", type=float, default=1.0, help="Position-scale limit (0 < r <= 1): the achieved position is fill_rate times the target position on every bar, so all position-change-based costs scale proportionally. It is a position-size (leverage) lever, not a partial-fill execution model. Default 1.0 (full fill, backward compatible).")
     parser.add_argument("--fill-rates", type=float, nargs="+", default=None, help="List of fill rates to sweep (overrides --fill-rate).")
     parser.add_argument("--latencies", type=int, nargs="+", default=None, help="List of execution latencies (in periods) to sweep (overrides --latency). Delays position execution by each latency after signal generation.")
     parser.add_argument("--adjust-splits", action="store_true", help="Adjust prices for stock splits using the splits column if present.")
@@ -228,8 +228,14 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     latency = getattr(args, 'latency', 0) or 0
     if latency < 0:
         latency = 0
-    # Account for partial execution fill rate (only a fraction of each
-    # targeted position change is filled; scales position and costs)
+    # Account for the execution fill-rate limit: the achieved position is
+    # fill_rate times the target position on every bar, so every
+    # position-change-based cost (commission, slippage, market impact) and
+    # every exposure-based cost (borrow, funding) scales proportionally. This
+    # is a position-size (leverage) lever, not a partial-fill execution model
+    # -- the held position is reset to fill_rate * target each bar instead of
+    # converging toward the target, and the unfilled part of the order is not
+    # charged anything.
     fill_rate = getattr(args, 'fill_rate', 1.0)
     if fill_rate is None:
         fill_rate = 1.0

@@ -424,7 +424,22 @@ def walk_forward_analysis(
         latency: Execution latency in periods passed to _calculate_strategy_returns.
             Positions are delayed by `1 + latency` periods after signal generation.
             Default 0 (no added delay beyond the standard next-period fill).
-        fill_rate: Fraction of each targeted position change that is filled,
+        fill_rate: Position-scale limit (participation rate) in (0, 1]. The
+            achieved position is ``fill_rate * target_position`` on every bar,
+            so every position-change-based cost (commission, slippage, market
+            impact) and every exposure-based cost (borrow, funding) scales
+            with it. Default 1.0 (full fill, backward compatible).
+
+            This is a *position-size (leverage) lever*, not a partial-fill
+            execution model: the held position is reset to ``fill_rate *
+            target`` each bar instead of converging toward the target
+            (``position_t = position_{t-1} + fill_rate * (target_t -
+            position_{t-1})``), and the unfilled part of the order is not
+            charged anything. Sweeping ``fill_rate`` therefore measures
+            leverage sensitivity, not execution realism -- the Sharpe ratio is
+            not scale-invariant because the risk-free rate is subtracted from
+            the scaled return and is not scaled with it. See
+            `references/validation_methods.md`, "Fill rate: decided convention".
             passed to _calculate_strategy_returns. Default 1.0 (full fill).
         apply_deflation: When True, compute the Deflated Sharpe Ratio
             (multiple-testing correction) for each period's in-sample
@@ -986,7 +1001,22 @@ def parameter_optimization(
         latency: Execution latency in periods passed to _calculate_strategy_returns.
             Positions are delayed by `1 + latency` periods after signal generation.
             Default 0 (no added delay beyond the standard next-period fill).
-        fill_rate: Fraction of each targeted position change that is filled,
+        fill_rate: Position-scale limit (participation rate) in (0, 1]. The
+            achieved position is ``fill_rate * target_position`` on every bar,
+            so every position-change-based cost (commission, slippage, market
+            impact) and every exposure-based cost (borrow, funding) scales
+            with it. Default 1.0 (full fill, backward compatible).
+
+            This is a *position-size (leverage) lever*, not a partial-fill
+            execution model: the held position is reset to ``fill_rate *
+            target`` each bar instead of converging toward the target
+            (``position_t = position_{t-1} + fill_rate * (target_t -
+            position_{t-1})``), and the unfilled part of the order is not
+            charged anything. Sweeping ``fill_rate`` therefore measures
+            leverage sensitivity, not execution realism -- the Sharpe ratio is
+            not scale-invariant because the risk-free rate is subtracted from
+            the scaled return and is not scaled with it. See
+            `references/validation_methods.md`, "Fill rate: decided convention".
             passed to _calculate_strategy_returns. Default 1.0 (full fill).
         n_splits: Number of train/test splits
         apply_deflation: When True, compute the Deflated Sharpe Ratio
@@ -1675,7 +1705,22 @@ def _calculate_strategy_returns(
             `1 + latency` periods after signal generation (1 = trade at next
             period's open, the default look-ahead-safe convention).
             Negative values are clamped to 0 to prevent accidental look-ahead.
-        fill_rate: Fraction of each targeted position change that is filled,
+        fill_rate: Position-scale limit (participation rate) in (0, 1]. The
+            achieved position is ``fill_rate * target_position`` on every bar,
+            so every position-change-based cost (commission, slippage, market
+            impact) and every exposure-based cost (borrow, funding) scales
+            with it. Default 1.0 (full fill, backward compatible).
+
+            This is a *position-size (leverage) lever*, not a partial-fill
+            execution model: the held position is reset to ``fill_rate *
+            target`` each bar instead of converging toward the target
+            (``position_t = position_{t-1} + fill_rate * (target_t -
+            position_{t-1})``), and the unfilled part of the order is not
+            charged anything. Sweeping ``fill_rate`` therefore measures
+            leverage sensitivity, not execution realism -- the Sharpe ratio is
+            not scale-invariant because the risk-free rate is subtracted from
+            the scaled return and is not scaled with it. See
+            `references/validation_methods.md`, "Fill rate: decided convention".
             in (0, 1]. Scales achieved positions and all position-change-based
             costs (commission, slippage, impact) and borrow/funding exposure.
             Default 1.0 (full fill) is bitwise identical to no fill modeling.
@@ -1721,7 +1766,7 @@ def _calculate_strategy_returns(
     # the following bar, so both bars are non-tradable and dropped. The
     # constant is shared with run_backtest.py through utils.py so the
     # convention has a single definition.
-    positions = signals.shift(1 + latency) * fill_rate  # Trade at next period's open, delayed by execution latency; partial fills scale achieved exposure
+    positions = signals.shift(1 + latency) * fill_rate  # Trade at next period's open, delayed by execution latency; the achieved position is fill_rate * target (a position-scale limit, not a partial-fill model)
 
     # Borrow and funding costs are annualized rates applied per period.
     # The per-period rate divides by the number of periods per year inferred
@@ -2338,7 +2383,22 @@ def cpcv_analysis(
         latency: Execution latency in periods passed to _calculate_strategy_returns.
             Positions are delayed by `1 + latency` periods after signal generation.
             Default 0 (no added delay beyond the standard next-period fill).
-        fill_rate: Fraction of each targeted position change that is filled,
+        fill_rate: Position-scale limit (participation rate) in (0, 1]. The
+            achieved position is ``fill_rate * target_position`` on every bar,
+            so every position-change-based cost (commission, slippage, market
+            impact) and every exposure-based cost (borrow, funding) scales
+            with it. Default 1.0 (full fill, backward compatible).
+
+            This is a *position-size (leverage) lever*, not a partial-fill
+            execution model: the held position is reset to ``fill_rate *
+            target`` each bar instead of converging toward the target
+            (``position_t = position_{t-1} + fill_rate * (target_t -
+            position_{t-1})``), and the unfilled part of the order is not
+            charged anything. Sweeping ``fill_rate`` therefore measures
+            leverage sensitivity, not execution realism -- the Sharpe ratio is
+            not scale-invariant because the risk-free rate is subtracted from
+            the scaled return and is not scaled with it. See
+            `references/validation_methods.md`, "Fill rate: decided convention".
             passed to _calculate_strategy_returns. Default 1.0 (full fill).
         apply_deflation: When True, compute the Deflated Sharpe Ratio
             (multiple-testing correction) for each fold's in-sample
@@ -2990,7 +3050,22 @@ def out_of_sample_validation(
         latency: Execution latency in periods passed to _calculate_strategy_returns.
             Positions are delayed by `1 + latency` periods after signal generation.
             Default 0 (no added delay beyond the standard next-period fill).
-        fill_rate: Fraction of each targeted position change that is filled,
+        fill_rate: Position-scale limit (participation rate) in (0, 1]. The
+            achieved position is ``fill_rate * target_position`` on every bar,
+            so every position-change-based cost (commission, slippage, market
+            impact) and every exposure-based cost (borrow, funding) scales
+            with it. Default 1.0 (full fill, backward compatible).
+
+            This is a *position-size (leverage) lever*, not a partial-fill
+            execution model: the held position is reset to ``fill_rate *
+            target`` each bar instead of converging toward the target
+            (``position_t = position_{t-1} + fill_rate * (target_t -
+            position_{t-1})``), and the unfilled part of the order is not
+            charged anything. Sweeping ``fill_rate`` therefore measures
+            leverage sensitivity, not execution realism -- the Sharpe ratio is
+            not scale-invariant because the risk-free rate is subtracted from
+            the scaled return and is not scaled with it. See
+            `references/validation_methods.md`, "Fill rate: decided convention".
             passed to _calculate_strategy_returns. Default 1.0 (full fill).
         apply_deflation: Compute Deflated Sharpe Ratio for multiple-testing correction
         benchmark: Optional list of benchmark OHLCV DataFrames for buy-and-hold comparison. When multiple benchmarks are provided, alpha p-values are corrected for multiple comparisons using a Deflated Alpha analogue.
@@ -7447,7 +7522,7 @@ def main():
     common_parser.add_argument("--multi-symbol", action="store_true", help="Load every symbol in a multi-symbol file (with a 'symbol' or 'ticker' column) as a panel, run survivorship-bias detection, and backtest a panel. Requires a panel strategy such as cross_sectional_momentum or dual_momentum.")
     common_parser.add_argument("--seed", type=int, default=None, help="Seed for the Monte Carlo random number generator. A fixed default seed is used when unset, so repeated runs (and cost sweeps) are reproducible; set any value to override.")
     common_parser.add_argument("--latency", type=int, default=0, help="Execution latency in periods (0 = no delay, 1 = one period delay). Delays position execution by latency periods after signal generation.")
-    common_parser.add_argument("--fill-rate", type=float, default=1.0, help="Execution fill rate (0 < r <= 1); only this fraction of each targeted position change is filled, scaling the achieved position and all transaction costs proportionally. Default 1.0 (full fill, backward compatible).")
+    common_parser.add_argument("--fill-rate", type=float, default=1.0, help="Position-scale limit (0 < r <= 1): the achieved position is fill_rate times the target position on every bar, so all position-change-based costs scale proportionally. It is a position-size (leverage) lever, not a partial-fill execution model. Default 1.0 (full fill, backward compatible).")
     common_parser.add_argument("--fill-rates", type=float, nargs="+", default=None, help="List of fill rates to sweep (overrides --fill-rate).")
     common_parser.add_argument("--latencies", type=int, nargs="+", default=None, help="List of execution latencies (in periods) to sweep (overrides --latency). Delays position execution by each latency after signal generation.")
     common_parser.add_argument(

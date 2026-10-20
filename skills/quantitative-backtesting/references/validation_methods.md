@@ -915,40 +915,53 @@ Parameter stability should be considered alongside out-of-sample performance
 metrics (OOS Sharpe, total return, volatility) and multiple-testing corrections
 (Deflated Sharpe Ratio) to form a complete picture of strategy robustness.
 
-### Open: what `fill_rate` actually models
+### Fill rate: decided convention
 
 `--fill-rate` (and the `--fill-rates` sweep) is described in the CLI help as
-"the fraction of each targeted position change that is filled", but the
-implementation **scales the target position**:
+a position-scale limit, and the implementation matches that description:
 
 ```
 positions = signals.shift(1 + latency) * fill_rate
 ```
 
-The consequences, measured on a deterministic 5-asset panel
-(`cross_sectional_momentum`, `lookback` 20, 498 usable bars):
+The convention, now pinned by `tests/test_run_backtest.py`
+(`test_run_backtest_fill_rate_scales_position_elementwise`) and by the
+existing per-entry-point fill-rate tests, is:
 
-- the per-bar return series is **exactly** `fill_rate` times the full-fill
-  series (the ratio is 0.500000 on every bar at `fill_rate=0.5`);
-- therefore a fill-rate sweep is a **position-size (leverage) sweep**, not an
-  execution-realism sweep: the total return falls to 0.48x at
-  `fill_rate=0.5`, and the Sharpe falls from 3.19 to 1.79 -- because the
-  risk-free rate (2%/yr) is subtracted from the *scaled* return and is not
-  scaled with it, so the Sharpe is not scale-invariant;
-- the traded notional per period is `fill_rate * |delta target|`, so the
-  transaction-cost and market-impact charges scale linearly with
-  `fill_rate` (the impact charge halves at `fill_rate=0.5`);
-- `estimate_capacity()` has no `fill_rate` argument at all, so the reported
-  capacity is the capacity at full fill;
-- the *unfilled* part of the target order is not charged anything: there is
-  no shortfall, priority or spread cost for the unexecuted portion.
+- **`fill_rate` scales the achieved position.** The held position on each
+  bar is ``fill_rate * target_position``, so every position-change-based
+  cost (commission, slippage, market impact) and every exposure-based cost
+  (borrow, funding) scales linearly with `fill_rate`. The parameter default
+  is `1.0` (full fill, backward compatible), and `fill_rate=1.0` is bitwise
+  identical to no fill modeling.
+- **It is a position-size (leverage) lever, not a partial-fill execution
+  model.** A real partial fill would converge the held position toward the
+  target (``position_t = position_{t-1} + fill_rate * (target_t -
+  position_{t-1})``); this framework instead resets the held position to
+  ``fill_rate * target`` every bar. The unfilled part of the target order is
+  not charged anything: there is no shortfall, priority or spread cost for
+  the unexecuted portion.
+- **A `fill_rate` sweep is therefore a leverage (de-risking) sweep, not an
+  execution-realism sweep.** Measured on a deterministic 5-asset panel
+  (`cross_sectional_momentum`, `lookback` 20, 498 usable bars,
+  `commission=0.0002`, `slippage=0.0001`, `impact_coefficient=0.5`):
+  - the per-bar return series is exactly `fill_rate` times the full-fill
+    series (ratio `0.500000` on every bar at `fill_rate=0.5`);
+  - total return falls to `0.48x` at `fill_rate=0.5` (`+13.851138%` ->
+    `+6.706919%`) and the Sharpe falls from `3.1864` to `1.7935` -- because
+    the risk-free rate (2%/yr) is subtracted from the *scaled* return and is
+    not scaled with it, so the Sharpe is **not** scale-invariant;
+  - `estimate_capacity()` has no `fill_rate` argument, so the reported
+    capacity is the capacity at full fill.
 
 So a reader who sweeps `--fill-rates 0.5 0.75 1.0` to test "what if only
 half of my orders fill" is in fact measuring a de-risked version of the
-strategy. This is recorded here as an **open methodology question**, not as a
-fixed convention: either the parameter should be renamed/documented as a
-participation limit (a position-size multiplier) with the semantics pinned by
-a test, or it should be re-implemented as a true partial-fill model (the
-held position converges toward the target instead of snapping to
-`fill_rate * target`), which is a number-changing change and must be
-reported as such.
+strategy, and must not read the result as evidence of execution robustness.
+
+**Not taken in this session:** re-implementing `fill_rate` as a true
+partial-fill model. That is a number-changing change (the pinned CPCV and
+walk-forward numbers, the `test_output/` snapshot and the sweep artifacts
+would all move) and must be reported as a methodology change with
+before/after numbers, not as a bug fix. The parameter name stays
+`fill_rate`; renaming it would change the CLI contract, the sweep artifact
+keys and every test that references it, and is deliberately out of scope.

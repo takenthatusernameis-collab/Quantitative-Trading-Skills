@@ -195,19 +195,7 @@ Risk Metrics:
   on top of it. Documented in `references/validation_methods.md` under
   "Recording the Warmup Convention" and guarded by
   `tests/test_execution_warmup.py`.
-- **`--fill-rate` scales the position, it does not model a partial fill**:
-  the CLI help describes it as "the fraction of each targeted position change
-  that is filled", but the implementation multiplies the *target* position by
-  the fill rate, so the per-bar return series is exactly `fill_rate` times
-  the full-fill series. A `--fill-rates` sweep therefore measures
-  position-size (leverage) sensitivity, not execution realism: the Sharpe is
-  not even scale-invariant (the risk-free rate is not scaled with the
-  returns), the unfilled part of the order is charged nothing, and
-  `estimate_capacity()` ignores the fill rate entirely. Do not read a
-  fill-rate sweep as evidence that a strategy survives realistic execution.
-  This is an **open methodology question**; see
-  `references/validation_methods.md` under "Open: what `fill_rate` actually
-  models".
+- **`--fill-rate` scales the position, it does not model a partial fill**: the achieved position is `fill_rate * target_position` on every bar, so every position-change-based cost (commission, slippage, market impact) and every exposure-based cost (borrow, funding) scales linearly with it. Default `1.0` (full fill, backward compatible) is bitwise identical to no fill modeling. A `--fill-rates` sweep therefore measures position-size (leverage) sensitivity, not execution realism: the per-bar return series is exactly `fill_rate` times the full-fill series, the Sharpe is not scale-invariant (the risk-free rate is not scaled with the returns), the unfilled part of the order is charged nothing, and `estimate_capacity()` reports capacity at full fill. Do not read a fill-rate sweep as evidence that a strategy survives realistic execution. The convention is decided and pinned by `tests/test_run_backtest.py` (`test_run_backtest_fill_rate_scales_position_elementwise`) and documented in `references/validation_methods.md` under "Fill rate: decided convention".
 - **Capacity is a point-in-time reading; the trend is the distribution**: the
   market-impact capacity estimate uses the *last* bar's ADV, so a liquidity
   squeeze that happened *inside* a window is invisible to it. Each regime
