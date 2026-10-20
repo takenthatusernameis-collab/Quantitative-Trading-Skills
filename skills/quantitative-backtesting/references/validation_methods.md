@@ -1518,18 +1518,145 @@ reported minimum detectable effect can be cleared. Two consequences are worth
 stating plainly:
 
 - **The pre-registered criteria are hard to satisfy at plausible effect
-  sizes.** The deflation benchmark (the expected maximum Sharpe over the
-  parameter grid) is estimated from the dispersion of the trial Sharpes, and
-  that dispersion does not shrink as the sample grows: the number of trials
-  grows with the number of validation windows, so the expected maximum grows
-  with it. The smallest confirmable annualized Sharpe was 4.20 on the
-  shipped example, 2.29-2.91 on the other shipped paths and 1.83 on the
-  control. An annualized Sharpe of, say, 1.5 -- a plausible result for a good
-  strategy -- is below every one of those thresholds, so criterion 2 would
-  not confirm it at these configurations. The control therefore demonstrates
-  that the machinery works, not that the criteria are well scaled.
+  sizes *on the samples measured*.** The smallest confirmable annualized
+  Sharpe was 4.20 on the shipped example, 2.29-2.91 on the other shipped
+  paths and 1.83 on the control. An annualized Sharpe of, say, 1.5 -- a
+  plausible result for a good strategy -- is below every one of those
+  thresholds, so criterion 2 would not confirm it at these configurations.
+  An earlier reading of this paragraph concluded from the control alone that
+  the criteria were unsatisfiable at plausible effect sizes *at any sample
+  size*, on the ground that the trial-Sharpe dispersion the deflation
+  benchmark is estimated from "does not shrink as the sample grows". The
+  measurement below shows that conclusion to be wrong: the dispersion does
+  shrink (the walk-forward training window expands, so the later trial
+  Sharpes are estimated on more data), the resolution falls with the sample
+  size, and criterion 2 *can* confirm a plausible effect once the sample is
+  a few thousand bars. The statement above is therefore a statement about
+  the samples it was measured on, and the control demonstrates that the
+  machinery works -- it does not, on its own, say how the criteria scale
+  with the sample.
 - **The control says nothing about the shipped sample.** It is a separate
   fixture; the shipped example's output and verdict are unchanged by it.
+
+### How much data does criterion 2 need?
+
+The shipped samples leave one question open. Their significance thresholds
+sit beyond the plausibility bound, but is that a property of the
+*criteria* -- so that no sample size would ever let them confirm a
+plausible effect -- or of the *sample* -- so that a longer history would?
+The resolution is a function of the sample, so the question is answerable by
+measurement rather than by argument.
+
+`scripts/measure_resolution_vs_sample_size.py` measures it. At the worked
+example's configuration (the 16-combination grid, the 6-month walk-forward
+training window with 2-month test and step windows, the 0.6/0.2/0.2
+chronological split, daily bars) it rebuilds the synthetic control fixture
+at each rung of a sample-size ladder and reports the framework's own
+`summary["test_resolution"]` -- built by `walk_forward._build_test_resolution`,
+the same builder the walk-forward, CPCV and out-of-sample paths attach to
+their summaries. The script re-derives nothing, re-tunes nothing and changes
+no threshold, no bound, no criterion and no verdict. `--data FILE` measures
+the same curve on the *first N bars* of a real history instead of the
+synthetic fixture.
+
+#### The curve
+
+The **no-effect** control is the null calibration: with the drift removed,
+the trial Sharpes the deflation benchmark is estimated from are pure
+estimation noise, which is what that benchmark is meant to measure. The
+**effect** series is the positive control's own configuration. Seed 7, the
+documented control seed:
+
+| Bars | Test observations | Parameter trials | Smallest confirmable annualized Sharpe (no-effect / effect) | Deflation benchmark SR* (no-effect / effect) | Criterion 2 |
+| --- | --- | --- | --- | --- | --- |
+| 500 | 98 | 13 / 4 | 3.8311 / 2.8591 | 1.7356 / 0.7768 | beyond the bound |
+| 1,000 | 198 | 50 / 53 | 3.1161 / 3.0915 | 1.6491 / 1.7752 | beyond the bound |
+| 2,500 | 498 | 233 / 189 | 2.3975 / 2.4011 | 1.4403 / 1.4985 | beyond the bound |
+| 5,000 | 998 | 510 / 434 | 1.9096 / 1.8373 | 1.2560 / 1.2135 | within the bound |
+| 10,000 | 1,998 | 1,047 / 897 | 1.7136 / 1.6012 | 1.2557 / 1.1584 | within the bound |
+| 25,000 | 4,998 | 2,641 / 2,210 | 1.3519 / 1.2037 | 1.0618 / 0.9208 | within the bound |
+| 50,000 | 9,998 | 5,347 / 4,424 | 1.1012 / 1.0100 | 0.8975 / 0.8098 | within the bound |
+
+#### The answer
+
+**Yes -- there is a sample size at which criterion 2 can confirm an effect
+of a plausible size.** The resolution falls with the sample size and crosses
+below the framework's 2.0 bound at a few thousand daily bars:
+
+- on seed 7 the crossing is between 4,000 bars (2.0366) and 4,500 bars
+  (1.9555) on the no-effect series, and between 3,000 bars (2.1922) and
+  4,000 bars (1.9476) on the effect series;
+- on the other seeds measured the crossing is later -- between 5,000 and
+  6,000 bars (seed 2024) and between 6,000 and 10,000 bars (seed 1);
+- **by 10,000 bars every draw measured is inside the bound**: 1.52-1.82
+  across the three seeds and both series;
+- and it keeps falling: 1.10 (no-effect) and 1.01 (effect) at 50,000 bars.
+
+So the shipped example's verdict is a statement about its 504 bars, not
+about the criteria. On the shipped sample criterion 2 needs an annualized
+Sharpe of 4.1950 to confirm anything -- more than twice the plausibility
+bound -- and no verdict on that sample can distinguish "the strategy has no
+edge" from "the sample is too small to see one".
+
+#### Why the resolution improves, and where it stops
+
+The minimum detectable Sharpe inverts the Deflated Sharpe z-score, so to
+first order
+
+```
+mde(annualized) = sqrt(annualization) * [ SR*(per period) + z_target / sqrt(T - 1) ]
+```
+
+with `SR*(per period) = std(trial Sharpes) * sqrt(2 ln N)` the framework's own
+deflation benchmark, `T` the number of test observations, `N` the number of
+parameter trials, and `z_target = 1.2816` the normal quantile for a
+p-value of 0.10. Two things follow.
+
+- **The floor is SR\* itself.** No sample size can make the test confirm an
+  effect below the expected maximum Sharpe the parameter grid produces from
+  luck alone. On this construction SR\* is 0.78-1.78 -- below the 2.0 bound
+  -- so the floor is not what blocks criterion 2 here. On the *shipped*
+  504-bar sample the floor is 2.0138 -- just above the bound -- so for that
+  sample criterion 2 could not confirm a plausible effect at any sample
+  size: the 21 configurations its search evaluated were, on their own,
+  expected to produce an annualized Sharpe of 2.01 from luck alone. The
+  floor is a property of the sample, and it is the number to read before
+  asking for more data.
+- **The sample size removes the `1 / sqrt(T)` term.** The trial count `N`
+  grows with the sample, but only through `sqrt(2 ln N)` (3.5 at `N = 400`,
+  4.1 at `N = 4,400`), which does not offset the fall. And the dispersion
+  the deflation benchmark is estimated from *does* shrink as the sample
+  grows, because the walk-forward training window expands: the trial
+  Sharpes of the later windows are estimated on more data and are
+  correspondingly more precise. Measured on the no-effect control, the
+  pooled trial-Sharpe dispersion falls from 0.47 annualized at 2,000 bars
+  to 0.34 at 10,000, while the dispersion of the *last* 25 windows alone is
+  already 0.16 at that size.
+
+That is why the curve falls, and why it flattens: the resolution converges
+onto the floor rather than onto zero.
+
+#### What this does not establish
+
+- **The floor is a property of the sample, not of the framework.** SR* is
+  estimated from the dispersion of the trial Sharpes of *this* strategy on
+  *this* sample. A strategy or a market whose trial Sharpes are more widely
+  dispersed has a higher floor, and for it criterion 2 may never confirm a
+  plausible effect. The framework already reports that floor -- it is the
+  `expected_max_sharpe` key of the Deflated Sharpe block the summary carries
+  under `summary["deflated_sharpe"]` -- so a reader can read it off their
+  own run without repeating this measurement.
+- **The ladder is measured on the synthetic control fixture.** The numbers
+  are properties of a formula and of the decision machinery; the crossing
+  point is a property of this construction, not a promise about a real
+  history. `--data FILE` measures the same curve on real data.
+- **Nothing here changes a verdict.** The measurement is beside the
+  pre-registered criteria, exactly like the resolution block itself: no
+  threshold, bound, criterion or verdict moves, and the shipped sample's
+  output is byte-identical. `tests/test_resolution_vs_sample_size.py` pins
+  all three properties, including that the measurement agrees with the
+  worked example's own shipped path (so it measures the shipped
+  configuration and not a private copy of it).
 
 ### The primary backtest entry point reports it too
 

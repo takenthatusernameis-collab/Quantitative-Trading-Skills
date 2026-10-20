@@ -151,6 +151,15 @@ the decision machinery: its data is produced by a formula
 (`scripts/generate_positive_control_data.py`), describes no real security, and
 says nothing about any market.
 
+**How much data the criteria need.** The thresholds on the shipped sample are a
+statement about its 504 bars, not about the criteria: measured at the same
+configuration, the smallest annualized Sharpe criterion 2 can confirm falls
+from 4.20 (the shipped 504-bar sample) to 2.40 at 2,500 bars and 1.71 at
+10,000 bars, crossing below the framework's 2.0 plausibility bound on the way.
+`scripts/measure_resolution_vs_sample_size.py` produces that curve, and
+`references/validation_methods.md`, "How much data does criterion 2 need?",
+records it and the mechanism.
+
 Run with:
 ```bash
 python3 skills/quantitative-backtesting/examples/falsifiable_hypothesis_example.py
