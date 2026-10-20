@@ -44,6 +44,9 @@ The result dictionary contains:
     were taken but compounded to zero).
   - `periods_with_position`: Number of periods that produced an out-of-sample
     return (at least one parameter set took a position in that period).
+  - `no_selection_diagnosis`: Why no period could select a parameter, when
+    that happened (`{cause, message, details}`). Absent when at least one
+    period selected a parameter. See "When No Parameter Can Be Selected".
   - `capacity` / `capacity_trend`: Market-impact capacity for the whole
     sample and the distribution of the per-period capacity readings inside
     it. `capacity` is a point-in-time reading (the last bar's ADV);
@@ -464,11 +467,74 @@ cause is reported explicitly (`summary["no_selection_diagnosis"]`, with a
 | `cause` | Meaning | Remedy |
 | ------- | ------- | ------ |
 | `no_validation_windows` | The validation phase produced no out-of-sample window at all (the walk-forward window does not fit the training split) | Give the training split more history, or shorten `--wf-train-months` / `--wf-test-months` |
-| `no_position_in_validation_window` | Windows were built, but every grid combination stayed flat over them (the indicator warm-up is longer than the window) | Shorten the indicator lookbacks in the grid, lengthen `--wf-test-months`, or raise `--cpcv-test-size` / lower `--cpcv-n-splits` |
+| `no_position_in_validation_window` | Windows were built, but every grid combination stayed flat over them (the indicator warm-up is longer than the window) | Shorten the indicator lookbacks in the grid, lengthen the test window, or raise the test-size fraction / lower the number of splits |
 
-The CLI prints the diagnosis and writes it to
-`out_of_sample_summary.json`, so a failed run still leaves a
-machine-readable record of why it failed next to the split it used.
+**Every path that can end up selecting nothing now reports it**, with the
+same vocabulary and the same artifact key, so one reader handles all of them:
+
+| Path | Recorded in | Notes |
+| ---- | ----------- | ----- |
+| `out-of-sample` | `summary["no_selection_diagnosis"]` (the failure summary) | The validation phase runs inside the training split |
+| `cpcv` (standalone) | `summary["no_selection_diagnosis"]` | The whole sample is the data the selection ran on |
+| `walk-forward` (standalone) | `summary["no_selection_diagnosis"]` | The whole sample is the data the selection ran on |
+
+The diagnosis is recorded **only** when no period / fold selected a parameter
+at all; a run that selected something carries no diagnosis. It is a
+measurement: it changes no return, cost, impact, capacity or selection
+number.
+
+The CLI prints the diagnosis next to the fold / period count
+(`No parameter could be selected: <message>`), so the console and the
+artifact carry the same string.
+
+#### The remedy names the flags the path actually accepts
+
+The same setting is spelled differently on the different subcommands, so the
+remedy names the flags of the path that produced the failure:
+
+| Path | Flags in the remedy |
+| ---- | ------------------- |
+| `cpcv` (standalone) | `--test-size`, `--n-splits` |
+| `walk-forward` (standalone) | `--train-months`, `--test-months`, `--step-months` |
+| `out-of-sample` (CPCV) | `--cpcv-test-size`, `--cpcv-n-splits` |
+| `out-of-sample` (walk-forward) | `--wf-train-months`, `--wf-test-months`, `--wf-step-months` |
+
+#### The CPCV test window is a fraction of each group
+
+`--test-size` is the fraction of **each group** that becomes the test set, so
+the effective out-of-sample fraction is
+
+```
+effective_oos_fraction = test_size / n_splits
+```
+
+not the fraction the flag name suggests. At the default `--test-size 0.1
+--n-splits 10` the effective out-of-sample fraction is **1%**: on the shipped
+`assets/example_data/sample_ohlcv.csv` (504 bars) every fold's test window
+holds **5 bars**, which is shorter than the indicator warm-up, so no
+combination can take a position and no parameter can be selected. The
+diagnosis states the effective fraction and the window length, so this is
+never left to be guessed.
+
+### The Overfitting-Risk Verdict When Nothing Could Be Selected
+
+The risk classification is derived from the *parameter stability*, which
+exists only when a parameter was selected in at least one period / fold. When
+nothing could be selected there is no stability to classify, so the verdict
+is **not applicable**, not "low" and not "high":
+
+- CPCV: `summary["overfitting_risk"]` is `null` and
+  `summary["overfitting_risk_reason"]` says why;
+- walk-forward: `diagnostics["overfitting_risk"]` is `null` and
+  `diagnostics["overfitting_risk_reason"]` says why;
+- the CLI prints `Overfitting Risk: unknown` plus the reason, and the
+  sensitivity-sweep tables print `unknown` in the risk column.
+
+Before this change the two paths disagreed on the same state -- CPCV
+reported `high` and walk-forward reported `low` for a run in which no
+parameter could be selected -- which is a category error: a categorical
+verdict on a run that could not trade reads as a finding about the strategy
+when it is a fact about the window.
 
 ### Inert Parameter Grids
 
@@ -613,6 +679,11 @@ the optimizer is chasing noise.
 | >= 0.5            | low        |
 | 0.3 to 0.5        | medium     |
 | < 0.3             | high       |
+
+When no period selected a parameter at all there is no stability to
+classify: the verdict is `null` ("not applicable") with an
+`overfitting_risk_reason`, not a categorical level. See "When No Parameter
+Can Be Selected".
 
 ### Out-of-Sample Metrics
 
@@ -760,6 +831,9 @@ The result dictionary contains:
     but compounded to zero).
   - `folds_with_position`: Number of folds that produced an out-of-sample
     return (at least one parameter set took a position in that fold).
+  - `no_selection_diagnosis`: Why no fold could select a parameter, when
+    that happened (`{cause, message, details}`). Absent when at least one
+    fold selected a parameter. See "When No Parameter Can Be Selected".
   - `capacity` / `capacity_trend`: Market-impact capacity for the whole
     sample and the distribution of the per-period capacity readings inside
     it. `capacity` is a point-in-time reading (the last bar's ADV);
@@ -805,6 +879,11 @@ the optimizer is chasing noise.
 | >= 0.5            | low        |
 | 0.3 to 0.5        | medium     |
 | < 0.3             | high       |
+
+When no fold selected a parameter at all there is no stability to classify:
+the verdict is `null` ("not applicable") with an
+`overfitting_risk_reason`, not a categorical level. See "When No Parameter
+Can Be Selected".
 
 ### The Warmup Bars of a Window
 
@@ -953,7 +1032,9 @@ results = cpcv_analysis(
 
 print(f"OOS Sharpe: {results['summary']['oos_sharpe']:.2f}")
 print(f"Parameter Stability: {results['summary']['avg_param_stability']:.2f}")
-print(f"Overfitting Risk: {results['summary']['overfitting_risk']}")
+print(f"Overfitting Risk: {results['summary']['overfitting_risk']}")  # None when nothing could be selected
+# Why nothing could be selected (absent when a parameter was selected):
+print(results['summary'].get("no_selection_diagnosis", {}).get("message", ""))
 ```
 
 ### CLI Usage

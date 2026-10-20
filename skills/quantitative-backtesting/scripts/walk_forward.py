@@ -947,6 +947,29 @@ def walk_forward_analysis(
     inert_report = _inert_grid_report(strategy_factory, param_grid, data)
     summary["inert_grid_params"] = inert_report["inert_grid_params"]
     summary["inert_grid_message"] = inert_report["message"]
+    # A run in which no period could select a parameter has to say why. The
+    # diagnosis uses the same vocabulary as the out-of-sample path (so one
+    # reader handles both) and is recorded in the summary, so the artifact
+    # explains itself instead of leaving `null` selections to be
+    # interpreted. It is a measurement: it changes no number.
+    if not any(p is not None for p in best_params_per_period):
+        summary["no_selection_diagnosis"] = _diagnose_no_selection(
+            validation_results={"periods": periods},
+            validation_method="walk_forward",
+            param_grid=param_grid,
+            train_data=data,
+            context={
+                "analysis_path": "walk_forward",
+                "train_months": train_months,
+                "test_months": test_months,
+                "step_months": step_months,
+                "cli_flags": {
+                    "train_months": "--train-months",
+                    "test_months": "--test-months",
+                    "step_months": "--step-months",
+                },
+            },
+        )
     # The execution warmup this path applied, so a consumer of the summary
     # knows how many leading bars of every window are not tradable without
     # having to re-derive the convention from the return series.
@@ -1274,7 +1297,6 @@ def overfitting_check(
         diagnostics["deflated_sharpe"] = wf_summary["deflated_sharpe"]
 
     # Overfitting flags
-    diagnostics["overfitting_risk"] = "low"
     if len(valid_params) > 0:
         # High parameter variation across periods suggests overfitting
         avg_stability = np.mean([
@@ -1284,6 +1306,21 @@ def overfitting_check(
             diagnostics["overfitting_risk"] = "high"
         elif avg_stability < 0.5:
             diagnostics["overfitting_risk"] = "medium"
+        else:
+            diagnostics["overfitting_risk"] = "low"
+    else:
+        # No period selected a parameter, so there is no parameter
+        # instability to measure: the risk verdict is *not applicable*, not
+        # "low". A categorical verdict on a run in which nothing could trade
+        # is a category error, and it reads as a finding about the strategy
+        # when it is a fact about the window. The CPCV path reports the same
+        # state the same way.
+        diagnostics["overfitting_risk"] = None
+        diagnostics["overfitting_risk_reason"] = (
+            "not applicable: no parameter was selected in any period, so "
+            "there is no parameter stability to classify (see "
+            "summary['no_selection_diagnosis'])"
+        )
 
     return diagnostics
 
@@ -2950,6 +2987,29 @@ def cpcv_analysis(
     inert_report = _inert_grid_report(strategy_factory, param_grid, data)
     summary["inert_grid_params"] = inert_report["inert_grid_params"]
     summary["inert_grid_message"] = inert_report["message"]
+    # A run in which no fold could select a parameter has to say why. The
+    # diagnosis uses the same vocabulary as the out-of-sample path (so one
+    # reader handles both) and is recorded in the summary, so the artifact
+    # explains itself instead of leaving ten `null` selections to be
+    # interpreted. It is a measurement: it changes no number.
+    if not any(p is not None for p in best_params_per_fold):
+        summary["no_selection_diagnosis"] = _diagnose_no_selection(
+            validation_results={"folds": folds},
+            validation_method="cpcv",
+            param_grid=param_grid,
+            train_data=data,
+            context={
+                "analysis_path": "cpcv",
+                "cpcv_n_splits": n_splits,
+                "cpcv_test_size": test_size,
+                "cpcv_purge_size": purge_size,
+                "cpcv_embargo_size": embargo_size,
+                "cli_flags": {
+                    "n_splits": "--n-splits",
+                    "test_size": "--test-size",
+                },
+            },
+        )
     # The execution warmup this path applied (see the walk-forward summary
     # for the same key).
     summary.update(
@@ -3005,7 +3065,26 @@ def _calculate_cpcv_summary(
             summary["overfitting_risk"] = "high"
     else:
         summary["avg_param_stability"] = 0.0
-        summary["overfitting_risk"] = "high"
+        # No fold selected a parameter, so there is no parameter instability
+        # to measure: the risk verdict is *not applicable*, not "high". A
+        # categorical verdict on a run in which nothing could trade is a
+        # category error, and it reads as a finding about the strategy when
+        # it is a fact about the window.
+        summary["overfitting_risk"] = None
+        n_selected_folds = len(
+            [f for f in folds if f.get("best_params") is not None]
+        )
+        if n_selected_folds == 0:
+            summary["overfitting_risk_reason"] = (
+                "not applicable: no parameter was selected in any fold, so "
+                "there is no parameter stability to classify (see "
+                "summary['no_selection_diagnosis'])"
+            )
+        else:
+            summary["overfitting_risk_reason"] = (
+                "not available: the selected parameters produced no "
+                "stability record to classify"
+            )
 
     return summary
 
@@ -3303,12 +3382,63 @@ def _print_inert_grid_warning(
     print(f"{indent}WARNING: {message}")
 
 
+def _print_no_selection_diagnosis(
+    diagnosis: Optional[Dict[str, Any]],
+    indent: str = "  ",
+) -> None:
+    """Print why no parameter could be selected, next to the fold / period count.
+
+    A run that selected nothing has to say why: the artifact carries the
+    diagnosis under ``summary["no_selection_diagnosis"]`` and the console
+    prints the same message, so the two never disagree. Nothing is printed
+    when a parameter *was* selected.
+    """
+    if not isinstance(diagnosis, dict):
+        return
+    message = diagnosis.get("message")
+    if not message:
+        return
+    print(f"{indent}No parameter could be selected: {message}")
+
+
+def _format_overfitting_risk(value: Any, unknown: str = "unknown") -> str:
+    """Format the overfitting-risk verdict, including the 'not applicable' case.
+
+    ``None`` means the verdict is not applicable (no parameter was selected,
+    so there was no parameter stability to classify). It is rendered as
+    "unknown" rather than as a categorical risk level, and never as a
+    fabricated "low" or "high".
+    """
+    if value is None:
+        return unknown
+    return str(value)
+
+
+def _print_overfitting_risk(
+    summary: Optional[Dict[str, Any]],
+    indent: str = "  ",
+) -> None:
+    """Print the overfitting-risk verdict and, when it is not applicable, why.
+
+    The verdict is printed by the CLI (not by the analysis functions), so it
+    appears exactly once and next to the numbers it qualifies.
+    """
+    if not isinstance(summary, dict):
+        return
+    value = summary.get("overfitting_risk")
+    print(f"Overfitting Risk: {_format_overfitting_risk(value)}")
+    reason = summary.get("overfitting_risk_reason")
+    if reason:
+        print(f"{indent}Reason: {reason}")
+
+
 def _diagnose_no_selection(
     validation_results: Dict[str, Any],
     validation_method: str,
     param_grid: Dict[str, List[Any]],
     train_data: pd.DataFrame,
     wf_window: Optional[Dict[str, Any]] = None,
+    context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Explain why the validation phase selected no parameters.
 
@@ -3317,6 +3447,19 @@ def _diagnose_no_selection(
     training split, and every grid combination stays flat over the
     out-of-sample window) call for completely different remedies, so the
     cause is reported explicitly instead of being collapsed into one message.
+
+    The same vocabulary is used by every path that can end up selecting
+    nothing: the out-of-sample framework (whose validation phase runs inside
+    the training split) and the standalone walk-forward and CPCV analyses.
+    ``context`` carries the configuration of the path that asks (the analysis
+    path, and the split/window settings that produced the windows); it is
+    recorded in ``details`` and, for CPCV, it also produces the sentence that
+    states the effective out-of-sample fraction, because that fraction is the
+    usual reason a CPCV window is too short to trade.
+
+    ``train_data`` is the data the selection ran on: the training split for
+    the out-of-sample path, the whole sample for the standalone paths. Its
+    length is reported as ``details["train_split_bars"]``.
     """
     windows = (
         (validation_results.get("periods") or [])
@@ -3343,6 +3486,8 @@ def _diagnose_no_selection(
         details["validation_window_bars"] = window_bars
     if wf_window is not None:
         details["walk_forward_window"] = wf_window
+    if context:
+        details.update(context)
 
     if n_windows == 0:
         cause = "no_validation_windows"
@@ -3353,32 +3498,55 @@ def _diagnose_no_selection(
             )
         else:
             message = (
-                "The validation phase produced no out-of-sample window, so no "
-                "parameter could be selected."
+                f"The {validation_method} analysis produced no out-of-sample "
+                "window, so no parameter could be selected."
             )
     else:
         cause = "no_position_in_validation_window"
         longest = max(window_bars) if window_bars else 0
+        # The remedy has to name the flags of the path that produced the
+        # windows: the standalone `cpcv` and `walk-forward` subcommands and
+        # the `out-of-sample` subcommand spell the same settings
+        # differently, and a remedy that names a flag the user cannot pass
+        # is not a remedy.
+        flags = (context or {}).get("cli_flags") or {}
         if validation_method == "cpcv":
+            test_size_flag = flags.get("test_size", "--test-size")
+            n_splits_flag = flags.get("n_splits", "--n-splits")
             remedy = (
-                "raise --cpcv-test-size (it is the fraction of each group used "
-                "as the test set) or lower --cpcv-n-splits so a fold's test "
-                "window holds enough bars for the strategy to take a position"
+                f"raise {test_size_flag} (it is the fraction of each group "
+                f"used as the test set) or lower {n_splits_flag} so a fold's "
+                f"test window holds enough bars for the strategy to take a "
+                f"position"
             )
         else:
+            test_months_flag = flags.get("test_months", "--test-months")
             remedy = (
                 "shorten the indicator lookbacks in the parameter grid, use a "
-                "longer --wf-test-months window, or give the training split "
-                "more history"
+                f"longer {test_months_flag} window, or give the training "
+                "split more history"
             )
         message = (
-            f"The {validation_method} validation phase produced {n_windows} "
+            f"The {validation_method} analysis produced {n_windows} "
             f"out-of-sample window(s) but no parameter combination took a "
             f"position in any of them (the longest window holds {longest} "
             f"bars). A combination is skipped when the strategy stays flat "
             f"over the whole window, which usually means the indicator "
             f"warm-up is longer than the window: {remedy}."
         )
+        # CPCV splits the data into groups and takes a *fraction of each
+        # group* as the test set, so the effective out-of-sample fraction is
+        # test_size / n_splits -- not the fraction the flag name suggests.
+        # State it, because it is the usual reason the window is too short.
+        n_splits = (context or {}).get("cpcv_n_splits")
+        test_size = (context or {}).get("cpcv_test_size")
+        if n_splits and test_size is not None:
+            message += (
+                f" With {test_size_flag} {test_size} and {n_splits_flag} "
+                f"{n_splits}, the effective out-of-sample fraction is "
+                f"{test_size}/{n_splits} = {test_size / n_splits:.4g} of the "
+                f"data, because the test size is the fraction of each group."
+            )
     return {"cause": cause, "message": message, "details": details}
 
 
@@ -3663,12 +3831,40 @@ def out_of_sample_validation(
         criterion=selection_criterion,
     )
     if selected_params is None:
+        # The validation phase runs inside the training split, so the CPCV
+        # configuration that produced its windows is the one the diagnosis
+        # has to state: the effective out-of-sample fraction is
+        # test_size / n_splits, not the fraction the flag name suggests.
+        _diagnosis_context = {"analysis_path": "out_of_sample"}
+        if validation_method == "cpcv":
+            _diagnosis_context.update({
+                "cpcv_n_splits": cpcv_n_splits,
+                "cpcv_test_size": cpcv_test_size,
+                "cpcv_purge_size": cpcv_purge_size,
+                "cpcv_embargo_size": cpcv_embargo_size,
+                "cli_flags": {
+                    "n_splits": "--cpcv-n-splits",
+                    "test_size": "--cpcv-test-size",
+                },
+            })
+        else:
+            _diagnosis_context.update({
+                "walk_forward_train_months": walk_forward_train_months,
+                "walk_forward_test_months": walk_forward_test_months,
+                "walk_forward_step_months": walk_forward_step_months,
+                "cli_flags": {
+                    "train_months": "--wf-train-months",
+                    "test_months": "--wf-test-months",
+                    "step_months": "--wf-step-months",
+                },
+            })
         diagnosis = _diagnose_no_selection(
             validation_results=validation_results,
             validation_method=validation_method,
             param_grid=param_grid,
             train_data=train_data,
             wf_window=wf_window,
+            context=_diagnosis_context,
         )
         print(f"No valid parameters selected from validation phase: {diagnosis['message']}")
         return {
@@ -4780,7 +4976,7 @@ def run_cpcv(args) -> int:
             print(
                 f"{row['impact_coefficient']:>17} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
                 f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
-                f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
+                f"{_format_overfitting_risk(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
         return 0
 
@@ -4819,7 +5015,7 @@ def run_cpcv(args) -> int:
             print(
                 f"{row['borrow_cost']:>13.4f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
                 f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
-                f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
+                f"{_format_overfitting_risk(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
         return 0
 
@@ -4855,7 +5051,7 @@ def run_cpcv(args) -> int:
             print(
                 f"{row['funding_cost']:>13.4f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
                 f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
-                f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
+                f"{_format_overfitting_risk(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
         return 0
 
@@ -4887,7 +5083,7 @@ def run_cpcv(args) -> int:
             'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:.4f}",
             "N/A" if row["oos_sharpe"] is None else f"{row['oos_sharpe']:.4f}",
             f"{row['avg_param_stability']:.4f}",
-            str(row["overfitting_risk"]),
+            _format_overfitting_risk(row["overfitting_risk"]),
             "N/A" if row["deflated_sharpe"] is None else f"{row['deflated_sharpe']:.4f}",
             str(row["n_folds"]),
         ],
@@ -4931,7 +5127,7 @@ def run_cpcv(args) -> int:
             print(
                 f"{row['commission']:>13.6f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
                 f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
-                f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
+                f"{_format_overfitting_risk(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
         return 0
 
@@ -4969,7 +5165,7 @@ def run_cpcv(args) -> int:
             print(
                 f"{row['slippage']:>13.6f} | {'N/A' if row["total_oos_return"] is None else f"{row['total_oos_return']:>16.4f}"} | "
                 f"{oos_sharpe_txt:>10} | {row['avg_param_stability']:>17.4f} | "
-                f"{str(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
+                f"{_format_overfitting_risk(row['overfitting_risk']):>17} | {dsr_txt:>14} | {row['n_folds']:>7}"
             )
         return 0
 
@@ -5068,13 +5264,18 @@ def run_cpcv(args) -> int:
     # per-fold selection over it a null experiment: say so next to the folds,
     # not only in the summary JSON.
     _print_inert_grid_warning(results["summary"].get("inert_grid_message"))
+    # A run that selected nothing says why, next to the fold count, so the
+    # console and the artifact carry the same diagnosis.
+    _print_no_selection_diagnosis(
+        results["summary"].get("no_selection_diagnosis")
+    )
     _total_oos_return = results["summary"]["total_oos_return"]
     print(
         f"Total OOS Return: {'N/A' if _total_oos_return is None else f'{_total_oos_return:.2%}'}"
     )
     print(f"OOS Sharpe Ratio: {results['summary'].get('oos_sharpe', 'N/A')}")
     print(f"Avg Parameter Stability: {results['summary'].get('avg_param_stability', 'N/A'):.2f}")
-    print(f"Overfitting Risk: {results['summary'].get('overfitting_risk', 'N/A')}")
+    _print_overfitting_risk(results["summary"])
     _print_panel_pricing(results["summary"].get("panel_pricing"))
     _print_execution_warmup(results["summary"])
     _print_book_diagnostic(
@@ -6146,6 +6347,11 @@ def run_walk_forward(args) -> int:
     # per-period selection over it a null experiment: say so next to the
     # periods, not only in the summary JSON.
     _print_inert_grid_warning(results["summary"].get("inert_grid_message"))
+    # A run that selected nothing says why, next to the period count, so the
+    # console and the artifact carry the same diagnosis.
+    _print_no_selection_diagnosis(
+        results["summary"].get("no_selection_diagnosis")
+    )
     _total_oos_return = results["summary"]["total_oos_return"]
     print(
         f"Total OOS Return: {'N/A' if _total_oos_return is None else f'{_total_oos_return:.2%}'}"
@@ -6169,7 +6375,7 @@ def run_walk_forward(args) -> int:
 
     # Check for overfitting
     diagnostics = overfitting_check(results)
-    print(f"Overfitting Risk: {diagnostics['overfitting_risk']}")
+    _print_overfitting_risk(diagnostics)
 
     # Save results
     output_dir = Path(args.output)

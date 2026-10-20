@@ -171,6 +171,18 @@ Risk Metrics:
   next to the ranking / selection it qualifies, and the invariant that the
   measurement changes no return, cost, impact, capacity or selection
   number. See `references/validation_methods.md`, "Inert Parameter Grids".
+- `test_no_selection_diagnosis.py` - Unit tests for the "no parameter could
+  be selected" diagnosis on the standalone paths: the standalone CPCV and
+  walk-forward analyses record `summary["no_selection_diagnosis"]` (same
+  `{cause, message, details}` shape as the out-of-sample path) when no
+  fold / period could select a parameter, the message names the window
+  length and the effective out-of-sample fraction
+  (`test_size / n_splits`), the remedy names flags the path's own
+  subcommand accepts, a run that *does* select a parameter carries no
+  diagnosis, the overfitting-risk verdict is `null` ("not applicable") when
+  nothing could be selected and unchanged when it could, and the diagnosis
+  changes no number. See `references/validation_methods.md`, "When No
+  Parameter Can Be Selected".
 
 ### references/
 - `data_schema.md` - Expected data formats and column specifications
@@ -316,6 +328,33 @@ Risk Metrics:
 - The out-of-sample validation framework (`walk_forward.py out-of-sample`) enforces a **strict chronological train/validation/test split** via `_verify_split_separation`: the three splits must be pairwise disjoint and ordered (`train_end < val_start`, `val_end < test_start`), and the check result is recorded in `train_val_test_split.separation_check`. A leak here would silently produce an in-sample-optimistic result indistinguishable from a genuine out-of-sample one, so the check is a correctness guard, not a cosmetic one.
 - The **validation phase runs inside the training split**, so the walk-forward window has to fit it: one period needs `train_months + test_months` of calendar span. A window that does not fit yields **zero** periods, so no parameter can be selected — which is why the default 12 + 3 month window aborted on the shipped one-year sample. The window is now resolved against the training split before the phase runs (`_resolve_walk_forward_window`): a window that fits is used unchanged, a window that does not fit is shortened **on the training side only** (the out-of-sample test window and the validation/test splits are never touched), and the resolution is printed and recorded in `summary["walk_forward_window"]` (`requested` / `effective` / `adapted` / `train_span_months` / `effective_periods` / `reason`). An adapted window is a methodology choice, so it is never implicit.
 - A validation phase that still selects nothing now **names its cause** instead of reporting "No valid parameters selected from validation phase": `summary["no_selection_diagnosis"].cause` is `no_validation_windows` (the window does not fit the training split) or `no_position_in_validation_window` (every grid combination stayed flat over the out-of-sample window — typically an indicator warm-up longer than the window). The CLI prints the diagnosis and writes it to `out_of_sample_summary.json`, so a failed run still leaves a machine-readable record of why it failed.
+- **Every path that can select nothing says why.** The standalone `cpcv` and
+  `walk-forward` analyses record the same `summary["no_selection_diagnosis"]`
+  (same `{cause, message, details}` shape) when *no* fold / period could
+  select a parameter, and their CLIs print it next to the fold / period
+  count. A run that selects a parameter carries no diagnosis. The remedy in
+  the message names the flags the path's own subcommand accepts (`--test-size`
+  / `--n-splits` for `cpcv`, `--train-months` / `--test-months` for
+  `walk-forward`, `--cpcv-test-size` / `--cpcv-n-splits` and
+  `--wf-train-months` / `--wf-test-months` for `out-of-sample`), so the
+  suggested fix can actually be applied. The diagnosis is a measurement: it
+  changes no return, cost, impact, capacity or selection number.
+- **The CPCV test window is a fraction of each group, so the effective
+  out-of-sample fraction is `test_size / n_splits`.** At the default
+  `--test-size 0.1 --n-splits 10` that is **1%**, and on the shipped 504-bar
+  sample every fold's test window holds **5 bars** — shorter than the
+  indicator warm-up, so nothing can be selected and every fold reports
+  `best_params_per_fold: null`. The diagnosis states the window length and
+  the effective fraction. The default is a design question, not a bug to be
+  silently patched: changing it changes every CPCV number.
+- **The overfitting-risk verdict is not applicable when nothing could be
+  selected.** It is derived from the parameter stability, which exists only
+  when a parameter was selected: with no selection the verdict is `null`
+  ("unknown" in the CLI) plus an `overfitting_risk_reason`, not "low" and
+  not "high". Before this, CPCV reported `high` and walk-forward reported
+  `low` for the same state — a categorical verdict on a run that could not
+  trade, which reads as a finding about the strategy when it is a fact about
+  the window. Guarded by `tests/test_no_selection_diagnosis.py`.
 - A parameter grid whose values do **not** change the strategy's behaviour is a null experiment: the "search" over it cannot change any result, yet the artifact would report it as a selected parameter. **Every** analysis path now detects it (`_inert_param_grid_keys` / `_inert_grid_report`): the out-of-sample path (`summary["inert_grid_params"]`), the walk-forward path and the CPCV path (both in their `summary`), and the parameter-optimization path (recorded in `parameter_optimization_inert_grid.json` next to the ranked list, because the ranking artifact is a plain list). Each CLI prints the warning exactly once, next to the ranking / selection it qualifies, so the console and the artifact say the same thing. It is a **warning, not an error**: the same grid may be non-inert on other data, and the measurement is a screen over the data the path prices, so it never changes a return, cost, impact, capacity or selection number. Check the strategy's parameter names before trusting a selection — `sma_crossover` reads `fast_period` and `slow_period`, so a grid over `lookback` searches nothing.
 - The `--selection-criterion` flag (`best_oos_sharpe` default, or `most_stable` / `best_avg_sharpe`) chooses the final parameters from the validation phase. **Only `most_stable` selects on in-sample behavior** (how often each combo won the grid search); `best_oos_sharpe` and `best_avg_sharpe` select on each period/fold's **out-of-sample** test Sharpe (`test_sharpe`), never on `best_sharpe`, which is the in-sample training Sharpe the grid search ranked by. Selecting on `best_sharpe` would pick the combo that overfit its training window — the exact selection bias this framework exists to avoid. Each walk-forward period and CPCV fold now carries a `test_sharpe` key (OOS test Sharpe of the selected combo; `None` on degenerate/empty test windows), and the OOS summary carries `selected_params_avg_test_sharpe` (mean OOS test Sharpe of the selected combo across the periods/folds that chose it).
 - For multi-symbol universes, run `--multi-symbol` to detect survivorship bias (late entries, early exits, insufficient history, data gaps) and review `survivorship_bias.json` before trusting panel results. The flag is accepted by every walk-forward subcommand (`walk-forward`, `optimize`, `cpcv`, `monte-carlo`, `out-of-sample`) as well as `run_backtest`; when set, the survivorship-bias report is persisted as `survivorship_bias.json` in the output directory and threaded into the summary JSON (`survivorship_bias`, `bias_controls_engaged=True`) so panel runs are auditable on the same file name across all CLIs.
@@ -355,6 +394,7 @@ python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
 python3 skills/quantitative-backtesting/tests/test_execution_warmup.py
 python3 skills/quantitative-backtesting/tests/test_out_of_sample_window.py
 python3 skills/quantitative-backtesting/tests/test_inert_param_grid.py
+python3 skills/quantitative-backtesting/tests/test_no_selection_diagnosis.py
 python3 skills/quantitative-backtesting/tests/test_examples_coverage.py
 python3 skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py
 ```
@@ -659,6 +699,18 @@ python3 skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_exampl
     **exactly once** (the analysis functions never print) next to the
     ranking / selection it qualifies; and the measurement changes no number
     (the ranking with and without the report is identical).
+  - `test_no_selection_diagnosis.py` - the "no parameter could be selected"
+    diagnosis on the standalone paths: the standalone CPCV and walk-forward
+    summaries record `summary["no_selection_diagnosis"]` (the same
+    `{cause, message, details}` shape the out-of-sample path uses) when no
+    fold / period could select anything; the cause is
+    `no_position_in_validation_window`; the message names the window length
+    and the effective out-of-sample fraction (`test_size / n_splits`), and
+    the remedy names flags that the path's own subcommand accepts (checked
+    against its `--help` output); a run that does select a parameter carries
+    no diagnosis and keeps its categorical overfitting verdict, while a run
+    that cannot select reports `null` / "unknown" plus a reason; and the
+    diagnosis changes no number.
 
 The canonical rendered outputs in `test_output/` are regenerated from
 `assets/example_data/sample_ohlcv.csv` via

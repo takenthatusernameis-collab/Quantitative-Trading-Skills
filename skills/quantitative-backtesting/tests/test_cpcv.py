@@ -179,7 +179,17 @@ def test_cpcv_basic_structure():
     assert "n_folds" in summary
     assert "total_oos_return" in summary
     assert "overfitting_risk" in summary
-    assert summary["overfitting_risk"] in ("low", "medium", "high")
+    # This configuration selects nothing in any fold (the 12-bar test window
+    # is shorter than the indicator warm-up), so there is no parameter
+    # stability to classify: the verdict is *not applicable*, not "low" and
+    # not "high". A categorical verdict on a run that could not trade is a
+    # category error. The reason is recorded, and the run says why in
+    # `no_selection_diagnosis`.
+    assert summary["overfitting_risk"] is None
+    assert "not applicable" in summary["overfitting_risk_reason"]
+    assert summary["no_selection_diagnosis"]["cause"] == (
+        "no_position_in_validation_window"
+    )
 
 
 def test_cpcv_purge_embargo():

@@ -953,7 +953,7 @@ def generate_tear_sheet(
             ("OOS Win Rate", "win_rate_folds", fmt_pct),
             ("Avg Fold Return", "avg_fold_return", fmt_pct),
             ("Avg Parameter Stability", "avg_param_stability", fmt_pct),
-            ("Overfitting Risk", "overfitting_risk", lambda v: str(v)),
+            ("Overfitting Risk", "overfitting_risk", lambda v: "unknown" if v is None else str(v)),
         ]
         for label, key, fmt in cpcv_metrics:
             if key in cpcv_summary:
