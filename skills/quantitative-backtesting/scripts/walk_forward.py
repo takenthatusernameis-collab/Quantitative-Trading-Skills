@@ -1770,8 +1770,12 @@ def _calculate_strategy_returns(
         if market_impact is not None:
             costs = costs + market_impact
     else:
-        # Transaction costs: apply on position changes
+        # Transaction costs: apply on position changes. The first
+        # EXECUTION_WARMUP_BARS bars are explicitly non-tradable (see above),
+        # so their cost is NaN rather than an emergent property of NaN
+        # propagation through the cost term.
         position_changes = positions.diff().abs()
+        position_changes.iloc[:EXECUTION_WARMUP_BARS] = float("nan")
         costs = position_changes * (commission + slippage)
 
         # Market impact model: impact = (position_notional / ADV) * impact_coefficient
