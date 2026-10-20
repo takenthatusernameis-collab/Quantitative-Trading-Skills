@@ -840,6 +840,12 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
     rfr = getattr(args, "risk_free_rate", None)
     metrics = calculate_metrics(results) if rfr is None else calculate_metrics(results, risk_free_rate=rfr)
 
+    # Same resolution block the single-run path attaches, built on the very
+    # return series the Deflated Sharpe Ratio was computed on.
+    metrics["test_resolution"] = _build_test_resolution(
+        metrics, results.get("returns")
+    )
+
     return {
         "impact_coefficient": impact_coefficient,
         "borrow_cost": borrow_cost,
@@ -852,6 +858,7 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
         "annualized_return": metrics.get("annualized_return", 0.0),
         "sharpe_ratio": metrics.get("sharpe_ratio", 0.0),
         "max_drawdown": metrics.get("max_drawdown", 0.0),
+        "test_resolution": metrics.get("test_resolution"),
     }
 
 
