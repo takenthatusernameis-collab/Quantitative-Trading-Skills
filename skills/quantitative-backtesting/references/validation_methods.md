@@ -473,16 +473,53 @@ machine-readable record of why it failed next to the split it used.
 ### Inert Parameter Grids
 
 A grid key whose values all produce the **same** signals (and the same book)
-on the training split is inert: the "search" over it cannot change any
-result, yet the artifact would still report it as a selected parameter. The
-out-of-sample path detects this (`_inert_param_grid_keys`), prints a warning
-and records the finding in `summary["inert_grid_params"]`, so a selection
-over inert parameters is never mistaken for evidence.
-
-This is a behavioural check, not a name check: it catches the common trap of
-a grid over a parameter the strategy does not read (e.g. `lookback` for
+on the data the path prices is inert: the "search" over it cannot change any
+result, yet the artifact would still report it as a selected parameter. This
+is a behavioural check, not a name check: it catches the common trap of a
+grid over a parameter the strategy does not read (e.g. `lookback` for
 `sma_crossover`, which reads `fast_period` and `slow_period`), and it does
 not flag a parameter that is merely unused on one particular sample.
+
+**Every analysis path detects it.** The measurement lives in
+`_inert_param_grid_keys` and is reported by `_inert_grid_report`, which
+returns the inert keys, the parameter names the strategy actually reads
+(read from the strategy's own source, so the hint cannot drift away from the
+implementation) and a human-readable message. The analysis functions only
+*measure* — they never print and never change a return, cost, impact,
+capacity or selection number — so the CLI decides where the warning appears
+and the artifact and the console always say the same thing.
+
+| Path | Recorded in | Scope of the measurement |
+| ---- | ----------- | ------------------------ |
+| `walk_forward_analysis` (`walk-forward`) | `summary["inert_grid_params"]`, `summary["inert_grid_message"]` | the full sample the path prices |
+| `cpcv_analysis` (`cpcv`) | `summary["inert_grid_params"]`, `summary["inert_grid_message"]` | the full sample the path prices |
+| `parameter_optimization` (`optimize`) | `parameter_optimization_inert_grid.json` (next to the ranked list) | the full sample the path prices |
+| `out_of_sample_validation` (`out-of-sample`) | `summary["inert_grid_params"]`, `summary["inert_grid_message"]` | the training split, which is where the selection happens |
+
+The ranking artifact of the optimization path is a plain ranked list, so the
+finding is written next to it as a separate record
+(`parameter_optimization_inert_grid.json`: the inert keys, the message, the
+parameter names the strategy reads, the grid, the strategy and the number of
+ranked combinations). The cost-sweep artifacts carry the same information in
+their rows (`inert_grid_params`).
+
+**A warning, not an error.** An entirely inert grid does not abort the run:
+the same grid may be non-inert on other data (a parameter can change the
+behaviour only in a particular regime), and the measurement is a screen over
+the data the path prices. Consistency across the four paths matters more
+than strictness, and the out-of-sample path has always warned rather than
+failed.
+
+The measurement is a **screen, not a proof**. A key is reported as inert
+only when every value of that key produces the same behaviour while the other
+grid keys are held at their first value. A key that changes the behaviour in
+that comparison is never reported, so the warning does not accuse a search of
+being empty when it is not; but a key whose effect appears *only* in
+combination with another grid value can still be reported as inert (a false
+accusation). Read the strategy's parameter names before trusting a selection:
+the parameter names the strategy reads are reported next to the warning
+(`strategy_parameters`), and they are read from the strategy's own source, so
+they cannot drift away from the implementation.
 
 ### Strict Train/Validation/Test Separation
 

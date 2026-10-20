@@ -939,25 +939,14 @@ def walk_forward_analysis(
     # was priced.
     summary["panel_pricing"] = panel_pricing
     summary["impact_aggregation"] = impact_aggregation
-    inert_grid_params = _inert_param_grid_keys(strategy_factory, param_grid, data)
-    summary["inert_grid_params"] = inert_grid_params
-    if inert_grid_params:
-        try:
-            accepted = _strategy_parameter_names(
-                strategy_factory(_first_grid_params(param_grid))
-            )
-        except Exception:
-            accepted = []
-        hint = (
-            f" The strategy reads: {', '.join(accepted)}."
-            if accepted
-            else ""
-        )
-        print(
-            "WARNING: the parameter grid did not change the strategy's "
-            f"behaviour for: {', '.join(inert_grid_params)}. The selection "
-            f"over those parameters is a null experiment.{hint}"
-        )
+    # A grid key whose values do not change the strategy's behaviour is a
+    # null experiment: the per-period selection over it cannot change any
+    # result, yet the artifact would still report it as a selected
+    # parameter. The finding is measured and recorded here; the CLI prints
+    # it next to the per-period selection.
+    inert_report = _inert_grid_report(strategy_factory, param_grid, data)
+    summary["inert_grid_params"] = inert_report["inert_grid_params"]
+    summary["inert_grid_message"] = inert_report["message"]
     # The execution warmup this path applied, so a consumer of the summary
     # knows how many leading bars of every window are not tradable without
     # having to re-derive the convention from the return series.
@@ -997,6 +986,7 @@ def parameter_optimization(
     benchmark_cost_is_periodic: bool = False,
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
+    inert_grid_report: Optional[Dict[str, Any]] = None,
     **kwargs,
 ) -> List[Dict[str, Any]]:
     """
@@ -1050,6 +1040,13 @@ def parameter_optimization(
         benchmark_commission: Commission per trade for benchmark (as decimal)
         benchmark_slippage: Slippage per trade for benchmark (as decimal)
         benchmark_expense_ratio: Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%)
+        inert_grid_report: Optional dict that receives the inert-grid
+            measurement (``inert_grid_params``, ``strategy_parameters`` and
+            ``message``) for the grid that was priced. A grid key whose
+            values do not change the strategy's behaviour is a null
+            experiment, so the caller can record the finding in its artifact
+            and print it next to the ranking. This function never prints, so
+            a cost sweep does not repeat the warning once per coefficient.
 
     Returns:
         List of result dictionaries sorted by Sharpe ratio (descending)
@@ -1188,24 +1185,15 @@ def parameter_optimization(
         except Exception:
             continue
 
-    inert_grid_params = _inert_param_grid_keys(strategy_factory, param_grid, data)
-    if inert_grid_params:
-        try:
-            accepted = _strategy_parameter_names(
-                strategy_factory(_first_grid_params(param_grid))
-            )
-        except Exception:
-            accepted = []
-        hint = (
-            f" The strategy reads: {', '.join(accepted)}."
-            if accepted
-            else ""
-        )
-        print(
-            "WARNING: the parameter grid did not change the strategy's "
-            f"behaviour for: {', '.join(inert_grid_params)}. The ranking "
-            f"over those parameters is a null experiment.{hint}"
-        )
+    # A grid key whose values do not change the strategy's behaviour is a null
+    # experiment: the ranking over it cannot change any result, yet the
+    # artifact would still report it as a selected parameter. The finding is
+    # measured here and handed to the caller (which records it in the artifact
+    # and prints it next to the ranking); this function never prints, so a
+    # cost sweep does not repeat the warning once per coefficient.
+    inert_report = _inert_grid_report(strategy_factory, param_grid, data)
+    if inert_grid_report is not None:
+        inert_grid_report.update(inert_report)
 
     results.sort(key=lambda x: x["sharpe_ratio"], reverse=True)
 
@@ -2954,25 +2942,14 @@ def cpcv_analysis(
     # The pricing convention that produced the reported out-of-sample P&L.
     summary["panel_pricing"] = panel_pricing
     summary["impact_aggregation"] = impact_aggregation
-    inert_grid_params = _inert_param_grid_keys(strategy_factory, param_grid, data)
-    summary["inert_grid_params"] = inert_grid_params
-    if inert_grid_params:
-        try:
-            accepted = _strategy_parameter_names(
-                strategy_factory(_first_grid_params(param_grid))
-            )
-        except Exception:
-            accepted = []
-        hint = (
-            f" The strategy reads: {', '.join(accepted)}."
-            if accepted
-            else ""
-        )
-        print(
-            "WARNING: the parameter grid did not change the strategy's "
-            f"behaviour for: {', '.join(inert_grid_params)}. The selection "
-            f"over those parameters is a null experiment.{hint}"
-        )
+    # A grid key whose values do not change the strategy's behaviour is a
+    # null experiment: the per-fold selection over it cannot change any
+    # result, yet the artifact would still report it as a selected
+    # parameter. The finding is measured and recorded here; the CLI prints
+    # it next to the per-fold selection.
+    inert_report = _inert_grid_report(strategy_factory, param_grid, data)
+    summary["inert_grid_params"] = inert_report["inert_grid_params"]
+    summary["inert_grid_message"] = inert_report["message"]
     # The execution warmup this path applied (see the walk-forward summary
     # for the same key).
     summary.update(
@@ -3262,6 +3239,68 @@ def _first_grid_params(param_grid: Dict[str, List[Any]]) -> Dict[str, Any]:
         if isinstance(values, (list, tuple)) and len(values) > 0:
             params[key] = values[0]
     return params
+
+
+def _inert_grid_report(
+    strategy_factory: Callable,
+    param_grid: Dict[str, List[Any]],
+    data: pd.DataFrame,
+    scope: str = "over the full sample",
+) -> Dict[str, Any]:
+    """Measure the grid keys that are inert, and describe the finding.
+
+    A grid key whose values do not change the strategy's behaviour is a null
+    experiment: the search over it cannot change any result, yet the artifact
+    would still report it as a selected parameter.
+
+    The helper only *measures*. It never changes a return, cost, impact,
+    capacity or selection number, and it never prints, so every caller
+    decides where the finding belongs (summary, artifact, console) and the
+    console never repeats itself.
+
+    Returns a dict with:
+      * ``inert_grid_params``: the inert grid keys (empty when there are none);
+      * ``strategy_parameters``: the parameter names the strategy actually
+        reads (a diagnostic hint, possibly empty);
+      * ``message``: a human-readable description, or None when nothing is
+        inert. The same string is written to the artifact and printed by the
+        CLI, so the two never disagree.
+    """
+    inert = _inert_param_grid_keys(strategy_factory, param_grid, data)
+    try:
+        accepted = _strategy_parameter_names(
+            strategy_factory(_first_grid_params(param_grid))
+        )
+    except Exception:
+        accepted = []
+    message = None
+    if inert:
+        hint = f" The strategy reads: {', '.join(accepted)}." if accepted else ""
+        message = (
+            f"the parameter grid did not change the strategy's behaviour "
+            f"{scope} for: {', '.join(inert)}. The search over those parameters "
+            f"is a null experiment, not evidence.{hint}"
+        )
+    return {
+        "inert_grid_params": inert,
+        "strategy_parameters": accepted,
+        "message": message,
+    }
+
+
+def _print_inert_grid_warning(
+    message: Optional[str],
+    indent: str = "  ",
+) -> None:
+    """Print an inert-grid warning next to the ranking / selection it qualifies.
+
+    The warning is printed by the CLI (not by the analysis functions), so it
+    appears exactly once, next to the numbers it qualifies, and the console
+    and the artifact say the same thing.
+    """
+    if not message:
+        return
+    print(f"{indent}WARNING: {message}")
 
 
 def _diagnose_no_selection(
@@ -3610,27 +3649,12 @@ def out_of_sample_validation(
     # null experiment: the "search" over it cannot change any result, yet the
     # artifact would still report it as a selected parameter. The finding is
     # recorded and reported so the selection is never mistaken for evidence.
-    inert_grid_params = _inert_param_grid_keys(
-        strategy_factory, param_grid, train_data
+    # The measurement is taken on the training split, which is where the
+    # selection happens.
+    inert_report = _inert_grid_report(
+        strategy_factory, param_grid, train_data, scope="on the training split"
     )
-    if inert_grid_params:
-        try:
-            accepted = _strategy_parameter_names(
-                strategy_factory(_first_grid_params(param_grid))
-            )
-        except Exception:
-            accepted = []
-        hint = (
-            f" The strategy reads: {', '.join(accepted)}."
-            if accepted
-            else ""
-        )
-        print(
-            "WARNING: the parameter grid did not change the strategy's "
-            f"behaviour on the training split for: "
-            f"{', '.join(inert_grid_params)}. The selection over those "
-            f"parameters is a null experiment.{hint}"
-        )
+    inert_grid_params = inert_report["inert_grid_params"]
 
     # Phase 2: SELECTION - Select best parameters based on criterion
     selected_params = _select_parameters(
@@ -3658,6 +3682,7 @@ def out_of_sample_validation(
                 "error": diagnosis["message"],
                 "no_selection_diagnosis": diagnosis,
                 "inert_grid_params": inert_grid_params,
+                "inert_grid_message": inert_report["message"],
                 "walk_forward_window": wf_window,
                 "train_val_test_split": split_info,
             },
@@ -4088,6 +4113,7 @@ def out_of_sample_validation(
     # Grid keys that did not change the strategy's behaviour on the training
     # split: a selection over them is a null experiment.
     summary["inert_grid_params"] = inert_grid_params
+    summary["inert_grid_message"] = inert_report["message"]
     # The execution warmup this path applied (see the walk-forward summary
     # for the same key).
     summary.update(
@@ -4298,6 +4324,10 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         "slippage": float(slippage),
         "latency": int(latency),
         "fill_rate": float(fill_rate),
+        # Grid keys that did not change the strategy's behaviour: the
+        # per-period selection over them is a null experiment, so the sweep
+        # artifact says so too.
+        "inert_grid_params": list(summary.get("inert_grid_params") or []),
         "total_oos_return": (
             None
             if summary.get("total_oos_return") is None
@@ -4377,6 +4407,10 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
+    # The inert-grid measurement is requested so the sweep artifact records
+    # it next to the ranking it qualifies. The helper performs no I/O and no
+    # printing, so the sweep stays silent and the artifact stays explicit.
+    inert_report: Dict[str, Any] = {}
     results = parameter_optimization(
         data=data,
         strategy_factory=strategy_factory,
@@ -4398,6 +4432,7 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
+        inert_grid_report=inert_report,
     )
     top = results[0] if results else None
     dsr = top.get("deflated_sharpe") if isinstance(top, dict) else None
@@ -4412,6 +4447,9 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         "top_sharpe": (float(top["sharpe_ratio"]) if top is not None else None),
         "top_total_return": (float(top["total_return"]) if top is not None else None),
         "n_combos": int(len(results)),
+        # Grid keys that did not change the strategy's behaviour: the ranking
+        # over them is a null experiment, so the sweep artifact says so too.
+        "inert_grid_params": list(inert_report.get("inert_grid_params") or []),
         # Deflated Sharpe Ratio (multiple-testing correction) of the best
         # combination, corrected for all evaluated combos (n_trials = len(
         # results)). Mirrors the deflated_sharpe key each optimization result
@@ -4537,6 +4575,10 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         "test_sharpe": (
             float(test_perf["test_sharpe"]) if test_perf.get("test_sharpe") is not None else None
         ),
+        # Grid keys that did not change the strategy's behaviour: the
+        # selection over them is a null experiment, so the sweep artifact says
+        # so too.
+        "inert_grid_params": list(summary.get("inert_grid_params") or []),
         "deflated_sharpe": (
             float(dsr["deflated_sharpe_ratio"]) if dsr is not None else None
         ),
@@ -4650,6 +4692,10 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         ),
         "avg_param_stability": float(summary.get("avg_param_stability", 0.0)),
         "overfitting_risk": summary.get("overfitting_risk"),
+        # Grid keys that did not change the strategy's behaviour: the
+        # per-fold selection over them is a null experiment, so the sweep
+        # artifact says so too.
+        "inert_grid_params": list(summary.get("inert_grid_params") or []),
         "deflated_sharpe": (
             float(dsr["deflated_sharpe_ratio"]) if dsr is not None else None
         ),
@@ -5018,6 +5064,10 @@ def run_cpcv(args) -> int:
                 )
 
     print(f"Number of CPCV folds: {results['summary']['n_folds']}")
+    # A grid key that did not change the strategy's behaviour makes the
+    # per-fold selection over it a null experiment: say so next to the folds,
+    # not only in the summary JSON.
+    _print_inert_grid_warning(results["summary"].get("inert_grid_message"))
     _total_oos_return = results["summary"]["total_oos_return"]
     print(
         f"Total OOS Return: {'N/A' if _total_oos_return is None else f'{_total_oos_return:.2%}'}"
@@ -6092,6 +6142,10 @@ def run_walk_forward(args) -> int:
                 )
 
     print(f"Number of walk-forward periods: {results['summary']['n_periods']}")
+    # A grid key that did not change the strategy's behaviour makes the
+    # per-period selection over it a null experiment: say so next to the
+    # periods, not only in the summary JSON.
+    _print_inert_grid_warning(results["summary"].get("inert_grid_message"))
     _total_oos_return = results["summary"]["total_oos_return"]
     print(
         f"Total OOS Return: {'N/A' if _total_oos_return is None else f'{_total_oos_return:.2%}'}"
@@ -6496,6 +6550,9 @@ def run_parameter_optimization(args) -> int:
     strategy_factory = _make_strategy_factory(args.strategy)
 
     print(f"Running parameter optimization with {args.strategy}...")
+    # The inert-grid measurement is requested from the analysis function so
+    # the ranking artifact can record it. The function itself never prints.
+    inert_report: Dict[str, Any] = {}
     results = parameter_optimization(
         data=data,
         strategy_factory=strategy_factory,
@@ -6517,6 +6574,7 @@ def run_parameter_optimization(args) -> int:
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
+        inert_grid_report=inert_report,
     )
 
     if not results:
@@ -6539,6 +6597,10 @@ def run_parameter_optimization(args) -> int:
                 f"(p-value {dsr['p_value']:.4f}, expected max Sharpe "
                 f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
             )
+    # A grid key that did not change the strategy's behaviour makes the
+    # ranking over it a null experiment: say so next to the ranking, not
+    # only in the artifact.
+    _print_inert_grid_warning(inert_report.get("message"))
 
     # Print benchmark comparison summary if benchmark provided
     if benchmark is not None and results and 'alpha' in results[0]:
@@ -6617,6 +6679,27 @@ def run_parameter_optimization(args) -> int:
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2, default=str)
     print(f"\nFull results saved to: {results_path}")
+
+    # The ranking artifact is a plain ranked list, so the inert-grid finding
+    # is written next to it as a separate record: a reader of the ranking can
+    # see that the grid never changed the strategy's behaviour, and that the
+    # ranking is therefore a null experiment rather than evidence.
+    inert_path = output_dir / "parameter_optimization_inert_grid.json"
+    with open(inert_path, "w") as f:
+        json.dump(
+            {
+                "inert_grid_params": inert_report.get("inert_grid_params") or [],
+                "inert_grid_message": inert_report.get("message"),
+                "strategy_parameters": inert_report.get("strategy_parameters") or [],
+                "param_grid": param_grid,
+                "strategy": args.strategy,
+                "n_ranked_combinations": len(results),
+            },
+            f,
+            indent=2,
+            default=str,
+        )
+    print(f"Inert-grid record saved to: {inert_path}")
 
     # Persist PIT validation results alongside the optimization artifact
     # so the data-integrity baseline is reproducible with the search.
@@ -7673,6 +7756,11 @@ def run_out_of_sample_validation(args) -> int:
             "No valid parameters selected from validation phase."
         )
         print(f"No valid parameters selected from validation phase.\n{error}")
+        # A grid key that did not change the strategy's behaviour makes the
+        # selection over it a null experiment: say so next to the failure,
+        # which is exactly where a null experiment is most likely to be
+        # mistaken for "no good parameters were found".
+        _print_inert_grid_warning(results["summary"].get("inert_grid_message"))
         # The failure is written out as an artifact too: a run that cannot
         # select parameters still has to leave a machine-readable record of
         # why, next to the split it used.
@@ -7715,13 +7803,7 @@ def run_out_of_sample_validation(args) -> int:
     # A grid key that did not change the strategy's behaviour makes the
     # selection over it a null experiment: say so next to the selection, not
     # only in the summary JSON.
-    inert_grid_params = results["summary"].get("inert_grid_params") or []
-    if inert_grid_params:
-        print(
-            f"  WARNING: inert parameter(s) on the training split: "
-            f"{', '.join(inert_grid_params)} -- the selection over them is a "
-            f"null experiment, not evidence."
-        )
+    _print_inert_grid_warning(results["summary"].get("inert_grid_message"))
 
     # The walk-forward window the validation phase actually ran with (it is
     # shortened when the requested window does not fit the training split).

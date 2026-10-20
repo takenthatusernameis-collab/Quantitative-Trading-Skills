@@ -163,6 +163,14 @@ Risk Metrics:
   it is (`summary["inert_grid_params"]`). See
   `references/validation_methods.md`, "The Walk-Forward Window Inside the
   Training Split".
+- `test_inert_param_grid.py` - Unit tests for inert parameter grids on every
+  analysis path: the measurement itself (a grid key the strategy does not
+  read is flagged, a live key is not), the recording of the finding in the
+  walk-forward, CPCV and out-of-sample summaries and in
+  `parameter_optimization_inert_grid.json`, the single CLI warning printed
+  next to the ranking / selection it qualifies, and the invariant that the
+  measurement changes no return, cost, impact, capacity or selection
+  number. See `references/validation_methods.md`, "Inert Parameter Grids".
 
 ### references/
 - `data_schema.md` - Expected data formats and column specifications
@@ -308,7 +316,7 @@ Risk Metrics:
 - The out-of-sample validation framework (`walk_forward.py out-of-sample`) enforces a **strict chronological train/validation/test split** via `_verify_split_separation`: the three splits must be pairwise disjoint and ordered (`train_end < val_start`, `val_end < test_start`), and the check result is recorded in `train_val_test_split.separation_check`. A leak here would silently produce an in-sample-optimistic result indistinguishable from a genuine out-of-sample one, so the check is a correctness guard, not a cosmetic one.
 - The **validation phase runs inside the training split**, so the walk-forward window has to fit it: one period needs `train_months + test_months` of calendar span. A window that does not fit yields **zero** periods, so no parameter can be selected — which is why the default 12 + 3 month window aborted on the shipped one-year sample. The window is now resolved against the training split before the phase runs (`_resolve_walk_forward_window`): a window that fits is used unchanged, a window that does not fit is shortened **on the training side only** (the out-of-sample test window and the validation/test splits are never touched), and the resolution is printed and recorded in `summary["walk_forward_window"]` (`requested` / `effective` / `adapted` / `train_span_months` / `effective_periods` / `reason`). An adapted window is a methodology choice, so it is never implicit.
 - A validation phase that still selects nothing now **names its cause** instead of reporting "No valid parameters selected from validation phase": `summary["no_selection_diagnosis"].cause` is `no_validation_windows` (the window does not fit the training split) or `no_position_in_validation_window` (every grid combination stayed flat over the out-of-sample window — typically an indicator warm-up longer than the window). The CLI prints the diagnosis and writes it to `out_of_sample_summary.json`, so a failed run still leaves a machine-readable record of why it failed.
-- A parameter grid whose values do **not** change the strategy's behaviour on the training split is a null experiment: the "search" over it cannot change any result, yet the artifact would report it as a selected parameter. The out-of-sample path detects it (`_inert_param_grid_keys`), warns, and records it in `summary["inert_grid_params"]`. Check the strategy's parameter names before trusting a selection — `sma_crossover` reads `fast_period` and `slow_period`, so a grid over `lookback` searches nothing.
+- A parameter grid whose values do **not** change the strategy's behaviour is a null experiment: the "search" over it cannot change any result, yet the artifact would report it as a selected parameter. **Every** analysis path now detects it (`_inert_param_grid_keys` / `_inert_grid_report`): the out-of-sample path (`summary["inert_grid_params"]`), the walk-forward path and the CPCV path (both in their `summary`), and the parameter-optimization path (recorded in `parameter_optimization_inert_grid.json` next to the ranked list, because the ranking artifact is a plain list). Each CLI prints the warning exactly once, next to the ranking / selection it qualifies, so the console and the artifact say the same thing. It is a **warning, not an error**: the same grid may be non-inert on other data, and the measurement is a screen over the data the path prices, so it never changes a return, cost, impact, capacity or selection number. Check the strategy's parameter names before trusting a selection — `sma_crossover` reads `fast_period` and `slow_period`, so a grid over `lookback` searches nothing.
 - The `--selection-criterion` flag (`best_oos_sharpe` default, or `most_stable` / `best_avg_sharpe`) chooses the final parameters from the validation phase. **Only `most_stable` selects on in-sample behavior** (how often each combo won the grid search); `best_oos_sharpe` and `best_avg_sharpe` select on each period/fold's **out-of-sample** test Sharpe (`test_sharpe`), never on `best_sharpe`, which is the in-sample training Sharpe the grid search ranked by. Selecting on `best_sharpe` would pick the combo that overfit its training window — the exact selection bias this framework exists to avoid. Each walk-forward period and CPCV fold now carries a `test_sharpe` key (OOS test Sharpe of the selected combo; `None` on degenerate/empty test windows), and the OOS summary carries `selected_params_avg_test_sharpe` (mean OOS test Sharpe of the selected combo across the periods/folds that chose it).
 - For multi-symbol universes, run `--multi-symbol` to detect survivorship bias (late entries, early exits, insufficient history, data gaps) and review `survivorship_bias.json` before trusting panel results. The flag is accepted by every walk-forward subcommand (`walk-forward`, `optimize`, `cpcv`, `monte-carlo`, `out-of-sample`) as well as `run_backtest`; when set, the survivorship-bias report is persisted as `survivorship_bias.json` in the output directory and threaded into the summary JSON (`survivorship_bias`, `bias_controls_engaged=True`) so panel runs are auditable on the same file name across all CLIs.
 - The CLI writes `data_provenance.json` (source path, checksum, filters, transformations, validation outcome) next to the results so every backtest is reproducible and auditable
@@ -346,6 +354,7 @@ python3 skills/quantitative-backtesting/tests/test_monte_carlo.py
 python3 skills/quantitative-backtesting/tests/test_generate_sample_data.py
 python3 skills/quantitative-backtesting/tests/test_execution_warmup.py
 python3 skills/quantitative-backtesting/tests/test_out_of_sample_window.py
+python3 skills/quantitative-backtesting/tests/test_inert_param_grid.py
 python3 skills/quantitative-backtesting/tests/test_examples_coverage.py
 python3 skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py
 ```
@@ -641,6 +650,15 @@ python3 skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_exampl
     reports its cause in `summary["no_selection_diagnosis"]` and the CLI
     writes that diagnosis to `out_of_sample_summary.json`, and an inert
     parameter grid is reported in `summary["inert_grid_params"]`.
+  - `test_inert_param_grid.py` - inert parameter grids on **all four**
+    analysis paths: the measurement flags a grid key the strategy does not
+    read (`lookback` for `sma_crossover`) and leaves a live key alone; the
+    walk-forward, CPCV and out-of-sample summaries record the finding, the
+    parameter-optimization path hands it to the caller and the CLI writes it
+    to `parameter_optimization_inert_grid.json`; each CLI prints the warning
+    **exactly once** (the analysis functions never print) next to the
+    ranking / selection it qualifies; and the measurement changes no number
+    (the ranking with and without the report is identical).
 
 The canonical rendered outputs in `test_output/` are regenerated from
 `assets/example_data/sample_ohlcv.csv` via
