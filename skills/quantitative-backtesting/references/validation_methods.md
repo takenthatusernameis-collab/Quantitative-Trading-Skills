@@ -562,14 +562,55 @@ the strategy did trade:
   triggered on it (`reason: signal_never_triggered`).
 
 The comparison is a statement about the windows, not a claim about the
-strategy's warm-up, and it is bounded by what the run measured: the
-diagnosis also reports how many bars the strategy actually held a position
-in the windows that did trade
-(`details["min_traded_position_bars"]`), because a verdict measured on
-windows in which the strategy held a position for a single bar is a
-different statement from one measured on windows it traded throughout.
+  strategy's warm-up, and it is bounded by what the run measured: the
+  diagnosis also reports how many bars the strategy actually held a position
+  in the windows that did trade
+  (`details["min_traded_position_bars"]`), because a verdict measured on
+  windows in which the strategy held a position for a single bar is a
+  different statement from one measured on windows it traded throughout.
 
-#### The remedy names the flags the path actually accepts
+  #### How much evidence the verdict rests on
+
+  "The strategy held a position for a single bar" is the sharper form of the
+  same question, and it is not visible in any number the artifact already
+  reports. The aggregate out-of-sample Sharpe and the parameter stability
+  ratio are computed over the *returns* of the windows that selected a
+  parameter, so they say nothing about how much of those windows the
+  strategy actually traded in: a "low" overfitting-risk rating earned on two
+  windows that each held a position for one bar out of twenty reads as a
+  finding about the strategy when it is mostly a finding about the windows.
+
+  When a run is in the partial state it records `summary[
+  "thin_evidence_warning"]` -- a measurement, so it changes no number -- with
+  a per-window breakdown of the windows the verdict rests on in which the
+  strategy held a position for at most 20% of the **executable** bars. The
+  fraction is of executable bars, not raw window bars, so it is stable across
+  the two warmup conventions: the walk-forward path drops two leading bars
+  from every window before the strategy can act on them, so a 20-bar window
+  has 18 executable bars and a position held for one bar is 1/18 of them.
+
+  | Key | Meaning |
+  | --- | ------- |
+  | `message` | The one-line statement the CLI prints |
+  | `details.n_windows_with_selected_params` | How many windows the verdict rests on |
+  | `details.n_thin_windows` | How many of those were thin |
+  | `details.warmup_bars` | The warmup bars subtracted from each window |
+  | `details.threshold` | The fraction at or below which a window is thin (0.2) |
+  | `details.thin_windows` | One record per thin window |
+
+  Each thin-window record carries the window's index, its length, its
+  executable length, the bars it held a position, the fraction of executable
+  bars that represents, the out-of-sample Sharpe of the selected combo in it,
+  and the window's calendar boundaries -- the same evidence the
+  `traded_windows` breakdown already carries, plus the fraction.
+
+  A run in which every window the verdict rests on traded in at least that
+  fraction of its executable bars carries no warning, and a run in which
+  nothing was selected at all carries none either (that is the
+  `no_selection_diagnosis`, which already says why). The CLI prints the
+  warning next to the verdict, and the artifact carries the same message.
+
+  #### The remedy names the flags the path actually accepts
 
 The same setting is spelled differently on the different subcommands, so the
 remedy names the flags of the path that produced the failure:

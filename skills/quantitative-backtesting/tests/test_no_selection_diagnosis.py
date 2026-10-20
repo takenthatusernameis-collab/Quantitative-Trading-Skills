@@ -25,14 +25,13 @@ vocabulary, in the artifact and in the console:
     selected (it is not "low" or "high"), and unchanged when it could;
   * the diagnosis is a measurement: it changes no number.
 
-The same question has a second, sharper form: what about a run in which
-*some* windows selected a parameter and others did not? "2 of 5 folds
-selected" is compatible with "the three flat folds were too short to
-trade" (a design problem) and with "the strategy never triggers on 60%
-of the sample" (a finding about the strategy), and the two need opposite
-remedies. The tests below pin that the artifact now says which windows
-were flat, why (measured in the search itself, not inferred), and how
-many windows the overfitting-risk verdict rests on.
+The same question has a third, sharper form: how much of the windows the
+verdict rests on did the strategy actually trade in? A "low" overfitting-risk
+rating earned on two windows that each held a position for one bar out of
+twenty says little about the strategy and more about the windows, and the
+aggregate Sharpe and stability ratio hide it. The tests below pin that the
+artifact now measures that too, as a `thin_evidence_warning`, without
+changing a single number.
 
 Run with: python3 skills/quantitative-backtesting/tests/test_no_selection_diagnosis.py
 No third-party test framework is required; uses only the standard library.
@@ -829,6 +828,163 @@ def test_the_cli_prints_the_partial_diagnosis_next_to_the_fold_count():
 
 
 # ---------------------------------------------------------------------------
+# How much evidence the verdict rests on
+# ---------------------------------------------------------------------------
+
+def test_the_partial_run_carries_a_thin_evidence_warning():
+    """A verdict measured on windows the strategy barely traded in says so.
+
+    The canonical partial run selects a parameter in two of its five folds
+    and holds a position in each of them for a single bar out of twenty.
+    The aggregate Sharpe, the stability ratio and the "low" overfitting-risk
+    verdict say nothing about that: a reader sees a low risk rating and no
+    idea how much of the evidence it rests on. The warning is a measurement
+    -- it changes no number -- and it says how many of the windows the
+    verdict rests on were thin, and how thin.
+    """
+    cpcv = _cpcv_partial_run()
+    warning = cpcv["summary"]["thin_evidence_warning"]
+
+    assert set(warning) == {"message", "details"}
+    details = warning["details"]
+    assert details["n_windows_with_selected_params"] == 2
+    assert details["n_thin_windows"] == 2
+    assert details["warmup_bars"] == 2
+    assert details["threshold"] == 0.2
+    assert details["window_noun"] == "fold"
+
+    thin = details["thin_windows"]
+    assert len(thin) == 2
+    for window in thin:
+        assert window["bars"] == 20
+        assert window["executable_bars"] == 18
+        assert window["position_bars"] == 1
+        # The fraction is rounded to four decimals in the artifact; it is
+        # 1/18 of the executable bars either way.
+        assert window["position_fraction_of_executable"] == round(1 / 18, 4)
+        assert window["test_sharpe"] == 0.0
+        assert window["test_start"] and window["test_end"]
+
+
+def test_the_thin_evidence_warning_names_the_executable_bars():
+    """The fraction is of *executable* bars, not raw window bars.
+
+    The walk-forward path drops two leading bars from every window before
+    the strategy can act on them, so a 20-bar window has 18 executable
+    bars and a position held for one bar is 1/18 of them. Reporting the
+    fraction of raw bars would overstate the evidence, so the artifact
+    carries both counts and the message says which the fraction is of.
+    """
+    cpcv = _cpcv_partial_run()
+    warning = cpcv["summary"]["thin_evidence_warning"]
+    details = warning["details"]
+
+    for window in details["thin_windows"]:
+        assert window["executable_bars"] == window["bars"] - details["warmup_bars"]
+        # The fraction is rounded to four decimals in the artifact, so the
+        # comparison is against the rounded value of the same division.
+        assert window["position_fraction_of_executable"] == round(
+            window["position_bars"] / window["executable_bars"], 4
+        )
+
+    message = warning["message"]
+    assert "executable bars" in message
+    assert "6%" in message
+    assert "20%" in message
+    assert "2 warmup bar(s)" in message
+
+
+def test_the_thin_evidence_warning_does_not_qualify_a_fullly_traded_run():
+    """Nothing is reported when every window the verdict rests on traded.
+
+    The walk-forward run over the shipped sample selects a parameter in all
+    three periods and trades in each of them for a substantial fraction of
+    the window (14 to 36 of 62-64 executable bars), so there is nothing thin
+    to report. The warning is absent, not a vacuous one.
+    """
+    data = _load_sample()
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=_make_strategy_factory("sma_crossover"),
+        param_grid=MEANINGFUL_GRID,
+    )
+    assert "thin_evidence_warning" not in results["summary"]
+
+
+def test_the_thin_evidence_warning_is_absent_when_nothing_was_selected():
+    """The warning is about the windows the verdict rests on, so it is
+    absent when no parameter was selected at all: that is the "no
+    parameter could be selected" diagnosis, which already says why.
+    """
+    data = _load_sample()
+    results = walk_forward_analysis(
+        data=data,
+        strategy_factory=_make_strategy_factory("sma_crossover"),
+        param_grid=TOO_SLOW_GRID,
+    )
+    assert "thin_evidence_warning" not in results["summary"]
+    assert "no_selection_diagnosis" in results["summary"]
+
+
+def test_the_thin_evidence_warning_changes_no_number():
+    """The warning is a measurement: it changes no number.
+
+    The partial run's out-of-sample record is unchanged by the warning --
+    the two folds that selected a parameter each held a position for one
+    bar, so the run's aggregate return is a flat one, and the numbers are
+    the ones the run produced.
+    """
+    cpcv = _cpcv_partial_run()
+    summary = cpcv["summary"]
+    assert summary["n_positive_folds"] == 0
+    assert summary["win_rate_folds"] == 0.0
+    assert summary["total_oos_return"] == 0.0
+    assert summary["oos_sharpe"] == 0.0
+    assert len(cpcv["oos_returns"]) > 0
+
+
+def test_the_cli_prints_the_thin_evidence_warning_next_to_the_verdict():
+    """The console and the artifact carry the same warning, next to the
+    fold count, so a reader sees how much evidence the verdict rests on
+    without opening the JSON.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = _run_cli(
+            [
+                "cpcv",
+                "--data", str(SAMPLE_DATA),
+                "--strategy", "sma_crossover",
+                "--param-grid", json.dumps(MEANINGFUL_GRID),
+                "--n-splits", "5",
+                "--test-size", "0.2",
+                "--output", tmpdir,
+            ]
+        )
+        assert result.returncode == 0, result.stderr[-3000:]
+        artifact = json.loads(
+            (Path(tmpdir) / "cpcv_summary.json").read_text()
+        )
+        warning = artifact["summary"]["thin_evidence_warning"]
+        assert warning["message"] in result.stdout
+        # Every thin window is named on the console, with the same text the
+        # artifact carries.
+        for window in warning["details"]["thin_windows"]:
+            text = (
+                f"window {window['window']}: held a position for "
+                f"{window['position_bars']} of "
+                f"{window['executable_bars']} executable bars "
+                f"({window['position_fraction_of_executable']:.0%}), "
+                f"{window['test_start']} to {window['test_end']}"
+            )
+            assert text in result.stdout
+        # The warning comes after the fold count and before the verdict.
+        fold_line = result.stdout.index("Number of CPCV folds")
+        warning_line = result.stdout.index("WARNING: The verdict rests on")
+        verdict_line = result.stdout.index("Overfitting Risk:")
+        assert fold_line < warning_line < verdict_line
+
+
+# ---------------------------------------------------------------------------
 # Test registry
 # ---------------------------------------------------------------------------
 
@@ -879,8 +1035,20 @@ TEST_REGISTRY = [
      test_the_all_flat_case_still_uses_the_no_selection_diagnosis),
     ("test_the_partial_diagnosis_changes_no_number",
      test_the_partial_diagnosis_changes_no_number),
-    ("test_the_cli_prints_the_partial_diagnosis_next_to_the_fold_count",
-     test_the_cli_prints_the_partial_diagnosis_next_to_the_fold_count),
+("test_the_cli_prints_the_partial_diagnosis_next_to_the_fold_count",
+      test_the_cli_prints_the_partial_diagnosis_next_to_the_fold_count),
+    ("test_the_partial_run_carries_a_thin_evidence_warning",
+      test_the_partial_run_carries_a_thin_evidence_warning),
+    ("test_the_thin_evidence_warning_names_the_executable_bars",
+      test_the_thin_evidence_warning_names_the_executable_bars),
+    ("test_the_thin_evidence_warning_does_not_qualify_a_fullly_traded_run",
+      test_the_thin_evidence_warning_does_not_qualify_a_fullly_traded_run),
+    ("test_the_thin_evidence_warning_is_absent_when_nothing_was_selected",
+      test_the_thin_evidence_warning_is_absent_when_nothing_was_selected),
+    ("test_the_thin_evidence_warning_changes_no_number",
+      test_the_thin_evidence_warning_changes_no_number),
+    ("test_the_cli_prints_the_thin_evidence_warning_next_to_the_verdict",
+      test_the_cli_prints_the_thin_evidence_warning_next_to_the_verdict),
 ]
 
 

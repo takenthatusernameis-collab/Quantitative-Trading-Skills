@@ -367,6 +367,22 @@ Risk Metrics:
   `references/validation_methods.md`, "When Only Some Windows Select a
   Parameter".
 
+  - **A verdict that rests on windows the strategy barely traded in is weak
+  evidence.** The aggregate out-of-sample Sharpe and the parameter stability
+  ratio say nothing about *how much* of the windows the verdict rests on the
+  strategy actually held a position: a "low" overfitting-risk rating earned on
+  two windows that each traded for one bar reads as a finding about the
+  strategy when it is mostly a finding about the windows. When a run is in
+  the partial state it records `summary["thin_evidence_warning"]` -- a
+  measurement, so it changes no number -- with a per-window breakdown of the
+  windows the verdict rests on in which the strategy held a position for at
+  most 20% of the **executable** bars (the window's length minus the warmup
+  bars the run drops, so the fraction is stable across the two warmup
+  conventions). The CLI prints it next to the verdict, and the artifact
+  carries the same message. A run in which every window the verdict rests on
+  traded in at least that fraction carries no warning. Guarded by
+  `tests/test_no_selection_diagnosis.py`.
+
 - **The CPCV test window is a fraction of each group, so the effective
   out-of-sample fraction is `test_size / n_splits`.** At the default
   `--test-size 0.1 --n-splits 10` that is **1%**, and on the shipped 504-bar

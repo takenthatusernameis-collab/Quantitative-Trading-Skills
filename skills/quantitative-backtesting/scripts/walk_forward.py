@@ -1080,6 +1080,22 @@ def walk_forward_analysis(
         )
         if partial_diagnosis is not None:
             summary["partial_selection_diagnosis"] = partial_diagnosis
+            # A verdict that rests on some windows has to be read against
+            # how much of those windows the strategy actually traded in. The
+            # aggregate Sharpe and stability ratio hide that: a "low"
+            # overfitting-risk rating earned on two windows that each traded
+            # for one bar says little about the strategy. This is a
+            # measurement -- it changes no number.
+            _warmup_bars = execution_warmup_metadata(
+                WARMUP_CONVENTION_WALK_FORWARD, latency
+            )["execution_warmup_bars"]
+            _thin = _thin_evidence_warning(
+                partial_diagnosis["details"].get("traded_windows", []),
+                _warmup_bars,
+                window_noun="period",
+            )
+            if _thin is not None:
+                summary["thin_evidence_warning"] = _thin
     # The execution warmup this path applied, so a consumer of the summary
     # knows how many leading bars of every window are not tradable without
     # having to re-derive the convention from the return series.
@@ -3262,6 +3278,21 @@ def cpcv_analysis(
                     f"contributed nothing to it (see "
                     f"summary['partial_selection_diagnosis'])"
                 )
+            # The verdict also rests on how much of those windows the
+            # strategy actually traded in. The aggregate Sharpe and
+            # stability ratio hide that: a "low" rating earned on two folds
+            # that each traded for one bar says little about the strategy.
+            # Measurement only -- it changes no number.
+            _warmup_bars = execution_warmup_metadata(
+                WARMUP_CONVENTION_WALK_FORWARD, latency
+            )["execution_warmup_bars"]
+            _thin = _thin_evidence_warning(
+                partial_diagnosis["details"].get("traded_windows", []),
+                _warmup_bars,
+                window_noun="fold",
+            )
+            if _thin is not None:
+                summary["thin_evidence_warning"] = _thin
     # The execution warmup this path applied (see the walk-forward summary
     # for the same key).
     summary.update(
@@ -3848,6 +3879,40 @@ def _print_partial_selection_diagnosis(
             print(f"{indent}  {text}")
 
 
+def _print_thin_evidence_warning(
+    warning: Optional[Dict[str, Any]],
+    indent: str = "  ",
+) -> None:
+    """Print how much evidence the verdict rests on, when that is little.
+
+    A verdict measured on windows the strategy barely traded in is weak
+    evidence: the aggregate Sharpe and stability ratio hide how much of
+    those windows the strategy actually held a position, so a "low"
+    overfitting-risk rating earned on two windows that each traded for one
+    bar reads as a finding about the strategy when it is mostly a finding
+    about the windows. The artifact carries the same message under
+    ``summary["thin_evidence_warning"]``, so the console and the artifact
+    never disagree. Nothing is printed when every window the verdict rests
+    on traded in at least the threshold fraction of its executable bars.
+    """
+    if not isinstance(warning, dict):
+        return
+    message = warning.get("message")
+    if not message:
+        return
+    print(f"{indent}WARNING: {message}")
+    details = warning.get("details") or {}
+    for window in details.get("thin_windows") or []:
+        text = (
+            f"window {window.get('window')}: held a position for "
+            f"{window.get('position_bars')} of "
+            f"{window.get('executable_bars')} executable bars "
+            f"({window.get('position_fraction_of_executable'):.0%}), "
+            f"{window.get('test_start')} to {window.get('test_end')}"
+        )
+        print(f"{indent}  {text}")
+
+
 def _format_overfitting_risk(value: Any, unknown: str = "unknown") -> str:
     """Format the overfitting-risk verdict, including the 'not applicable' case.
 
@@ -4373,6 +4438,126 @@ def _diagnose_partial_selection(
         "cause": dominant,
         "message": message,
         "details": details,
+    }
+
+
+def _thin_evidence_warning(
+    windows: List[Dict[str, Any]],
+    warmup_bars: int,
+    *,
+    window_noun: str = "window",
+    threshold: float = 0.2,
+) -> Optional[Dict[str, Any]]:
+    """Does the run's verdict rest on windows the strategy barely traded in?
+
+    A verdict measured on windows in which the strategy held a position for
+    only a handful of bars is a much weaker statement than the same verdict
+    measured on windows it traded throughout -- and the difference is not
+    visible in any number the artifact already reports. ``position_bars`` is
+    a per-window measurement and the aggregate Sharpe / stability ratio
+    hides it, so a "low" overfitting-risk rating earned on two windows that
+    each traded for one bar reads as a finding about the strategy when it is
+    mostly a finding about the windows. This surfaces that, as a
+    measurement: it changes no number.
+
+    The threshold is expressed in *executable* bars, not raw window bars, so
+    it is stable across the two warmup conventions. The walk-forward path
+    drops ``latency + 2`` leading bars from every window before the strategy
+    can act on them; run_backtest drops one. A 20-bar window that the
+    walk-forward path reports as holding a position for 1 bar therefore has
+    18 executable bars left, and the question is whether the position count
+    is a small fraction of *that*.
+
+    Args:
+        windows: The windows that selected a parameter, each carrying at
+            least ``position_bars`` and ``bars`` (the shape the
+            partial-selection diagnosis already builds in
+            ``traded_windows``).
+        warmup_bars: The number of leading bars the run's warmup convention
+            makes non-tradable (``execution_warmup_bars``).
+        window_noun: "period" / "fold" / "window", for the message.
+        threshold: The maximum position count, as a fraction of the
+            executable window, that counts as "thin". Default 0.2.
+
+    Returns:
+        ``None`` when every window the verdict rests on traded in at least
+        ``threshold`` of its executable bars, otherwise a dict with
+        ``message`` and ``details`` recording the thin windows and the
+        fraction of executable bars each held a position.
+    """
+    if not windows:
+        return None
+
+    warmup_bars = int(warmup_bars or 0)
+    thin: List[Dict[str, Any]] = []
+    for window in windows:
+        position_bars = window.get("position_bars")
+        bars = window.get("bars")
+        if position_bars is None or bars is None:
+            continue
+        executable = max(int(bars) - warmup_bars, 0)
+        if executable <= 0:
+            # Nothing tradable in the window at all: the position count is
+            # not a fraction of an executable window, so there is nothing
+            # thin to report here (the window is flat, which the
+            # partial-selection diagnosis already names).
+            continue
+        fraction = float(position_bars) / float(executable)
+        if fraction <= threshold:
+            thin.append(
+                {
+                    "window": window.get("window"),
+                    "bars": int(bars),
+                    "executable_bars": executable,
+                    "position_bars": int(position_bars),
+                    "position_fraction_of_executable": round(fraction, 4),
+                    "test_sharpe": window.get("test_sharpe"),
+                    "test_start": window.get("test_start"),
+                    "test_end": window.get("test_end"),
+                }
+            )
+
+    if not thin:
+        return None
+
+    n_thin = len(thin)
+    n_total = len(windows)
+    min_fraction = min(t["position_fraction_of_executable"] for t in thin)
+    max_fraction = max(t["position_fraction_of_executable"] for t in thin)
+
+    if n_thin == n_total:
+        scope = (
+            f"every one of the {n_total} {window_noun}s the verdict rests on"
+        )
+    else:
+        scope = (
+            f"{n_thin} of the {n_total} {window_noun}s the verdict rests on"
+        )
+
+    message = (
+        f"The verdict rests on {scope} in which the strategy held a "
+        f"position for {min_fraction:.0%} to {max_fraction:.0%} of the "
+        f"executable bars (at most {threshold:.0%} of each window, after "
+        f"the {warmup_bars} warmup bar(s) this run drops are removed). A "
+        f"verdict measured on windows the strategy barely traded in is weak "
+        f"evidence: it says little about the strategy and more about the "
+        f"windows it was measured on. The reported numbers are unchanged -- "
+        f"this is a measurement of how much evidence the verdict has, not a "
+        f"correction to it."
+    )
+
+    return {
+        "message": message,
+        "details": {
+            "n_windows_with_selected_params": n_total,
+            "n_thin_windows": n_thin,
+            "thin_windows": thin,
+            "max_position_fraction_of_executable": round(max_fraction, 4),
+            "min_position_fraction_of_executable": round(min_fraction, 4),
+            "warmup_bars": warmup_bars,
+            "threshold": float(threshold),
+            "window_noun": window_noun,
+        },
     }
 
 
@@ -5003,6 +5188,24 @@ def out_of_sample_validation(
     )
     if _partial_diagnosis is not None:
         summary["partial_selection_diagnosis"] = _partial_diagnosis
+        # The selected parameter was chosen from the windows that could
+        # select one, and the verdict on it rests on how much of those
+        # windows the strategy actually traded in. The aggregate Sharpe
+        # and stability ratio hide that: a "low" rating earned on two
+        # windows that each traded for one bar says little about the
+        # strategy. Measurement only -- it changes no number.
+        _warmup_bars = execution_warmup_metadata(
+            WARMUP_CONVENTION_WALK_FORWARD, latency
+        )["execution_warmup_bars"]
+        _thin = _thin_evidence_warning(
+            _partial_diagnosis["details"].get("traded_windows", []),
+            _warmup_bars,
+            window_noun=_partial_diagnosis["details"].get(
+                "window_noun", "window"
+            ),
+        )
+        if _thin is not None:
+            summary["thin_evidence_warning"] = _thin
 
     # Add multiple benchmark information to summary if applicable
     if isinstance(test_benchmark, list):
@@ -6125,6 +6328,12 @@ def run_cpcv(args) -> int:
     _print_partial_selection_diagnosis(
         results["summary"].get("partial_selection_diagnosis")
     )
+    # A verdict that rests on some folds also rests on how much of those
+    # folds the strategy actually traded in: a "low" rating earned on two
+    # folds that each traded for one bar says little about the strategy.
+    _print_thin_evidence_warning(
+        results["summary"].get("thin_evidence_warning")
+    )
     _total_oos_return = results["summary"]["total_oos_return"]
     print(
         f"Total OOS Return: {'N/A' if _total_oos_return is None else f'{_total_oos_return:.2%}'}"
@@ -7212,6 +7421,12 @@ def run_walk_forward(args) -> int:
     # periods were flat and why, next to the period count.
     _print_partial_selection_diagnosis(
         results["summary"].get("partial_selection_diagnosis")
+    )
+    # A verdict that rests on some periods also rests on how much of those
+    # periods the strategy actually traded in: a "low" rating earned on two
+    # periods that each traded for one bar says little about the strategy.
+    _print_thin_evidence_warning(
+        results["summary"].get("thin_evidence_warning")
     )
     _total_oos_return = results["summary"]["total_oos_return"]
     print(
@@ -8876,6 +9091,13 @@ def run_out_of_sample_validation(args) -> int:
     # chosen from fewer windows than the validation phase had.
     _print_partial_selection_diagnosis(
         results["summary"].get("partial_selection_diagnosis")
+    )
+    # The selected parameter was chosen from the windows that could select
+    # one, and if those windows barely traded, the selection rests on thin
+    # evidence: the aggregate Sharpe hides how much of them the strategy
+    # actually held a position.
+    _print_thin_evidence_warning(
+        results["summary"].get("thin_evidence_warning")
     )
 
     # The walk-forward window the validation phase actually ran with (it is
