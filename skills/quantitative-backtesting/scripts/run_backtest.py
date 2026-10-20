@@ -47,7 +47,12 @@ from utils import (
     strategy_target_weights,
     WARMUP_CONVENTION_RUN_BACKTEST,
 )
-from walk_forward import estimate_capacity, deflated_sharpe_ratio, minimum_detectable_sharpe
+from walk_forward import (
+    _build_test_resolution,
+    _print_deflated_alpha,
+    _print_test_resolution,
+    estimate_capacity,
+)
 
 
 def parse_args():
@@ -1137,6 +1142,20 @@ def main():
     metrics["book_diagnostic"] = results.get("book_diagnostic")
     book_diagnostic = results.get("book_diagnostic")
 
+    # What the significance tests this run reports could have detected at the
+    # sample size actually available: the smallest confirmable effect. The
+    # statistic is read straight out of `metrics` (the Deflated Sharpe Ratio
+    # `calculate_metrics` attached, and the aggregate Deflated Alpha Ratio it
+    # attached for a multi-benchmark run) and inverted on the very return
+    # series those statistics were computed on -- `results["returns"]`, the
+    # same series `calculate_metrics` passes to `deflated_sharpe_ratio` -- so
+    # the resolution reported is the resolution of *that* statistic and not of
+    # some other series. A measurement, not a correction: no p-value, no
+    # verdict and no other reported number is changed.
+    metrics["test_resolution"] = _build_test_resolution(
+        metrics, results.get("returns")
+    )
+
     # Panel pricing mode: which convention produced the reported P&L. It is
     # printed before every number so a result can never be read without
     # knowing how the panel was priced.
@@ -1283,6 +1302,13 @@ def main():
             f"(p-value {dsr['p_value']:.4f}, expected max Sharpe "
             f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
         )
+    # The aggregate Deflated Alpha Ratio (multi-benchmark runs): the
+    # statistic the alpha resolution below belongs to.
+    _print_deflated_alpha(metrics.get("deflated_alpha"))
+    # What the significance tests could have detected at the sample size
+    # actually available: the smallest confirmable effect. A measurement, not
+    # a correction -- it changes no verdict and no reported number.
+    _print_test_resolution(metrics.get("test_resolution"))
 
     print("Generating report...")
     generate_report(metrics, args.output, symbol=args.symbol, strategy_name=args.strategy)

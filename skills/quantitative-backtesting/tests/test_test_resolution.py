@@ -12,6 +12,11 @@ console. These tests pin:
 
   * all three analysis paths (walk-forward, CPCV, out-of-sample) report the
     block, and the CLI prints it next to the Deflated Sharpe line;
+  * the primary backtest entry point (`run_backtest.py`) reports the block
+    too, built on the very return series its Deflated Sharpe Ratio was
+    computed on, and carries it in `metrics.json`;
+  * the aggregate Deflated Alpha Ratio -- the statistic the alpha resolution
+    belongs to -- is printed next to that resolution;
   * the block agrees with the `minimum_detectable_sharpe` /
     `minimum_detectable_alpha` helpers it is built from;
   * a statistic whose return series does not match is reported as "not
@@ -45,6 +50,7 @@ from walk_forward import (  # noqa: E402
     PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
     _build_test_resolution,
     _make_strategy_factory,
+    _print_deflated_alpha,
     _print_test_resolution,
     cpcv_analysis,
     minimum_detectable_alpha,
@@ -56,6 +62,7 @@ from walk_forward import (  # noqa: E402
 SAMPLE_DATA = SKILLS_DIR / "assets" / "example_data" / "sample_ohlcv.csv"
 SAMPLE_BENCHMARK = SKILLS_DIR / "assets" / "example_data" / "sample_benchmark.csv"
 WALK_FORWARD_CLI = SKILLS_DIR / "scripts" / "walk_forward.py"
+RUN_BACKTEST_CLI = SKILLS_DIR / "scripts" / "run_backtest.py"
 
 MEANINGFUL_GRID = {"fast_period": [5, 10], "slow_period": [20, 30]}
 
@@ -318,6 +325,244 @@ def test_a_run_without_deflation_says_there_is_no_test_resolution():
 
 
 # ---------------------------------------------------------------------------
+# The primary backtest entry point (run_backtest.py)
+# ---------------------------------------------------------------------------
+
+def _run_backtest_cli(extra_args, tmp):
+    """Run the primary backtest CLI and return (result, metrics artifact)."""
+    result = subprocess.run(
+        [
+            sys.executable, str(RUN_BACKTEST_CLI),
+            "--data", str(SAMPLE_DATA),
+            "--strategy", "sma_crossover",
+            "--params", json.dumps({"fast_period": 10, "slow_period": 30}),
+            "--output", tmp,
+        ] + list(extra_args),
+        capture_output=True,
+        text=True,
+        timeout=1800,
+    )
+    assert result.returncode == 0, (
+        f"run_backtest CLI exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-3000:]}\nstderr:\n{result.stderr[-3000:]}"
+    )
+    metrics = json.loads((Path(tmp) / "metrics.json").read_text())
+    return result, metrics
+
+
+def test_the_run_backtest_cli_reports_the_test_resolution():
+    """The primary backtest entry point reports what its test could detect."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result, metrics = _run_backtest_cli(
+            [
+                "--n-trials", "12",
+                "--benchmark", str(SAMPLE_BENCHMARK), str(SAMPLE_DATA),
+            ],
+            tmp,
+        )
+
+        assert "Test resolution (measurement, not a correction)" in result.stdout
+        assert "Deflated Sharpe: smallest confirmable annualized Sharpe" in result.stdout
+        assert "Deflated Alpha: smallest confirmable annualized alpha" in result.stdout
+
+        resolution = metrics.get("test_resolution")
+        assert isinstance(resolution, dict), "metrics.json has no test_resolution"
+        assert resolution["sharpe_status"] == "resolvable"
+        assert resolution["alpha_status"] == "resolvable"
+        assert resolution["min_detectable_sharpe"] is not None
+        assert resolution["min_detectable_alpha"] is not None
+
+        # The resolution must be the resolution of *that* statistic: the
+        # observation count and the observed effect are the Deflated Sharpe
+        # Ratio's own, not a re-derivation over some other series.
+        dsr = metrics["deflated_sharpe"]
+        assert resolution["n_test_observations"] == dsr["n_observations"]
+        assert resolution["n_parameter_trials"] == dsr["n_trials"]
+        assert resolution["observed_annualized_sharpe"] == dsr["sharpe_ratio"]
+
+        dar = metrics["deflated_alpha"]
+        assert resolution["n_benchmarks"] == dar["n_benchmarks"]
+        assert resolution["observed_annualized_alpha"] == dar["alpha"]
+
+        # The console and the artifact carry the same numbers.
+        assert f"{resolution['min_detectable_sharpe']:.4f}" in result.stdout
+        assert f"{resolution['min_detectable_alpha']:.2%}" in result.stdout
+
+
+def test_the_run_backtest_resolution_is_built_on_the_statistics_own_series():
+    """The block and the helper agree when built the way run_backtest builds it.
+
+    `run_backtest.py` reads the Deflated Sharpe Ratio out of the metrics
+    `calculate_metrics` produced and inverts it on `results["returns"]` -- the
+    same series `calculate_metrics` handed to `deflated_sharpe_ratio`. This
+    pins that the two are the same numbers, and that the block is not built
+    on a re-derived series.
+    """
+    from performance import calculate_metrics
+
+    rng = np.random.default_rng(7)
+    dates = pd.date_range("2021-01-01", periods=400, freq="B")
+    returns = pd.Series(rng.normal(0.0004, 0.011, 400), index=dates)
+    results = {
+        "equity_curve": (1 + returns).cumprod() * 100000,
+        "returns": returns,
+        "config": {"n_trials": 9, "initial_capital": 100000},
+    }
+    metrics = calculate_metrics(results)
+
+    resolution = _build_test_resolution(metrics, results["returns"])
+    expected = minimum_detectable_sharpe(
+        metrics["deflated_sharpe"], results["returns"]
+    )
+    assert resolution["sharpe_status"] == "resolvable"
+    assert resolution["min_detectable_sharpe"] == expected["minimum_detectable_sharpe"]
+    assert resolution["n_test_observations"] == metrics["deflated_sharpe"]["n_observations"]
+    # A different series must not silently resolve the same statistic.
+    other = _build_test_resolution(metrics, results["returns"].iloc[:10])
+    assert other["sharpe_status"] == "not_resolvable"
+    assert other["sharpe_reason"] == "returns_do_not_match_statistic"
+
+
+def test_the_run_backtest_cli_says_so_when_no_significance_test_was_run():
+    """A run without --n-trials reports that there is no resolution."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result, metrics = _run_backtest_cli([], tmp)
+
+        assert "No significance test was run" in result.stdout
+        resolution = metrics["test_resolution"]
+        assert resolution["sharpe_status"] == "not_applicable"
+        assert resolution["alpha_status"] == "not_applicable"
+        assert resolution["min_detectable_sharpe"] is None
+        assert resolution["min_detectable_alpha"] is None
+
+
+# ---------------------------------------------------------------------------
+# The aggregate Deflated Alpha Ratio the alpha resolution belongs to
+# ---------------------------------------------------------------------------
+
+def test_the_aggregate_deflated_alpha_is_printed_next_to_the_resolution():
+    """The statistic the alpha resolution belongs to is visible on the console."""
+    import io
+    from contextlib import redirect_stdout
+
+    summary, _ = _out_of_sample_summary(
+        benchmark=[_make_benchmark_data(), _make_benchmark_data(seed=123)]
+    )
+    dar = summary["deflated_alpha"]
+    assert isinstance(dar, dict)
+
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):
+        _print_deflated_alpha(dar)
+    printed = buffer.getvalue()
+
+    assert "Deflated Alpha Ratio" in printed
+    assert f"{dar['deflated_alpha_ratio']:.4f}" in printed
+    assert f"{dar['p_value']:.4f}" in printed
+    assert f"{dar['n_benchmarks']} benchmarks" in printed
+
+
+def test_the_walk_forward_cli_prints_the_aggregate_deflated_alpha():
+    """The walk-forward CLI shows the aggregate DAR, not only its resolution."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result = subprocess.run(
+            [
+                sys.executable, str(WALK_FORWARD_CLI), "walk-forward",
+                "--data", str(SAMPLE_DATA),
+                "--strategy", "sma_crossover",
+                "--param-grid", json.dumps(MEANINGFUL_GRID),
+                "--train-months", "12",
+                "--test-months", "3",
+                "--step-months", "3",
+                "--deflate",
+                "--benchmark", str(SAMPLE_BENCHMARK), str(SAMPLE_DATA),
+                "--output", tmp,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=1800,
+        )
+        assert result.returncode == 0, (
+            f"walk-forward CLI exited {result.returncode}\n"
+            f"stdout:\n{result.stdout[-3000:]}\nstderr:\n{result.stderr[-3000:]}"
+        )
+
+        artifact = json.loads(
+            (Path(tmp) / "walk_forward_summary.json").read_text()
+        )
+        dar = artifact["summary"]["deflated_alpha"]
+        assert "Deflated Alpha Ratio: " in result.stdout
+        assert f"{dar['deflated_alpha_ratio']:.4f}" in result.stdout
+        assert f"{dar['p_value']:.4f}" in result.stdout
+        # The aggregate DAR is printed before the alpha resolution it belongs to.
+        assert result.stdout.index("Deflated Alpha Ratio: ") < result.stdout.index(
+            "Deflated Alpha: smallest confirmable annualized alpha"
+        )
+
+
+def test_the_cpcv_cli_prints_the_aggregate_deflated_alpha():
+    """The CPCV CLI shows the aggregate DAR, not only its resolution."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result = subprocess.run(
+            [
+                sys.executable, str(WALK_FORWARD_CLI), "cpcv",
+                "--data", str(SAMPLE_DATA),
+                "--strategy", "sma_crossover",
+                "--param-grid", json.dumps(MEANINGFUL_GRID),
+                "--n-splits", "5",
+                "--test-size", "0.5",
+                "--deflate",
+                "--benchmark", str(SAMPLE_BENCHMARK), str(SAMPLE_DATA),
+                "--output", tmp,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=1800,
+        )
+        assert result.returncode == 0, (
+            f"cpcv CLI exited {result.returncode}\n"
+            f"stdout:\n{result.stdout[-3000:]}\nstderr:\n{result.stderr[-3000:]}"
+        )
+
+        artifact = json.loads((Path(tmp) / "cpcv_summary.json").read_text())
+        dar = artifact["summary"]["deflated_alpha"]
+        assert "Deflated Alpha Ratio: " in result.stdout
+        assert f"{dar['deflated_alpha_ratio']:.4f}" in result.stdout
+        assert f"{dar['p_value']:.4f}" in result.stdout
+
+
+def test_the_out_of_sample_cli_prints_the_aggregate_deflated_alpha():
+    """The out-of-sample CLI shows the aggregate DAR it deflates against."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result = subprocess.run(
+            [
+                sys.executable, str(WALK_FORWARD_CLI), "out-of-sample",
+                "--data", str(SAMPLE_DATA),
+                "--strategy", "sma_crossover",
+                "--param-grid", json.dumps(MEANINGFUL_GRID),
+                "--deflate",
+                "--benchmark", str(SAMPLE_BENCHMARK), str(SAMPLE_DATA),
+                "--output", tmp,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=1800,
+        )
+        assert result.returncode == 0, (
+            f"out-of-sample CLI exited {result.returncode}\n"
+            f"stdout:\n{result.stdout[-3000:]}\nstderr:\n{result.stderr[-3000:]}"
+        )
+
+        artifact = json.loads(
+            (Path(tmp) / "out_of_sample_summary.json").read_text()
+        )
+        dar = artifact["summary"]["deflated_alpha"]
+        assert "Deflated Alpha Ratio (test): " in result.stdout
+        assert f"{dar['deflated_alpha_ratio']:.4f}" in result.stdout
+        assert f"{dar['p_value']:.4f}" in result.stdout
+
+
+# ---------------------------------------------------------------------------
 # The console
 # ---------------------------------------------------------------------------
 
@@ -436,6 +681,20 @@ TEST_REGISTRY = [
      test_the_resolution_block_carries_no_verdict),
     ("test_a_run_without_deflation_says_there_is_no_test_resolution",
      test_a_run_without_deflation_says_there_is_no_test_resolution),
+    ("test_the_run_backtest_cli_reports_the_test_resolution",
+     test_the_run_backtest_cli_reports_the_test_resolution),
+    ("test_the_run_backtest_resolution_is_built_on_the_statistics_own_series",
+     test_the_run_backtest_resolution_is_built_on_the_statistics_own_series),
+    ("test_the_run_backtest_cli_says_so_when_no_significance_test_was_run",
+     test_the_run_backtest_cli_says_so_when_no_significance_test_was_run),
+    ("test_the_aggregate_deflated_alpha_is_printed_next_to_the_resolution",
+     test_the_aggregate_deflated_alpha_is_printed_next_to_the_resolution),
+    ("test_the_walk_forward_cli_prints_the_aggregate_deflated_alpha",
+     test_the_walk_forward_cli_prints_the_aggregate_deflated_alpha),
+    ("test_the_cpcv_cli_prints_the_aggregate_deflated_alpha",
+     test_the_cpcv_cli_prints_the_aggregate_deflated_alpha),
+    ("test_the_out_of_sample_cli_prints_the_aggregate_deflated_alpha",
+     test_the_out_of_sample_cli_prints_the_aggregate_deflated_alpha),
     ("test_the_console_prints_the_resolution_and_its_wording",
      test_the_console_prints_the_resolution_and_its_wording),
     ("test_the_walk_forward_cli_prints_the_test_resolution",

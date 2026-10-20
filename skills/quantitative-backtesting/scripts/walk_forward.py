@@ -4539,6 +4539,40 @@ def _print_test_resolution(
         )
 
 
+def _print_deflated_alpha(
+    deflated_alpha: Optional[Dict[str, Any]],
+    indent: str = "",
+    label: str = "Deflated Alpha Ratio",
+) -> None:
+    """Print the aggregate Deflated Alpha Ratio a summary carries.
+
+    The alpha *resolution* printed next to the verdict belongs to the
+    aggregate Deflated Alpha Ratio (the DAR over the benchmark set), so that
+    statistic has to be visible next to it: a resolution whose statistic the
+    reader cannot see cannot be checked.
+
+    The per-benchmark corrected alpha p-value the CLIs also print is that
+    benchmark's own DAR p-value -- for the primary benchmark it coincides with
+    the aggregate's. What the aggregate line adds is the ratio itself, the
+    expected maximum alpha and the benchmark count, none of which the
+    per-benchmark print carries.
+
+    The numbers printed here are the ones the artifact already carries under
+    ``summary["deflated_alpha"]``; nothing is recomputed and no reported
+    number is changed.
+    """
+    if not isinstance(deflated_alpha, dict):
+        return
+    print(
+        f"{indent}{label}: "
+        f"{_format_optional_float(deflated_alpha.get('deflated_alpha_ratio'))} "
+        f"(p-value {_format_optional_float(deflated_alpha.get('p_value'))}, "
+        f"expected max alpha "
+        f"{_format_optional_float(deflated_alpha.get('expected_max_alpha'), '{:.2%}')}, "
+        f"{deflated_alpha.get('n_benchmarks')} benchmarks)"
+    )
+
+
 def _format_overfitting_risk(value: Any, unknown: str = "unknown") -> str:
     """Format the overfitting-risk verdict, including the 'not applicable' case.
 
@@ -7083,6 +7117,9 @@ def run_cpcv(args) -> int:
             f"(p-value {dsr['p_value']:.4f}, expected max Sharpe "
             f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
         )
+    # The aggregate Deflated Alpha Ratio: the statistic the alpha resolution
+    # below belongs to.
+    _print_deflated_alpha(results["summary"].get("deflated_alpha"))
     # What the significance tests could have detected at the sample size
     # actually available: the smallest confirmable effect. A measurement, not
     # a correction -- it changes no verdict and no reported number.
@@ -8185,6 +8222,9 @@ def run_walk_forward(args) -> int:
             f"(p-value {dsr['p_value']:.4f}, expected max Sharpe "
             f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
         )
+    # The aggregate Deflated Alpha Ratio: the statistic the alpha resolution
+    # below belongs to.
+    _print_deflated_alpha(results["summary"].get("deflated_alpha"))
     # What the significance tests could have detected at the sample size
     # actually available: the smallest confirmable effect. A measurement, not
     # a correction -- it changes no verdict and no reported number.
@@ -9899,6 +9939,12 @@ def run_out_of_sample_validation(args) -> int:
             f"(p-value {dsr['p_value']:.4f}, expected max Sharpe "
             f"{dsr['expected_max_sharpe']:.4f}, {dsr['n_trials']} trials)"
         )
+    # The aggregate Deflated Alpha Ratio: the statistic the alpha resolution
+    # below belongs to.
+    _print_deflated_alpha(
+        summary.get("deflated_alpha"),
+        label="Deflated Alpha Ratio (test)",
+    )
     # What the held-out significance tests could have detected at the sample
     # size actually available: the smallest confirmable effect. A
     # measurement, not a correction -- it changes no verdict and no reported

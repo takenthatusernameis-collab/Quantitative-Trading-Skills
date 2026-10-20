@@ -1428,3 +1428,46 @@ resolution is reported next to every verdict.
 The two-benchmark out-of-sample run also reports a Deflated Alpha resolution:
 the smallest confirmable annualized alpha is **35.68%** (observed 17.29%),
 which is likewise beyond the 10% plausibility bound.
+
+### The primary backtest entry point reports it too
+
+`run_backtest.py` is the framework's main entry point, and it reports the same
+block under `metrics["test_resolution"]` -- so a reader of `metrics.json` sees
+the resolution of the significance tests that `metrics.json` also carries, not
+only the p-values.
+
+The wiring is deliberately narrow: the block is built from the statistics
+`calculate_metrics` already attached to the metrics (`deflated_sharpe`, and
+`deflated_alpha` for a multi-benchmark run) and inverted on
+`results["returns"]` -- **the same series `calculate_metrics` handed to
+`deflated_sharpe_ratio`**. The resolution reported is therefore the
+resolution of *that* statistic; a mismatch is not silently absorbed but
+reported as `not_resolvable` with the reason
+`returns_do_not_match_statistic`.
+
+`tests/test_test_resolution.py` pins that the block's
+`n_test_observations` is the Deflated Sharpe Ratio's own `n_observations`,
+that its `observed_annualized_sharpe` is that statistic's `sharpe_ratio`, and
+that a run without `--n-trials` says there is no resolution instead of
+staying silent.
+
+### The aggregate Deflated Alpha Ratio is printed next to its resolution
+
+The alpha *resolution* is the resolution of a specific statistic: the
+aggregate Deflated Alpha Ratio (the DAR over the benchmark set). The CLIs
+printed the resolution but not the statistic it belongs to, so the reader
+could not check it. All four CLIs now print the aggregate DAR next to the
+resolution:
+
+```
+Deflated Alpha Ratio: 0.6329 (p-value 0.3671, expected max alpha 14.87%, 2 benchmarks)
+```
+
+The numbers are the ones the artifact already carries under
+`summary["deflated_alpha"]`; nothing is recomputed and no reported number
+changes. The per-benchmark corrected alpha p-value the CLIs also print is
+that benchmark's own DAR p-value -- for the primary benchmark it coincides
+with the aggregate's -- so what the aggregate line adds is the ratio itself,
+the expected maximum alpha and the benchmark count, none of which the
+per-benchmark print carries.
+

@@ -51,7 +51,7 @@ This skill provides a comprehensive framework for systematic trading strategy de
 - Parameter sensitivity analysis
 - Overfitting detection (combinatorially purged cross-validation)
 - Multiple-testing correction via the Deflated Sharpe Ratio (Bailey & López de Prado)
-- Test resolution (minimum detectable effect): how large an effect the held-out sample could have detected at all (reported by the walk-forward, CPCV and out-of-sample paths as `summary["test_resolution"]`, and printed next to the Deflated Sharpe line)
+- Test resolution (minimum detectable effect): how large an effect the held-out sample could have detected at all (reported by the walk-forward, CPCV and out-of-sample paths as `summary["test_resolution"]`, by the primary backtest entry point as `metrics["test_resolution"]`, and printed next to the Deflated Sharpe line)
 
 ### 6. Reporting
 - Automated tear sheet generation
@@ -191,14 +191,18 @@ Risk Metrics:
   Parameter Can Be Selected".
 - `test_test_resolution.py` - Unit tests for the **test resolution** (minimum
   detectable effect) reporting: the walk-forward, CPCV and out-of-sample paths
-  each attach `summary["test_resolution"]`, the block agrees with the
+  each attach `summary["test_resolution"]`, the primary backtest entry point
+  attaches `metrics["test_resolution"]` built on the very return series its
+  Deflated Sharpe Ratio was computed on, the block agrees with the
   `minimum_detectable_sharpe` / `minimum_detectable_alpha` helpers it is built
   from, a statistic whose return series does not match is reported as "not
   resolvable" with a reason instead of a number, a threshold beyond the
   stated plausibility bound is flagged, the block mutates nothing and carries
-  no verdict, a run without a significance test says so, and the CLI prints it
-  next to the Deflated Sharpe line. See `references/validation_methods.md`,
-  "Test Resolution (Minimum Detectable Effect)".
+  no verdict, a run without a significance test says so, the CLI prints it
+  next to the Deflated Sharpe line, and the aggregate Deflated Alpha Ratio
+  the alpha resolution belongs to is printed next to that resolution. See
+  `references/validation_methods.md`, "Test Resolution (Minimum Detectable
+  Effect)".
 
 ### references/
 - `data_schema.md` - Expected data formats and column specifications
@@ -427,13 +431,30 @@ Risk Metrics:
   trials behind them, the smallest annualized Sharpe / alpha each statistic
   could have confirmed, and whether that threshold exceeds the stated
   plausibility bound (`PLAUSIBLE_MAX_ANNUALIZED_SHARPE = 2.0`,
-  `PLAUSIBLE_MAX_ANNUALIZED_ALPHA = 0.10`). The CLI prints it next to the
-  Deflated Sharpe line, labelled *"measurement, not a correction"*. A
-  statistic whose return series does not match the one it was computed on is
-  reported as **not resolvable** with a reason, never as a number. The block
-  changes no number: it is reporting-only, and a run without a significance
-  test says so instead of staying silent. Guarded by
+  `PLAUSIBLE_MAX_ANNUALIZED_ALPHA = 0.10`). The primary backtest entry point
+  (`run_backtest.py`) reports the same block under
+  `metrics["test_resolution"]`, built from the statistics
+  `calculate_metrics` attached and inverted on `results["returns"]` — the same
+  series those statistics were computed on — so the resolution reported is the
+  resolution of *that* statistic. The CLI prints it next to the Deflated
+  Sharpe line, labelled *"measurement, not a correction"*. A statistic whose
+  return series does not match the one it was computed on is reported as
+  **not resolvable** with a reason, never as a number. The block changes no
+  number: it is reporting-only, and a run without a significance test says so
+  instead of staying silent. Guarded by
   `tests/test_test_resolution.py`.
+
+- **A resolution without its statistic is not checkable.** The alpha
+  resolution belongs to the *aggregate* Deflated Alpha Ratio (the DAR over the
+  benchmark set), so all four CLIs print that statistic next to the
+  resolution — `Deflated Alpha Ratio: 0.6329 (p-value 0.3671, expected max
+  alpha 14.87%, 2 benchmarks)`. The numbers are the ones the artifact already
+  carries under `summary["deflated_alpha"]`; nothing is recomputed and no
+  reported number changes. (The per-benchmark corrected alpha p-value the
+  CLIs also print is that benchmark's own DAR p-value; for the primary
+  benchmark it coincides with the aggregate's, so what the aggregate line
+  adds is the ratio itself, the expected maximum alpha and the benchmark
+  count.) Guarded by `tests/test_test_resolution.py`.
 
 - **The CPCV test window is a fraction of each group, so the effective
   out-of-sample fraction is `test_size / n_splits`.** At the default
