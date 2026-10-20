@@ -51,6 +51,7 @@ This skill provides a comprehensive framework for systematic trading strategy de
 - Parameter sensitivity analysis
 - Overfitting detection (combinatorially purged cross-validation)
 - Multiple-testing correction via the Deflated Sharpe Ratio (Bailey & López de Prado)
+- Test resolution (minimum detectable effect): how large an effect the held-out sample could have detected at all
 
 ### 6. Reporting
 - Automated tear sheet generation
@@ -382,6 +383,31 @@ Risk Metrics:
   carries the same message. A run in which every window the verdict rests on
   traded in at least that fraction carries no warning. Guarded by
   `tests/test_no_selection_diagnosis.py`.
+
+- **A significance test that cannot detect a plausible effect has not
+  falsified anything.** With `T` observations, the threshold "deflated
+  p < 0.10" requires the effect to exceed a certain size; when that size is
+  implausible the criterion is measuring the sample, not the strategy. The
+  worked example `examples/falsifiable_hypothesis_example.py` therefore
+  reports the **test resolution** beside the verdict: the smallest annualized
+  Sharpe / alpha each statistical criterion requires at the sample size
+  actually available (`walk_forward.minimum_detectable_sharpe` and
+  `walk_forward.minimum_detectable_alpha` invert the Deflated Sharpe Ratio
+  and the Deflated Alpha Ratio), and it names the criteria the sample cannot
+  resolve. On the shipped sample (100 test observations) those thresholds are
+  an annualized Sharpe of 4.20, an annualized alpha of 38.0% (raw alpha
+  t-test) and 35.3% (deflated) — all beyond what a plausible strategy
+  produces, so their failure is a statement about the size of the held-out
+  sample. The verdict itself is **not** changed by this: it stays the
+  conjunction of the pre-registered criteria (a decision rule is not
+  revisited after the result is seen), and the resolution is reported beside
+  it. Two wiring rules keep the two alpha p-values distinguishable: the raw
+  and the multiple-testing-corrected p-value are different statistics (the
+  correction overwrites `alpha_pvalue` and keeps the raw one in
+  `alpha_pvalue_original`), and the held-out window is counted in
+  **observations**, not periods. Guarded by
+  `tests/test_falsifiable_hypothesis_example.py` and
+  `tests/test_walk_forward.py`.
 
 - **The CPCV test window is a fraction of each group, so the effective
   out-of-sample fraction is `test_size / n_splits`.** At the default

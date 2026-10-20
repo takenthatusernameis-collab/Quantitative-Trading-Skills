@@ -49,6 +49,8 @@ from walk_forward import (  # noqa: E402
     _add_benchmark_to_summary,
     _benchmark_list_alpha_correction,
     deflated_alpha_ratio,
+    minimum_detectable_alpha,
+    minimum_detectable_sharpe,
     estimate_capacity,
     _load_and_validate_data,
     main as walk_forward_main,
@@ -1970,6 +1972,219 @@ def test_deflated_alpha_ratio_cross_sectional_units_are_period_consistent():
     denom = strat_vol_ann * np.sqrt(ann_factor)
     assert abs(res_cs["expected_max_alpha"] / denom - sr_star_cs) < 1e-9
     assert abs(res_fb["expected_max_alpha"] / denom - sr_star_fb) < 1e-9
+
+
+# --- Minimum detectable effect (test resolution) -----------------------------
+
+
+def _synthetic_returns(periods: int = 300, seed: int = 11, drift: float = 0.0004) -> pd.Series:
+    """Deterministic per-period return series for the deflation helpers.
+
+    The same seed with more periods extends the series, so a shorter and a
+    longer sample share their overlapping observations.
+    """
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2021-01-01", periods=periods, freq="B")
+    return pd.Series(drift + rng.normal(0, 0.01, periods), index=dates)
+
+
+def test_the_minimum_detectable_effect_helpers_mirror_the_forward_statistics():
+    """The z-formula used to invert the Deflated Sharpe / Deflated Alpha
+    statistics must reproduce the forward statistics' own z-score exactly.
+
+    The minimum-detectable-effect helpers invert that z, so if the two
+    formulas ever drift apart the reported resolution would no longer be the
+    resolution of the statistic that produced the verdict.
+    """
+    from walk_forward import _deflation_z_score, _normal_quantile
+
+    returns = _synthetic_returns(periods=300)
+    trial_sharpes = [0.2, 0.5, -0.1, 0.9, 0.35]
+    dsr = deflated_sharpe_ratio(
+        sharpe_ratio=0.8,
+        returns=returns,
+        n_trials=len(trial_sharpes),
+        trial_sharpes=trial_sharpes,
+    )
+    ann = _annualization_factor(returns.index)
+    sr = dsr["sharpe_ratio"] / np.sqrt(ann)
+    sr_star = dsr["expected_max_sharpe"] / np.sqrt(ann)
+    z = _deflation_z_score(
+        sr, sr_star, dsr["n_observations"], dsr["skewness"], dsr["kurtosis"]
+    )
+    assert abs(z - dsr["z_score"]) < 1e-12
+
+    bench = _synthetic_returns(periods=300, seed=12)
+    trial_alphas = [0.01, -0.02, 0.03]
+    dar = deflated_alpha_ratio(
+        alpha=0.05,
+        returns=returns,
+        benchmark_returns=bench,
+        n_benchmarks=len(trial_alphas),
+        trial_alphas=trial_alphas,
+    )
+    strat_vol_ann = float(returns.std() * np.sqrt(ann))
+    scale = strat_vol_ann * np.sqrt(ann)
+    z_alpha = _deflation_z_score(
+        dar["alpha"] / scale,
+        dar["expected_max_alpha"] / scale,
+        dar["n_observations"],
+        dar["skewness"],
+        dar["kurtosis"],
+    )
+    assert abs(z_alpha - dar["z_score"]) < 1e-12
+
+    # The normal quantile helper is the standard inverse CDF.
+    assert abs(_normal_quantile(0.95) - 1.6448536269514722) < 1e-9
+
+
+def test_the_minimum_detectable_sharpe_is_the_sharpe_that_reaches_the_target():
+    """The reported minimum detectable Sharpe is exactly the annualized
+    Sharpe whose deflated p-value reaches the target: at the MDE the test
+    sits on the threshold, and just below it the test does not reject."""
+    returns = _synthetic_returns(periods=300)
+    trial_sharpes = [0.2, 0.5, -0.1, 0.9, 0.35]
+    dsr = deflated_sharpe_ratio(
+        sharpe_ratio=0.8,
+        returns=returns,
+        n_trials=len(trial_sharpes),
+        trial_sharpes=trial_sharpes,
+    )
+    mde = minimum_detectable_sharpe(dsr, returns, target_p_value=0.10)
+    assert mde["attainable"] is True
+    assert mde["minimum_detectable_sharpe"] > 0
+    assert mde["n_observations"] == dsr["n_observations"]
+    assert mde["n_trials"] == dsr["n_trials"]
+
+    at_mde = deflated_sharpe_ratio(
+        sharpe_ratio=mde["minimum_detectable_sharpe"],
+        returns=returns,
+        n_trials=len(trial_sharpes),
+        trial_sharpes=trial_sharpes,
+    )
+    assert abs(at_mde["p_value"] - 0.10) < 1e-6
+
+    below = deflated_sharpe_ratio(
+        sharpe_ratio=mde["minimum_detectable_sharpe"] * 0.99,
+        returns=returns,
+        n_trials=len(trial_sharpes),
+        trial_sharpes=trial_sharpes,
+    )
+    assert below["p_value"] > 0.10
+
+
+def test_the_minimum_detectable_sharpe_shrinks_as_the_sample_grows():
+    """More observations resolve smaller effects: the minimum detectable
+    Sharpe must fall when the same process is observed for longer."""
+    short = _synthetic_returns(periods=100, seed=11)
+    long = _synthetic_returns(periods=1000, seed=11)
+    trial_sharpes = [0.2, 0.5, -0.1, 0.9, 0.35]
+    mde_short = minimum_detectable_sharpe(
+        deflated_sharpe_ratio(
+            sharpe_ratio=0.8, returns=short, n_trials=5, trial_sharpes=trial_sharpes
+        ),
+        short,
+        0.10,
+    )
+    mde_long = minimum_detectable_sharpe(
+        deflated_sharpe_ratio(
+            sharpe_ratio=0.8, returns=long, n_trials=5, trial_sharpes=trial_sharpes
+        ),
+        long,
+        0.10,
+    )
+    assert mde_short["attainable"] and mde_long["attainable"]
+    assert (
+        mde_long["minimum_detectable_sharpe"]
+        < mde_short["minimum_detectable_sharpe"]
+    ), "a longer sample must resolve a smaller effect"
+
+
+def test_the_minimum_detectable_alpha_is_the_alpha_that_reaches_the_target():
+    """The Deflated Alpha analogue: at the reported minimum detectable alpha
+    the corrected p-value sits on the threshold."""
+    returns = _synthetic_returns(periods=300, seed=11)
+    bench = _synthetic_returns(periods=300, seed=12)
+    trial_alphas = [0.01, -0.02, 0.03]
+    dar = deflated_alpha_ratio(
+        alpha=0.05,
+        returns=returns,
+        benchmark_returns=bench,
+        n_benchmarks=len(trial_alphas),
+        trial_alphas=trial_alphas,
+    )
+    mde = minimum_detectable_alpha(dar, returns, target_p_value=0.10)
+    assert mde["attainable"] is True
+    assert mde["minimum_detectable_alpha"] > 0
+    assert mde["n_observations"] == dar["n_observations"]
+    assert mde["n_benchmarks"] == dar["n_benchmarks"]
+
+    at_mde = deflated_alpha_ratio(
+        alpha=mde["minimum_detectable_alpha"],
+        returns=returns,
+        benchmark_returns=bench,
+        n_benchmarks=len(trial_alphas),
+        trial_alphas=trial_alphas,
+    )
+    assert abs(at_mde["p_value"] - 0.10) < 1e-6
+
+    below = deflated_alpha_ratio(
+        alpha=mde["minimum_detectable_alpha"] * 0.99,
+        returns=returns,
+        benchmark_returns=bench,
+        n_benchmarks=len(trial_alphas),
+        trial_alphas=trial_alphas,
+    )
+    assert below["p_value"] > 0.10
+
+
+def test_the_minimum_detectable_effect_helpers_degrade_gracefully():
+    """A statistic computed on a different return series (or on nothing) is
+    reported as unattainable instead of silently producing a number."""
+    returns = _synthetic_returns(periods=300)
+    dsr = deflated_sharpe_ratio(sharpe_ratio=0.8, returns=returns, n_trials=5)
+
+    mismatched = minimum_detectable_sharpe(dsr, returns.iloc[:100], 0.10)
+    assert mismatched["attainable"] is False
+    assert mismatched["minimum_detectable_sharpe"] is None
+    assert mismatched["reason"] == "returns_do_not_match_statistic"
+
+    missing = minimum_detectable_sharpe(None, returns, 0.10)
+    assert missing["attainable"] is False
+    assert missing["reason"] == "no_deflated_sharpe"
+
+    no_returns = minimum_detectable_sharpe(dsr, None, 0.10)
+    assert no_returns["attainable"] is False
+    assert no_returns["reason"] == "no_returns"
+
+    assert minimum_detectable_alpha(None, returns, 0.10)["reason"] == "no_deflated_alpha"
+    # A Deflated Sharpe result is not a Deflated Alpha result: it carries no
+    # expected-max alpha, so no minimum detectable alpha can be reported.
+    assert (
+        minimum_detectable_alpha(dsr, returns, 0.10)["reason"]
+        == "no_expected_max_alpha"
+    )
+
+
+def test_t_critical_value_inverts_the_two_sided_p_value():
+    """The critical value helper is the inverse of the two-sided t p-value,
+    so the reported minimum detectable effect is consistent with the
+    significance level it is reported at."""
+    from performance import _t_two_sided_pvalue, t_critical_value
+
+    for df in (10, 30, 98, 500):
+        t_crit = t_critical_value(df, 0.05)
+        assert t_crit is not None, f"no critical value for df={df}"
+        assert abs(_t_two_sided_pvalue(t_crit, df) - 0.05) < 1e-8
+
+    # Known value: the 95% two-sided critical value with 98 degrees of
+    # freedom is 1.9845.
+    assert abs(t_critical_value(98, 0.05) - 1.984467) < 1e-4
+
+    # Degenerate inputs are reported, not guessed.
+    assert t_critical_value(0, 0.05) is None
+    assert t_critical_value(10, 0.0) is None
+    assert t_critical_value(10, 1.0) is None
 
 
 def test_out_of_sample_validation_multiple_benchmarks_deflated_alpha():
@@ -5908,6 +6123,12 @@ TEST_REGISTRY = [
     ("test_degenerate_constant_return_dar_consistency", test_degenerate_constant_return_dar_consistency),
     ("test_deflated_alpha_ratio_fallback_units_are_period_consistent", test_deflated_alpha_ratio_fallback_units_are_period_consistent),
     ("test_deflated_alpha_ratio_cross_sectional_units_are_period_consistent", test_deflated_alpha_ratio_cross_sectional_units_are_period_consistent),
+    ("test_the_minimum_detectable_effect_helpers_mirror_the_forward_statistics", test_the_minimum_detectable_effect_helpers_mirror_the_forward_statistics),
+    ("test_the_minimum_detectable_sharpe_is_the_sharpe_that_reaches_the_target", test_the_minimum_detectable_sharpe_is_the_sharpe_that_reaches_the_target),
+    ("test_the_minimum_detectable_sharpe_shrinks_as_the_sample_grows", test_the_minimum_detectable_sharpe_shrinks_as_the_sample_grows),
+    ("test_the_minimum_detectable_alpha_is_the_alpha_that_reaches_the_target", test_the_minimum_detectable_alpha_is_the_alpha_that_reaches_the_target),
+    ("test_the_minimum_detectable_effect_helpers_degrade_gracefully", test_the_minimum_detectable_effect_helpers_degrade_gracefully),
+    ("test_t_critical_value_inverts_the_two_sided_p_value", test_t_critical_value_inverts_the_two_sided_p_value),
     ("test_out_of_sample_validation_multiple_benchmarks_deflated_alpha", test_out_of_sample_validation_multiple_benchmarks_deflated_alpha),
     ("test_calculate_metrics_deflated_alpha_with_benchmark_list", test_calculate_metrics_deflated_alpha_with_benchmark_list),
     ("test_cli_cpcv_benchmark_cost_is_periodic", test_cli_cpcv_benchmark_cost_is_periodic),

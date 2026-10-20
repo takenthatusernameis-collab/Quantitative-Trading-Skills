@@ -15,6 +15,7 @@ import sys
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from statistics import NormalDist
 from typing import Dict, Any, List, Callable, Optional, Union
 from itertools import product
 
@@ -1936,6 +1937,263 @@ def deflated_alpha_ratio(
         "skewness": float(skew),
         "kurtosis": float(kurt),
     }
+
+
+# ---------------------------------------------------------------------------
+# Minimum detectable effect (test resolution)
+# ---------------------------------------------------------------------------
+#
+# A significance test on a small sample can fail for reasons that have
+# nothing to do with the hypothesis. With T observations, a threshold of
+# "deflated p < 0.10" requires the effect to exceed a certain size; when that
+# size is implausible, the criterion is not discriminating between
+# hypotheses -- it is measuring the sample size. Reporting the minimum
+# detectable effect (MDE) alongside the verdict makes that explicit: it
+# states the smallest effect the test could have confirmed, so a reader can
+# judge whether a failed criterion is evidence against the hypothesis or just
+# a statement about the resolution of the test.
+#
+# The helpers below invert the Deflated Sharpe / Deflated Alpha statistics
+# using the forward statistic's own components (SR*, T, skewness, kurtosis),
+# so the reported resolution is exactly the resolution of the statistic that
+# produced the verdict.
+
+
+def _normal_quantile(p: float) -> float:
+    """Inverse standard-normal CDF (stdlib only, no SciPy dependency)."""
+    if not np.isfinite(p) or p <= 0.0 or p >= 1.0:
+        raise ValueError(f"probability must be in (0, 1), got {p}")
+    return float(NormalDist().inv_cdf(p))
+
+
+def _deflation_z_score(
+    effect: float,
+    effect_star: float,
+    t_obs: int,
+    skew: float,
+    kurt: float,
+) -> float:
+    """z-statistic of the Deflated Sharpe / Deflated Alpha test.
+
+    Mirrors the z-formula of :func:`deflated_sharpe_ratio` and
+    :func:`deflated_alpha_ratio`, which both use it to turn an estimated
+    effect into a probability. The minimum-detectable-effect helpers invert
+    it, so the forward and inverse forms must stay in lockstep (pinned by
+    ``test_the_minimum_detectable_effect_helpers_mirror_the_forward_statistics``).
+    """
+    if t_obs <= 1:
+        return float("-inf")
+    variance_term = 1.0 - skew * effect + ((kurt - 1.0) / 4.0) * effect * effect
+    if not np.isfinite(variance_term) or variance_term <= 0.0:
+        variance_term = np.finfo(float).tiny
+    return (effect - effect_star) * math.sqrt(t_obs - 1) / math.sqrt(variance_term)
+
+
+def _solve_minimum_effect(
+    target_z: float,
+    effect_star: float,
+    t_obs: int,
+    skew: float,
+    kurt: float,
+) -> Optional[float]:
+    """Smallest effect whose deflation z-score reaches ``target_z``.
+
+    ``effect`` and ``effect_star`` share the same (per-period, dimensionless)
+    units. Returns None when no such effect exists -- the z-score saturates
+    below the target for every effect when the variance term grows faster
+    than the numerator.
+    """
+    if not np.isfinite(target_z) or t_obs <= 1:
+        return None
+    if _deflation_z_score(effect_star, effect_star, t_obs, skew, kurt) >= target_z:
+        return float(effect_star)
+
+    # The z-score is increasing in the effect for well-behaved parameters, so
+    # expand upward until the target is crossed and then bisect.
+    step = max(abs(effect_star) * 0.25, 0.05)
+    lo = float(effect_star)
+    hi = float(effect_star) + step
+    z_hi = _deflation_z_score(hi, effect_star, t_obs, skew, kurt)
+    for _ in range(200):
+        if np.isfinite(z_hi) and z_hi >= target_z:
+            break
+        lo = hi
+        step *= 2.0
+        hi = float(effect_star) + step
+        z_hi = _deflation_z_score(hi, effect_star, t_obs, skew, kurt)
+    else:
+        return None
+
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        z_mid = _deflation_z_score(mid, effect_star, t_obs, skew, kurt)
+        if np.isfinite(z_mid) and z_mid >= target_z:
+            hi = mid
+        else:
+            lo = mid
+    return float(0.5 * (lo + hi))
+
+
+def minimum_detectable_sharpe(
+    deflated_sharpe: Dict[str, Any],
+    returns: pd.Series,
+    target_p_value: float = 0.10,
+) -> Dict[str, Any]:
+    """Smallest annualized Sharpe the Deflated Sharpe Ratio can confirm.
+
+    Inverts the Deflated Sharpe Ratio: given the forward statistic (its
+    ``expected_max_sharpe``, ``n_observations``, ``skewness`` and
+    ``kurtosis``) and the return series it was computed on, returns the
+    smallest annualized Sharpe whose deflated p-value reaches
+    ``target_p_value``.
+
+    Args:
+        deflated_sharpe: Forward result from :func:`deflated_sharpe_ratio`
+            (e.g. ``summary["deflated_sharpe"]``).
+        returns: The per-period return series the statistic was computed on.
+        target_p_value: The p-value threshold the criterion uses.
+
+    Returns:
+        Dict with ``minimum_detectable_sharpe`` (annualized), the per-period
+        value, the observed Sharpe, the expected-max Sharpe under the null,
+        T and N, plus ``attainable`` / ``reason`` describing whether the
+        threshold can be reached at all.
+    """
+    out: Dict[str, Any] = {
+        "minimum_detectable_sharpe": None,
+        "minimum_detectable_sharpe_per_period": None,
+        "target_p_value": float(target_p_value),
+        "observed_sharpe": None,
+        "expected_max_sharpe": None,
+        "n_observations": None,
+        "n_trials": None,
+        "attainable": False,
+        "reason": None,
+    }
+    if not isinstance(deflated_sharpe, dict):
+        out["reason"] = "no_deflated_sharpe"
+        return out
+
+    t_obs = deflated_sharpe.get("n_observations")
+    sr_star_ann = deflated_sharpe.get("expected_max_sharpe")
+    out["observed_sharpe"] = deflated_sharpe.get("sharpe_ratio")
+    out["expected_max_sharpe"] = sr_star_ann
+    out["n_observations"] = t_obs
+    out["n_trials"] = deflated_sharpe.get("n_trials")
+
+    if returns is None:
+        out["reason"] = "no_returns"
+        return out
+    series = returns.dropna() if hasattr(returns, "dropna") else returns
+    if len(series) < 2:
+        out["reason"] = "insufficient_returns"
+        return out
+    if t_obs is None or int(t_obs) != len(series):
+        out["reason"] = "returns_do_not_match_statistic"
+        return out
+    if sr_star_ann is None or not np.isfinite(float(sr_star_ann)):
+        out["reason"] = "no_expected_max_sharpe"
+        return out
+
+    ann_factor = _annualization_factor(series.index)
+    skew = float(deflated_sharpe.get("skewness", 0.0))
+    kurt = float(deflated_sharpe.get("kurtosis", 3.0))
+    target_z = _normal_quantile(1.0 - float(target_p_value))
+
+    sr_star = float(sr_star_ann) / math.sqrt(ann_factor)
+    sr_required = _solve_minimum_effect(target_z, sr_star, int(t_obs), skew, kurt)
+    if sr_required is None:
+        out["reason"] = "target_unattainable"
+        return out
+
+    out["minimum_detectable_sharpe_per_period"] = float(sr_required)
+    out["minimum_detectable_sharpe"] = float(sr_required * math.sqrt(ann_factor))
+    out["attainable"] = True
+    return out
+
+
+def minimum_detectable_alpha(
+    deflated_alpha: Dict[str, Any],
+    returns: pd.Series,
+    target_p_value: float = 0.10,
+) -> Dict[str, Any]:
+    """Smallest annualized alpha the Deflated Alpha Ratio can confirm.
+
+    The Deflated Alpha Ratio analogue of :func:`minimum_detectable_sharpe`:
+    inverts the DAR statistic to report the smallest annualized alpha whose
+    deflated p-value reaches ``target_p_value`` at the realized sample size.
+
+    Args:
+        deflated_alpha: Forward result from :func:`deflated_alpha_ratio`
+            (e.g. ``summary["deflated_alpha"]``).
+        returns: The strategy's per-period return series (the series the
+            statistic was computed on).
+        target_p_value: The p-value threshold the criterion uses.
+
+    Returns:
+        Dict with ``minimum_detectable_alpha`` (annualized), the per-period
+        value, the observed alpha, the expected-max alpha under the null, T
+        and N, plus ``attainable`` / ``reason``.
+    """
+    out: Dict[str, Any] = {
+        "minimum_detectable_alpha": None,
+        "minimum_detectable_alpha_per_period": None,
+        "target_p_value": float(target_p_value),
+        "observed_alpha": None,
+        "expected_max_alpha": None,
+        "n_observations": None,
+        "n_benchmarks": None,
+        "attainable": False,
+        "reason": None,
+    }
+    if not isinstance(deflated_alpha, dict):
+        out["reason"] = "no_deflated_alpha"
+        return out
+
+    t_obs = deflated_alpha.get("n_observations")
+    max_alpha_ann = deflated_alpha.get("expected_max_alpha")
+    out["observed_alpha"] = deflated_alpha.get("alpha")
+    out["expected_max_alpha"] = max_alpha_ann
+    out["n_observations"] = t_obs
+    out["n_benchmarks"] = deflated_alpha.get("n_benchmarks")
+
+    if returns is None:
+        out["reason"] = "no_returns"
+        return out
+    series = returns.dropna() if hasattr(returns, "dropna") else returns
+    if len(series) < 2:
+        out["reason"] = "insufficient_returns"
+        return out
+    if t_obs is None or int(t_obs) != len(series):
+        out["reason"] = "returns_do_not_match_statistic"
+        return out
+    if max_alpha_ann is None or not np.isfinite(float(max_alpha_ann)):
+        out["reason"] = "no_expected_max_alpha"
+        return out
+
+    ann_factor = _annualization_factor(series.index)
+    strat_vol_ann = float(series.std() * math.sqrt(ann_factor))
+    if strat_vol_ann <= 0:
+        out["reason"] = "zero_volatility"
+        return out
+    skew = float(deflated_alpha.get("skewness", 0.0))
+    kurt = float(deflated_alpha.get("kurtosis", 3.0))
+    target_z = _normal_quantile(1.0 - float(target_p_value))
+
+    # The forward statistic works in per-period Sharpe-like units:
+    # sr = alpha / (vol_ann * sqrt(ann_factor)), so invert through the same
+    # scale factor and report the required alpha back in annualized units.
+    scale = strat_vol_ann * math.sqrt(ann_factor)
+    sr_star = float(max_alpha_ann) / scale
+    sr_required = _solve_minimum_effect(target_z, sr_star, int(t_obs), skew, kurt)
+    if sr_required is None:
+        out["reason"] = "target_unattainable"
+        return out
+
+    out["minimum_detectable_alpha_per_period"] = float(sr_required)
+    out["minimum_detectable_alpha"] = float(sr_required * scale)
+    out["attainable"] = True
+    return out
 
 
 def _calculate_strategy_returns(

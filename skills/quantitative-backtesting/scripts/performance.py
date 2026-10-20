@@ -101,6 +101,59 @@ def _t_two_sided_pvalue(t: float, df: int) -> Optional[float]:
     return float(_betai(0.5 * df, 0.5, x))
 
 
+def t_critical_value(df: int, two_sided_alpha: float = 0.05) -> Optional[float]:
+    """Two-sided critical value of Student's t statistic with `df` degrees of freedom.
+
+    The inverse of :func:`_t_two_sided_pvalue`, obtained by bisection so the
+    skill keeps working without SciPy. Used to report the minimum effect a
+    significance test can detect at a given sample size (the "resolution" of
+    the test): a test with T observations only rejects when the effect exceeds
+    ``t_critical_value * standard_error``.
+
+    Args:
+        df: Degrees of freedom (observations - 2 for a simple regression).
+        two_sided_alpha: Significance level (e.g. 0.05 for a 5% test).
+
+    Returns:
+        The critical t value, or None when the test cannot be evaluated
+        (df <= 0, or a non-finite / out-of-range significance level).
+    """
+    if df <= 0:
+        return None
+    try:
+        alpha = float(two_sided_alpha)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(alpha) or not (0.0 < alpha < 1.0):
+        return None
+
+    lo, hi = 0.0, 1.0
+    p_hi = _t_two_sided_pvalue(hi, df)
+    if p_hi is None:
+        return None
+    for _ in range(200):
+        if p_hi <= alpha:
+            break
+        lo = hi
+        hi *= 2.0
+        p_hi = _t_two_sided_pvalue(hi, df)
+        if p_hi is None:
+            return None
+    else:
+        return None
+
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        p_mid = _t_two_sided_pvalue(mid, df)
+        if p_mid is None:
+            return None
+        if p_mid > alpha:
+            lo = mid
+        else:
+            hi = mid
+    return float(0.5 * (lo + hi))
+
+
 def _benchmark_stats(
     returns: pd.Series,
     benchmark_returns: pd.Series,

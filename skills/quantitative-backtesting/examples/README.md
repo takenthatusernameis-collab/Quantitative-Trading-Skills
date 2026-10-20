@@ -122,6 +122,28 @@ python3 skills/quantitative-backtesting/examples/trading_costs_robustness_exampl
 
 Self-contained: uses synthetic data, no network access required. Produces a structured JSON summary and a key-findings banner.
 
+### `falsifiable_hypothesis_example.py`
+
+A worked example of a **pre-registered falsification test**: one specific,
+bounded hypothesis, five explicit falsification criteria, and a verdict that
+is the conjunction of those criteria — never a claim of profitability.
+
+1. **Pre-registered criteria** — OOS Sharpe > 0; deflated Sharpe p-value < 0.10; raw benchmark-alpha p-value < 0.05; OOS total return above the benchmark's; Deflated Alpha Ratio > 0.90.
+2. **Chronological 0.6/0.2/0.2 train/validation/test split**, with the split-separation audit printed (the held-out test set is never used in any selection step).
+3. **Point-in-time validation, walk-forward selection on the training slice only**, and a multiple-testing correction on both sides (parameter grid → Deflated Sharpe; benchmark set → Deflated Alpha).
+4. **The raw and the corrected alpha p-values are kept distinct.** The benchmark correction rewrites `alpha_pvalue` with the deflated value and keeps the raw one in `alpha_pvalue_original`; criterion 3 reads the raw value and criterion 5 the corrected one, so the benchmark-side data-mining control binds independently instead of being implied by criterion 3.
+5. **Test resolution** — the smallest annualized Sharpe / alpha each significance criterion requires at the sample size actually available (the minimum detectable effect), with the criteria the sample cannot resolve named in the output. The verdict is *not* changed by this analysis: a decision rule is not revisited after the result is seen.
+
+On the shipped sample data the verdict is `NOT SUPPORTED`, and the resolution
+section shows that the three statistical criteria need effects the 100 test
+observations cannot resolve — so that verdict is largely a statement about the
+size of the held-out sample rather than about the strategy.
+
+Run with:
+```bash
+python3 skills/quantitative-backtesting/examples/falsifiable_hypothesis_example.py
+```
+
 ### `real_data_workflow.md`
 
 Comprehensive guide for working with real market data including:

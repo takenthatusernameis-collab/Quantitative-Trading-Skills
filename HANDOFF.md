@@ -2,101 +2,177 @@
 
 ## What changed this session
 
-The HANDOFF_NEXT.md task is done: a run in the partial-selection state now
-records how much evidence its verdict rests on, in the artifact and in the
-console.
+The HANDOFF_NEXT.md task ("focus on the falsifiable hypothesis example or
+extend thin-evidence gating") is done. The example's `NOT SUPPORTED` verdict
+was investigated, and the investigation found two real defects. Both are
+fixed, and the example now reports what its verdict can and cannot mean.
 
-### `skills/quantitative-backtesting/scripts/walk_forward.py`
+### Finding 1 (defect): criteria 3 and 5 were the same statistic
 
-- New `_thin_evidence_warning(windows, warmup_bars, *, window_noun="window",
-  threshold=0.2)` helper, placed next to `_diagnose_partial_selection`. It
-  reads the `traded_windows` breakdown the partial-selection diagnosis already
-  builds and returns `None` when every window the verdict rests on traded in at
-  least `threshold` of its **executable** bars, otherwise a
-  `{message, details}` record naming each thin window and the fraction of
-  executable bars it held a position. The fraction is of executable bars (the
-  window length minus the run's warmup bars), so it is stable across the two
-  warmup conventions.
-- Wired into the summary of all three paths that can be in the partial state:
-  `walk_forward_analysis` (window_noun="period"), `cpcv_analysis`
-  (window_noun="fold"), `out_of_sample_validation` (window_noun from the
-  diagnosis). Each writes `summary["thin_evidence_warning"]` only when the
-  partial-selection diagnosis exists and the warning is non-null.
-- New `_print_thin_evidence_warning` console printer, called in the three CLI
-  flows (`run_cpcv`, `run_walk_forward`, `run_out_of_sample`) immediately
-  after `_print_partial_selection_diagnosis`, so the console and the artifact
-  carry the same message.
+`examples/falsifiable_hypothesis_example.py` read the primary benchmark's
+`alpha_pvalue` for criterion 3 ("benchmark alpha p-value < 0.05"). In the
+multiple-benchmark path the benchmark correction **rewrites** `alpha_pvalue`
+with the deflated p-value and keeps the raw one in `alpha_pvalue_original`
+(`scripts/walk_forward.py`, `_benchmark_list_alpha_correction`). So criterion 3
+was silently testing the *corrected* p-value -- the same number criterion 5
+tests (1 - DAR). On the shipped fixture both were 0.5622, the raw value
+(0.8991) was never surfaced, and the advertised "benchmark-side data-mining
+control" could never bind independently: criterion 5 was implied by criterion 3.
 
-The warning is a **measurement, not a correction**: it changes no number. The
-canonical partial run's aggregate Sharpe, stability ratio, and overfitting-risk
-verdict are byte-identical to HEAD.
+Fix: criterion 3 now reads `alpha_pvalue_original` (the raw, uncorrected
+alpha t-test p-value) and criterion 5 keeps the corrected value. Both are
+printed with explicit labels and both are returned in `observed`
+(`benchmark_alpha_pvalue` = raw, `benchmark_alpha_pvalue_corrected` =
+corrected, `benchmark_alpha_correction_applied` = whether a correction was
+engaged at all). The criterion descriptions in `CRITERIA` say which is which.
 
-### `skills/quantitative-backtesting/tests/test_no_selection_diagnosis.py`
+### Finding 2 (defect): the verdict was reported without the test's resolution
 
-Seven new tests, all passing (30/30):
-- `test_the_partial_run_carries_a_thin_evidence_warning` -- the canonical
-  partial run carries the warning with 2 thin windows out of 2.
-- `test_the_thin_evidence_warning_names_the_executable_bars` -- the fraction is
-  of executable bars (18 of 20), the message says so, and the artifact carries
-  both counts.
-- `test_the_thin_evidence_warning_does_not_qualify_a_fullly_traded_run` -- the
-  walk-forward run over the shipped sample carries no warning.
-- `test_the_thin_evidence_warning_is_absent_when_nothing_was_selected` -- the
-  all-flat run carries no warning (that is the `no_selection_diagnosis`).
-- `test_the_thin_evidence_warning_changes_no_number` -- the partial run's
-  aggregate numbers are unchanged.
-- `test_the_cli_prints_the_thin_evidence_warning_next_to_the_verdict` -- the
-  console prints the warning and each thin window's one-line text, in the
-  right order (fold count -> warning -> verdict).
+With 100 test observations, the example's three significance criteria require
+effects that no plausible strategy produces, so the verdict was close to a
+foregone conclusion and said nothing about the strategy:
+
+| Criterion | Required to pass | Observed |
+| --- | --- | --- |
+| 2 deflated Sharpe p < 0.10 | annualized Sharpe >= 4.1950 | -0.3581 |
+| 3 raw benchmark alpha p < 0.05 | annualized alpha >= 38.02% | -2.43% |
+| 5 Deflated Alpha Ratio > 0.90 | annualized alpha >= 35.34% | -2.43% |
+
+Fix: the example now reports the **test resolution** -- the minimum
+detectable effect of each statistical criterion at the sample size actually
+available -- and names the criteria the sample cannot resolve. A failed
+criterion that the sample cannot resolve is a statement about the sample, not
+evidence against the hypothesis.
+
+The verdict itself is **not** changed: it stays the conjunction of the
+pre-registered criteria (a decision rule is not revisited after the result is
+seen). The resolution is reported *beside* the verdict, and the console says
+so in plain words ("HOW TO READ THIS VERDICT").
+
+The plausibility bounds used to flag a criterion (`PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+= 2.0`, `PLAUSIBLE_MAX_ANNUALIZED_ALPHA = 0.10`) are stated assumptions,
+declared in the module and printed with the result so they can be disputed.
+
+### Finding 3 (labelling): "Test periods: 100" was not 100 periods
+
+The framework's `test_n_periods` is `len(test_returns)` -- the number of test
+**observations** (daily bars in the held-out window). The example printed it
+as "Test periods", which reads as 100 independent periods. The example now
+reports it as `test_n_observations` and prints "Test observations: 100
+(daily bars in the held-out window, not independent periods)". The framework
+key itself is unchanged (see "unresolved" below).
+
+### New reusable helpers
+
+`scripts/walk_forward.py` (next to `deflated_sharpe_ratio` /
+`deflated_alpha_ratio`):
+
+- `_normal_quantile(p)` -- inverse normal CDF, stdlib only (`statistics.NormalDist`).
+- `_deflation_z_score(effect, effect_star, t_obs, skew, kurt)` -- the z-formula
+  of both deflated statistics in one place; the minimum-detectable-effect
+  helpers invert it, so forward and inverse cannot drift apart.
+- `_solve_minimum_effect(target_z, effect_star, t_obs, skew, kurt)` -- the
+  inversion (bracket expansion + bisection).
+- `minimum_detectable_sharpe(deflated_sharpe, returns, target_p_value=0.10)` --
+  the smallest annualized Sharpe whose deflated p-value reaches the target.
+- `minimum_detectable_alpha(deflated_alpha, returns, target_p_value=0.10)` --
+  the Deflated Alpha analogue (smallest annualized alpha).
+
+`scripts/performance.py`:
+
+- `t_critical_value(df, two_sided_alpha=0.05)` -- the inverse of the skill's
+  own `_t_two_sided_pvalue` (bisection, no SciPy). Used for the raw alpha
+  t-test's minimum detectable effect.
+
+`examples/falsifiable_hypothesis_example.py`:
+
+- `_alpha_regression_df(test_returns, benchmark_frame)` -- degrees of freedom
+  of the benchmark alpha regression (aligned observations minus two).
+- `_test_resolution(summary, test_returns, benchmark_frame, primary_bench)` --
+  assembles the resolution block and flags the criteria beyond it.
 
 ### Documentation
 
-- `skills/quantitative-backtesting/SKILL.md` -- new bullet under the
-  partial-selection section describing the warning.
-- `skills/quantitative-backtesting/references/validation_methods.md` -- new
-  "How much evidence the verdict rests on" section with the key table.
-
-### Harnesses (in `/home/runner/work/_temp/kilo-tmp/kilo/`)
-
-- `parity_check.py` -- `REPORTING_ONLY_KEYS` now includes
-  `thin_evidence_warning` (it previously only excluded the inert-grid keys,
-  which is why the canonical partial `cpcv` case would have failed).
-- `partial_parity.py` -- the allow-list for added keys now matches
-  `summary.thin_evidence_warning*` and `diagnostics.thin_evidence_warning*`
-  by prefix.
-- `panel_parity.py` -- the panel path now strips `thin_evidence_warning` too.
+- `SKILL.md` -- new bullet under "Tips" (the verdict-resolution rule) and a
+  new line under "Validation and Robustness".
+- `references/validation_methods.md` -- new section "Test Resolution
+  (Minimum Detectable Effect)" with the helpers, the reading rule, and the
+  table of required vs observed effects.
+- `examples/README.md` -- a section for `falsifiable_hypothesis_example.py`
+  (it was not documented there before).
 
 ## What was verified
 
-- `skills/quantitative-backtesting/tests/test_no_selection_diagnosis.py`:
-  30/30 pass.
-- All 15 other test files in `skills/quantitative-backtesting/tests/` pass
-  (177 in `test_walk_forward.py`, 104 in `test_run_backtest.py`, etc.).
-- `parity_check.py`: 8/8 cases identical (HEAD vs working tree, ignoring the
-  reporting-only keys).
-- `partial_parity.py`: 10/10 cases pass -- no number changed, only the
-  reporting-only keys added.
-- `panel_parity.py`: panel/book path identical.
-- `parity_inert.py`: 0 mismatches between the old and new inert-grid
-  detectors.
-- Canonical partial case end to end: `cpcv --n-splits 5 --test-size 0.2` writes
-  `summary.thin_evidence_warning` naming folds 0 and 3 (1 of 18 executable
-  bars each, 6%), and the CLI prints the same message next to the verdict.
+- `skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py`:
+  8/8 pass (5 new). The suite now shares one pipeline run between the tests
+  instead of running it per test.
+- `skills/quantitative-backtesting/tests/test_walk_forward.py`: 183/183 pass
+  (6 new: the z-mirror, both round trips, the sample-size monotonicity, the
+  graceful degradation, and `t_critical_value`).
+- Whole skill suite, every test file: 15/16 files pass --
+  `test_cpcv` 29/29, `test_data_loader` 32/32, `test_examples_coverage` 7/7,
+  `test_execution_warmup` 8/8, `test_falsifiable_hypothesis_example` 8/8,
+  `test_generate_sample_data` 2/2, `test_inert_param_grid` 27/27,
+  `test_monte_carlo` 20/20, `test_no_selection_diagnosis` 34/34,
+  `test_out_of_sample_window` 10/10, `test_panel_reference_pinned` 2/2,
+  `test_performance` 33/33, `test_run_backtest` 104/104,
+  `test_strategy_builder` 33/33, `test_walk_forward` 183/183.
+- `test_reporting.py` fails 9/62 -- **pre-existing and environmental**:
+  `matplotlib` is not installed in this container, so the `save_plots=True`
+  tear-sheet tests cannot create their PNGs. Verified by stashing this
+  session's changes and re-running at HEAD: the same 9 failures, same count.
+  Not caused by this session.
+- The example runs end to end on the shipped sample and prints the resolution
+  section, the flagged criteria, and the "HOW TO READ THIS VERDICT" note.
 
 ## What remains unresolved
 
-None. The task in HANDOFF_NEXT.md is complete.
+- The framework's own key `test_n_periods` (in `test_performance`, and
+  mirrored into summaries) still counts observations while claiming to count
+  periods. The example no longer misreports it, but the framework's CLI and
+  artifacts still do. Renaming or adding an alias changes the artifact shape,
+  so it is deliberately left for a session that can also rebuild the parity
+  harnesses.
+- The resolution analysis exists only in the worked example. The library's own
+  verdicts (walk-forward / CPCV / out-of-sample aggregates) do not yet report
+  a minimum detectable effect next to the Deflated Sharpe / Deflated Alpha
+  numbers they carry.
+- Whether the example's criteria are *satisfiable at all* has only been shown
+  analytically (the minimum detectable effect). There is no positive control:
+  no run of the same machinery against a series with a known effect, so the
+  claim "the test would have said yes to a large enough effect" is still
+  an inference from the formula rather than an executed observation.
+- `matplotlib` is missing from this environment, so the reporting tests and
+  the tear-sheet figure paths cannot be exercised here.
 
 ## Approaches that failed and why
 
-- The first `parity_check.py` run failed because the `work` directory in
-  `/home/runner/work/_temp/kilo-tmp/kilo/` was a stale copy of the repo from
-  an earlier session (it did not contain this session's edits). Recreating it
-  from the working tree (`rm -rf work && cp -r <repo> work`) fixed the
-  comparison; the failure was a harness artifact, not a code defect.
-- Two new tests failed on exact float equality (`1/18` vs the artifact's
-  `round(1/18, 4)`). Fixed by asserting against the rounded value, which is
-  what the artifact actually carries.
-- `test_the_thin_evidence_warning_names_the_executable_bars` failed because the
-  message does not contain the literal "18" (it says "6%" and "20%"). Changed
-  the assertion to check the percentages the message actually states.
+- The first full-suite run used a shell `for f in skills/.../test_*.py` loop
+  inside a background process; the loop variable did not expand and every
+  invocation ran `python3` against the working directory
+  ("can't find '__main__' module"). Replaced with a Python driver
+  (`/home/runner/work/_temp/kilo-tmp/kilo/run_suite.py`) that globs the test
+  files and runs each with `subprocess` -- the glob then works and the
+  per-file summary is captured.
+- One new test asserted `minimum_detectable_alpha(dsr, ...)["reason"] ==
+  "no_deflated_alpha"`. A Deflated Sharpe result *is* a dict, so the helper
+  got past the type check and failed later with `no_expected_max_alpha`.
+  Fixed the assertion to the reason the code actually produces, and the
+  distinction is now documented in the test.
+- The suite driver initially resolved the repository root from
+  `Path(__file__).parent`, which pointed at the temporary directory and found
+  0 test files. Fixed by pinning the repository path.
+
+## What was deliberately not done
+
+- The verdict vocabulary was **not** extended (no "INCONCLUSIVE" verdict) and
+  the pre-registered criteria were **not** re-thresholded. Both would be
+  decisions made after seeing the result, which is the thing this framework
+  exists to prevent. The resolution is reported as interpretation, not as a
+  change to the decision rule.
+- The plausibility bounds are module constants in the example, not framework
+  defaults, so no other path's numbers move.
+- No parity harness was rebuilt this session (the previous session's harnesses
+  lived in a temporary directory that was wiped). No framework number changed:
+  the new helpers are additive functions, `t_critical_value` is additive, and
+  the only behaviour change is inside the worked example.

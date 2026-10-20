@@ -1293,3 +1293,77 @@ would all move) and must be reported as a methodology change with
 before/after numbers, not as a bug fix. The parameter name stays
 `fill_rate`; renaming it would change the CLI contract, the sweep artifact
 keys and every test that references it, and is deliberately out of scope.
+
+## Test Resolution (Minimum Detectable Effect)
+
+A significance test on a small sample can fail for reasons that have nothing
+to do with the hypothesis. With `T` observations, the threshold "deflated
+p < 0.10" requires the effect to exceed a certain size; when that size is
+implausible, the criterion is not discriminating between hypotheses -- it is
+measuring the sample size. Reporting the **minimum detectable effect** (MDE)
+next to the verdict makes that visible instead of leaving the reader to
+assume that a failed test is evidence.
+
+### The helpers
+
+`walk_forward.minimum_detectable_sharpe(deflated_sharpe, returns, target_p_value=0.10)`
+and `walk_forward.minimum_detectable_alpha(deflated_alpha, returns, target_p_value=0.10)`
+invert the Deflated Sharpe Ratio and the Deflated Alpha Ratio. They return the
+smallest annualized Sharpe / annualized alpha whose deflated p-value reaches
+the target at the realized sample size.
+
+- They reuse the forward statistic's own components (`expected_max_sharpe` /
+  `expected_max_alpha`, `n_observations`, `skewness`, `kurtosis`), so the
+  reported resolution is exactly the resolution of the statistic that produced
+  the verdict. The forward and inverse z-formulas live in one place
+  (`walk_forward._deflation_z_score`) and are pinned against each other by
+  `test_the_minimum_detectable_effect_helpers_mirror_the_forward_statistics`.
+- At the reported MDE the forward statistic's p-value is the target
+  (`test_the_minimum_detectable_sharpe_is_the_sharpe_that_reaches_the_target`,
+  `test_the_minimum_detectable_alpha_is_the_alpha_that_reaches_the_target`).
+- More observations resolve smaller effects
+  (`test_the_minimum_detectable_sharpe_shrinks_as_the_sample_grows`).
+- A statistic computed on a different return series, or on nothing, is
+  reported as unattainable with a `reason` -- never as a number
+  (`test_the_minimum_detectable_effect_helpers_degrade_gracefully`).
+
+For the raw benchmark-alpha t-test (a Jensen's-alpha regression on the
+aligned test window) the MDE is `t_crit * standard error of alpha`. The
+critical value comes from `performance.t_critical_value`, the inverse of the
+skill's own two-sided t p-value (`_t_two_sided_pvalue`), so the two agree
+(`test_t_critical_value_inverts_the_two_sided_p_value`).
+
+### Reading a verdict
+
+The worked example
+`examples/falsifiable_hypothesis_example.py` prints the resolution as its own
+section and names the criteria the sample cannot resolve. On the shipped
+sample data (504 daily bars, a 0.6/0.2/0.2 split, 100 test observations):
+
+| Criterion | Statistic | Required to pass | Observed |
+| --- | --- | --- | --- |
+| 2 `deflated_sharpe_pvalue_lt_0.10` | Deflated Sharpe (N = 21 configurations) | annualized Sharpe >= 4.1950 | -0.3581 |
+| 3 `benchmark_alpha_pvalue_lt_0.05` | raw alpha t-test (df = 98) | annualized alpha >= 38.02% | -2.43% |
+| 5 `deflated_alpha_ratio_gt_0.90` | Deflated Alpha Ratio (N = 2 benchmarks) | annualized alpha >= 35.34% | -2.43% |
+
+All three thresholds are beyond what a plausible strategy would produce, so
+their failure is a statement about the size of the held-out sample rather
+than evidence against the hypothesis. The verdict itself is unchanged: it is
+the conjunction of the pre-registered criteria, and the resolution analysis is
+reported beside it, never folded into it. Changing a decision rule after
+seeing the result is the thing this framework exists to prevent.
+
+Two rules keep the two p-values distinguishable, and both are pinned by
+`tests/test_falsifiable_hypothesis_example.py`:
+
+- **The raw and the corrected alpha p-value are different statistics.** The
+  benchmark correction rewrites the primary benchmark's `alpha_pvalue` with
+  the deflated p-value and keeps the raw one in `alpha_pvalue_original`.
+  Criterion 3 reads the raw value and criterion 5 reads the corrected one.
+  If both read the corrected value, criterion 5 is implied by criterion 3 and
+  the benchmark-side data-mining control can never bind independently.
+- **The held-out window is counted in observations, not periods.** The
+  framework reports `test_n_periods` as the number of test *bars*
+  (`len(test_returns)`), which is what the resolution arithmetic needs; the
+  example reports it as `test_n_observations` so that "100" is not read as
+  100 independent periods.
