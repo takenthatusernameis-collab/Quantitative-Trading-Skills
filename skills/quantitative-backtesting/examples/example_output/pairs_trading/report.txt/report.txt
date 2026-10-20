@@ -1,0 +1,25 @@
+============================================================
+BACKTEST PERFORMANCE REPORT
+============================================================
+Symbol: N/A
+Strategy: N/A
+
+--- Return Metrics ---
+Total Return: N/A
+Annualized Return:     0.00%
+Annualized Volatility: 0.00%
+
+--- Risk-Adjusted Returns ---
+Sharpe Ratio:          0.00
+Sortino Ratio:         0.00
+Calmar Ratio:          0.00
+
+--- Risk Metrics ---
+Max Drawdown:          0.00%
+Avg Drawdown:          0.00%
+VaR (95%):             0.00%
+CVaR (95%):            0.00%
+Skewness:              0.00
+Kurtosis:              0.00
+
+============================================================
