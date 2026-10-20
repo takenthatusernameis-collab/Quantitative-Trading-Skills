@@ -5794,7 +5794,13 @@ def out_of_sample_validation(
      "test_total_return": test_total_return,
          "test_sharpe": test_sharpe,
          "test_volatility": float(test_returns.std() * np.sqrt(ann_factor_test)) if len(test_returns) > 1 else 0.0,
-         "test_n_periods": len(test_returns),
+         # The held-out window is counted in OBSERVATIONS (one per return
+         # observation, e.g. one daily bar), not in independent periods. The
+         # two are not interchangeable: 100 daily bars are not 100
+         # independent periods, and the resolution arithmetic (min
+         # detectable Sharpe / alpha) needs the observation count. The
+         # walk-forward PERIOD count lives in `summary["n_periods"]`.
+         "test_n_observations": len(test_returns),
          "test_returns": test_returns,
          "capacity": test_capacity_point,
          "capacity_trend": test_capacity_trend,
@@ -10145,7 +10151,7 @@ def run_out_of_sample_validation(args) -> int:
             "test_total_return": results["test_performance"]["test_total_return"],
             "test_sharpe": results["test_performance"]["test_sharpe"],
             "test_volatility": results["test_performance"]["test_volatility"],
-            "test_n_periods": results["test_performance"]["test_n_periods"],
+            "test_n_observations": results["test_performance"]["test_n_observations"],
             "capacity": results["test_performance"].get("capacity"),
             # Panel book diagnostic for the held-out test window: the
             # per-asset book against the framework's net-exposure pricing

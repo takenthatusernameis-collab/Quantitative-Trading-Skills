@@ -370,7 +370,7 @@ def run_hypothesis_test(data_path, symbol="SPY"):
     dsr_pvalue = deflated_sharpe.get("p_value") if isinstance(deflated_sharpe, dict) else None
     # The framework reports the number of test OBSERVATIONS (daily bars in the
     # held-out window), not the number of independent periods.
-    test_n_observations = test_perf.get("test_n_periods")
+    test_n_observations = test_perf.get("test_n_observations")
 
     # Multiple-benchmark path: alpha / alpha_pvalue / benchmark_total_return
     # come from the primary (first) benchmark in the per-benchmark list; the

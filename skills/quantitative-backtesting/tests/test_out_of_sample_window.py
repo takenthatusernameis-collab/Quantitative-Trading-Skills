@@ -181,7 +181,7 @@ def test_out_of_sample_validation_adapts_the_window_to_the_training_split():
     assert len(periods) == window["effective_periods"]
     # The out-of-sample report is complete: a selection, a validation window
     # and a held-out test window.
-    assert results["test_performance"]["test_n_periods"] > 0
+    assert results["test_performance"]["test_n_observations"] > 0
     assert results["validation_performance"]["val_n_periods"] > 0
 
 

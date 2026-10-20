@@ -1363,10 +1363,11 @@ Two rules keep the two p-values distinguishable, and both are pinned by
   If both read the corrected value, criterion 5 is implied by criterion 3 and
   the benchmark-side data-mining control can never bind independently.
 - **The held-out window is counted in observations, not periods.** The
-  framework reports `test_n_periods` as the number of test *bars*
+  framework reports `test_n_observations` as the number of test *bars*
   (`len(test_returns)`), which is what the resolution arithmetic needs; the
-  example reports it as `test_n_observations` so that "100" is not read as
-  100 independent periods.
+  example reports the same number under the same name so that "100" is not
+  read as 100 independent periods. The walk-forward *period* count is a
+  different number and lives in `summary["n_periods"]`.
 
 ### The framework's own verdicts report their resolution
 

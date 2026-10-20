@@ -2,53 +2,118 @@
 
 ## What changed
 
-Implemented the alpha resolution per path from HANDOFF_NEXT.md: `_summarize_path` now mirrors the Sharpe crossing analysis for criterion 5, in
-`skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py`:
+Completed the `test_n_periods` -> `test_n_observations` rename assigned in HANDOFF_NEXT.md, with the parity
+harness that the breaking API change required. The held-out window was already counted in return
+*observations*; only the *name* was wrong ("periods" implies independent periods, which daily bars are not).
 
-- `per_size_alpha` — per rung, per path: `min/max_min_detectable_alpha`, `max/min_expected_max_alpha` (alpha*), draws measured/resolved/within bound, `all_within_bound` / `any_within_bound` against `PLAUSIBLE_MAX_ANNUALIZED_ALPHA == 0.10`.
-- `first_size_all_within_alpha_bound` / `first_size_any_within_alpha_bound` — the first rung at which every / any draw's minimum confirmable annualized alpha crossed the 10% bound.
-- `min_min_detectable_alpha`, `max_min_detectable_alpha`, `max_expected_max_alpha`, `alpha_floor_at_largest_size`, `alpha_floor_beyond_plausible_bound`, `alpha_floor_beyond_plausible_bound_at_largest_size`, `all_rungs_within_alpha_bound`, `any_rungs_within_alpha_bound` — exposed in `summary.by_path[*]`.
-- `print_path_summary(...)` prints the alpha crossing alongside the Sharpe one, and states explicitly when the alpha bound is crossed later than the Sharpe bound.
-- Module and `_summarize_path` docstrings record that the two criteria cross at different sample sizes.
+Framework (`skills/quantitative-backtesting/scripts/walk_forward.py`):
 
-The measurement re-reads the framework's own `summary["test_resolution"].min_detectable_alpha` and `summary["deflated_alpha"].expected_max_alpha`; it changes no threshold, bound, criterion or verdict.
+- `out_of_sample_validation`'s `test_performance` block now emits `"test_n_observations": len(test_returns)`
+  (was `"test_n_periods"`), with a comment recording that the walk-forward *period* count lives in
+  `summary["n_periods"]` and that the observation count is what the resolution arithmetic needs.
+- The CLI's saved artifact (`out_of_sample_summary.json`) re-projects the same renamed key
+  (`walk_forward.py:10154`); the old key is gone from the artifact too.
 
-- `print_test_frac_sweep(...)` prints the alpha columns (`min alpha`, `alpha*`, `all alpha`, `any alpha`) alongside the Sharpe ones, and reports the first held-out fraction at which every / any draw is within the alpha plausibility bound; `main(...)` forwards `first_all_alpha` / `first_any_alpha` to it. The alpha stats were already computed by `_summarize_test_frac_sweep`; only the printing path was missing.
-- Extended `skills/quantitative-backtesting/tests/test_resolution_vs_sample_size.py` (14 -> 16 tests):
-  - `test_test_frac_sweep_at_larger_sizes_matches_the_framework_own_block` — pins the sweep's `min_detectable_alpha` / `expected_max_alpha` at 5,000 and 10,000 bars against the framework's own `test_resolution` / `deflated_alpha` blocks on a directly re-run analysis (test_fracs 0.1/0.2/0.3, seed 7, no_effect).
-  - `test_test_frac_sweep_alpha_crossings_match_the_per_fraction_flags` — the reported alpha crossing equals the smallest fraction whose per-fraction flag is set, or None (no verdict moves).
+Consumers updated:
 
-Ran the sweep at 5,000 and 10,000 bars (seed 7, no_effect, test_fracs 0.1/0.2/0.3):
-- 5,000 bars: Sharpe bound crossed at test_frac 20.0% (min SR 1.9096 at 0.2; 2.1745 at 0.1); alpha bound also at 20.0% (min alpha 0.1131 at 0.1 > 0.10).
-- 10,000 bars: Sharpe bound crossed at test_frac 10.0% (min SR 1.9142 at 0.1; 1.7136 at 0.2), but alpha bound NOT crossed at 0.1 (min alpha 0.1277 > 0.10) — alpha crossing at 20.0% (min alpha 0.0689). Confirms criterion 5's bound is crossed later than criterion 2's, exactly the held-out-fraction trade-off.
+- `examples/falsifiable_hypothesis_example.py:373` now reads `test_perf.get("test_n_observations")`. The
+  example's own reported key was already `test_n_observations`, so the framework and the example now use one
+  name for one number.
+- `tests/test_out_of_sample_window.py:184` reads the renamed key.
+- `references/validation_methods.md:1365-1370` documents the framework's key name, and now also states that
+  the walk-forward period count is a *different* number living in `summary["n_periods"]`.
 
-The measurement changes no threshold, bound, criterion or verdict; `PLAUSIBLE_MAX_ANNUALIZED_ALPHA == 0.10` stays; the shipped 0.6/0.2/0.2 split remains the default and unchanged.
+Not renamed (deliberately): `summary["n_periods"]` (walk_forward.py:1446, 3088 — the walk-forward *period*
+count, correctly named) and `reporting.py:728`'s `("Number of Periods", "n_periods", ...)` row, which reads that
+summary diagnostic. Both are pinned by the harness so an over-broad rename cannot happen silently.
+
+New parity harness `skills/quantitative-backtesting/tests/test_test_window_observations.py` (7 tests) plus its
+baseline fixture `tests/fixtures/test_performance_pre_rename_baseline.json` (captured from the pre-rename
+source at commit `6074e3b`):
+
+1. the framework emits `test_n_observations` and no longer emits `test_n_periods`; reading the old key raises
+   `KeyError` (the break is explicit, not a silent `None`);
+2. the count is the number of *return observations* (`len(test_returns)` = 100), which is strictly smaller than
+   the held-out window's row count (102) because of warmup rows — so the key cannot be swapped for a window
+   size unnoticed;
+3. the rename moved nothing but the name: the key set, every scalar metric and the whole 100-element test
+   return series are identical to the pre-rename baseline, and `summary["test_sharpe"] / ["test_total_return"]
+   / ["test_volatility"]` are unchanged;
+4. no production code (`scripts/*.py`, `examples/*.py`) reads or emits `test_n_periods` any more;
+5. the walk-forward *period* count is untouched (`n_periods == len(periods)`) and the reporting row still reads
+   `n_periods`;
+6. the saved JSON artifact carries `test_n_observations` and not the old key, with the same value (100);
+7. end-to-end parity: the worked example, the programmatic API and the artifact all report 100 under the same
+   name.
+
+Negative control: reverting the rename in `walk_forward.py` (both the emission and the CLI projection) makes
+7/7 of the harness fail; restoring it makes 7/7 pass. The harness is an executable invariant, not a comment.
+
+No threshold, bound, criterion, verdict or number moved. The shipped 0.6/0.2/0.2 split is unchanged.
 
 ## What was verified
 
-- `test_resolution_vs_sample_size.py`: 16/16 (was 14/14 at the start of the session).
-- `python3 -m py_compile` clean on both changed files (pyflakes is not installed in this environment).
-- Neighbouring suites untouched by this work previously passed: `test_test_resolution.py` 38/38, `test_cpcv.py` 29/29, `test_run_backtest.py` 104/104, `test_walk_forward.py` 183/183`.
-- Default ladder (`--sizes 2500 --seeds 7 --series no_effect`) still runs and prints identical out-of-sample numbers as before (at 2,500 bars, test_frac=0.2: min_detectable_sharpe 2.3975, SR* 1.4403 — matching the pre-change baseline); pinned by `test_shipped_default_split_is_unchanged` and `test_the_measurement_agrees_with_the_shipped_example_path`.
-- Measured trade-off visible: the alpha bound is crossed later than the Sharpe bound on the CPCV path (some draws at 5,000 bars vs every draw already at 2,500 bars for Sharpe); the walk-forward path's alpha floor (alpha*) is above the 10% bound at every measured rung, so no measured sample size would let it confirm a plausible alpha on every draw.
+- New harness: 7/7 (`python3 skills/quantitative-backtesting/tests/test_test_window_observations.py`), and 7
+  passed under `pytest`.
+- Negative control on the harness: 0/7 with the rename reverted, 7/7 restored.
+- Neighbouring suites, all re-run after the change:
+  `test_falsifiable_hypothesis_example.py` 14/14, `test_out_of_sample_window.py` 10/10,
+  `test_examples_coverage.py` 7/7, `test_walk_forward.py` 183/183, `test_cpcv.py` 29/29,
+  `test_run_backtest.py` 104/104, `test_reporting.py` 62 tests OK (unittest),
+  `test_test_resolution.py` 38/38, `test_resolution_vs_sample_size.py` 16/16, `test_performance.py` 33/33,
+  `test_monte_carlo.py` 20/20, `test_execution_warmup.py` 8/8, `test_inert_param_grid.py` 27/27,
+  `test_no_selection_diagnosis.py` 34/34, `test_panel_reference_pinned.py` 2/2,
+  `test_strategy_builder.py` 33/33, `test_generate_sample_data.py` 2/2, `test_data_loader.py` 32/32.
+- `python3 -m py_compile` clean on all four changed/added Python files.
+- `skills-ref validate skills/quantitative-backtesting/` -> "Valid skill" (the CI validator used by
+  `.github/workflows/validate-skills.yml`).
+- Direct old-vs-new comparison (pre-rename source loaded side by side from commit `6074e3b`): every
+  `test_performance` value is bit-identical; the only difference is the key name.
+- Determinism: the shipped-sample validation run is byte-stable across repeats, so the pinned baseline is a
+  stable contract rather than a snapshot of a lucky run.
 
 ## What remains unresolved
 
-- The `test_n_periods` rename API change remains outstanding: `walk_forward.py:5797` emits `"test_n_periods": len(test_returns)` (counts test bars, mislabeled "periods") and `out_of_sample_validation` passes it through at `walk_forward.py:10148`, but the example already reports `test_n_observations` and `tests/test_falsifiable_hypothesis_example.py:256-257` asserts `"test_n_periods" not in obs`. `references/validation_methods.md:1365-1369` documents the distinction. Breaking API change needing its own parity harness.
+- `validation_performance["val_n_periods"]` (`walk_forward.py:5708`) has the *same* mislabel as the key just
+  fixed: it is `len(val_returns)` (100 validation bars on the shipped sample), not a period count. It was left
+  alone because the assignment scoped the breaking change to `test_performance` only, and widening a breaking
+  API change needs its own baseline capture. Evidence and a recipe are in HANDOFF_NEXT.md.
+- The resolution ladder has only been measured on the *null* (no-effect) fixture. The effect-series
+  measurement has now been taken as well (numbers below), and it shows the ladder is a property of the sample
+  size and the trial distribution rather than of the hypothesis — but the held-out-fraction sweep on the effect
+  series is still unmeasured. That is the next task.
 
 ## Approaches that failed
 
-- None in this session; the baseline (14/14) was clean and the sweep printing integrated without conflict.
+- None. The rename was mechanical; the parity baseline was captured from the pre-rename source on the first
+  attempt, and the only test failure during development was my own key-set comparison in the harness (the
+  baseline stores `test_returns` outside the metric dict), fixed in one edit.
 
 ## Next task (one, precise)
 
-**Rename `test_n_periods` -> `test_n_observations` in the framework's `test_performance` (the held-out window counts test bars, not periods), with a parity harness.**
+**Measure the held-out-fraction sweep on the *effect* series (positive control), at 5,000 and 10,000 bars, and
+pin the control's discrimination in the test suite.**
 
-The held-out-fraction sweep (`measure_test_frac_sweep`) was demonstrated at 2,500 bars, where no fraction crosses the 2.0 plausibility bound. The crossing fraction at larger sample sizes (5,000 / 10,000 bars) has not been measured, and the alpha side of that sweep has not been measured at all.
+The resolution ladder is calibrated on a synthetic fixture, and the ladder measured on the null fixture says
+what a null sample can resolve. The positive control (`scripts/generate_positive_control_data.py`: the same
+draws with a known injected effect) says whether a real edge is *confirmable* once the sample is large enough.
+Measuring it turns the resolution analysis from "how big a sample would this null need" into "can this
+framework confirm a real edge at all, and at what size".
 
-- Tool: `skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py` — `measure_test_frac_sweep(...)` and `_summarize_test_frac_sweep(...)`; the sweep currently reports only the Sharpe crossing (`min_detectable_sharpe`, `expected_max_sharpe`) and only for `PATH_OUT_OF_SAMPLE`. Mirror the alpha analysis there too (`min_detectable_alpha`, `expected_max_alpha` vs `PLAUSIBLE_MAX_ANNUALIZED_ALPHA`), and run the sweep at 5,000 and 10,000 bars.
-- Constraint: change no threshold, bound, criterion or verdict; `PLAUSIBLE_MAX_ANNUALIZED_ALPHA == 0.10` stays; re-use the framework's own blocks; the shipped 0.6/0.2/0.2 split remains the default and is unchanged.
-- Verification: extend `tests/test_resolution_vs_sample_size.py` pinning the sweep's alpha numbers against the framework's own blocks on a directly re-run analysis, and that no verdict moves.
-- Evidence: at 2,500 bars the Sharpe sweep shows `min_detectable_sharpe` falling 2.89 -> 2.24 as `test_frac` grows 0.1 -> 0.3 with no fraction crossing the 2.0 bound; the alpha crossing at 2,500 bars is unresolved.
+Measured in this session (ladder, default 0.6/0.2/0.2 split, seed 7, `n_test_observations` 998 / 1998):
 
-(End of file - total 47 lines)
+| series | bars | min detectable SR | SR* | min detectable alpha | alpha* | observed SR |
+| --- | --- | --- | --- | --- | --- | --- |
+| no_effect | 5,000 | 1.9096 | 1.2560 | 0.0930 | 0.0219 | -0.0448 |
+| no_effect | 10,000 | 1.7136 | 1.2557 | 0.0689 | 0.0174 | -0.1806 |
+| effect | 5,000 | 1.8373 | 1.2135 | 0.0952 | 0.0185 | 3.3798 |
+| effect | 10,000 | 1.6012 | 1.1584 | 0.0779 | 0.0240 | 3.4834 |
+
+What this shows: the minimum detectable effect is nearly the same on both fixtures (Sharpe 1.84 vs 1.91 at
+5,000 bars; alpha 0.095 vs 0.093), so the ladder is a property of the *sample size, the number of trials and
+the realized volatility* — not of whether the strategy has an edge. What separates the fixtures is the
+*observed* statistic (Sharpe 3.38 on the effect series vs -0.04 on the null): the control's observed edge sits
+above the 2.00 plausibility bound and is confirmable on every draw at 5,000 bars, while the null is never
+confirmable at any size. The CPCV path remains the exception: at 10,000 bars its alpha floor (alpha* 0.1228)
+stays above the 0.10 bound, so no sample size would let that path confirm a plausible alpha.
+
