@@ -896,13 +896,17 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
 
 def _summarize_test_frac_sweep(
     rows: Sequence[Dict[str, Any]],
-) -> Tuple[List[Dict[str, Any]], Optional[float], Optional[float]]:
+) -> Tuple[
+    List[Dict[str, Any]], Optional[float], Optional[float], Optional[float], Optional[float]
+]:
     """Summarise a test-fraction sweep, bucketed by held-out fraction.
 
-    Returns ``(per_fraction_stats, first_all_within_bound, first_any_within_bound)``.
+    Returns ``(per_fraction_stats, first_all_within_bound, first_any_within_bound,
+    first_all_within_alpha_bound, first_any_within_alpha_bound)``.
     Each stat block reports the framework's own resolution numbers for that
-    split: the minimum confirmable Sharpe, the deflation floor SR*, the test
-    observations available, and whether the 2.0 plausibility bound is crossed.
+    split: the minimum confirmable Sharpe, the deflation floor SR*, the minimum
+    confirmable alpha, the deflation floor alpha*, the test observations
+    available, and whether the plausibility bounds are crossed.
     """
     buckets: Dict[float, Dict[str, Any]] = {}
     for row in rows:
@@ -911,49 +915,72 @@ def _summarize_test_frac_sweep(
         bucket = buckets.setdefault(
             test_frac,
             {
-                "values": [],
-                "floors": [],
+                "sharpe_values": [],
+                "sharpe_floors": [],
+                "alpha_values": [],
+                "alpha_floors": [],
                 "measured": 0,
-                "within": 0,
+                "sharpe_within": 0,
+                "alpha_within": 0,
                 "n_test_observations": None,
             },
         )
         bucket["measured"] += 1
-        floor = block.get("expected_max_sharpe")
-        if floor is not None:
-            bucket["floors"].append(floor)
-        value = block.get("min_detectable_sharpe")
-        if value is None:
-            continue
-        if bucket["n_test_observations"] is None:
-            bucket["n_test_observations"] = block.get("n_test_observations")
-        bucket["values"].append(value)
-        if value <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE:
-            bucket["within"] += 1
+        sharpe_floor = block.get("expected_max_sharpe")
+        if sharpe_floor is not None:
+            bucket["sharpe_floors"].append(sharpe_floor)
+        sharpe_value = block.get("min_detectable_sharpe")
+        if sharpe_value is not None:
+            if bucket["n_test_observations"] is None:
+                bucket["n_test_observations"] = block.get("n_test_observations")
+            bucket["sharpe_values"].append(sharpe_value)
+            if sharpe_value <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE:
+                bucket["sharpe_within"] += 1
+        alpha_floor = block.get("expected_max_alpha")
+        if alpha_floor is not None:
+            bucket["alpha_floors"].append(alpha_floor)
+        alpha_value = block.get("min_detectable_alpha")
+        if alpha_value is not None:
+            bucket["alpha_values"].append(alpha_value)
+            if alpha_value <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA:
+                bucket["alpha_within"] += 1
 
     stats: List[Dict[str, Any]] = []
     for test_frac in sorted(buckets):
         bucket = buckets[test_frac]
-        values = bucket["values"]
+        sharpe_values = bucket["sharpe_values"]
+        alpha_values = bucket["alpha_values"]
         stats.append(
             {
                 "test_frac": test_frac,
                 "train_frac": 0.8 - test_frac,
                 "val_frac": VAL_FRAC,
                 "n_test_observations": bucket["n_test_observations"],
-                "min_min_detectable_sharpe": min(values) if values else None,
-                "max_min_detectable_sharpe": max(values) if values else None,
+                "min_min_detectable_sharpe": min(sharpe_values) if sharpe_values else None,
+                "max_min_detectable_sharpe": max(sharpe_values) if sharpe_values else None,
                 "max_expected_max_sharpe": (
-                    max(bucket["floors"]) if bucket["floors"] else None
+                    max(bucket["sharpe_floors"]) if bucket["sharpe_floors"] else None
+                ),
+                "min_min_detectable_alpha": min(alpha_values) if alpha_values else None,
+                "max_min_detectable_alpha": max(alpha_values) if alpha_values else None,
+                "max_expected_max_alpha": (
+                    max(bucket["alpha_floors"]) if bucket["alpha_floors"] else None
                 ),
                 "draws_measured": bucket["measured"],
-                "draws_resolved": len(values),
-                "draws_within_bound": bucket["within"],
-                "all_within_bound": bool(values)
-                and len(values) == bucket["measured"]
-                and all(v <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE for v in values),
+                "draws_resolved": len(sharpe_values),
+                "draws_within_bound": bucket["sharpe_within"],
+                "draws_within_alpha_bound": bucket["alpha_within"],
+                "all_within_bound": bool(sharpe_values)
+                and len(sharpe_values) == bucket["measured"]
+                and all(v <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE for v in sharpe_values),
                 "any_within_bound": any(
-                    v <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE for v in values
+                    v <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE for v in sharpe_values
+                ),
+                "all_within_alpha_bound": bool(alpha_values)
+                and len(alpha_values) == bucket["measured"]
+                and all(v <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA for v in alpha_values),
+                "any_within_alpha_bound": any(
+                    v <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA for v in alpha_values
                 ),
             }
         )
@@ -966,7 +993,15 @@ def _summarize_test_frac_sweep(
         (entry["test_frac"] for entry in stats if entry["any_within_bound"]),
         None,
     )
-    return stats, first_all, first_any
+    first_all_alpha = next(
+        (entry["test_frac"] for entry in stats if entry["all_within_alpha_bound"]),
+        None,
+    )
+    first_any_alpha = next(
+        (entry["test_frac"] for entry in stats if entry["any_within_alpha_bound"]),
+        None,
+    )
+    return stats, first_all, first_any, first_all_alpha, first_any_alpha
 
 
 def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1297,7 +1332,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             test_fracs=test_fracs,
             inject_effect=inject,
         )
-        stats, first_all, first_any = _summarize_test_frac_sweep(rows)
+        stats, first_all, first_any, first_all_alpha, first_any_alpha = _summarize_test_frac_sweep(rows)
 
         if args.json:
             print(
@@ -1308,6 +1343,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                             "stats": stats,
                             "first_all_within_bound": first_all,
                             "first_any_within_bound": first_any,
+                            "first_all_within_alpha_bound": first_all_alpha,
+                            "first_any_within_alpha_bound": first_any_alpha,
                         },
                     },
                     indent=2,
