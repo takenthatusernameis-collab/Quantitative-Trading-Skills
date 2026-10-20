@@ -1175,21 +1175,24 @@ def print_path_summary(summary: Dict[str, Any], path: str) -> None:
             "2.0 annualized Sharpe"
         )
 
-
 def print_test_frac_sweep(
     stats: Sequence[Dict[str, Any]],
     first_all: Optional[float],
     first_any: Optional[float],
+    first_all_alpha: Optional[float],
+    first_any_alpha: Optional[float],
 ) -> None:
     """Print the held-out-fraction sweep as a table.
 
     One row per held-out fraction: the framework's own minimum confirmable
     Sharpe and deflation floor SR* for that split, plus the plausibility-bound
-    crossing.
+    crossing -- and, in parallel, the minimum confirmable alpha and deflation
+    floor alpha* for criterion 5.
     """
     header = (
         f"{'test_frac':>9} {'train_frac':>10} {'val_frac':>8} "
-        f"{'T':>6} {'min SR':>8} {'SR*':>8} {'all within':>10} {'any within':>10}"
+        f"{'T':>6} {'min SR':>8} {'SR*':>8} {'min alpha':>10} {'alpha*':>10} "
+        f"{'all SR':>9} {'any SR':>9} {'all alpha':>10} {'any alpha':>10}"
     )
     print(header)
     print("-" * len(header))
@@ -1201,8 +1204,12 @@ def print_test_frac_sweep(
             f"{str(entry['n_test_observations'] or '-'):>6} "
             f"{_fmt(entry['min_min_detectable_sharpe']):>8} "
             f"{_fmt(entry['max_expected_max_sharpe']):>8} "
-            f"{str(entry['all_within_bound']):>10} "
-            f"{str(entry['any_within_bound']):>10}"
+            f"{_fmt(entry['min_min_detectable_alpha'], '%.4f'):>10} "
+            f"{_fmt(entry['max_expected_max_alpha'], '%.4f'):>10} "
+            f"{str(entry['all_within_bound']):>9} "
+            f"{str(entry['any_within_bound']):>9} "
+            f"{str(entry['all_within_alpha_bound']):>10} "
+            f"{str(entry['any_within_alpha_bound']):>10}"
         )
     print()
     if first_all is not None:
@@ -1219,6 +1226,21 @@ def print_test_frac_sweep(
         print(
             "  first held-out fraction at which SOME draw is within the bound: "
             f"{first_any:.1%}"
+        )
+    if first_all_alpha is not None:
+        print(
+            "  first held-out fraction at which EVERY draw is within the "
+            f"alpha plausibility bound: {first_all_alpha:.1%}"
+        )
+    else:
+        print(
+            "  no measured held-out fraction brought every draw within the "
+            "alpha plausibility bound"
+        )
+    if first_any_alpha is not None:
+        print(
+            "  first held-out fraction at which SOME draw is within the alpha "
+            f"bound: {first_any_alpha:.1%}"
         )
 
 
@@ -1356,7 +1378,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"PATH: {PATH_OUT_OF_SAMPLE} -- held-out fraction sweep at {size} bars "
             f"(val_frac = {VAL_FRAC:.1%}, train_frac = 0.8 - test_frac)"
         )
-        print_test_frac_sweep(stats, first_all, first_any)
+        print_test_frac_sweep(
+            stats, first_all, first_any, first_all_alpha, first_any_alpha
+        )
         return 0
 
     if args.json:

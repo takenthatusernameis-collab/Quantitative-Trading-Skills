@@ -76,7 +76,9 @@ from measure_resolution_vs_sample_size import (  # noqa: E402
     WF_TEST_MONTHS,
     WF_TRAIN_MONTHS,
     measure_synthetic,
+    measure_test_frac_sweep,
     summarize,
+    _summarize_test_frac_sweep,
 )
 from walk_forward import (  # noqa: E402
     PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
@@ -581,6 +583,73 @@ def test_test_frac_sweep_each_split_matches_the_framework_own_block():
         )
 
 
+def test_test_frac_sweep_at_larger_sizes_matches_the_framework_own_block():
+    """Each swept split at 5,000 and 10,000 bars matches the framework's own block.
+
+    The held-out-fraction sweep was measured at 2,500 bars where no fraction
+    crosses either plausibility bound. At 5,000 and 10,000 bars the trade-off
+    between test observations and the deflation floor moves, so the sweep's
+    alpha numbers are pinned here against the framework's own
+    ``test_resolution`` / ``deflated_alpha`` blocks on a directly re-run
+    analysis. No threshold, bound, criterion or verdict moves.
+    """
+    for bars in (MIDDLE_SAMPLE_BARS, LARGE_SAMPLE_BARS):
+        for test_frac in (0.1, 0.2, 0.3):
+            train_frac = 0.8 - test_frac
+            measured = measure_synthetic(
+                bars, 7, False,
+                train_frac=train_frac, val_frac=0.2, test_frac=test_frac,
+                paths=(OUT_OF_SAMPLE,),
+            )
+            block = measured["paths"][OUT_OF_SAMPLE]
+            framework_summary, _ = _framework_oos_block(
+                bars, 7, False, train_frac, 0.2, test_frac
+            )
+            framework = framework_summary.get("test_resolution")
+            assert isinstance(framework, dict), (
+                f"{bars} bars test_frac={test_frac}: the framework did not "
+                "attach a test_resolution block to its summary"
+            )
+            assert block["min_detectable_alpha"] == framework["min_detectable_alpha"], (
+                f"{bars} bars test_frac={test_frac}: the measured minimum "
+                "confirmable alpha must equal the framework's own block"
+            )
+            assert block["expected_max_alpha"] == (
+                framework_summary["deflated_alpha"]["expected_max_alpha"]
+            ), (
+                f"{bars} bars test_frac={test_frac}: the measured deflation "
+                "floor (alpha*) must equal the framework's own Deflated Alpha "
+                "block"
+            )
+            # The plausibility bounds the sweep compares against stay where
+            # they are: the measurement reads them, it never re-tunes them.
+            assert block["plausible_max_annualized_alpha"] == PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+
+
+def test_test_frac_sweep_alpha_crossings_match_the_per_fraction_flags():
+    """The sweep's reported alpha crossings agree with the per-fraction flags.
+
+    Verifies that no verdict moves: the crossing fraction the summary reports
+    is exactly the smallest measured fraction whose per-fraction flag is set,
+    or None when no fraction is inside the bound.
+    """
+    for bars in (MIDDLE_SAMPLE_BARS, LARGE_SAMPLE_BARS):
+        rows = measure_test_frac_sweep(
+            bars, seeds=(7,), test_fracs=(0.1, 0.2, 0.3), inject_effect=False,
+        )
+        stats, first_all, first_any, first_all_alpha, first_any_alpha = (
+            _summarize_test_frac_sweep(rows)
+        )
+        flag_all = [e["test_frac"] for e in stats if e["all_within_alpha_bound"]]
+        flag_any = [e["test_frac"] for e in stats if e["any_within_alpha_bound"]]
+        assert (first_all_alpha is None) == (not flag_all)
+        assert (first_any_alpha is None) == (not flag_any)
+        if first_all_alpha is not None:
+            assert first_all_alpha == min(flag_all)
+        if first_any_alpha is not None:
+            assert first_any_alpha == min(flag_any)
+
+
 def _framework_wf_block(bars, seed, inject_effect):
     """Run the framework's own walk_forward_analysis on the same fixture.
 
@@ -789,6 +858,8 @@ TEST_REGISTRY = [
     ("test_the_measurement_moves_no_threshold_and_no_verdict_on_any_path", test_the_measurement_moves_no_threshold_and_no_verdict_on_any_path),
     ("test_test_frac_sweep_keeps_val_frac_and_sums_to_one", test_test_frac_sweep_keeps_val_frac_and_sums_to_one),
     ("test_test_frac_sweep_each_split_matches_the_framework_own_block", test_test_frac_sweep_each_split_matches_the_framework_own_block),
+    ("test_test_frac_sweep_at_larger_sizes_matches_the_framework_own_block", test_test_frac_sweep_at_larger_sizes_matches_the_framework_own_block),
+    ("test_test_frac_sweep_alpha_crossings_match_the_per_fraction_flags", test_test_frac_sweep_alpha_crossings_match_the_per_fraction_flags),
     ("test_shipped_default_split_is_unchanged", test_shipped_default_split_is_unchanged),
 ]
 
