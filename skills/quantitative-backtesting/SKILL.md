@@ -164,7 +164,11 @@ Risk Metrics:
   test_frac`); that sweep runs on the control fixture, names the series it
   measured (the no-effect null calibration or the effect positive control)
   and refuses `--data` rather than reporting the fixture's numbers under a
-  real history's name. The measured answer, per path: the resolution
+  real history's name. The sweep runs on the out-of-sample path only: that is
+  the only path whose split is expressed as fractions of the sample (the
+  walk-forward path is configured in months and the CPCV path in splits), so
+  `test_frac` has no meaning on the other two.
+  The measured answer, per path: the resolution
   *improves* with the sample and crosses below the 2.0 plausibility bound at
   a few thousand daily bars, so the shipped sample's verdict is a statement
   about its 504 bars rather than about the criteria. The three paths cross

@@ -68,6 +68,7 @@ No third-party test framework is required; uses only the standard library.
 """
 
 import contextlib
+import inspect
 import io
 import json
 import math
@@ -573,6 +574,139 @@ def test_test_frac_sweep_keeps_val_frac_and_sums_to_one():
             + measured["test_frac"]
             - 1.0
         ) < 1e-9
+
+
+def _doc_section(heading):
+    """The body of one '#### ' section of the reference document.
+
+    The document is Markdown with the section's text hard-wrapped, so the
+    body is whitespace-normalised before it is read: a phrase may be split
+    across a line break in the file and must still be found.
+    """
+    doc = (SKILLS_DIR / "references" / "validation_methods.md").read_text(
+        encoding="utf-8"
+    )
+    marker = f"#### {heading}"
+    assert doc.count(marker) == 1, f"the section {heading!r} must appear once"
+    start = doc.index(marker) + len(marker)
+    body = doc[start:]
+    end = body.find("\n#### ")
+    if end != -1:
+        body = body[:end]
+    return re.sub(r"\s+", " ", body)
+
+
+def test_the_sweeps_scope_is_the_frameworks_own_and_the_docs_say_so():
+    """The sweep is out-of-sample only, and that is the framework's doing.
+
+    The held-out-fraction sweep is presented among the three-path results, so
+    a reader can reasonably assume the other two paths were simply forgotten.
+    They were not: ``test_frac`` is a parameter of the out-of-sample analysis
+    only. The walk-forward analysis is configured in months and the CPCV
+    analysis in a number of splits and a per-group test fraction, so neither
+    has a held-out fraction of the sample to sweep.
+
+    This pins the reason against the framework's own signatures, the
+    measurement's own default, and the wording of the reference document --
+    including the configuration the document names, which has to be the
+    shipped one. The document's configuration was wrong once: it named a
+    1-month step where the framework ships a 2-month one, and it credited
+    the CPCV path with a month-based configuration it does not have. A
+    reader who took the document at its word would size the walk-forward
+    windows wrongly and would look for a held-out fraction the CPCV path
+    does not have.
+    """
+    oos_params = inspect.signature(out_of_sample_validation).parameters
+    wf_params = inspect.signature(walk_forward_analysis).parameters
+    cpcv_params = inspect.signature(cpcv_analysis).parameters
+
+    # The reason itself: only the out-of-sample analysis is split by fraction.
+    assert "test_frac" in oos_params, (
+        "the out-of-sample analysis is the one the sweep measures; it must "
+        "take a held-out fraction"
+    )
+    assert "test_frac" not in wf_params, (
+        "the walk-forward path is configured in months; if it took a "
+        "test_frac the sweep could run on it and the document would have to "
+        "say so"
+    )
+    assert "test_frac" not in cpcv_params, (
+        "the CPCV path is configured in splits; if it took a test_frac the "
+        "sweep could run on it and the document would have to say so"
+    )
+    assert {"train_months", "test_months", "step_months"} <= set(wf_params)
+    assert {"n_splits", "test_size"} <= set(cpcv_params)
+
+    # The measurement's own scope: the sweep measures the out-of-sample path.
+    sweep_paths = inspect.signature(measure_test_frac_sweep).parameters[
+        "paths"
+    ].default
+    assert tuple(sweep_paths) == (OUT_OF_SAMPLE,), (
+        f"the sweep measures the out-of-sample path only; its default paths "
+        f"are {sweep_paths}"
+    )
+
+    sweep_doc = _doc_section("How much of the data should be held out?")
+    paths_doc = _doc_section("The three analysis paths answer it differently")
+
+    # The document says the sweep is out-of-sample only, and says why.
+    assert "out-of-sample path only" in sweep_doc, (
+        "the sweep's section must state that the sweep is measured on the "
+        "out-of-sample path only"
+    )
+    assert "CPCV path is configured in a number of splits" in sweep_doc, (
+        "the sweep's section must say how the CPCV path is configured: it is "
+        "configured in splits and a per-group test fraction, not in months"
+    )
+    assert "CPCV paths are configured in" not in sweep_doc, (
+        "the CPCV path is not month-configured; the document must not "
+        "attribute a month-based configuration to it"
+    )
+    for occurrence in re.finditer("CPCV", sweep_doc):
+        window = sweep_doc[max(0, occurrence.start() - 120):occurrence.end() + 120]
+        assert "month" not in window.lower(), (
+            "the CPCV path is not configured in months; the sweep's section "
+            f"must not put the two together: ...{window}..."
+        )
+
+    # The configuration the document names is the shipped configuration.
+    expected_months = {
+        "training window": WF_TRAIN_MONTHS,
+        "test window": WF_TEST_MONTHS,
+        "step": WF_STEP_MONTHS,
+    }
+    for name, section in (("sweep", sweep_doc), ("paths", paths_doc)):
+        named = {
+            label: int(months)
+            for months, label in re.findall(
+                r"(\d+)-month\s+(training window|test window|step)\b", section
+            )
+        }
+        assert named == expected_months, (
+            f"the {name} section must name the shipped walk-forward "
+            f"configuration {expected_months}; it names {named}"
+        )
+        assert f"{CPCV_N_SPLITS} splits" in section, (
+            f"the {name} section must name the shipped CPCV configuration "
+            f"({CPCV_N_SPLITS} splits)"
+        )
+        assert f"{CPCV_TEST_SIZE:.0%} of each group" in section, (
+            f"the {name} section must name the shipped CPCV test size "
+            f"({CPCV_TEST_SIZE:.0%} of each group)"
+        )
+
+    # The out-of-sample path's split is named as the shipped split.
+    assert f"{TRAIN_FRAC:g}/{VAL_FRAC:g}/{TEST_FRAC:g}" in sweep_doc, (
+        "the sweep's section must name the shipped out-of-sample split"
+    )
+
+    # The skill's own entry point says the same, so a reader who meets the
+    # flag there is not left with a different scope.
+    skill_doc = (SKILLS_DIR / "SKILL.md").read_text(encoding="utf-8")
+    assert "the out-of-sample path only" in re.sub(r"\s+", " ", skill_doc), (
+        "SKILL.md must state that the sweep runs on the out-of-sample path "
+        "only"
+    )
 
 
 def test_test_frac_sweep_each_split_matches_the_framework_own_block():
@@ -2651,6 +2785,7 @@ TEST_REGISTRY = [
     ("test_the_floor_is_reported_for_every_path_and_every_rung", test_the_floor_is_reported_for_every_path_and_every_rung),
     ("test_the_measurement_moves_no_threshold_and_no_verdict_on_any_path", test_the_measurement_moves_no_threshold_and_no_verdict_on_any_path),
     ("test_test_frac_sweep_keeps_val_frac_and_sums_to_one", test_test_frac_sweep_keeps_val_frac_and_sums_to_one),
+    ("test_the_sweeps_scope_is_the_frameworks_own_and_the_docs_say_so", test_the_sweeps_scope_is_the_frameworks_own_and_the_docs_say_so),
     ("test_test_frac_sweep_each_split_matches_the_framework_own_block", test_test_frac_sweep_each_split_matches_the_framework_own_block),
     ("test_test_frac_sweep_at_larger_sizes_matches_the_framework_own_block", test_test_frac_sweep_at_larger_sizes_matches_the_framework_own_block),
     ("test_test_frac_sweep_alpha_crossings_match_the_per_fraction_flags", test_test_frac_sweep_alpha_crossings_match_the_per_fraction_flags),

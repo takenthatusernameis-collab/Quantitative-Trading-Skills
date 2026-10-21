@@ -1805,21 +1805,26 @@ not near-ties and leaves this one to the numbers above.
 
 The sweep is measured on the **out-of-sample path only**, and that is by
 construction, not by oversight. The sweep varies `test_frac`, a fraction of
-the sample, but the walk-forward and CPCV paths are configured in *months*
-(6-month training window, 2-month test window, 1-month step; see "The
-three analysis paths answer it differently" above), not in fractions of the
-sample, so `test_frac` has no meaning on them: there is no held-out
-fraction to sweep. The out-of-sample path is the only one whose split is
-expressed as fractions of the sample (the shipped 0.6/0.2/0.2 split), so
-it is the only one on which a fraction sweep can be run.
+the sample, and the out-of-sample path is the only one of the three whose
+split is expressed that way (the shipped 0.6/0.2/0.2 split). The
+walk-forward path is configured in *months* -- a 6-month training window, a
+2-month test window and a 2-month step (see "The three analysis paths
+answer it differently" above) -- so its windows tile the sample in calendar
+time and it has no held-out fraction to sweep. The CPCV path is configured
+in a number of splits and a per-group test fraction (5 splits, 20% of each
+group), which re-splits the whole sample combinatorially instead of holding
+one window out, so it has no single held-out fraction either.
+`test_frac` therefore has no meaning on either of them, and the framework
+agrees: of the three analyses, only the out-of-sample one takes a
+`test_frac` at all.
 
 The sweep therefore establishes a statement about the **out-of-sample
 path's split** -- how its held-out fraction trades test observations for
 training data -- and says nothing about the walk-forward or CPCV paths,
-whose resolutions are governed by their month-based windows and are
-reported separately in the three-path table below. It is also a statement
-about *resolution*, not about the criteria or the verdict: no threshold,
-bound, criterion or verdict moves with it.
+whose resolutions are governed by their own configurations and are reported
+separately in the three-path table below. It is also a statement about
+*resolution*, not about the criteria or the verdict: no threshold, bound,
+criterion or verdict moves with it.
 
 #### The three analysis paths answer it differently
 
@@ -1836,6 +1841,19 @@ crossing points, and the measurement now reports all three:
   returns of every walk-forward window (which together span the sample);
 - the **CPCV** path evaluates its test on the pooled out-of-sample returns of
   every fold (also spanning the sample).
+
+Each path is configured in the units of its own analysis, and the units are
+what differ (the measurement's own configuration, as shipped):
+
+- the **out-of-sample** path splits the sample into fractions -- the shipped
+  0.6/0.2/0.2 train/validation/test split -- so its held-out window is a
+  fraction of the sample;
+- the **walk-forward** path steps calendar windows over the sample -- a
+  6-month training window, a 2-month test window and a 2-month step -- so
+  its windows tile the sample in calendar time;
+- the **CPCV** path re-splits the sample into 5 splits and takes the first
+  20% of each group as that group's test set, so it holds out no single
+  window of the sample.
 
 Measured on the same control fixture, over three seeds and both series
 (the six draws at each rung):
