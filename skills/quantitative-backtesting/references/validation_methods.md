@@ -1803,6 +1803,24 @@ would fail on a rounding difference rather than on a change of substance,
 so `tests/test_resolution_vs_sample_size.py` pins the crossings that are
 not near-ties and leaves this one to the numbers above.
 
+The sweep is measured on the **out-of-sample path only**, and that is by
+construction, not by oversight. The sweep varies `test_frac`, a fraction of
+the sample, but the walk-forward and CPCV paths are configured in *months*
+(6-month training window, 2-month test window, 1-month step; see "The
+three analysis paths answer it differently" above), not in fractions of the
+sample, so `test_frac` has no meaning on them: there is no held-out
+fraction to sweep. The out-of-sample path is the only one whose split is
+expressed as fractions of the sample (the shipped 0.6/0.2/0.2 split), so
+it is the only one on which a fraction sweep can be run.
+
+The sweep therefore establishes a statement about the **out-of-sample
+path's split** -- how its held-out fraction trades test observations for
+training data -- and says nothing about the walk-forward or CPCV paths,
+whose resolutions are governed by their month-based windows and are
+reported separately in the three-path table below. It is also a statement
+about *resolution*, not about the criteria or the verdict: no threshold,
+bound, criterion or verdict moves with it.
+
 #### The three analysis paths answer it differently
 
 The curve above is the **out-of-sample path's** curve, because that is where
