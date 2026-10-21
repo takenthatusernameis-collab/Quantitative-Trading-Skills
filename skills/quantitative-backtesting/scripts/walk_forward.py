@@ -2311,6 +2311,7 @@ def _build_test_resolution(
         "min_detectable_alpha": None,
         "observed_annualized_sharpe": None,
         "observed_annualized_alpha": None,
+        "realized_annualized_volatility": None,
         # "resolvable": the minimum detectable effect was computed.
         # "not_resolvable": the statistic exists but the effect could not be
         #   computed (see the matching `*_reason`).
@@ -2329,6 +2330,17 @@ def _build_test_resolution(
 
     deflated_sharpe = summary.get("deflated_sharpe")
     deflated_alpha = summary.get("deflated_alpha")
+
+    # Realized annualized volatility of the series the statistic was computed
+    # on: the conditioning quantity for the minimum detectable effects.
+    if returns is not None:
+        try:
+            _series = returns.dropna() if hasattr(returns, "dropna") else returns
+            if len(_series) >= 2:
+                _ann = _annualization_factor(_series.index)
+                resolution["realized_annualized_volatility"] = float(_series.std() * math.sqrt(_ann))
+        except Exception:
+            pass
 
     if isinstance(deflated_sharpe, dict):
         resolution["n_test_observations"] = deflated_sharpe.get("n_observations")
@@ -4508,6 +4520,10 @@ def _print_test_resolution(
         scope.append(f"{benches} benchmark(s)")
     if scope:
         print(f"{indent}  {', '.join(scope)}.")
+
+    vol = resolution.get("realized_annualized_volatility")
+    if vol is not None:
+        print(f"{indent}  Realized annualized volatility of the test window: {_format_optional_float(vol, '{:.2%}')}")
 
     sharpe_status = resolution.get("sharpe_status")
     if sharpe_status == "resolvable":

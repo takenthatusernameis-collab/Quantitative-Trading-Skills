@@ -1407,6 +1407,21 @@ a correction"*. Three properties are deliberate:
   message states that no significance test was run -- silence would be
   indistinguishable from a run that forgot to report the resolution.
 
+- **The minimum detectable effect is conditional on the realized volatility of
+  the test window.** The block now also carries
+  `realized_annualized_volatility`: the annualized standard deviation (ddof=1)
+  of the very return series the statistic was computed on. The alpha MDE is
+  volatility-scaled (`alpha* = sr_star * strat_vol_ann * sqrt(ann_factor)`),
+  so two runs at the same sample size can have different alpha MDEs purely
+  because their test windows are more or less volatile. Compare the
+  `realized_annualized_volatility` alongside the MDE before attributing a
+  difference to sample size. Measured on the control fixture (seed 7, 5,000
+  bars): the control's test window is 12.08% annualized against the null's
+  10.98%, and the two fixtures' alpha MDEs differ at the same T. The Sharpe
+  MDE is a ratio and looks scale-free, but its floor is estimated from trial
+  alphas divided by the strategy's volatility, so the conditioning is reported
+  rather than assumed away.
+
 ### Cost sweeps report the resolution of every point
 
 A cost sweep is a table of Sharpes: one per cost level. Read on its own, the
