@@ -355,20 +355,29 @@ def _run_walk_forward(
     )
 
 
-def _run_cpcv(data, benchmarks) -> Dict[str, Any]:
-    """Run the shipped CPCV analysis on one prepared sample.
+def _run_cpcv(
+    data,
+    benchmarks,
+    n_splits: int = CPCV_N_SPLITS,
+    test_size: float = CPCV_TEST_SIZE,
+) -> Dict[str, Any]:
+    """Run the CPCV analysis on one prepared sample.
 
     As for the walk-forward path: the whole sample is this path's sample,
     and the resolution measured here is the resolution of the test that
-    path runs on its pooled out-of-sample fold returns.
+    path runs on its pooled out-of-sample fold returns. The split
+    configuration defaults to the shipped one (5 splits, a test window of
+    20% of each group), so the ladder is unchanged by the sweep's
+    existence: the sweep passes its own configuration in, and the default
+    stays the default.
     """
     return _run_framework(
         cpcv_analysis,
         data=data,
         strategy_factory=_STRATEGY_FACTORY,
         param_grid=PARAM_GRID,
-        n_splits=CPCV_N_SPLITS,
-        test_size=CPCV_TEST_SIZE,
+        n_splits=n_splits,
+        test_size=test_size,
         initial_capital=INITIAL_CAPITAL,
         commission=COMMISSION,
         slippage=SLIPPAGE,
@@ -922,6 +931,94 @@ def measure_wf_window_sweep(
                     "n_periods": summary.get("n_periods"),
                     "periods_with_position": summary.get("periods_with_position"),
                     "paths": {PATH_WALK_FORWARD: block},
+                }
+            )
+    return rows
+
+
+def measure_cpcv_sweep(
+    bars: int,
+    seeds: Sequence[int],
+    splits: Sequence[Tuple[int, float]],
+    inject_effect: bool = True,
+) -> List[Dict[str, Any]]:
+    """Measure the CPCV path's resolution across split configurations.
+
+    At a fixed sample size, runs the **CPCV** path once per
+    ``(n_splits, test_size)`` configuration and reports the framework's own
+    resolution block for that configuration. ``test_size`` is the fraction
+    of *each group* used as that group's test set -- not of the sample -- so
+    the effective out-of-sample fraction is ``test_size / n_splits`` and the
+    total pooled test observations are about ``test_size * bars`` regardless
+    of the number of splits (what changes with splits is the fold count, the
+    training data per fold, and the per-fold test window).
+
+    The trade-off measured: more splits means more folds (more pooled
+    out-of-sample observations and more trial Sharpes for the deflation
+    floor) but a smaller test window per fold, while a larger test fraction
+    gives each fold more test observations (better resolution) at the cost of
+    less training data per fold, which raises the deflation floor SR* because
+    the trial Sharpes it is estimated from are then estimated on less data.
+
+    One series at a time: the no-effect series is the null calibration and
+    the effect series is the positive control, and their numbers answer
+    different questions, so the series is named rather than defaulted.
+    ``inject_effect=None`` is refused instead of silently measuring the
+    no-effect series.
+    """
+    if inject_effect is None:
+        raise ValueError(
+            "the sweep measures one series at a time: pass inject_effect=True "
+            "(the effect series) or inject_effect=False (the no-effect "
+            "series). None would silently measure the no-effect series."
+        )
+    rows: List[Dict[str, Any]] = []
+    for n_splits, test_size in splits:
+        if int(n_splits) < 2:
+            raise ValueError(
+                f"n_splits must be at least 2, got {n_splits}"
+            )
+        if not (0.0 < test_size < 1.0):
+            raise ValueError(
+                f"test_size must be in (0, 1), got {test_size}"
+            )
+        n_splits = int(n_splits)
+        test_size = float(test_size)
+        for seed in seeds:
+            tmpdir, data, benchmarks = _control_sample(bars, seed, inject_effect)
+            try:
+                results = _run_cpcv(
+                    data,
+                    benchmarks,
+                    n_splits=n_splits,
+                    test_size=test_size,
+                )
+            finally:
+                tmpdir.cleanup()
+            summary = results.get("summary", {})
+            block = _measure_path(
+                PATH_CPCV,
+                summary,
+                results.get("oos_returns"),
+                n_windows=len(results.get("folds") or []),
+            )
+            rows.append(
+                {
+                    "path": PATH_CPCV,
+                    "n_splits": n_splits,
+                    "test_size": test_size,
+                    "bars": bars,
+                    "seed": seed,
+                    "series": "effect" if inject_effect else "no_effect",
+                    "source": "synthetic control fixture",
+                    # The framework's own record of how many of the folds
+                    # could price the strategy at all. A test window shorter
+                    # than the strategy's own indicator warmup leaves most
+                    # folds empty, and the number of folds that carry a
+                    # position is what shows it.
+                    "n_folds": summary.get("n_folds"),
+                    "folds_with_position": summary.get("folds_with_position"),
+                    "paths": {PATH_CPCV: block},
                 }
             )
     return rows
@@ -1697,6 +1794,193 @@ def _summarize_wf_window_sweep(
     return stats, first_all, first_any, first_all_alpha, first_any_alpha
 
 
+def _summarize_cpcv_sweep(
+    rows: Sequence[Dict[str, Any]],
+) -> Tuple[
+    List[Dict[str, Any]], Optional[Tuple[int, float]], Optional[Tuple[int, float]],
+    Optional[Tuple[int, float]], Optional[Tuple[int, float]]
+]:
+    """Summarise a CPCV split sweep, bucketed by configuration.
+
+    Returns ``(per_configuration_stats, first_all_within_bound,
+    first_any_within_bound, first_all_within_alpha_bound,
+    first_any_within_alpha_bound)``. Each stat block reports the framework's
+    own resolution numbers for that split configuration: the minimum
+    confirmable Sharpe, the deflation floor SR*, the minimum confirmable
+    alpha, the deflation floor alpha*, the out-of-sample observations
+    available, the observed statistics, and whether the plausibility bounds
+    are crossed.
+
+    The configurations are ordered by (n_splits, test_size), and the "first"
+    flags name the first configuration in that order whose flag is set --
+    the same convention the other sweeps use.
+    """
+    buckets: Dict[Tuple[int, float], Dict[str, Any]] = {}
+    for row in rows:
+        key = (int(row.get("n_splits")), float(row.get("test_size")))
+        block = _path_block(row, PATH_CPCV)
+        bucket = buckets.setdefault(
+            key,
+            {
+                "sharpe_values": [],
+                "sharpe_floors": [],
+                "alpha_values": [],
+                "alpha_floors": [],
+                "observed_sharpes": [],
+                "observed_alphas": [],
+                "observations": [],
+                "trials": [],
+                "with_position": [],
+                "measured": 0,
+                "sharpe_within": 0,
+                "alpha_within": 0,
+                "n_test_observations": None,
+                "n_folds": None,
+            },
+        )
+        bucket["measured"] += 1
+        sharpe_floor = block.get("expected_max_sharpe")
+        if sharpe_floor is not None:
+            bucket["sharpe_floors"].append(sharpe_floor)
+        sharpe_value = block.get("min_detectable_sharpe")
+        if sharpe_value is not None:
+            if bucket["n_test_observations"] is None:
+                bucket["n_test_observations"] = block.get("n_test_observations")
+                bucket["n_folds"] = block.get("n_windows")
+            bucket["sharpe_values"].append(sharpe_value)
+            if sharpe_value <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE:
+                bucket["sharpe_within"] += 1
+        alpha_floor = block.get("expected_max_alpha")
+        if alpha_floor is not None:
+            bucket["alpha_floors"].append(alpha_floor)
+        alpha_value = block.get("min_detectable_alpha")
+        if alpha_value is not None:
+            bucket["alpha_values"].append(alpha_value)
+            if alpha_value <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA:
+                bucket["alpha_within"] += 1
+        observed_sharpe = block.get("observed_annualized_sharpe")
+        if observed_sharpe is not None and np.isfinite(observed_sharpe):
+            bucket["observed_sharpes"].append(observed_sharpe)
+        observed_alpha = block.get("observed_annualized_alpha")
+        if observed_alpha is not None and np.isfinite(observed_alpha):
+            bucket["observed_alphas"].append(observed_alpha)
+        observations = block.get("n_test_observations")
+        if observations is not None:
+            bucket["observations"].append(observations)
+        trials = block.get("n_parameter_trials")
+        if trials is not None:
+            bucket["trials"].append(trials)
+        with_position = row.get("folds_with_position")
+        if with_position is not None:
+            bucket["with_position"].append(with_position)
+
+    stats: List[Dict[str, Any]] = []
+    for n_splits, test_size in sorted(buckets):
+        bucket = buckets[(n_splits, test_size)]
+        sharpe_values = bucket["sharpe_values"]
+        alpha_values = bucket["alpha_values"]
+        observed_sharpes = bucket["observed_sharpes"]
+        observed_alphas = bucket["observed_alphas"]
+        observations = bucket["observations"]
+        trials = bucket["trials"]
+        with_position = bucket["with_position"]
+        stats.append(
+            {
+                "n_splits": n_splits,
+                "test_size": test_size,
+                "n_folds": bucket["n_folds"],
+                "min_folds_with_position": (
+                    min(with_position) if with_position else None
+                ),
+                "max_folds_with_position": (
+                    max(with_position) if with_position else None
+                ),
+                "min_n_test_observations": min(observations) if observations else None,
+                "max_n_test_observations": max(observations) if observations else None,
+                "min_n_parameter_trials": min(trials) if trials else None,
+                "max_n_parameter_trials": max(trials) if trials else None,
+                "min_min_detectable_sharpe": min(sharpe_values) if sharpe_values else None,
+                "max_min_detectable_sharpe": max(sharpe_values) if sharpe_values else None,
+                "min_expected_max_sharpe": (
+                    min(bucket["sharpe_floors"]) if bucket["sharpe_floors"] else None
+                ),
+                "max_expected_max_sharpe": (
+                    max(bucket["sharpe_floors"]) if bucket["sharpe_floors"] else None
+                ),
+                "min_min_detectable_alpha": min(alpha_values) if alpha_values else None,
+                "max_min_detectable_alpha": max(alpha_values) if alpha_values else None,
+                "min_expected_max_alpha": (
+                    min(bucket["alpha_floors"]) if bucket["alpha_floors"] else None
+                ),
+                "max_expected_max_alpha": (
+                    max(bucket["alpha_floors"]) if bucket["alpha_floors"] else None
+                ),
+                "min_observed_annualized_sharpe": (
+                    min(observed_sharpes) if observed_sharpes else None
+                ),
+                "max_observed_annualized_sharpe": (
+                    max(observed_sharpes) if observed_sharpes else None
+                ),
+                "min_observed_annualized_alpha": (
+                    min(observed_alphas) if observed_alphas else None
+                ),
+                "max_observed_annualized_alpha": (
+                    max(observed_alphas) if observed_alphas else None
+                ),
+                "draws_measured": bucket["measured"],
+                "draws_resolved": len(sharpe_values),
+                "draws_within_bound": bucket["sharpe_within"],
+                "draws_within_alpha_bound": bucket["alpha_within"],
+                "all_within_bound": bool(sharpe_values)
+                and len(sharpe_values) == bucket["measured"]
+                and all(v <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE for v in sharpe_values),
+                "any_within_bound": any(
+                    v <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE for v in sharpe_values
+                ),
+                "all_within_alpha_bound": bool(alpha_values)
+                and len(alpha_values) == bucket["measured"]
+                and all(v <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA for v in alpha_values),
+                "any_within_alpha_bound": any(
+                    v <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA for v in alpha_values
+                ),
+            }
+        )
+
+    first_all = next(
+        (
+            (entry["n_splits"], entry["test_size"])
+            for entry in stats
+            if entry["all_within_bound"]
+        ),
+        None,
+    )
+    first_any = next(
+        (
+            (entry["n_splits"], entry["test_size"])
+            for entry in stats
+            if entry["any_within_bound"]
+        ),
+        None,
+    )
+    first_all_alpha = next(
+        (
+            (entry["n_splits"], entry["test_size"])
+            for entry in stats
+            if entry["all_within_alpha_bound"]
+        ),
+        None,
+    )
+    first_any_alpha = next(
+        (
+            (entry["n_splits"], entry["test_size"])
+            for entry in stats
+            if entry["any_within_alpha_bound"]
+        ),
+        None,
+    )
+    return stats, first_all, first_any, first_all_alpha, first_any_alpha
+
+
 def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """Summarise a ladder: the crossing of the plausibility bound and the floor.
 
@@ -2237,6 +2521,79 @@ def print_wf_window_sweep(
             )
 
 
+def print_cpcv_sweep(
+    stats: Sequence[Dict[str, Any]],
+    first_all: Optional[Tuple[int, float]],
+    first_any: Optional[Tuple[int, float]],
+    first_all_alpha: Optional[Tuple[int, float]],
+    first_any_alpha: Optional[Tuple[int, float]],
+) -> None:
+    """Print the CPCV split sweep as a table.
+
+    One row per split configuration: the framework's own minimum confirmable
+    Sharpe and deflation floor SR* for that configuration, plus the
+    plausibility-bound crossing -- and, in parallel, the minimum confirmable
+    alpha and deflation floor alpha* for criterion 5.
+    """
+    header = (
+        f"{'n_splits':>9} {'test_size':>10} {'folds':>7} {'with pos':>10} "
+        f"{'T':>13} {'trials':>12} {'min SR':>8} {'SR*':>8} {'min alpha':>10} "
+        f"{'alpha*':>10} {'obs SR':>14} {'obs alpha':>16} "
+        f"{'all SR':>9} {'any SR':>9} {'all alpha':>10} {'any alpha':>10}"
+    )
+    print(header)
+    print("-" * len(header))
+    for entry in stats:
+        observed_sharpe = entry.get("min_observed_annualized_sharpe")
+        observed_alpha = entry.get("min_observed_annualized_alpha")
+        if observed_sharpe is not None and entry.get("max_observed_annualized_sharpe") is not None:
+            observed_sharpe_text = (
+                f"{observed_sharpe:.2f} to "
+                f"{entry['max_observed_annualized_sharpe']:.2f}"
+            )
+        else:
+            observed_sharpe_text = "n/a"
+        if observed_alpha is not None and entry.get("max_observed_annualized_alpha") is not None:
+            observed_alpha_text = (
+                f"{observed_alpha * 100:.1f}% to "
+                f"{entry['max_observed_annualized_alpha'] * 100:.1f}%"
+            )
+        else:
+            observed_alpha_text = "n/a"
+        print(
+            f"{entry['n_splits']:>9} "
+            f"{entry['test_size']:>10.1%} "
+            f"{str(entry['n_folds'] or '-'):>7} "
+            f"{_range_text(entry.get('min_folds_with_position'), entry.get('max_folds_with_position')):>10} "
+            f"{_range_text(entry.get('min_n_test_observations'), entry.get('max_n_test_observations')):>13} "
+            f"{_range_text(entry.get('min_n_parameter_trials'), entry.get('max_n_parameter_trials')):>12} "
+            f"{_fmt(entry['min_min_detectable_sharpe']):>8} "
+            f"{_fmt(entry['max_expected_max_sharpe']):>8} "
+            f"{_fmt(entry['min_min_detectable_alpha'], '%.4f'):>10} "
+            f"{_fmt(entry['max_expected_max_alpha'], '%.4f'):>10} "
+            f"{observed_sharpe_text:>14} "
+            f"{observed_alpha_text:>16} "
+            f"{str(entry['all_within_bound']):>9} "
+            f"{str(entry['any_within_bound']):>9} "
+            f"{str(entry['all_within_alpha_bound']):>10} "
+            f"{str(entry['any_within_alpha_bound']):>10}"
+        )
+    print()
+    for label, value in (
+        ("every draw is within the plausibility bound", first_all),
+        ("some draw is within the plausibility bound", first_any),
+        ("every draw is within the alpha plausibility bound", first_all_alpha),
+        ("some draw is within the alpha plausibility bound", first_any_alpha),
+    ):
+        if value is None:
+            print(f"  no measured split configuration brought {label}")
+        else:
+            print(
+                f"  first split configuration at which {label}: "
+                f"{value[0]} splits, {value[1]:.0%} of each group"
+            )
+
+
 def _parse_wf_windows(spec: str) -> List[Tuple[int, int]]:
     """Parse ``train_months:test_months`` pairs into window configurations.
 
@@ -2271,6 +2628,47 @@ def _parse_wf_windows(spec: str) -> List[Tuple[int, int]]:
     if not windows:
         raise ValueError("--wf-windows must list at least one configuration")
     return windows
+
+
+def _parse_cpcv_splits(spec: str) -> List[Tuple[int, float]]:
+    """Parse ``n_splits:test_size`` pairs into CPCV split configurations.
+
+    The CPCV path is configured in a number of splits and a per-group test
+    fraction, so its sweep is written the same way: ``5:0.2`` is 5 splits
+    with a test window of 20% of each group. ``test_size`` is the fraction
+    of *each group*, not of the sample -- the framework's own message at
+    `walk_forward.py:4683` says so -- so a sweep that reported it as a
+    fraction of the sample would misstate it.
+    """
+    splits: List[Tuple[int, float]] = []
+    for part in spec.split(","):
+        text = part.strip()
+        if not text:
+            continue
+        if text.count(":") != 1:
+            raise ValueError(
+                f"a split configuration is n_splits:test_size, got {text!r}"
+            )
+        splits_text, test_text = text.split(":")
+        try:
+            n_splits = int(splits_text)
+            test_size = float(test_text)
+        except ValueError:
+            raise ValueError(
+                f"a split configuration is n_splits:test_size, got {text!r}"
+            ) from None
+        if n_splits < 2:
+            raise ValueError(
+                f"n_splits must be at least 2, got {text!r}"
+            )
+        if not (0.0 < test_size < 1.0):
+            raise ValueError(
+                f"test_size must be in (0, 1), got {text!r}"
+            )
+        splits.append((n_splits, test_size))
+    if not splits:
+        raise ValueError("--cpcv-splits must list at least one configuration")
+    return splits
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -2344,6 +2742,22 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
     parser.add_argument(
+        "--cpcv-splits",
+        default=None,
+        help=(
+            "Comma-separated CPCV split configurations to sweep at a fixed "
+            "sample size, written n_splits:test_size (for example "
+            "5:0.2,10:0.2). test_size is the fraction of *each group* used "
+            "as that group's test set -- not of the sample -- so the "
+            "effective out-of-sample fraction is test_size / n_splits. When "
+            "set, the ladder is replaced by this sweep at the single --size "
+            "given; the shipped 5 splits / 20% configuration remains the "
+            "default and is unchanged. The sweep measures the synthetic "
+            "control fixture -- it cannot be combined with --data -- and it "
+            "names the series it measured."
+        ),
+    )
+    parser.add_argument(
         "--data",
         default=None,
         help=(
@@ -2398,6 +2812,22 @@ def main(argv: Optional[List[str]] = None) -> int:
             "first sweeps the out-of-sample path's held-out fraction and the "
             "second sweeps the walk-forward path's window configuration. "
             "Measure one at a time."
+        )
+
+    if args.test_fracs and args.cpcv_splits:
+        parser.error(
+            "--test-fracs and --cpcv-splits are two different sweeps: the "
+            "first sweeps the out-of-sample path's held-out fraction and the "
+            "second sweeps the CPCV path's split configuration. Measure one "
+            "at a time."
+        )
+
+    if args.wf_windows and args.cpcv_splits:
+        parser.error(
+            "--wf-windows and --cpcv-splits are two different sweeps: the "
+            "first sweeps the walk-forward path's window configuration and "
+            "the second sweeps the CPCV path's split configuration. Measure "
+            "one at a time."
         )
 
     if args.wf_windows:
@@ -2455,6 +2885,74 @@ def main(argv: Optional[List[str]] = None) -> int:
                 f"(step follows the test window) -- series: {label}"
             )
             print_wf_window_sweep(
+                stats, first_all, first_any, first_all_alpha, first_any_alpha
+            )
+            print()
+
+        if args.json:
+            if len(sweeps) == 1:
+                label, payload = next(iter(sweeps.items()))
+                print(json.dumps({"series": label, **payload}, indent=2, default=str))
+            else:
+                print(json.dumps({"sweeps": sweeps}, indent=2, default=str))
+        return 0
+
+    if args.cpcv_splits:
+        splits = _parse_cpcv_splits(args.cpcv_splits)
+        if len(sizes) != 1:
+            parser.error("--cpcv-splits requires exactly one --size (fixed sample size)")
+        if args.data:
+            parser.error(
+                "--cpcv-splits sweeps the synthetic control fixture and cannot "
+                "be combined with --data: the sweep would report the "
+                "fixture's numbers under the real history's name. Measure a "
+                "real history with --sizes (the ladder) instead."
+            )
+        size = sizes[0]
+
+        # The sweep measures the series the flag asks for, and names it.
+        # "both" measures the null calibration and the positive control and
+        # prints both: their numbers answer different questions, and a
+        # table that does not say which one it is cannot be read.
+        series_to_measure = (
+            [("no_effect", False), ("effect", True)]
+            if inject is None
+            else [("effect" if inject else "no_effect", inject)]
+        )
+        sweeps: Dict[str, Dict[str, Any]] = {}
+        for label, inject_effect in series_to_measure:
+            rows = measure_cpcv_sweep(
+                size,
+                seeds=seeds,
+                splits=splits,
+                inject_effect=inject_effect,
+            )
+            stats, first_all, first_any, first_all_alpha, first_any_alpha = (
+                _summarize_cpcv_sweep(rows)
+            )
+            sweeps[label] = {
+                "rows": rows,
+                "sweep": {
+                    "series": label,
+                    "path": PATH_CPCV,
+                    "stats": stats,
+                    "first_all_within_bound": list(first_all) if first_all else None,
+                    "first_any_within_bound": list(first_any) if first_any else None,
+                    "first_all_within_alpha_bound": (
+                        list(first_all_alpha) if first_all_alpha else None
+                    ),
+                    "first_any_within_alpha_bound": (
+                        list(first_any_alpha) if first_any_alpha else None
+                    ),
+                },
+            }
+            if args.json:
+                continue
+            print(
+                f"PATH: {PATH_CPCV} -- split sweep at {size} bars "
+                f"(test_size is the fraction of each group) -- series: {label}"
+            )
+            print_cpcv_sweep(
                 stats, first_all, first_any, first_all_alpha, first_any_alpha
             )
             print()

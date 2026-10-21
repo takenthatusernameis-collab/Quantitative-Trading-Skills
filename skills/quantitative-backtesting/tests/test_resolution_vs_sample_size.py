@@ -110,10 +110,12 @@ from measure_resolution_vs_sample_size import (  # noqa: E402
     measure_synthetic,
     measure_test_frac_sweep,
     measure_wf_window_sweep,
+    measure_cpcv_sweep,
     print_path_summary,
     summarize,
     _summarize_test_frac_sweep,
     _summarize_wf_window_sweep,
+    _summarize_cpcv_sweep,
 )
 from walk_forward import (  # noqa: E402
     PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
@@ -904,13 +906,22 @@ def _framework_wf_block(
     return results.get("summary", {})
 
 
-def _framework_cpcv_block(bars, seed, inject_effect):
+def _framework_cpcv_block(
+    bars,
+    seed,
+    inject_effect,
+    n_splits=CPCV_N_SPLITS,
+    test_size=CPCV_TEST_SIZE,
+):
     """Run the framework's own cpcv_analysis on the same fixture.
 
     Returns its summary, so callers can read the framework's own
     ``summary["test_resolution"]`` and ``summary["deflated_alpha"]`` blocks
     and compare them with what the measurement reports for the identical
     configuration.
+
+    The split configuration defaults to the shipped one, so the parity check
+    is unchanged; the split sweep passes its own configuration in.
     """
     tmpdir, data, benchmarks = _control_fixture(bars, seed, inject_effect)
     try:
@@ -921,8 +932,8 @@ def _framework_cpcv_block(bars, seed, inject_effect):
                 data=data,
                 strategy_factory=strategy_factory,
                 param_grid=PARAM_GRID,
-                n_splits=CPCV_N_SPLITS,
-                test_size=CPCV_TEST_SIZE,
+                n_splits=n_splits,
+                test_size=test_size,
                 initial_capital=INITIAL_CAPITAL,
                 commission=COMMISSION,
                 slippage=SLIPPAGE,
@@ -1465,6 +1476,37 @@ WF_SWEEP_FIXTURE = (
 # The window configurations the capture measured.
 WF_SWEEP_WINDOWS = ((3, 2), (6, 1), (6, 2), (6, 3), (6, 6), (12, 2), (24, 2))
 
+# The capture of the CPCV split sweep, with its provenance, and the trimmed
+# fixture the test file pins.
+CPCV_SWEEP_CAPTURE = (
+    SKILLS_DIR.parent.parent
+    / "results"
+    / "resolution_floor"
+    / "cpcv_sweep_10000.json"
+)
+
+CPCV_SWEEP_FIXTURE = (
+    SKILLS_DIR / "tests" / "fixtures" / "cpcv_sweep_10000.json"
+)
+
+# The split configurations the capture measured: (n_splits, test_size).
+CPCV_SWEEP_CONFIGS = (
+    (3, 0.2), (5, 0.1), (5, 0.2), (5, 0.3),
+    (10, 0.1), (10, 0.2), (20, 0.2),
+)
+
+
+def _load_cpcv_sweep_capture():
+    """The CPCV split sweep capture: the tool's own --json output plus provenance."""
+    with open(CPCV_SWEEP_CAPTURE, "r") as handle:
+        return json.load(handle)
+
+
+def _load_cpcv_sweep_fixture():
+    """The trimmed CPCV split sweep fixture: provenance plus rows."""
+    with open(CPCV_SWEEP_FIXTURE, "r") as handle:
+        return json.load(handle)
+
 
 def _load_wf_sweep_capture():
     """The window sweep capture: the tool's own --json output plus provenance."""
@@ -1915,6 +1957,336 @@ def test_the_window_sweep_is_documented_with_what_it_does_not_establish():
     )
     assert "walk-forward path" in skill_doc, (
         "SKILL.md must say which path the window sweep measures"
+    )
+
+
+# ---------------------------------------------------------------------------
+# CPCV SPLIT SWEEP: the CPCV path's resolution as a function of ITS OWN
+# configuration -- the number of splits and the per-group test fraction.
+#
+# The held-out-fraction sweep is measured on the out-of-sample path only,
+# because that path is the only one whose split is expressed as fractions of
+# the sample. The walk-forward path is configured in months and the CVC
+# path is configured in splits and a per-group test fraction, so neither has
+# a held-out fraction of the sample to sweep.
+#
+# This sweep measures the CPCV path's own lever.
+# ---------------------------------------------------------------------------
+
+
+def test_the_cpcv_sweep_measures_the_cpcv_path_only():
+    """The split sweep measures the CPCV path, and names it.
+
+    Every row the sweep produces is a CPCV row: the row names the path, and
+    it carries that path's block and no other path's block.
+    """
+    rows = measure_cpcv_sweep(
+        SMALL_SAMPLE_BARS,
+        seeds=(7,),
+        splits=((CPCV_N_SPLITS, CPCV_TEST_SIZE),),
+        inject_effect=False,
+    )
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["path"] == CPCV
+    assert set(row["paths"]) == {CPCV}, (
+        "the split sweep measures the CPCV path only: a row must not carry "
+        "another path's block"
+    )
+    block = row["paths"][CPCV]
+    assert block["path"] == CPCV
+    assert block["min_detectable_sharpe"] is not None
+    assert block["n_test_observations"] is not None
+    assert row["series"] == "no_effect"
+    assert row["source"] == "synthetic control fixture"
+    assert row["n_splits"] == CPCV_N_SPLITS
+    assert row["test_size"] == CPCV_TEST_SIZE
+
+
+def test_the_cpcv_sweep_matches_the_framework_own_block():
+    """Each swept configuration's numbers equal the framework's own block.
+
+    The sweep's numbers are the framework's own resolution block, read off a
+    directly re-run analysis -- not a re-derivation of it.
+    """
+    for n_splits, test_size in ((6, 0.2), (10, 0.2)):
+        rows = measure_cpcv_sweep(
+            SMALL_SAMPLE_BARS,
+            seeds=(7,),
+            splits=((n_splits, test_size),),
+            inject_effect=False,
+        )
+        block = rows[0]["paths"][CPCV]
+        framework = _framework_cpcv_block(
+            SMALL_SAMPLE_BARS, 7, False, n_splits, test_size
+        )
+        resolution = framework.get("test_resolution")
+        assert isinstance(resolution, dict), (
+            "the framework did not attach a test_resolution block to its summary"
+        )
+        assert block["min_detectable_sharpe"] == resolution["min_detectable_sharpe"], (
+            f"n_splits={n_splits} test_size={test_size}: the measured minimum "
+            "confirmable Sharpe must equal the framework's own block"
+        )
+        assert block["n_test_observations"] == resolution["n_test_observations"]
+        assert block["expected_max_sharpe"] == (
+            framework["deflated_sharpe"]["expected_max_sharpe"]
+        ), (
+            f"n_splits={n_splits} test_size={test_size}: the measured deflation "
+            "floor (SR*) must equal the framework's own Deflated Sharpe block"
+        )
+        assert block["min_detectable_alpha"] == resolution["min_detectable_alpha"]
+        assert block["expected_max_alpha"] == (
+            framework["deflated_alpha"]["expected_max_alpha"]
+        ), (
+            f"n_splits={n_splits} test_size={test_size}: the measured deflation "
+            "floor (alpha*) must equal the framework's own Deflated Alpha block"
+        )
+
+
+def test_the_shipped_cpcv_configuration_is_unchanged_by_the_sweep():
+    """The sweep adds a lever; it does not move the shipped configuration.
+
+    The shipped CPCV configuration is CPCV_N_SPLITS splits and a
+    CPCV_TEST_SIZE per-group test fraction, and the ladder measures that path
+    at that configuration. The sweep's row at the shipped configuration has to
+    be the same measurement the ladder reports.
+    """
+    assert CPCV_N_SPLITS >= 2
+    assert 0.0 < CPCV_TEST_SIZE < 1.0
+
+    rows = measure_cpcv_sweep(
+        SMALL_SAMPLE_BARS,
+        seeds=(7,),
+        splits=((CPCV_N_SPLITS, CPCV_TEST_SIZE),),
+        inject_effect=False,
+    )
+    swept = rows[0]["paths"][CPCV]
+    ladder = _measured(SMALL_SAMPLE_BARS, 7, False)["paths"][CPCV]
+    assert swept["min_detectable_sharpe"] == ladder["min_detectable_sharpe"]
+    assert swept["min_detectable_alpha"] == ladder["min_detectable_alpha"]
+    assert swept["expected_max_sharpe"] == ladder["expected_max_sharpe"]
+    assert swept["expected_max_alpha"] == ladder["expected_max_alpha"]
+    assert swept["n_test_observations"] == ladder["n_test_observations"]
+    assert swept["n_windows"] == ladder["n_windows"]
+
+
+def test_the_cpcv_sweep_refuses_to_measure_both_series_at_once():
+    """The sweep measures one series at a time, and says which one."""
+    raised = False
+    try:
+        measure_cpcv_sweep(
+            SMALL_SAMPLE_BARS,
+            seeds=(7,),
+            splits=((6, 0.2),),
+            inject_effect=None,
+        )
+    except ValueError as exc:
+        raised = True
+        assert "one series at a time" in str(exc), str(exc)
+    assert raised, (
+        "the sweep must refuse inject_effect=None instead of silently "
+        "measuring the no-effect series"
+    )
+
+
+def test_the_cpcv_sweep_names_the_series_it_measured():
+    """A split sweep table says which series it is."""
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        exit_code = measurement_main(
+            ["--sizes", "2500", "--seeds", "7", "--cpcv-splits", "6:0.2"]
+        )
+    output = buffer.getvalue()
+
+    assert exit_code == 0
+    assert "series: no_effect" in output, (
+        "the split sweep must label the no-effect (null calibration) table"
+    )
+    assert "series: effect" in output, (
+        "the split sweep must label the effect (positive control) table"
+    )
+    assert output.count("split sweep") == 2, (
+        "the default split sweep must measure both series and print both tables"
+    )
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        exit_code = measurement_main(
+            ["--sizes", "2500", "--seeds", "7", "--cpcv-splits", "6:0.2", "--series", "effect"]
+        )
+    output = buffer.getvalue()
+    assert exit_code == 0
+    assert "series: effect" in output
+    assert "series: no_effect" not in output
+
+
+def test_the_cpcv_sweep_refuses_to_report_a_real_history_it_did_not_measure():
+    """The split sweep measures the control fixture, and says so."""
+    raised = False
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            measurement_main(
+                ["--sizes", "2500", "--cpcv-splits", "6:0.2", "--data", "history.csv"]
+            )
+    except SystemExit as exc:
+        raised = True
+        assert exc.code == 2, (
+            f"the refusal must be an argparse error (exit 2), got {exc.code}"
+        )
+    assert raised, (
+        "the split sweep must refuse --data instead of reporting the control "
+        "fixture's numbers under the real history's name"
+    )
+
+
+def test_the_cpcv_sweep_refuses_to_sweep_two_paths_at_once():
+    """Two sweeps, two paths: they are measured one at a time."""
+    raised = False
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            measurement_main(
+                ["--sizes", "2500", "--test-fracs", "0.2", "--cpcv-splits", "6:0.2"]
+            )
+    except SystemExit as exc:
+        raised = True
+        assert exc.code == 2, (
+            f"the refusal must be an argparse error (exit 2), got {exc.code}"
+        )
+    assert raised, (
+        "the held-out-fraction sweep and the split sweep measure two "
+        "different paths and must be measured one at a time"
+    )
+
+
+def test_the_cpcv_sweep_moves_no_threshold_and_no_verdict():
+    """The sweep reads the framework's bounds; it never re-tunes them."""
+    rows = measure_cpcv_sweep(
+        SMALL_SAMPLE_BARS,
+        seeds=(7,),
+        splits=((6, 0.2), (10, 0.2)),
+        inject_effect=False,
+    )
+    for row in rows:
+        block = row["paths"][CPCV]
+        assert block["plausible_max_annualized_sharpe"] == PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+        assert block["plausible_max_annualized_alpha"] == PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+        for key in block:
+            assert "verdict" not in key
+
+
+def test_the_cpcv_sweep_capture_is_the_tools_own_json_output():
+    """The capture is the tool's own output, with its provenance."""
+    capture = _load_cpcv_sweep_capture()
+    provenance = capture["provenance"]
+    assert "--cpcv-splits" in provenance["command"], (
+        "the capture must record the command that produced it"
+    )
+    assert "measure_resolution_vs_sample_size.py" in provenance["command"]
+    assert "--sizes 10000" in provenance["command"], (
+        "the capture must record the sample size it measured at"
+    )
+    assert provenance["plausibility_bounds"] == {
+        "plausible_max_annualized_sharpe": PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
+        "plausible_max_annualized_alpha": PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
+    }
+    assert provenance["environment"]["numpy"]
+    assert provenance["environment"]["pandas"]
+    assert provenance["script_commit"]
+    assert provenance["measured"]["path"] == CPCV
+    assert provenance["measured"]["series"] == ["no_effect", "effect"]
+
+    measured_configurations = {
+        (row["n_splits"], row["test_size"])
+        for series in capture["sweeps"].values()
+        for row in series["rows"]
+    }
+    assert measured_configurations == set(CPCV_SWEEP_CONFIGS), (
+        "the capture must carry the split configurations it measured, "
+        f"{sorted(measured_configurations)}"
+    )
+    for series, payload in capture["sweeps"].items():
+        rows = payload["rows"]
+        assert rows, "the capture must carry the rows it measured"
+        for row in rows:
+            assert set(row["paths"]) == {CPCV}
+            assert row["series"] == series
+        stats, first_all, first_any, first_all_alpha, first_any_alpha = (
+            _summarize_cpcv_sweep(rows)
+        )
+        assert stats == payload["sweep"]["stats"], (
+            f"{series}: the summary rebuilt from the captured rows must equal "
+            "the summary the tool printed for them"
+        )
+        recorded = payload["sweep"]["first_all_within_bound"]
+        assert recorded == (list(first_all) if first_all else None)
+
+
+def test_the_cpcv_sweep_fixture_is_a_trimmed_copy_of_the_capture():
+    """The trimmed fixture keeps everything the summary reads."""
+    capture = _load_cpcv_sweep_capture()
+    fixture = _load_cpcv_sweep_fixture()
+
+    assert fixture["provenance"] == capture["provenance"]
+    assert len(fixture["rows"]) == len(capture["sweeps"]["no_effect"]["rows"]) + len(
+        capture["sweeps"]["effect"]["rows"]
+    )
+
+    trimmed = []
+    for series in ("no_effect", "effect"):
+        for row in capture["sweeps"][series]["rows"]:
+            block = row["paths"][CPCV]
+            trimmed.append(
+                {
+                    "n_splits": row["n_splits"],
+                    "test_size": row["test_size"],
+                    "bars": row["bars"],
+                    "seed": row["seed"],
+                    "series": row["series"],
+                    "folds_with_position": row["folds_with_position"],
+                    "n_folds": row["n_folds"],
+                    "paths": {
+                        CPCV: {
+                            key: block[key] for key in RECAPTURE_PATH_KEYS
+                        }
+                    },
+                }
+            )
+    assert fixture["rows"] == trimmed, (
+        "the trimmed fixture must keep every key the sweep's summary reads, "
+        "and nothing that would change it"
+    )
+
+
+def test_the_cpcv_sweep_is_documented_with_what_it_does_not_establish():
+    """The document states the sweep's scope and its limits."""
+    section = _doc_section("How should the CPCV path be split?")
+    assert "does not establish" in section, (
+        "the split sweep's section must say what it does not establish"
+    )
+    assert "synthetic" in section.lower(), (
+        "the split sweep's section must name the fixture it measured"
+    )
+    assert "no threshold" in section, (
+        "the split sweep's section must say that no threshold, bound, "
+        "criterion or verdict moves with it"
+    )
+    # The configuration the document names is the shipped one.
+    assert f"{CPCV_N_SPLITS} splits" in section, (
+        "the split sweep's section must name the shipped CPCV configuration "
+        f"({CPCV_N_SPLITS} splits)"
+    )
+
+    # The skill's own entry point carries the flag, so a reader who meets it
+    # there knows which path it measures.
+    skill_doc = re.sub(
+        r"\s+", " ", (SKILLS_DIR / "SKILL.md").read_text(encoding="utf-8")
+    )
+    assert "--cpcv-splits" in skill_doc, (
+        "SKILL.md must carry the split sweep's flag"
+    )
+    assert "CPCV path" in skill_doc, (
+        "SKILL.md must say which path the split sweep measures"
     )
 
 
@@ -3306,6 +3678,17 @@ TEST_REGISTRY = [
     ("test_the_window_sweep_capture_is_the_tools_own_json_output", test_the_window_sweep_capture_is_the_tools_own_json_output),
     ("test_the_window_sweep_fixture_is_a_trimmed_copy_of_the_capture", test_the_window_sweep_fixture_is_a_trimmed_copy_of_the_capture),
     ("test_the_window_sweep_is_documented_with_what_it_does_not_establish", test_the_window_sweep_is_documented_with_what_it_does_not_establish),
+    ("test_the_cpcv_sweep_measures_the_cpcv_path_only", test_the_cpcv_sweep_measures_the_cpcv_path_only),
+    ("test_the_cpcv_sweep_matches_the_framework_own_block", test_the_cpcv_sweep_matches_the_framework_own_block),
+    ("test_the_shipped_cpcv_configuration_is_unchanged_by_the_sweep", test_the_shipped_cpcv_configuration_is_unchanged_by_the_sweep),
+    ("test_the_cpcv_sweep_refuses_to_measure_both_series_at_once", test_the_cpcv_sweep_refuses_to_measure_both_series_at_once),
+    ("test_the_cpcv_sweep_names_the_series_it_measured", test_the_cpcv_sweep_names_the_series_it_measured),
+    ("test_the_cpcv_sweep_refuses_to_report_a_real_history_it_did_not_measure", test_the_cpcv_sweep_refuses_to_report_a_real_history_it_did_not_measure),
+    ("test_the_cpcv_sweep_refuses_to_sweep_two_paths_at_once", test_the_cpcv_sweep_refuses_to_sweep_two_paths_at_once),
+    ("test_the_cpcv_sweep_moves_no_threshold_and_no_verdict", test_the_cpcv_sweep_moves_no_threshold_and_no_verdict),
+    ("test_the_cpcv_sweep_capture_is_the_tools_own_json_output", test_the_cpcv_sweep_capture_is_the_tools_own_json_output),
+    ("test_the_cpcv_sweep_fixture_is_a_trimmed_copy_of_the_capture", test_the_cpcv_sweep_fixture_is_a_trimmed_copy_of_the_capture),
+    ("test_the_cpcv_sweep_is_documented_with_what_it_does_not_establish", test_the_cpcv_sweep_is_documented_with_what_it_does_not_establish),
     ("test_shipped_default_split_is_unchanged", test_shipped_default_split_is_unchanged),
     ("test_the_summary_reports_what_sets_the_alpha_floor", test_the_summary_reports_what_sets_the_alpha_floor),
     ("test_an_unpriceable_alpha_floor_is_reported_as_unpriceable", test_an_unpriceable_alpha_floor_is_reported_as_unpriceable),

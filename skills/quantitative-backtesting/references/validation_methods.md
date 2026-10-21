@@ -1975,6 +1975,114 @@ fixture construction, script commit and bounds -- in
 fixture in `tests/fixtures/wf_window_sweep_10000.json` is pinned by
 `tests/test_resolution_vs_sample_size.py`.
 
+#### How should the CPCV path be split?
+
+The walk-forward path is configured in months and the out-of-sample path in
+fractions of the sample, so neither of those sweeps applies to the CPCV
+path. The CPCV path is configured in *splits* -- how many combinatorial
+train/test folds are drawn -- and in a *per-group test fraction*, the share
+of each group held out of a fold. That pair is the CPCV path's own lever,
+and this sweep measures it.
+
+`measure_resolution_vs_sample_size.py --cpcv-splits 3:0.2,5:0.1,5:0.2,5:0.3,10:0.1,10:0.2,20:0.2`
+sweeps `n_splits:test_size` pairs at a fixed sample size on the CPCV path
+and reports the framework's own resolution block for each configuration,
+exactly as the fraction sweep reports the out-of-sample path's block for
+each fraction. `test_size` is the fraction of *each group*, not of the
+sample -- the effective out-of-sample fraction is `test_size / n_splits`
+-- so the sweep is read in per-group terms. The sweep is measured on the
+same synthetic control fixture, names the series it measured, and refuses
+`--data` for the same reason the fraction sweep does.
+
+The shipped configuration -- 5 splits and a 20% per-group test fraction
+(`5:0.2`) -- is unchanged by the sweep: the ladder above still measures the
+CPCV path at 5 splits and a 20% test size.
+
+Measured at 10,000 bars (three seeds; the ranges are over the draws). The
+**no-effect** series is the null calibration, and the **effect** series is
+the positive control:
+
+| Series | Splits | Test size | Folds | Test obs. | Trial Sharpes | Smallest confirmable Sharpe | SR* | Smallest confirmable alpha | alpha* | Observed Sharpe | Observed alpha |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| no-effect | 3 | 20% | 3 | 1,992 | 45 | 0.68 to 0.95 | 0.22 to 0.49 | 5.1% to 8.4% | 1.5% to 4.6% | -0.53 to -0.30 | -2.7% to -1.5% |
+| no-effect | 5 | 10% | 5 | 990 | 75 | 0.86 to 0.96 | 0.21 to 0.31 | 6.6% to 9.4% | 2.4% to 4.3% | -0.44 to -0.27 | -2.9% to -1.9% |
+| no-effect | 5 | 20% | 5 | 1,990 | 75 | 0.67 to 0.77 | 0.21 to 0.31 | 5.4% to 7.1% | 1.2% to 2.8% | -0.32 to -0.19 | -2.3% to -1.3% |
+| no-effect | 5 | 30% | 5 | 2,990 | 75 | 0.59 to 0.69 | 0.21 to 0.31 | 4.6% to 6.0% | 1.0% to 2.4% | -0.23 to -0.14 | -1.7% to -1.0% |
+| no-effect | 10 | 10% | 10 | 980 | 128 to 147 | 0.84 to 0.91 | 0.19 to 0.26 | 7.0% to 8.9% | 2.4% to 4.2% | -0.39 to -0.25 | -2.8% to -1.8% |
+| no-effect | 10 | 20% | 10 | 1,980 | 150 | 0.64 to 0.72 | 0.19 to 0.27 | 5.7% to 7.0% | 1.3% to 3.0% | -0.29 to -0.17 | -2.2% to -1.3% |
+| no-effect | 20 | 20% | 20 | 1,960 | 271 to 295 | 0.62 to 0.70 | 0.16 to 0.25 | 5.3% to 6.6% | 1.1% to 2.7% | -0.27 to -0.16 | -2.1% to -1.2% |
+| effect | 3 | 20% | 3 | 1,992 | 45 | 0.93 to 2.92 | 0.48 to 2.48 | 7.5% to 23.4% | 4.3% to 19.9% | 2.30 to 3.58 | 37.3% to 41.5% |
+| effect | 5 | 10% | 5 | 990 | 75 | 1.14 to 1.33 | 0.51 to 0.70 | 9.3% to 11.5% | 6.5% to 7.9% | 3.03 to 3.38 | 39.3% to 40.8% |
+| effect | 5 | 20% | 5 | 1,990 | 75 | 0.96 to 1.15 | 0.51 to 0.70 | 7.3% to 9.0% | 5.1% to 6.2% | 3.31 to 3.55 | 40.4% to 41.9% |
+| effect | 5 | 30% | 5 | 2,990 | 75 | 0.87 to 1.07 | 0.51 to 0.70 | 6.4% to 8.0% | 4.4% to 5.6% | 3.18 to 3.46 | 39.8% to 41.3% |
+| effect | 10 | 10% | 10 | 980 | 150 | 1.14 to 1.42 | 0.51 to 0.78 | 9.5% to 12.1% | 6.6% to 8.2% | 2.98 to 3.38 | 39.2% to 40.7% |
+| effect | 10 | 20% | 10 | 1,980 | 150 | 0.96 to 1.23 | 0.51 to 0.78 | 7.6% to 9.5% | 5.4% to 6.6% | 3.26 to 3.54 | 40.3% to 41.8% |
+| effect | 20 | 20% | 20 | 1,960 | 292 to 300 | 0.99 to 1.25 | 0.54 to 0.80 | 8.0% to 9.9% | 5.5% to 6.8% | 3.24 to 3.53 | 40.1% to 41.6% |
+
+What the sweep shows:
+
+- **The CPCV path resolves a plausible Sharpe at smaller samples than the
+  out-of-sample path prices it.** At 10,000 bars every measured split
+  configuration has every draw inside the 2.0 plausibility bound on both
+  series -- the shipped `5:0.2` configuration included -- while the
+  out-of-sample path needs a full 10,000 bars for that at some fractions.
+  Splitting the whole sample combinatorially pools more out-of-sample
+  returns than holding one window out.
+- **More splits buys more test observations but more trials.** Going from
+  3 splits to 20 splits (both at 20% test size) folds the test-observation
+  count up from 1,992 to 1,960 per draw (roughly flat because the test
+  fraction is per-group) while the trial Sharpes grow from 45 to 271-295
+  -- the parameter grid is re-fitted in every fold. The deflation floor SR*
+  falls from 0.22-0.49 to 0.16-0.25 on the null calibration, so the larger
+  search is more than offset by the sharper deflation estimate.
+- **The test size is a lever on the record, not only on the resolution.** A
+  smaller per-group test fraction leaves fewer out-of-sample returns pooled
+  across folds: 990 test observations at 10% against 1,990 at 20% with 5
+  splits, and the smallest confirmable Sharpe rises accordingly (0.86-0.96
+  at 10% against 0.67-0.77 at 20% on the null calibration). Fewer folds
+  with positions also means fewer windows price the strategy.
+- **The two series' resolutions are close; their observed statistics are
+  not.** At 10,000 bars, on the same draw at the same configuration, the
+  two series' minimum confirmable Sharpes are within about 0.4 annualized
+  points of each other. The control's observed Sharpe runs from 0.96 to 3.58
+  across the draws and configurations measured (above the 2.0 bound on most
+  of them), while the null's observed Sharpe never rises above -0.14. The
+  resolution is a property of the sample and of the split configuration;
+  the observed statistic is what carries the edge.
+- **Every configuration crosses the Sharpe bound on the null calibration at
+  10,000 bars**, so criterion 2 is inside this path's resolution at the
+  shipped `5:0.2` configuration. Criterion 5 is tighter: on the positive
+  control the alpha bound is crossed on every draw at 5 splits and a 20%
+  test size, but not on the null calibration at any configuration measured,
+  and never on every draw measured at 3 splits.
+
+What this does not establish:
+
+- These are properties of the synthetic control fixture and of the shipped
+  configuration, not promises about a real history. A real history's
+  volatility, its regime structure and its own indicator warmup would move
+  every number here.
+- The sweep covers the CPCV path's splits and per-group test fraction only.
+  It says nothing about the out-of-sample path's held-out fraction (measured
+  by the fraction sweep above) or about the walk-forward path's windows
+  (measured by the window sweep above) -- those are separate configurations
+  of the three paths.
+- Seven configurations were measured. A configuration outside them is not
+  covered, and the table above -- not the "first configuration" flags, which
+  are ordered by (n_splits, test_size) -- is the answer to which
+  configuration to use.
+- It is a statement about resolution and about the framework's own record
+  of which configurations could price the strategy. It is not a statement
+  that any strategy is profitable: no threshold, bound, criterion or verdict
+  moves with it, and the shipped 5-split / 20% test-size configuration stays
+  the default.
+
+The measured sweep is captured with its provenance -- command, environment,
+fixture construction, script commit and bounds -- in
+`results/resolution_floor/cpcv_sweep_10000.json`, and a trimmed fixture in
+`tests/fixtures/cpcv_sweep_10000.json` is pinned by
+`tests/test_resolution_vs_sample_size.py`.
+
 #### The three analysis paths answer it differently
 
 The curve above is the **out-of-sample path's** curve, because that is where
