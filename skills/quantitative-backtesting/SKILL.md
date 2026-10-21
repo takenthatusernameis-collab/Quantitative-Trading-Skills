@@ -168,6 +168,25 @@ Risk Metrics:
   the only path whose split is expressed as fractions of the sample (the
   walk-forward path is configured in months and the CPCV path in splits), so
   `test_frac` has no meaning on the other two.
+  `--wf-windows 6:2,12:3` sweeps the **walk-forward path's** own window
+  configuration instead -- `train_months:test_months` pairs at a fixed
+  sample size, with the step following the test window so the out-of-sample
+  windows tile the sample without overlapping (the framework refuses
+  `step_months < test_months`). It runs on the same control fixture, names
+  the series it measured, and refuses `--data` for the same reason. The
+  shipped 6/2/2 configuration is unchanged and is one of the swept points.
+  The measured answer: the walk-forward path's training window is a
+  resolution lever (its training window is *expanding*, so a longer initial
+  window means every window's parameter selection is estimated on more data
+  and the deflation floor SR* falls -- on the null calibration at 10,000
+  bars, 3 months of training gives a worst-draw minimum confirmable Sharpe
+  of 1.8497 and a floor of 1.6250, against 1.2230 and 1.0016 at 24 months),
+  and its test window is a lever on the *record*: a test window shorter than
+  the strategy's own indicator warmup leaves most windows unable to price
+  the strategy at all (the framework's own `periods_with_position` count
+  says so), and the repeated restart of a short window shows up in the
+  observed statistic. See `references/validation_methods.md`, "How long
+  should the walk-forward windows be?".
   The measured answer, per path: the resolution
   *improves* with the sample and crosses below the 2.0 plausibility bound at
   a few thousand daily bars, so the shipped sample's verdict is a statement

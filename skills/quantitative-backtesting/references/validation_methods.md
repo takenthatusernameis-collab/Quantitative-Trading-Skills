@@ -1826,6 +1826,152 @@ separately in the three-path table below. It is also a statement about
 *resolution*, not about the criteria or the verdict: no threshold, bound,
 criterion or verdict moves with it.
 
+#### How long should the walk-forward windows be?
+
+The sweep above is measured on the out-of-sample path because that path is
+the one whose split is expressed as fractions of the sample. The
+walk-forward path is configured in *months*, so its own lever is the window
+configuration -- how long the training window is and how long the test
+window is -- and this sweep measures it.
+
+`measure_resolution_vs_sample_size.py --wf-windows 3:2,6:1,6:2,6:3,6:6,12:2,24:2`
+sweeps `train_months:test_months` pairs at a fixed sample size on the
+walk-forward path and reports the framework's own resolution block for each
+configuration, exactly as the fraction sweep reports the out-of-sample path's
+block for each fraction. The **step follows the test window**, so the
+out-of-sample windows tile the sample without overlapping: the framework
+refuses `step_months < test_months`, because overlapping windows
+double-count bars in the pooled out-of-sample record and bias the aggregate
+statistics. The sweep is measured on the same synthetic control fixture,
+names the series it measured, and refuses `--data` for the same reason the
+fraction sweep does.
+
+The shipped configuration -- a 6-month training window, a 2-month test
+window and a 2-month step -- is the `6:2` column, and it is unchanged by
+the sweep: the ladder above still measures the walk-forward path at 6/2/2.
+
+Measured at 10,000 bars (three seeds; the ranges are over the draws).
+
+The **no-effect** series is the null calibration, and the **effect** series
+is the positive control:
+
+| Series | Train | Test | Windows | Windows with a position | Test obs. | Pooled trial Sharpes | Smallest confirmable Sharpe | SR* | Smallest confirmable alpha | alpha* | Observed Sharpe | Observed alpha |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| no-effect | 3 | 2 | 228 | 210 to 215 | 8,709 to 8,929 | 1,646 to 1,808 | 1.3430 to 1.8497 | 1.1254 to 1.6250 | 2.12% to 2.43% | 0.35% to 1.09% | -0.58 to -0.19 | -2.9% to -0.03% |
+| no-effect | 6 | 1 | 453 | 284 to 298 | 5,612 to 5,893 | 682 to 781 | 1.2026 to 1.4359 | 0.9294 to 1.1472 | 2.61% to 3.10% | 1.47% to 1.98% | -0.70 to -0.63 | -3.3% to -2.4% |
+| no-effect | 6 | 2 | 226 | 214 | 8,870 to 8,882 | 1,752 to 1,870 | 1.1196 to 1.3732 | 0.8982 to 1.1562 | 2.15% to 2.41% | 0.36% to 1.06% | -0.55 to -0.39 | -2.7% to -1.6% |
+| no-effect | 6 | 3 | 151 | 150 to 151 | 9,485 to 9,548 | 1,819 to 1,916 | 1.0906 to 1.3191 | 0.8811 to 1.1092 | 2.09% to 2.30% | 0.30% to 0.66% | -0.62 to -0.22 | -2.8% to -0.5% |
+| no-effect | 6 | 6 | 75 | 75 | 9,635 | 1,093 to 1,103 | 1.0800 to 1.5083 | 0.8720 to 1.3005 | 2.41% to 2.99% | 0.33% to 0.96% | -0.42 to -0.12 | -1.5% to -0.03% |
+| no-effect | 12 | 2 | 223 | 211 to 212 | 8,744 to 8,794 | 1,739 to 1,847 | 1.0442 to 1.2978 | 0.8214 to 1.0795 | 2.22% to 2.56% | 0.42% to 1.05% | -0.58 to -0.37 | -2.9% to -1.6% |
+| no-effect | 24 | 2 | 217 | 205 to 206 | 8,507 to 8,545 | 1,702 to 1,796 | 0.7283 to 1.2230 | 0.5069 to 1.0016 | 2.22% to 2.82% | 0.38% to 0.99% | -0.61 to -0.37 | -2.9% to -2.0% |
+| effect | 3 | 2 | 228 | 159 to 171 | 6,603 to 7,100 | 1,415 to 1,500 | 1.3442 to 1.5537 | 1.1110 to 1.3129 | 8.29% to 11.01% | 6.44% to 8.94% | 1.51 to 1.97 | 5.2% to 7.0% |
+| effect | 6 | 1 | 453 | 240 to 259 | 4,740 to 5,120 | 680 to 715 | 1.1173 to 1.2720 | 0.8422 to 1.0043 | 6.72% to 7.40% | 5.39% to 6.10% | 0.68 to 0.84 | -1.9% to -1.5% |
+| effect | 6 | 2 | 226 | 156 to 164 | 6,461 to 6,802 | 1,442 to 1,480 | 1.2674 to 1.4529 | 1.0287 to 1.2091 | 8.39% to 12.65% | 6.56% to 10.47% | 1.25 to 1.90 | 2.7% to 5.2% |
+| effect | 6 | 3 | 151 | 120 to 128 | 7,588 to 8,094 | 1,439 to 1,530 | 1.2234 to 1.6032 | 0.9986 to 1.3779 | 8.31% to 10.16% | 6.15% to 7.83% | 2.14 to 2.66 | 13.9% to 18.6% |
+| effect | 6 | 6 | 75 | 72 to 74 | 9,251 to 9,507 | 1,003 to 1,040 | 1.2088 to 1.5867 | 1.0055 to 1.3824 | 2.36% to 3.58% | 0.20% to 1.36% | 2.56 to 2.93 | 28.3% to 32.4% |
+| effect | 12 | 2 | 223 | 155 to 163 | 6,420 to 6,760 | 1,441 to 1,475 | 1.2295 to 1.4541 | 0.9904 to 1.2095 | 8.49% to 12.95% | 6.66% to 10.76% | 1.28 to 1.91 | 2.7% to 5.0% |
+| effect | 24 | 2 | 217 | 150 to 159 | 6,213 to 6,596 | 1,393 to 1,437 | 1.1143 to 1.4070 | 0.8713 to 1.1583 | 8.52% to 13.07% | 6.66% to 10.84% | 1.25 to 1.94 | 2.5% to 5.1% |
+
+And at 5,000 bars, where the resolution has not yet crossed the bound under
+every configuration:
+
+| Series | Train | Test | Smallest confirmable Sharpe | SR* | Smallest confirmable alpha | alpha* | Every draw inside the Sharpe bound? | Every draw inside the alpha bound? |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| no-effect | 3 | 2 | 1.5269 to 2.4452 | 1.2154 to 2.1098 | 2.59% to 3.20% | 0.37% to 0.79% | **no** | yes |
+| no-effect | 6 | 1 | 1.3074 to 1.9203 | 0.9142 to 1.4865 | 3.08% to 3.33% | 1.45% to 1.67% | yes | yes |
+| no-effect | 6 | 2 | 1.4311 to 1.7668 | 1.1026 to 1.4540 | 2.21% to 3.08% | 0.26% to 0.53% | yes | yes |
+| no-effect | 6 | 3 | 1.3689 to 1.7158 | 1.0640 to 1.4157 | 2.61% to 3.27% | 0.38% to 0.69% | yes | yes |
+| no-effect | 6 | 6 | 1.3412 to 1.7704 | 1.0431 to 1.4744 | 3.13% to 3.71% | 0.31% to 0.77% | yes | yes |
+| no-effect | 12 | 2 | 1.3350 to 1.4799 | 1.0010 to 1.1654 | 2.19% to 3.24% | 0.44% to 0.65% | yes | yes |
+| no-effect | 24 | 2 | 0.9438 to 1.3622 | 0.6205 to 1.0381 | 2.07% to 3.63% | 0.33% to 0.92% | yes | yes |
+| effect | 3 | 2 | 1.6395 to 1.9639 | 1.3091 to 1.6237 | 7.92% to 13.35% | 5.47% to 10.22% | yes | **no** |
+| effect | 6 | 1 | 1.2861 to 1.4723 | 0.8991 to 1.0844 | 7.47% to 8.58% | 5.55% to 6.55% | yes | yes |
+| effect | 6 | 2 | 1.5104 to 1.8002 | 1.1798 to 1.4525 | 7.08% to 14.81% | 4.66% to 11.50% | yes | **no** |
+| effect | 6 | 3 | 1.4420 to 1.9547 | 1.1253 to 1.6319 | 8.09% to 11.70% | 5.08% to 8.25% | yes | **no** |
+| effect | 6 | 6 | 1.4187 to 1.9321 | 1.1325 to 1.6413 | 3.30% to 4.21% | 0.18% to 0.97% | yes | yes |
+| effect | 12 | 2 | 1.3444 to 1.8035 | 0.9981 to 1.4533 | 7.23% to 15.50% | 4.81% to 12.15% | yes | **no** |
+| effect | 24 | 2 | 1.1680 to 1.7587 | 0.8106 to 1.3964 | 7.20% to 15.91% | 4.72% to 12.41% | yes | **no** |
+
+What the sweep shows:
+
+- **The training window is a resolution lever, and it points one way.** The
+  walk-forward path's training window is *expanding* -- every window trains
+  on everything before it -- so a longer initial training window means
+  every window's parameter selection is estimated on more data, and the
+  trial Sharpes the deflation floor is estimated from are less dispersed.
+  On the null calibration at 10,000 bars, going from 3 months of training
+  to 24 months of training drops the worst draw's minimum confirmable
+  Sharpe from 1.8497 to 1.2230 and the worst draw's floor SR* from 1.6250
+  to 1.0016. The cost is that the walk-forward starts later: 228 windows
+  become 217, and the pooled out-of-sample observations fall from 8,929 to
+  8,507. On this construction the resolution gain is the larger of the two.
+- **The training window decides the criterion-2 crossing at 5,000 bars.**
+  With 3 months of training the null calibration's worst draw (2.4452) is
+  outside the 2.0 plausibility bound; with 6, 12 or 24 months of training
+  every draw measured is inside it. The same sample and the same strategy
+  resolve a plausible Sharpe or not, depending on the window.
+- **The test window is a lever on the record itself, not only on the
+  resolution.** A test window shorter than the strategy's own indicator
+  warmup leaves most windows unable to price the strategy at all: the
+  grid's slowest moving average needs 50 bars and a month is about 21, so
+  at a test window of 1 month only 240 to 259 of the 453 windows carry a
+  position, against 214 of 226 at 2 months and 72 to 74 of 75 at 6 months.
+  The framework reports that count itself (`periods_with_position`), and the
+  sweep carries it in every row.
+- **A short test window also truncates the position repeatedly, and the
+  observed statistic shows it.** On the positive control at 10,000 bars the
+  observed annualized Sharpe is 0.68 to 0.84 at a test window of 1 month
+  against 1.25 to 1.90 at 2 months and 2.56 to 2.93 at 6 months, and the
+  observed annualized alpha goes from -1.9% to -1.5% at 1 month to 28.3% to
+  32.4% at 6 months. Each window restarts the strategy flat, so a short
+  test window re-enters and re-exits more often; the edge is measured on
+  what is left. The null calibration moves the same way (observed alpha
+  -3.3% to -2.4% at 1 month against -1.5% to -0.03% at 6 months), so this
+  is a property of the window configuration, not of the injected effect.
+- **The alpha bound is the one that moves.** At 10,000 bars every
+  configuration measured has every draw inside the 2.0 Sharpe bound, on
+  both series -- the criterion-2 verdict is the same under all seven
+  configurations. The alpha bound is not: on the positive control it is
+  inside for every draw at test windows of 1 and 6 months and *above* the
+  bound on the worst draw at every test window of 2 and 3 months (10.47% at
+  the shipped 6/2 against the 10% bound), and at 5,000 bars the same split
+  appears on the null calibration's side of the table.
+- **The two series' resolutions are close; their observed statistics are
+  not.** At 10,000 bars the two series' minimum confirmable Sharpes are
+  within 0.50 annualized points of each other at every configuration, and
+  their minimum confirmable alphas within 7.5 percentage points. The
+  control's observed Sharpe is 1.25 to 2.93 and its observed alpha 2.5% to
+  32.4% on every draw measured, while the null's observed Sharpe never
+  reaches -0.08 and its observed alpha never reaches -0.03%. The resolution
+  is a property of the sample and of the window configuration; the observed
+  statistic is what carries the edge.
+
+What this does not establish:
+
+- These are properties of the synthetic control fixture and of the shipped
+  configuration, not promises about a real history. A real history's
+  volatility, its regime structure and its own indicator warmup would move
+  every number here.
+- The sweep covers the walk-forward path's windows only. It says nothing
+  about the out-of-sample path's split (measured by the fraction sweep
+  above) or about the CPCV path's number of splits and per-group test
+  fraction, which is the remaining unmeasured configuration of the three
+  paths.
+- Seven configurations were measured. A configuration outside them is not
+  covered, and the table above -- not the "first configuration" flags, which
+  are ordered by (training window, test window) -- is the answer to which
+  configuration to use.
+- It is a statement about resolution and about the framework's own record
+  of which windows could price the strategy. It is not a statement that any
+  strategy is profitable: no threshold, bound, criterion or verdict moves
+  with it, and the shipped 6/2/2 configuration stays the default.
+
+The measured sweep is captured with its provenance -- command, environment,
+fixture construction, script commit and bounds -- in
+`results/resolution_floor/wf_window_sweep_10000.json`, and a trimmed
+fixture in `tests/fixtures/wf_window_sweep_10000.json` is pinned by
+`tests/test_resolution_vs_sample_size.py`.
+
 #### The three analysis paths answer it differently
 
 The curve above is the **out-of-sample path's** curve, because that is where

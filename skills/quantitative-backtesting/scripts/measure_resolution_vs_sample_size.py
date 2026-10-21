@@ -315,21 +315,32 @@ def _run_validation(
     )
 
 
-def _run_walk_forward(data, benchmarks) -> Dict[str, Any]:
-    """Run the shipped walk-forward analysis on one prepared sample.
+def _run_walk_forward(
+    data,
+    benchmarks,
+    train_months: int = WF_TRAIN_MONTHS,
+    test_months: int = WF_TEST_MONTHS,
+    step_months: int = WF_STEP_MONTHS,
+) -> Dict[str, Any]:
+    """Run the walk-forward analysis on one prepared sample.
 
     The whole sample is this path's sample: it prices its own out-of-sample
     windows across it, and the resolution measured here is the resolution of
     the significance test that path actually runs on those windows.
+
+    The window configuration defaults to the shipped one (6-month training
+    window, 2-month test window, 2-month step), so the ladder is unchanged
+    by the existence of the window sweep: the sweep passes its own windows
+    in, and the default stays the default.
     """
     return _run_framework(
         walk_forward_analysis,
         data=data,
         strategy_factory=_STRATEGY_FACTORY,
         param_grid=PARAM_GRID,
-        train_months=WF_TRAIN_MONTHS,
-        test_months=WF_TEST_MONTHS,
-        step_months=WF_STEP_MONTHS,
+        train_months=train_months,
+        test_months=test_months,
+        step_months=step_months,
         initial_capital=INITIAL_CAPITAL,
         commission=COMMISSION,
         slippage=SLIPPAGE,
@@ -643,6 +654,34 @@ def _measure_sample(
     return measured
 
 
+def _control_sample(bars: int, seed: int, inject_effect: bool):
+    """Build the control fixture the measurement measures on.
+
+    The fixture is the worked example's positive control
+    (``generate_positive_control_data.py``): the same construction,
+    regenerated at the requested length, with the same seeds. The temporary
+    directory that holds it is returned with the data, so the caller can
+    clean it up.
+    """
+    tmpdir = tempfile.TemporaryDirectory(prefix="resolution_vs_sample_size_")
+    fixture_paths = write_control_fixture(
+        tmpdir.name,
+        strategy_seed=seed,
+        benchmark_seed=seed + (CONTROL_BENCHMARK_SEED - CONTROL_STRATEGY_SEED),
+        inject_effect=inject_effect,
+        periods=bars,
+    )
+    data = load_data(str(fixture_paths["strategy"]))
+    # The worked example's benchmark set, in the same order as its
+    # `BENCHMARK_FILES`: the strategy's own series is the primary
+    # benchmark, the alternative benchmark is the second.
+    benchmarks = [
+        load_data(str(fixture_paths["strategy"])),
+        load_data(str(fixture_paths["benchmark"])),
+    ]
+    return tmpdir, data, benchmarks
+
+
 def measure_synthetic(
     bars: int,
     seed: int,
@@ -658,23 +697,11 @@ def measure_synthetic(
     (`generate_positive_control_data.py`): the same construction, regenerated
     at the requested length, with the same seeds.
     """
-    with tempfile.TemporaryDirectory(prefix="resolution_vs_sample_size_") as tmpdir:
-        fixture_paths = write_control_fixture(
-            tmpdir,
-            strategy_seed=seed,
-            benchmark_seed=seed + (CONTROL_BENCHMARK_SEED - CONTROL_STRATEGY_SEED),
-            inject_effect=inject_effect,
-            periods=bars,
-        )
-        data = load_data(str(fixture_paths["strategy"]))
-        # The worked example's benchmark set, in the same order as its
-        # `BENCHMARK_FILES`: the strategy's own series is the primary
-        # benchmark, the alternative benchmark is the second.
-        benchmarks = [
-            load_data(str(fixture_paths["strategy"])),
-            load_data(str(fixture_paths["benchmark"])),
-        ]
+    tmpdir, data, benchmarks = _control_sample(bars, seed, inject_effect)
+    try:
         measured = _measure_sample(data, benchmarks, paths=paths, train_frac=train_frac, val_frac=val_frac, test_frac=test_frac)
+    finally:
+        tmpdir.cleanup()
     measured.update(
         {
             "bars": bars,
@@ -805,6 +832,97 @@ def measure_test_frac_sweep(
                     val_frac=val_frac,
                     test_frac=test_frac,
                 )
+            )
+    return rows
+
+
+def measure_wf_window_sweep(
+    bars: int,
+    seeds: Sequence[int],
+    windows: Sequence[Tuple[int, int]],
+    inject_effect: bool = True,
+) -> List[Dict[str, Any]]:
+    """Measure the walk-forward path's resolution across window configurations.
+
+    At a fixed sample size, runs the **walk-forward** path once per
+    ``(train_months, test_months)`` configuration and reports the framework's
+    own resolution block for that configuration. The step is set to the test
+    window, so the out-of-sample windows tile the sample without overlapping
+    -- the framework refuses ``step_months < test_months`` because
+    overlapping windows double-count bars in the pooled out-of-sample record
+    and bias the aggregate statistics.
+
+    The trade-off measured: a longer training window starts the walk-forward
+    later, so fewer windows fit in the sample (fewer out-of-sample
+    observations), while a longer test window gives fewer and longer windows
+    over the same span. Both are levers on the same pooled out-of-sample
+    series, and where they cross is the answer to "how long should the
+    training and test windows be?".
+
+    One series at a time: the no-effect series is the null calibration and
+    the effect series is the positive control, and their numbers answer
+    different questions, so the series is named rather than defaulted.
+    ``inject_effect=None`` is refused instead of silently measuring the
+    no-effect series.
+    """
+    if inject_effect is None:
+        raise ValueError(
+            "the sweep measures one series at a time: pass inject_effect=True "
+            "(the effect series) or inject_effect=False (the no-effect "
+            "series). None would silently measure the no-effect series."
+        )
+    rows: List[Dict[str, Any]] = []
+    for train_months, test_months in windows:
+        if int(train_months) <= 0 or int(test_months) <= 0:
+            raise ValueError(
+                f"the walk-forward windows must be positive months, got "
+                f"train_months={train_months}, test_months={test_months}"
+            )
+        train_months = int(train_months)
+        test_months = int(test_months)
+        # The step follows the test window: the windows tile the sample
+        # without overlapping, which is the configuration the framework
+        # accepts (step_months >= test_months) and the one that pools every
+        # bar after the training window into the out-of-sample record.
+        step_months = test_months
+        for seed in seeds:
+            tmpdir, data, benchmarks = _control_sample(bars, seed, inject_effect)
+            try:
+                results = _run_walk_forward(
+                    data,
+                    benchmarks,
+                    train_months=train_months,
+                    test_months=test_months,
+                    step_months=step_months,
+                )
+            finally:
+                tmpdir.cleanup()
+            summary = results.get("summary", {})
+            block = _measure_path(
+                PATH_WALK_FORWARD,
+                summary,
+                results.get("oos_returns"),
+                n_windows=len(results.get("periods") or []),
+            )
+            rows.append(
+                {
+                    "path": PATH_WALK_FORWARD,
+                    "train_months": train_months,
+                    "test_months": test_months,
+                    "step_months": step_months,
+                    "bars": bars,
+                    "seed": seed,
+                    "series": "effect" if inject_effect else "no_effect",
+                    "source": "synthetic control fixture",
+                    # The framework's own record of how many of the windows
+                    # could price the strategy at all. A test window shorter
+                    # than the strategy's own indicator warmup leaves most
+                    # windows empty, and the number of windows that carry a
+                    # position is what shows it.
+                    "n_periods": summary.get("n_periods"),
+                    "periods_with_position": summary.get("periods_with_position"),
+                    "paths": {PATH_WALK_FORWARD: block},
+                }
             )
     return rows
 
@@ -1387,6 +1505,198 @@ def _summarize_test_frac_sweep(
     return stats, first_all, first_any, first_all_alpha, first_any_alpha
 
 
+def _summarize_wf_window_sweep(
+    rows: Sequence[Dict[str, Any]],
+) -> Tuple[
+    List[Dict[str, Any]], Optional[Tuple[int, int]], Optional[Tuple[int, int]],
+    Optional[Tuple[int, int]], Optional[Tuple[int, int]]
+]:
+    """Summarise a walk-forward window sweep, bucketed by configuration.
+
+    Returns ``(per_configuration_stats, first_all_within_bound,
+    first_any_within_bound, first_all_within_alpha_bound,
+    first_any_within_alpha_bound)``. Each stat block reports the framework's
+    own resolution numbers for that window configuration: the minimum
+    confirmable Sharpe, the deflation floor SR*, the minimum confirmable
+    alpha, the deflation floor alpha*, the out-of-sample observations
+    available, the observed statistics, and whether the plausibility bounds
+    are crossed.
+
+    The configurations are ordered by (train_months, test_months), and the
+    "first" flags name the first configuration in that order whose flag is
+    set -- the same convention the fraction sweep uses, so a reader who
+    knows one sweep knows the other.
+    """
+    buckets: Dict[Tuple[int, int], Dict[str, Any]] = {}
+    for row in rows:
+        key = (int(row.get("train_months")), int(row.get("test_months")))
+        block = _path_block(row, PATH_WALK_FORWARD)
+        bucket = buckets.setdefault(
+            key,
+            {
+                "sharpe_values": [],
+                "sharpe_floors": [],
+                "alpha_values": [],
+                "alpha_floors": [],
+                "observed_sharpes": [],
+                "observed_alphas": [],
+                "observations": [],
+                "trials": [],
+                "with_position": [],
+                "measured": 0,
+                "sharpe_within": 0,
+                "alpha_within": 0,
+                "n_test_observations": None,
+                "n_windows": None,
+                "n_periods": None,
+            },
+        )
+        bucket["measured"] += 1
+        sharpe_floor = block.get("expected_max_sharpe")
+        if sharpe_floor is not None:
+            bucket["sharpe_floors"].append(sharpe_floor)
+        sharpe_value = block.get("min_detectable_sharpe")
+        if sharpe_value is not None:
+            if bucket["n_test_observations"] is None:
+                bucket["n_test_observations"] = block.get("n_test_observations")
+                bucket["n_windows"] = block.get("n_windows")
+                bucket["n_periods"] = row.get("n_periods")
+            bucket["sharpe_values"].append(sharpe_value)
+            if sharpe_value <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE:
+                bucket["sharpe_within"] += 1
+        alpha_floor = block.get("expected_max_alpha")
+        if alpha_floor is not None:
+            bucket["alpha_floors"].append(alpha_floor)
+        alpha_value = block.get("min_detectable_alpha")
+        if alpha_value is not None:
+            bucket["alpha_values"].append(alpha_value)
+            if alpha_value <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA:
+                bucket["alpha_within"] += 1
+        observed_sharpe = block.get("observed_annualized_sharpe")
+        if observed_sharpe is not None and np.isfinite(observed_sharpe):
+            bucket["observed_sharpes"].append(observed_sharpe)
+        observed_alpha = block.get("observed_annualized_alpha")
+        if observed_alpha is not None and np.isfinite(observed_alpha):
+            bucket["observed_alphas"].append(observed_alpha)
+        observations = block.get("n_test_observations")
+        if observations is not None:
+            bucket["observations"].append(observations)
+        trials = block.get("n_parameter_trials")
+        if trials is not None:
+            bucket["trials"].append(trials)
+        with_position = row.get("periods_with_position")
+        if with_position is not None:
+            bucket["with_position"].append(with_position)
+
+    stats: List[Dict[str, Any]] = []
+    for train_months, test_months in sorted(buckets):
+        bucket = buckets[(train_months, test_months)]
+        sharpe_values = bucket["sharpe_values"]
+        alpha_values = bucket["alpha_values"]
+        observed_sharpes = bucket["observed_sharpes"]
+        observed_alphas = bucket["observed_alphas"]
+        observations = bucket["observations"]
+        trials = bucket["trials"]
+        with_position = bucket["with_position"]
+        stats.append(
+            {
+                "train_months": train_months,
+                "test_months": test_months,
+                "step_months": test_months,
+                "n_windows": bucket["n_windows"],
+                "n_periods": bucket["n_periods"],
+                "min_periods_with_position": (
+                    min(with_position) if with_position else None
+                ),
+                "max_periods_with_position": (
+                    max(with_position) if with_position else None
+                ),
+                "min_n_test_observations": min(observations) if observations else None,
+                "max_n_test_observations": max(observations) if observations else None,
+                "min_n_parameter_trials": min(trials) if trials else None,
+                "max_n_parameter_trials": max(trials) if trials else None,
+                "min_min_detectable_sharpe": min(sharpe_values) if sharpe_values else None,
+                "max_min_detectable_sharpe": max(sharpe_values) if sharpe_values else None,
+                "min_expected_max_sharpe": (
+                    min(bucket["sharpe_floors"]) if bucket["sharpe_floors"] else None
+                ),
+                "max_expected_max_sharpe": (
+                    max(bucket["sharpe_floors"]) if bucket["sharpe_floors"] else None
+                ),
+                "min_min_detectable_alpha": min(alpha_values) if alpha_values else None,
+                "max_min_detectable_alpha": max(alpha_values) if alpha_values else None,
+                "min_expected_max_alpha": (
+                    min(bucket["alpha_floors"]) if bucket["alpha_floors"] else None
+                ),
+                "max_expected_max_alpha": (
+                    max(bucket["alpha_floors"]) if bucket["alpha_floors"] else None
+                ),
+                "min_observed_annualized_sharpe": (
+                    min(observed_sharpes) if observed_sharpes else None
+                ),
+                "max_observed_annualized_sharpe": (
+                    max(observed_sharpes) if observed_sharpes else None
+                ),
+                "min_observed_annualized_alpha": (
+                    min(observed_alphas) if observed_alphas else None
+                ),
+                "max_observed_annualized_alpha": (
+                    max(observed_alphas) if observed_alphas else None
+                ),
+                "draws_measured": bucket["measured"],
+                "draws_resolved": len(sharpe_values),
+                "draws_within_bound": bucket["sharpe_within"],
+                "draws_within_alpha_bound": bucket["alpha_within"],
+                "all_within_bound": bool(sharpe_values)
+                and len(sharpe_values) == bucket["measured"]
+                and all(v <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE for v in sharpe_values),
+                "any_within_bound": any(
+                    v <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE for v in sharpe_values
+                ),
+                "all_within_alpha_bound": bool(alpha_values)
+                and len(alpha_values) == bucket["measured"]
+                and all(v <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA for v in alpha_values),
+                "any_within_alpha_bound": any(
+                    v <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA for v in alpha_values
+                ),
+            }
+        )
+
+    first_all = next(
+        (
+            (entry["train_months"], entry["test_months"])
+            for entry in stats
+            if entry["all_within_bound"]
+        ),
+        None,
+    )
+    first_any = next(
+        (
+            (entry["train_months"], entry["test_months"])
+            for entry in stats
+            if entry["any_within_bound"]
+        ),
+        None,
+    )
+    first_all_alpha = next(
+        (
+            (entry["train_months"], entry["test_months"])
+            for entry in stats
+            if entry["all_within_alpha_bound"]
+        ),
+        None,
+    )
+    first_any_alpha = next(
+        (
+            (entry["train_months"], entry["test_months"])
+            for entry in stats
+            if entry["any_within_alpha_bound"]
+        ),
+        None,
+    )
+    return stats, first_all, first_any, first_all_alpha, first_any_alpha
+
+
 def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """Summarise a ladder: the crossing of the plausibility bound and the floor.
 
@@ -1405,6 +1715,15 @@ def _fmt(value, spec="%.4f", missing="n/a"):
     if value is None or (isinstance(value, float) and not np.isfinite(value)):
         return missing
     return spec % value
+
+
+def _range_text(low, high, missing="n/a"):
+    """A count over the draws, as a range when the draws differ."""
+    if low is None or high is None:
+        return missing
+    if low == high:
+        return str(low)
+    return f"{low}-{high}"
 
 
 def print_table(rows: Sequence[Dict[str, Any]], path: str = PRIMARY_PATH) -> None:
@@ -1844,6 +2163,116 @@ def print_test_frac_sweep(
         )
 
 
+def print_wf_window_sweep(
+    stats: Sequence[Dict[str, Any]],
+    first_all: Optional[Tuple[int, int]],
+    first_any: Optional[Tuple[int, int]],
+    first_all_alpha: Optional[Tuple[int, int]],
+    first_any_alpha: Optional[Tuple[int, int]],
+) -> None:
+    """Print the walk-forward window sweep as a table.
+
+    One row per window configuration: the framework's own minimum confirmable
+    Sharpe and deflation floor SR* for that configuration, plus the
+    plausibility-bound crossing -- and, in parallel, the minimum confirmable
+    alpha and deflation floor alpha* for criterion 5.
+    """
+    header = (
+        f"{'train_m':>8} {'test_m':>7} {'step_m':>7} {'windows':>8} {'with pos':>10} "
+        f"{'T':>13} {'trials':>12} {'min SR':>8} {'SR*':>8} {'min alpha':>10} "
+        f"{'alpha*':>10} {'obs SR':>14} {'obs alpha':>16} "
+        f"{'all SR':>9} {'any SR':>9} {'all alpha':>10} {'any alpha':>10}"
+    )
+    print(header)
+    print("-" * len(header))
+    for entry in stats:
+        observed_sharpe = entry.get("min_observed_annualized_sharpe")
+        observed_alpha = entry.get("min_observed_annualized_alpha")
+        if observed_sharpe is not None and entry.get("max_observed_annualized_sharpe") is not None:
+            observed_sharpe_text = (
+                f"{observed_sharpe:.2f} to "
+                f"{entry['max_observed_annualized_sharpe']:.2f}"
+            )
+        else:
+            observed_sharpe_text = "n/a"
+        if observed_alpha is not None and entry.get("max_observed_annualized_alpha") is not None:
+            observed_alpha_text = (
+                f"{observed_alpha * 100:.1f}% to "
+                f"{entry['max_observed_annualized_alpha'] * 100:.1f}%"
+            )
+        else:
+            observed_alpha_text = "n/a"
+        print(
+            f"{entry['train_months']:>8} "
+            f"{entry['test_months']:>7} "
+            f"{entry['step_months']:>7} "
+            f"{str(entry['n_windows'] or '-'):>8} "
+            f"{_range_text(entry.get('min_periods_with_position'), entry.get('max_periods_with_position')):>10} "
+            f"{_range_text(entry.get('min_n_test_observations'), entry.get('max_n_test_observations')):>13} "
+            f"{_range_text(entry.get('min_n_parameter_trials'), entry.get('max_n_parameter_trials')):>12} "
+            f"{_fmt(entry['min_min_detectable_sharpe']):>8} "
+            f"{_fmt(entry['max_expected_max_sharpe']):>8} "
+            f"{_fmt(entry['min_min_detectable_alpha'], '%.4f'):>10} "
+            f"{_fmt(entry['max_expected_max_alpha'], '%.4f'):>10} "
+            f"{observed_sharpe_text:>14} "
+            f"{observed_alpha_text:>16} "
+            f"{str(entry['all_within_bound']):>9} "
+            f"{str(entry['any_within_bound']):>9} "
+            f"{str(entry['all_within_alpha_bound']):>10} "
+            f"{str(entry['any_within_alpha_bound']):>10}"
+        )
+    print()
+    for label, value in (
+        ("every draw is within the plausibility bound", first_all),
+        ("some draw is within the plausibility bound", first_any),
+        ("every draw is within the alpha plausibility bound", first_all_alpha),
+        ("some draw is within the alpha plausibility bound", first_any_alpha),
+    ):
+        if value is None:
+            print(f"  no measured window configuration brought {label}")
+        else:
+            print(
+                f"  first window configuration at which {label}: "
+                f"train {value[0]} months, test {value[1]} months"
+            )
+
+
+def _parse_wf_windows(spec: str) -> List[Tuple[int, int]]:
+    """Parse ``train_months:test_months`` pairs into window configurations.
+
+    The walk-forward path is configured in months, so its sweep is written
+    in months too: ``6:2`` is a 6-month training window and a 2-month test
+    window. The step is not written here -- it follows the test window, so
+    the windows tile the sample without overlapping (the framework refuses
+    ``step_months < test_months``).
+    """
+    windows: List[Tuple[int, int]] = []
+    for part in spec.split(","):
+        text = part.strip()
+        if not text:
+            continue
+        if text.count(":") != 1:
+            raise ValueError(
+                f"a window configuration is train_months:test_months, got {text!r}"
+            )
+        train_text, test_text = text.split(":")
+        try:
+            train_months = int(train_text)
+            test_months = int(test_text)
+        except ValueError:
+            raise ValueError(
+                f"a window configuration is train_months:test_months, got {text!r}"
+            ) from None
+        if train_months <= 0 or test_months <= 0:
+            raise ValueError(
+                f"the walk-forward windows must be positive months, got {text!r}"
+            )
+        windows.append((train_months, test_months))
+    if not windows:
+        raise ValueError("--wf-windows must list at least one configuration")
+    return windows
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -1901,6 +2330,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
     parser.add_argument(
+        "--wf-windows",
+        default=None,
+        help=(
+            "Comma-separated walk-forward window configurations to sweep at a "
+            "fixed sample size, written train_months:test_months (for example "
+            "6:2,12:3). The step follows the test window, so the windows tile "
+            "the sample without overlapping. When set, the ladder is replaced "
+            "by this sweep at the single --size given; the shipped 6/2/2 "
+            "configuration remains the default and is unchanged. The sweep "
+            "measures the synthetic control fixture -- it cannot be combined "
+            "with --data -- and it names the series it measured."
+        ),
+    )
+    parser.add_argument(
         "--data",
         default=None,
         help=(
@@ -1948,6 +2391,81 @@ def main(argv: Optional[List[str]] = None) -> int:
         sys.stderr.write(banner.getvalue())
     else:
         sys.stdout.write(banner.getvalue())
+
+    if args.test_fracs and args.wf_windows:
+        parser.error(
+            "--test-fracs and --wf-windows are two different sweeps: the "
+            "first sweeps the out-of-sample path's held-out fraction and the "
+            "second sweeps the walk-forward path's window configuration. "
+            "Measure one at a time."
+        )
+
+    if args.wf_windows:
+        try:
+            windows = _parse_wf_windows(args.wf_windows)
+        except ValueError as exc:
+            parser.error(str(exc))
+        if len(sizes) != 1:
+            parser.error("--wf-windows requires exactly one --size (fixed sample size)")
+        if args.data:
+            parser.error(
+                "--wf-windows sweeps the synthetic control fixture and cannot "
+                "be combined with --data: the sweep would report the "
+                "fixture's numbers under the real history's name. Measure a "
+                "real history with --sizes (the ladder) instead."
+            )
+        size = sizes[0]
+
+        series_to_measure = (
+            [("no_effect", False), ("effect", True)]
+            if inject is None
+            else [("effect" if inject else "no_effect", inject)]
+        )
+        sweeps: Dict[str, Dict[str, Any]] = {}
+        for label, inject_effect in series_to_measure:
+            rows = measure_wf_window_sweep(
+                size,
+                seeds=seeds,
+                windows=windows,
+                inject_effect=inject_effect,
+            )
+            stats, first_all, first_any, first_all_alpha, first_any_alpha = (
+                _summarize_wf_window_sweep(rows)
+            )
+            sweeps[label] = {
+                "rows": rows,
+                "sweep": {
+                    "series": label,
+                    "path": PATH_WALK_FORWARD,
+                    "stats": stats,
+                    "first_all_within_bound": list(first_all) if first_all else None,
+                    "first_any_within_bound": list(first_any) if first_any else None,
+                    "first_all_within_alpha_bound": (
+                        list(first_all_alpha) if first_all_alpha else None
+                    ),
+                    "first_any_within_alpha_bound": (
+                        list(first_any_alpha) if first_any_alpha else None
+                    ),
+                },
+            }
+            if args.json:
+                continue
+            print(
+                f"PATH: {PATH_WALK_FORWARD} -- window sweep at {size} bars "
+                f"(step follows the test window) -- series: {label}"
+            )
+            print_wf_window_sweep(
+                stats, first_all, first_any, first_all_alpha, first_any_alpha
+            )
+            print()
+
+        if args.json:
+            if len(sweeps) == 1:
+                label, payload = next(iter(sweeps.items()))
+                print(json.dumps({"series": label, **payload}, indent=2, default=str))
+            else:
+                print(json.dumps({"sweeps": sweeps}, indent=2, default=str))
+        return 0
 
     if args.test_fracs:
         test_fracs = [float(t) for t in args.test_fracs.split(",") if t.strip()]
