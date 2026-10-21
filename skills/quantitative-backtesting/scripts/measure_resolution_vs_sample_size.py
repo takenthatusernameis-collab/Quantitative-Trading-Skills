@@ -465,6 +465,20 @@ def _alpha_floor_measured(block: Dict[str, Any]) -> bool:
     return status == "resolvable"
 
 
+def _sharpe_floor_measured(block: Dict[str, Any]) -> bool:
+    """Whether a block's Sharpe floor is a measurement or a placeholder.
+
+    Mirror of ``_alpha_floor_measured`` for criterion 2. The framework's
+    own ``sharpe_status`` records whether the Deflated Sharpe criterion
+    could be priced on that draw. When it could not, the floor the block
+    carries is a placeholder rather than a measurement.
+    """
+    status = block.get("sharpe_status")
+    if status is None:
+        return True
+    return status == "resolvable"
+
+
 def _alpha_floor_driver(block: Dict[str, Any]) -> Dict[str, Any]:
     """One path block's Deflated Alpha floor, and what sets it.
 
