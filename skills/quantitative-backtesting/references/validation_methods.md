@@ -1921,6 +1921,46 @@ about a real history. What it does establish is the mechanism -- the paths
 differ because they see different out-of-sample series, and the held-out
 window is the smallest of them.
 
+### The same curve on a real history
+
+The `--data` path of `scripts/measure_resolution_vs_sample_size.py` measures
+the same curve on the longest real history in the repository,
+`skills/quantitative-backtesting/assets/example_data/sample_panel_ohlcv.csv`
+(1,500 bars, with `sample_benchmark.csv` beside it for the two-benchmark
+Deflated Alpha path), as prefixes of 500 / 1,000 / 1,500 bars on all three
+paths at the shipped 0.6 / 0.2 / 0.2 split. The capture -- command,
+environment, source file and script commit -- is committed in
+`results/resolution_floor/ladder_real_500_to_1500.json`, and a trimmed
+fixture in `tests/fixtures/resolution_ladder_real_500_to_1500.json` is pinned
+by `test_the_real_history_ladder_reports_what_it_measured` in
+`tests/test_resolution_vs_sample_size.py`.
+
+| Bars | Path | Smallest confirmable annualized Sharpe | Criterion 2 resolvable? | Smallest confirmable annualized alpha | Criterion 5 resolvable? |
+| --- | --- | --- | --- | --- | --- |
+| 500 | out-of-sample | not resolvable | No | not resolvable | No |
+| 500 | walk-forward | not resolvable | No | not resolvable | No |
+| 500 | CPCV | 3.9696 | Yes | not resolvable | No |
+| 1,000 | out-of-sample | 3.0586 | Yes | 5.9063 | Yes |
+| 1,000 | walk-forward | 2.7493 | Yes | 4.3882 | Yes |
+| 1,000 | CPCV | 3.2459 | Yes | 2.5756 | Yes |
+| 1,500 | out-of-sample | 2.5806 | Yes | 2.3963 | Yes |
+| 1,500 | walk-forward | 2.6348 | Yes | 2.6613 | Yes |
+| 1,500 | CPCV | 3.2471 | Yes | 2.7527 | Yes |
+
+At every size measured the smallest confirmable Sharpe is above the 2.0
+plausibility bound on every path, and no measured size brought criterion 2
+within the bound on every draw measured at that size: `first_size_all_within_bound`
+is not set for any path. The mechanism is visible on real data -- the
+resolution falls as the prefix grows (2.5806 at 1,500 bars against 3.0586 at
+1,000 on the out-of-sample path) -- but the crossing is not reached.
+
+The honest reading: the repository's data cannot settle "is there a sample
+size at which criterion 2 can confirm a plausible effect?" on a real history.
+The longest rung measured is 1,500 bars; the crossing needs at least
+10,000 bars for criterion 2 and 25,000-50,000 bars for criterion 5, lengths
+no real history in the repository reaches. The crossing points above are
+properties of the synthetic control fixture, not of this history.
+
 #### Why the resolution improves, and where it stops
 
 The minimum detectable Sharpe inverts the Deflated Sharpe z-score, so to

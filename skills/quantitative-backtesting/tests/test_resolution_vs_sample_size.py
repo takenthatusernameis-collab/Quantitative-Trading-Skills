@@ -1335,6 +1335,32 @@ def _load_driver_ladder_fixture():
         return json.load(handle)
 
 
+# The measured resolution curve on the longest real history in the
+# repository: sample_panel_ohlcv.csv (1,500 bars), as prefixes of 500 /
+# 1,000 / 1,500 bars on all three paths at the shipped split. This is a
+# measurement of the decision machinery on real market history, not a
+# formula; the crossing of the plausibility bound is not reached on it.
+REAL_HISTORY_CAPTURE = (
+    SKILLS_DIR.parent.parent / "results" / "resolution_floor" / "ladder_real_500_to_1500.json"
+)
+
+REAL_HISTORY_FIXTURE = (
+    SKILLS_DIR / "tests" / "fixtures" / "resolution_ladder_real_500_to_1500.json"
+)
+
+
+def _load_real_history_capture():
+    """The tool's own --json output on the real history, with its provenance."""
+    with open(REAL_HISTORY_CAPTURE, "r") as handle:
+        return json.load(handle)
+
+
+def _load_real_history_fixture():
+    """The trimmed real-history fixture: provenance plus rows."""
+    with open(REAL_HISTORY_FIXTURE, "r") as handle:
+        return json.load(handle)
+
+
 def _floor_rows(path, rungs):
     """Rows carrying only a floor and a resolution, one row per rung.
 
@@ -1993,6 +2019,91 @@ def test_the_re_captured_ladder_reports_what_sets_the_alpha_floor():
     assert shared == 3 * 2 * 3, "every shared rung must be compared"
 
 
+def test_the_real_history_ladder_reports_what_it_measured():
+    """The real-history curve is the tool's own output, scoped to what it measured.
+
+    The longest real history in the repository is sample_panel_ohlcv.csv
+    (1,500 bars). The ladder measures prefixes of 500 / 1,000 / 1,500 bars on
+    all three paths at the shipped 0.6/0.2/0.2 split. Nothing here settles
+    whether a larger sample could confirm a plausible effect: the capture does
+    not measure one, and the test claims nothing about any size it did not
+    measure.
+
+    The capture is the tool's own ``--json`` output, committed with its
+    provenance (command, environment, source file, script commit) beside the
+    trimmed fixture in ``tests/fixtures/``.
+    """
+    capture = _load_real_history_capture()
+    fixture = _load_real_history_fixture()
+    provenance = capture["provenance"]
+
+    # The capture says what it is and where it came from.
+    assert provenance["measured"]["sizes"] == [500, 1000, 1500], provenance["measured"]
+    assert set(provenance["measured"]["paths"]) == {
+        OUT_OF_SAMPLE,
+        WALK_FORWARD,
+        CPCV,
+    }, provenance["measured"]["paths"]
+    assert "sample_panel_ohlcv.csv" in provenance["measured"]["source_file"]
+    assert "sample_benchmark.csv" in provenance["measured"]["benchmark_file"]
+    assert "measure_resolution_vs_sample_size.py" in provenance["command"]
+    assert provenance["script_commit"]
+    assert provenance["measured_at_utc"]
+    assert provenance["plausibility_bounds"]["plausible_max_annualized_sharpe"] == (
+        PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+    )
+    assert provenance["plausibility_bounds"]["plausible_max_annualized_alpha"] == (
+        PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+    )
+
+    rows = capture["rows"]
+    assert len(rows) == 3
+    assert [row["bars"] for row in rows] == [500, 1000, 1500]
+    for row in rows:
+        assert set(row["paths"].keys()) == {OUT_OF_SAMPLE, WALK_FORWARD, CPCV}
+        assert row["series"] == "real_history_prefix"
+        assert row["seed"] is None
+
+    # The capture is the tool's own --json output: rows plus the summary the
+    # tool prints for them, with provenance added on top.
+    assert set(capture.keys()) == {"provenance", "rows", "summary"}
+
+    # The summary rebuilt from the trimmed fixture agrees with the committed
+    # summary key by key: nothing was added, dropped or re-computed.
+    fixture_rows = fixture["rows"]
+    assert [row["bars"] for row in fixture_rows] == [500, 1000, 1500]
+    rebuilt = summarize(fixture_rows)
+    assert rebuilt == capture["summary"], (
+        "the summary rebuilt from the fixture must equal the committed summary"
+    )
+
+    # The crossing is not reached on this history: no measured sample size
+    # brought criterion 2 (the Deflated Sharpe) within the plausibility bound
+    # on every draw measured at that size. This is a statement about the three
+    # sizes measured, not about any size the capture did not measure.
+    by_path = capture["summary"]["by_path"]
+    for path in (OUT_OF_SAMPLE, WALK_FORWARD, CPCV):
+        assert by_path[path]["first_size_all_within_bound"] is None, (
+            f"{path}: criterion 2 must not be reported as reached on a "
+            "history whose longest rung is 1,500 bars"
+        )
+
+    # The alpha-floor driver is reported at every measured rung: every path's
+    # driver carries the driver's own keys, and the report does not say the
+    # floor cannot be measured on this ladder.
+    for path in (OUT_OF_SAMPLE, WALK_FORWARD, CPCV):
+        driver = by_path[path]["alpha_floor_driver"]
+        assert driver["identity"] == (
+            "alpha* = std(benchmark alphas, ddof=1) * sqrt(2 ln N)"
+        )
+        assert driver["n_benchmarks"] == 2
+        output = _printed_summary(capture["rows"], path)
+        assert "not measurable on this ladder" not in output, (
+            f"{path}: the ladder carries the driver, so the report must not "
+            "say the floor cannot be measured"
+        )
+
+
 def test_the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars():
     """Live re-measurement of the rung the shorter ladder could not see.
 
@@ -2088,6 +2199,7 @@ TEST_REGISTRY = [
     ("test_the_measured_ladder_finds_the_alpha_crossing_the_shorter_ladder_missed", test_the_measured_ladder_finds_the_alpha_crossing_the_shorter_ladder_missed),
     ("test_the_measured_ladder_is_the_frameworks_own_numbers", test_the_measured_ladder_is_the_frameworks_own_numbers),
     ("test_the_re_captured_ladder_reports_what_sets_the_alpha_floor", test_the_re_captured_ladder_reports_what_sets_the_alpha_floor),
+    ("test_the_real_history_ladder_reports_what_it_measured", test_the_real_history_ladder_reports_what_it_measured),
     ("test_the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars", test_the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars),
     ("test_the_default_ladder_brackets_the_measured_alpha_crossing", test_the_default_ladder_brackets_the_measured_alpha_crossing),
 ]
