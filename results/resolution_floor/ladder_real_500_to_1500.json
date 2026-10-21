@@ -22,8 +22,8 @@
       "series": [
         "real_history_prefix"
       ],
-      "source_file": "skills/quantitative-backtesting/assets/example_data/sample_panel_ohlcv.csv",
-      "benchmark_file": "skills/quantitative-backtesting/assets/example_data/sample_benchmark.csv",
+      "source_file": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/sample_panel_ohlcv.csv",
+      "benchmark_file": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/sample_benchmark.csv",
       "history_rows": 1500,
       "split": {
         "train_frac": 0.6,
@@ -31,12 +31,12 @@
         "test_frac": 0.2
       }
     },
-    "measured_at_utc": "2026-10-21T06:08:05Z",
+    "measured_at_utc": "2026-10-21T09:30:06Z",
     "plausibility_bounds": {
       "plausible_max_annualized_alpha": 0.1,
       "plausible_max_annualized_sharpe": 2.0
     },
-    "script_commit": "3c6d8593e504a6ebcfc8f80453c7bd5aecb34093"
+    "script_commit": "5d53aa2dccf17d7861b3563754814813ee784f91"
   },
   "rows": [
     {
@@ -137,7 +137,7 @@
       "bars": 500,
       "seed": null,
       "series": "real_history_prefix",
-      "source": "skills/quantitative-backtesting/assets/example_data/sample_panel_ohlcv.csv"
+      "source": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/sample_panel_ohlcv.csv"
     },
     {
       "walk_forward_periods": 1,
@@ -243,7 +243,7 @@
       "bars": 1000,
       "seed": null,
       "series": "real_history_prefix",
-      "source": "skills/quantitative-backtesting/assets/example_data/sample_panel_ohlcv.csv"
+      "source": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/sample_panel_ohlcv.csv"
     },
     {
       "walk_forward_periods": 1,
@@ -349,7 +349,7 @@
       "bars": 1500,
       "seed": null,
       "series": "real_history_prefix",
-      "source": "skills/quantitative-backtesting/assets/example_data/sample_panel_ohlcv.csv"
+      "source": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/sample_panel_ohlcv.csv"
     }
   ],
   "summary": {
@@ -367,6 +367,8 @@
         "draws_measured": 1,
         "draws_resolved": 0,
         "draws_within_bound": 0,
+        "draws_floor_unmeasured": 1,
+        "floor_unmeasured_reason": null,
         "all_within_bound": false,
         "any_within_bound": false
       },
@@ -379,6 +381,8 @@
         "draws_measured": 1,
         "draws_resolved": 1,
         "draws_within_bound": 0,
+        "draws_floor_unmeasured": 0,
+        "floor_unmeasured_reason": null,
         "all_within_bound": false,
         "any_within_bound": false
       },
@@ -391,6 +395,8 @@
         "draws_measured": 1,
         "draws_resolved": 1,
         "draws_within_bound": 0,
+        "draws_floor_unmeasured": 0,
+        "floor_unmeasured_reason": null,
         "all_within_bound": false,
         "any_within_bound": false
       }
@@ -456,6 +462,11 @@
     "max_expected_max_sharpe": 1.7465982916867107,
     "max_expected_max_alpha": 0.6679994981971298,
     "floor_at_largest_size": 1.4980433809368334,
+    "sharpe_floor_measured": true,
+    "sharpe_floor_unmeasured_rungs": [
+      500
+    ],
+    "sharpe_floor_unmeasured_reason": null,
     "alpha_floor_at_largest_size": 0.010942980427713134,
     "alpha_floor_at_largest_measured_size": 1500,
     "alpha_floor_measured": true,
@@ -523,6 +534,8 @@
             "draws_measured": 1,
             "draws_resolved": 0,
             "draws_within_bound": 0,
+            "draws_floor_unmeasured": 1,
+            "floor_unmeasured_reason": null,
             "all_within_bound": false,
             "any_within_bound": false
           },
@@ -535,6 +548,8 @@
             "draws_measured": 1,
             "draws_resolved": 1,
             "draws_within_bound": 0,
+            "draws_floor_unmeasured": 0,
+            "floor_unmeasured_reason": null,
             "all_within_bound": false,
             "any_within_bound": false
           },
@@ -547,6 +562,8 @@
             "draws_measured": 1,
             "draws_resolved": 1,
             "draws_within_bound": 0,
+            "draws_floor_unmeasured": 0,
+            "floor_unmeasured_reason": null,
             "all_within_bound": false,
             "any_within_bound": false
           }
@@ -612,6 +629,11 @@
         "max_expected_max_sharpe": 1.7465982916867107,
         "max_expected_max_alpha": 0.6679994981971298,
         "floor_at_largest_size": 1.4980433809368334,
+        "sharpe_floor_measured": true,
+        "sharpe_floor_unmeasured_rungs": [
+          500
+        ],
+        "sharpe_floor_unmeasured_reason": null,
         "alpha_floor_at_largest_size": 0.010942980427713134,
         "alpha_floor_at_largest_measured_size": 1500,
         "alpha_floor_measured": true,
@@ -679,6 +701,8 @@
             "draws_measured": 1,
             "draws_resolved": 0,
             "draws_within_bound": 0,
+            "draws_floor_unmeasured": 1,
+            "floor_unmeasured_reason": null,
             "all_within_bound": false,
             "any_within_bound": false
           },
@@ -691,6 +715,8 @@
             "draws_measured": 1,
             "draws_resolved": 1,
             "draws_within_bound": 0,
+            "draws_floor_unmeasured": 0,
+            "floor_unmeasured_reason": null,
             "all_within_bound": false,
             "any_within_bound": false
           },
@@ -703,6 +729,8 @@
             "draws_measured": 1,
             "draws_resolved": 1,
             "draws_within_bound": 0,
+            "draws_floor_unmeasured": 0,
+            "floor_unmeasured_reason": null,
             "all_within_bound": false,
             "any_within_bound": false
           }
@@ -768,6 +796,11 @@
         "max_expected_max_sharpe": 1.9041529160297335,
         "max_expected_max_alpha": 0.06637754079253924,
         "floor_at_largest_size": 1.9041529160297335,
+        "sharpe_floor_measured": true,
+        "sharpe_floor_unmeasured_rungs": [
+          500
+        ],
+        "sharpe_floor_unmeasured_reason": null,
         "alpha_floor_at_largest_size": 0.011908930879055276,
         "alpha_floor_at_largest_measured_size": 1500,
         "alpha_floor_measured": true,
@@ -835,6 +868,8 @@
             "draws_measured": 1,
             "draws_resolved": 1,
             "draws_within_bound": 0,
+            "draws_floor_unmeasured": 0,
+            "floor_unmeasured_reason": null,
             "all_within_bound": false,
             "any_within_bound": false
           },
@@ -847,6 +882,8 @@
             "draws_measured": 1,
             "draws_resolved": 1,
             "draws_within_bound": 0,
+            "draws_floor_unmeasured": 0,
+            "floor_unmeasured_reason": null,
             "all_within_bound": false,
             "any_within_bound": false
           },
@@ -859,6 +896,8 @@
             "draws_measured": 1,
             "draws_resolved": 1,
             "draws_within_bound": 0,
+            "draws_floor_unmeasured": 0,
+            "floor_unmeasured_reason": null,
             "all_within_bound": false,
             "any_within_bound": false
           }
@@ -924,6 +963,9 @@
         "max_expected_max_sharpe": 2.199303289299973,
         "max_expected_max_alpha": 0.13418098063865672,
         "floor_at_largest_size": 2.199303289299973,
+        "sharpe_floor_measured": true,
+        "sharpe_floor_unmeasured_rungs": [],
+        "sharpe_floor_unmeasured_reason": null,
         "alpha_floor_at_largest_size": 0.008254561558529074,
         "alpha_floor_at_largest_measured_size": 1500,
         "alpha_floor_measured": true,

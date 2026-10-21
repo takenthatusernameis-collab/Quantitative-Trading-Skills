@@ -1471,10 +1471,21 @@ SAMPLE_HISTORY = (
     SKILLS_DIR / "assets" / "example_data" / "sample_ohlcv.csv"
 )
 
+# The longest real history in the repository: sample_panel_ohlcv.csv
+# (1,500 bars), with sample_benchmark.csv beside it for the two-benchmark
+# Deflated Alpha path. Measured as prefixes of 500 / 1,000 / 1,500 bars;
+# at 500 bars the out-of-sample and walk-forward paths cannot price the
+# Deflated Sharpe criterion (sharpe_status is "not_applicable"), which is
+# the live case for the criterion-2 unmeasured distinction.
+PANEL_HISTORY = (
+    SKILLS_DIR / "assets" / "example_data" / "sample_panel_ohlcv.csv"
+)
+
 # The bars the shipped history carries.
 SAMPLE_HISTORY_BARS = 504
 
 _REAL_HISTORY_MEASUREMENTS = {}
+_PANEL_HISTORY_MEASUREMENTS = {}
 
 
 def _real_history(bars):
@@ -1484,6 +1495,18 @@ def _real_history(bars):
             str(SAMPLE_HISTORY), bars, paths=(OUT_OF_SAMPLE, WALK_FORWARD, CPCV)
         )
     return _REAL_HISTORY_MEASUREMENTS[bars]
+
+
+def _panel_history(bars):
+    """The measurement on the longest real history, measured once and shared.
+
+    sample_panel_ohlcv.csv (1,500 bars), measured as a prefix of `bars`.
+    """
+    if bars not in _PANEL_HISTORY_MEASUREMENTS:
+        _PANEL_HISTORY_MEASUREMENTS[bars] = measure_real(
+            str(PANEL_HISTORY), bars, paths=(OUT_OF_SAMPLE, WALK_FORWARD, CPCV)
+        )
+    return _PANEL_HISTORY_MEASUREMENTS[bars]
 
 
 def test_an_unpriceable_alpha_floor_is_reported_as_unpriceable():
@@ -1696,6 +1719,173 @@ def test_a_placeholder_floor_is_not_read_as_a_measurement():
     measured_output = _printed_summary(measured_rows, CPCV)
     assert "does not block criterion 5" in measured_output
     assert "was not measured" not in measured_output
+
+
+def test_an_unpriceable_sharpe_floor_is_reported_as_unmeasurable():
+    """The live 500-bar panel-history case: OOS / walk-forward Sharpe not priced.
+
+    On sample_panel_ohlcv.csv at 500 bars the out-of-sample and walk-forward
+    paths cannot price the Deflated Sharpe criterion
+    (sharpe_status is "not_applicable": not enough test observations / trial
+    Sharpes), so the SR* numbers they carry are placeholders, not a measured
+    floor. The summary must not quote them as a measured floor, must not say
+    criterion 2 is settled, and must carry the framework's own record of why.
+    CPCV on the same prefix *can* price the Sharpe criterion, so its floor is
+    still reported as a measurement -- the gate is the framework's own status,
+    not the size of the sample.
+    """
+    measured = _panel_history(500)
+
+    for path in (OUT_OF_SAMPLE, WALK_FORWARD):
+        block = measured["paths"][path]
+        assert block["sharpe_status"] == "not_applicable", (
+            f"{path} at 500 bars: the Deflated Sharpe criterion must not be "
+            "priced on this prefix"
+        )
+        assert block["min_detectable_sharpe"] is None
+        assert block["expected_max_sharpe"] is None
+
+    stats = summarize([measured])["by_path"][OUT_OF_SAMPLE]
+
+    # The floor was never measured, so nothing about it is quoted.
+    assert stats["sharpe_floor_measured"] is False
+    assert stats["floor_at_largest_size"] is None
+    assert stats["max_expected_max_sharpe"] is None
+    assert stats["floor_beyond_plausible_bound"] is None
+    assert stats["floor_beyond_plausible_bound_at_largest_size"] is None
+    assert stats["sharpe_floor_unmeasured_rungs"] == [500]
+    # not_applicable carries no reason from the framework.
+    assert stats["sharpe_floor_unmeasured_reason"] is None
+
+    rung = stats["per_size"][-1]
+    assert rung["max_expected_max_sharpe"] is None
+    assert rung["min_expected_max_sharpe"] is None
+    assert rung["draws_floor_unmeasured"] == 1
+    assert rung["floor_unmeasured_reason"] is None
+
+    # CPCV on the same prefix prices the Sharpe criterion, so its floor is
+    # still reported as a measurement.
+    cpcv_stats = summarize([measured])["by_path"][CPCV]
+    assert cpcv_stats["sharpe_floor_measured"] is True
+    assert cpcv_stats["floor_at_largest_size"] == (
+        measured["paths"][CPCV]["expected_max_sharpe"]
+    )
+
+    # The report says so instead of quoting zeros.
+    output = _printed_summary([measured], OUT_OF_SAMPLE)
+    assert "could not be measured" in output
+    assert "does not block criterion 2" not in output
+
+
+def test_a_measured_sharpe_floor_is_still_reported():
+    """The same 500-bar prefix, CPCV path: resolvable, floor still reported.
+
+    CPCV prices the Deflated Sharpe criterion on the 500-bar prefix
+    (sharpe_status is resolvable), so its SR* floor is a measurement and the
+    summary quotes it, with the bound comparison intact. The fix silences
+    nothing: a priced criterion still reports its floor.
+    """
+    measured = _panel_history(500)
+    block = measured["paths"][CPCV]
+    assert block["sharpe_status"] == "resolvable"
+
+    stats = summarize([measured])["by_path"][CPCV]
+
+    assert stats["sharpe_floor_measured"] is True
+    assert stats["floor_at_largest_size"] == block["expected_max_sharpe"]
+    assert stats["max_expected_max_sharpe"] == block["expected_max_sharpe"]
+    assert stats["sharpe_floor_unmeasured_rungs"] == []
+    assert stats["floor_beyond_plausible_bound_at_largest_size"] is False
+
+    output = _printed_summary([measured], CPCV)
+    assert "the Sharpe (SR*) floor was not measured" not in output
+    assert "could not be measured" not in output
+
+
+def test_a_placeholder_sharpe_floor_is_not_read_as_a_measurement():
+    """The rule itself, on a block built to exercise it directly.
+
+    A block whose Deflated Sharpe criterion could not be priced carries
+    placeholder numbers; the summary must not read them as a measured floor --
+    whatever those placeholders happen to be. The framework's own status and
+    reason are what the gate reads, not the size of the number. The same block
+    with the criterion priced is a measured floor again.
+    """
+    rows = [
+        {
+            "bars": 500,
+            "seed": None,
+            "series": "real_history_prefix",
+            "paths": {
+                CPCV: {
+                    "min_detectable_sharpe": None,
+                    "min_detectable_alpha": None,
+                    # A placeholder floor: the criterion was not priced.
+                    "expected_max_sharpe": 0.53,
+                    "expected_max_alpha": 0.0,
+                    "strategy_alpha": 0.0,
+                    "benchmark_alphas": [0.0, 0.0],
+                    "n_benchmarks": 2,
+                    "sharpe_status": "not_resolvable",
+                    "alpha_status": "not_resolvable",
+                    "sharpe_reason": "insufficient_returns",
+                    "alpha_reason": "zero_volatility",
+                }
+            },
+        }
+    ]
+    stats = summarize(rows)["by_path"][CPCV]
+
+    assert stats["sharpe_floor_measured"] is False
+    assert stats["floor_at_largest_size"] is None
+    assert stats["max_expected_max_sharpe"] is None
+    assert stats["floor_beyond_plausible_bound"] is None
+    assert stats["floor_beyond_plausible_bound_at_largest_size"] is None
+    assert stats["sharpe_floor_unmeasured_rungs"] == [500]
+    assert stats["sharpe_floor_unmeasured_reason"] == "insufficient_returns"
+
+    rung = stats["per_size"][-1]
+    assert rung["max_expected_max_sharpe"] is None
+    assert rung["min_expected_max_sharpe"] is None
+    assert rung["draws_floor_unmeasured"] == 1
+    assert rung["floor_unmeasured_reason"] == "insufficient_returns"
+
+    # Same block, criterion priced: measured floor again.
+    measured_rows = [
+        {
+            "bars": 500,
+            "seed": None,
+            "series": "real_history_prefix",
+            "paths": {
+                CPCV: {
+                    "min_detectable_sharpe": 1.13,
+                    "min_detectable_alpha": None,
+                    "expected_max_sharpe": 0.53,
+                    "expected_max_alpha": 0.0,
+                    "strategy_alpha": 0.0,
+                    "benchmark_alphas": [0.0, 0.0],
+                    "n_benchmarks": 2,
+                    "sharpe_status": "resolvable",
+                    "alpha_status": "not_resolvable",
+                    "sharpe_reason": None,
+                    "alpha_reason": "zero_volatility",
+                }
+            },
+        }
+    ]
+    measured_stats = summarize(measured_rows)["by_path"][CPCV]
+    assert measured_stats["sharpe_floor_measured"] is True
+    assert measured_stats["floor_at_largest_size"] == 0.53
+    assert measured_stats["floor_beyond_plausible_bound_at_largest_size"] is False
+    measured_output = _printed_summary(measured_rows, CPCV)
+    assert "does not block criterion 2" in measured_output
+    assert "the Sharpe (SR*) floor was not measured" not in measured_output
+
+    output = _printed_summary(rows, CPCV)
+    assert "does not block criterion 2" not in output
+    assert "the Sharpe (SR*) floor was not measured" in output
+    assert "placeholder" in output
+    assert "insufficient_returns" in output
 
 
 def test_every_test_in_this_file_is_registered():
@@ -2193,6 +2383,9 @@ TEST_REGISTRY = [
     ("test_an_unpriceable_alpha_floor_is_reported_as_unpriceable", test_an_unpriceable_alpha_floor_is_reported_as_unpriceable),
     ("test_a_measured_alpha_floor_is_still_reported_with_its_driver", test_a_measured_alpha_floor_is_still_reported_with_its_driver),
     ("test_a_placeholder_floor_is_not_read_as_a_measurement", test_a_placeholder_floor_is_not_read_as_a_measurement),
+    ("test_an_unpriceable_sharpe_floor_is_reported_as_unmeasurable", test_an_unpriceable_sharpe_floor_is_reported_as_unmeasurable),
+    ("test_a_measured_sharpe_floor_is_still_reported", test_a_measured_sharpe_floor_is_still_reported),
+    ("test_a_placeholder_sharpe_floor_is_not_read_as_a_measurement", test_a_placeholder_sharpe_floor_is_not_read_as_a_measurement),
     ("test_every_test_in_this_file_is_registered", test_every_test_in_this_file_is_registered),
     ("test_the_floor_conclusion_is_scoped_to_the_measured_range", test_the_floor_conclusion_is_scoped_to_the_measured_range),
     ("test_the_summary_reports_the_floor_when_it_stops_blocking_the_path", test_the_summary_reports_the_floor_when_it_stops_blocking_the_path),

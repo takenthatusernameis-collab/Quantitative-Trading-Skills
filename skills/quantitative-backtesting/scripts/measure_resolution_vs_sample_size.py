@@ -1256,8 +1256,11 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
         # The floor is still above the bound at the largest rung measured:
         # more data may bring it under. None (not False) when the floor was
         # never measured: the question was not settled.
-        "floor_beyond_plausible_bound_at_largest_size": floor_at_largest is not None
-        and floor_at_largest > PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
+        "floor_beyond_plausible_bound_at_largest_size": (
+            floor_at_largest > PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+            if floor_at_largest is not None
+            else None
+        ),
         "alpha_floor_beyond_plausible_bound_at_largest_size": (
             alpha_floor_at_largest > PLAUSIBLE_MAX_ANNUALIZED_ALPHA
             if alpha_floor_at_largest is not None

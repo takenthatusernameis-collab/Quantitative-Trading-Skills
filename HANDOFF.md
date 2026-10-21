@@ -2,9 +2,9 @@
 
 ## What changed
 
-Completed the assigned task in `HANDOFF_NEXT.md`: **the resolution curve is now captured on the longest real history in the repository, and the finding is stated honestly ("the crossing is out of reach with the data here").**
+This session completed the assigned criterion-2 task from `HANDOFF_NEXT.md`: **the Deflated Sharpe floor (SR*) now carries the same "was it measured at all?" distinction as criterion 5.**
 
-No threshold, bound, criterion or verdict moved. `scripts/walk_forward.py` is not in this session's diff.
+The previous session captured the resolution curve on the longest real history (`sample_panel_ohlcv.csv`, 500/1000/1500 bars); no threshold, bound, criterion or verdict moved, and `scripts/walk_forward.py` is not in this session's diff.
 
 ### 1. The capture (`results/resolution_floor/ladder_real_500_to_1500.json`)
 
@@ -39,9 +39,8 @@ New subsection "The same curve on a real history" after the "What this does not 
 
 ## What remains unresolved
 
-- **The same "was it measured at all?" distinction has not been applied to criterion 2.** The Sharpe floor (SR*) is reported through the same `_print_floor_status` (`scripts/measure_resolution_vs_sample_size.py:1403`), but only the alpha side is gated on the framework's status (`sharpe_status`/`sharpe_reason`, copied by `_measure_path`). The report's own table already prints "n/a" for a criterion it could not resolve, so the table and the summary can disagree. At 500 bars on this real history the out-of-sample and walk-forward Sharpe criteria are literally `not_applicable` (not resolvable) while the summary's Sharpe floor flags are still computed -- the table/summary disagreement is reachable here. The reachable reasons are `target_unattainable`, `returns_do_not_match_statistic`, `no_returns` and `insufficient_returns`. This is the next task.
-- The resolution ladder has still never been measured on a real history long enough to reach the crossing (this session's 1,500 bars is far below it); that is an inherent data limitation, stated plainly in the docs.
-- The 50,000-bar synthetic capture predates the driver keys (its summary still says "not measurable on this ladder" for the driver); re-capturing costs ~17 min for that rung alone and is a nice-to-have, not a blocker.
+- **Criterion 2 is now resolved.** The Sharpe floor is gated on the framework's own `sharpe_status`/`sharpe_reason`, so a criterion that could not be priced reports `None` (unmeasured) rather than a measured floor, and the summary and printed table can no longer disagree. No open defect remains on the assigned task.
+- Nice-to-have follow-ups: re-capture the 50,000-bar synthetic ladder rung so it carries the alpha-floor driver keys (~17 min for that rung alone); state explicitly in `references/validation_methods.md` why the held-out-fraction sweep is out-of-sample-path-only (the other paths are configured in months, not fractions).
 
 ## Approaches that failed
 
@@ -49,12 +48,13 @@ New subsection "The same curve on a real history" after the "What this does not 
 
 ## Next task (one, precise)
 
-**Apply the "was it measured at all?" distinction to criterion 2.** Gate the Sharpe floor (SR*) reporting on the framework's own `sharpe_status`/`sharpe_reason` exactly as the alpha side is now gated on `alpha_status`/`alpha_reason`, so a criterion the framework could not resolve is reported as unpriceable/not measured rather than as a measured floor, and the summary and the printed table can no longer disagree.
+**Re-capture the 50,000-bar synthetic ladder rung so `tests/fixtures/resolution_ladder_2500_to_50000.json` carries the alpha-floor driver keys.**
+
+The 2,500/5,000/10,000-bar re-capture (`resolution_ladder_2500_to_10000.json`) carries the driver, but the longer ladder that established the walk-forward alpha crossing at 50,000 bars predates the driver keys, so its summary still reports the driver as not measurable. Re-measure the 50,000-bar rung (and regenerate the fixture) with the current tool so `alpha_floor_driver` is present at the largest rung.
 
 Evidence:
 
-- `scripts/measure_resolution_vs_sample_size.py:375` `_measure_path` copies `sharpe_status`/`sharpe_reason` into each path block; `scripts/measure_resolution_vs_sample_size.py:1403` `_print_floor_status` and `scripts/measure_resolution_vs_sample_size.py:1500` `_print_alpha_floor_driver` are where the floor verdict is printed; `scripts/measure_resolution_vs_sample_size.py:826` `_summarize_path` builds the per-path summary (the alpha side is gated via `_alpha_floor_measured` at `:441`).
-- The reachable criterion-2 reasons: `target_unattainable` (a dispersed parameter grid on few observations), `returns_do_not_match_statistic`, `no_returns`, `insufficient_returns`.
-- On the real history just captured, at 500 bars the out-of-sample and walk-forward Sharpe criteria are `not_applicable` (`min_detectable_sharpe` is `None`) -- a live case where the table/summary can already disagree.
-
-Constraint: no threshold, bound, criterion or verdict moves, and `scripts/walk_forward.py` is not in this task's diff. Add tests mirroring the alpha side: an unpriceable-Sharpe-floor pin, a measured-Sharpe-floor control, and a registry/definition pin.
+- `skills/quantitative-backtesting/tests/fixtures/resolution_ladder_2500_to_50000.json` predates the driver keys (its blocks have no `strategy_alpha`/`benchmark_alphas`).
+- `skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py:measure_ladder` + `summarize` produce the fixture shape (`provenance` + `rows`).
+- Verification: `test_the_measured_ladder_finds_the_alpha_crossing_the_shorter_ladder_missed` and `test_the_measured_ladder_is_the_frameworks_own_numbers` must stay green, and a summary built from the regenerated fixture must report `alpha_floor_driver` at the 50,000-bar rung.
+- Constraint: ~17 minutes for the 50,000-bar rung alone; no threshold, bound, criterion or verdict moves.

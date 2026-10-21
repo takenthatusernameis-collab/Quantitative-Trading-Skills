@@ -2114,6 +2114,45 @@ floor it carries is zero, and a block whose criterion was not priced is a
 placeholder whatever it carries. `tests/test_resolution_vs_sample_size.py`
 pins both sides.
 
+#### A floor that was never measured is not a floor of zero (criterion 2)
+
+The same distinction applies to the Deflated Sharpe floor (SR*): the framework
+records whether it could price the Deflated Sharpe criterion on each draw
+(`sharpe_status` / `sharpe_reason` in the per-path block), and the measurement
+carries that record instead of re-deriving it.
+
+When the criterion could not be priced, the Sharpe numbers the block carries
+are the output of a failed pricing, not measurements. On a 500-bar prefix of
+`sample_panel_ohlcv.csv` the out-of-sample and walk-forward paths cannot price
+the Deflated Sharpe criterion (`sharpe_status` is `not_applicable`), so their
+`expected_max_sharpe` is `None` -- a placeholder, not a measured floor. Read as
+a measurement it produces two false statements: that there is a floor (it was
+never estimated), and that the floor "does not block criterion 2" (criterion 2
+was never evaluated on that draw).
+
+So the report keeps the two apart:
+
+| | floor measured | floor not measured |
+| --- | --- | --- |
+| `floor_at_largest_size` | the floor, at the largest rung whose floor was measured | `None` (never a number) |
+| `floor_beyond_plausible_bound` | `True` / `False` | `None` -- the question was not settled, not answered "no" |
+| `floor_beyond_plausible_bound_at_largest_size` | `True` / `False` | `None` |
+| `sharpe_floor_measured` | `True` | `False` |
+| `sharpe_floor_unmeasured_rungs` / `sharpe_floor_unmeasured_reason` | empty | the rungs, and the framework's own reason |
+| the printed conclusion | where the floor stands against the bound | "the Sharpe (SR*) floor was not measured on this path: the framework could not price the Sharpe criterion (<reason>)" |
+
+**Measured.** On the same 500-bar prefix the CPCV path *can* price the
+Deflated Sharpe criterion (`sharpe_status` is `resolvable`), so its SR* floor
+(1.1318) is still reported as a measurement, with the bound comparison intact.
+The out-of-sample and walk-forward paths on the same prefix report their
+Sharpe floor as not measured. `tests/test_resolution_vs_sample_size.py`
+pins both sides.
+
+The rule the report follows is the framework's own status, not the size of the
+number: a block whose criterion was priced is a measurement even when the
+floor it carries is below the bound, and a block whose criterion was not
+priced is a placeholder whatever it carries.
+
 #### What this does not establish
 
 - **The floor is a property of the sample, not of the framework.** SR* is
