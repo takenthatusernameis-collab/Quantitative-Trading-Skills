@@ -1,184 +1,210 @@
-# Handoff — 2026-10-20 (session)
+# Handoff — 2026-10-21 (session)
 
 ## What changed
 
-Completed the assigned task in `HANDOFF_NEXT.md`: the walk-forward path's alpha floor was
-measured out to 50,000 bars, and the tool's "no sample size would let this path confirm a
-plausible alpha" message **does not survive** the measurement. The message is now scoped to
-the rungs measured, and the summary reports the case the old code dropped.
+Completed the assigned task in `HANDOFF_NEXT.md`: **what sets the alpha floor is
+now reported**, not just measured. The Deflated Alpha floor (alpha*) was quoted
+as a bare number by the resolution report; the number is not what a reader
+would guess, so the report now carries the driver that sets it and checks the
+identity against the framework's own block.
 
-### The measurement
+No threshold, bound, criterion or verdict moved. `PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+== 0.10`, `PLAUSIBLE_MAX_ANNUALIZED_SHARPE == 2.00` and the shipped 0.6/0.2/0.2
+split are untouched, and **the estimator itself was not touched**:
+`scripts/walk_forward.py` is not in this session's diff at all.
 
-`skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py --sizes
-2500,5000,10000,25000,50000 --paths out_of_sample,walk_forward,cpcv --series both --seeds
-7,1,2024 --json` — the full ladder (five rungs x three seeds x both series x three paths,
-30 measured rows) on the synthetic positive-control fixture. The tool's own `--json` output
-is committed as the raw record at `results/resolution_floor/ladder_2500_to_50000.json`; the
-rows the tests read, trimmed to the framework's own blocks and stamped with provenance
-(command, commit, environment, fixture construction), are at
-`skills/quantitative-backtesting/tests/fixtures/resolution_ladder_2500_to_50000.json`.
+### 1. The report carries the driver (`scripts/measure_resolution_vs_sample_size.py`)
 
-Alpha floor (alpha\*, the worst of the six draws at each rung; the bound is 0.10):
+- **New `_alpha_floor_driver(block)`** (measure_resolution_vs_sample_size.py:424):
+  reconstructs alpha* from the block's own benchmark alphas --
+  `alpha* = std(benchmark alphas, ddof=1) * sqrt(2 ln N)` -- and checks it
+  against the framework's own `expected_max_alpha`. The check has three
+  outcomes and all three are reported: it holds (the framework used the
+  cross-sectional estimator), it fails (the framework used its i.i.d.-normal
+  null fallback, so the floor is set by the sample size instead), or it cannot
+  be checked (the benchmark alphas were not reported).
+- **`_measure_path`** now filters the benchmark alphas exactly as the
+  framework's own trial set does (finite alphas only), so the report's
+  benchmark alphas *are* the alphas the floor was estimated from.
+- **`_summarize_path`** now carries `alpha_floor_driver` per path: the
+  identity, the benchmark count, the driver of the **worst draw at the largest
+  measured rung** (the draw that sets the floor the summary quotes), the
+  dispersion and strategy-alpha ranges over the ladder, and the check flag with
+  the counts of draws measured and draws checked. Each rung of
+  `per_size_alpha` also carries `min/max_benchmark_alpha_std` -- the dispersion
+  the floor at that rung was estimated from.
+- **`print_path_summary`** now prints what sets the floor (new
+  `_print_alpha_floor_driver`), with the numbers that reproduce it:
 
-| Path | 2,500 | 5,000 | 10,000 | 25,000 | 50,000 | First rung at which *every* draw is inside the alpha bound |
-| --- | --- | --- | --- | --- | --- | --- |
-| out-of-sample | 0.0133 | 0.0334 | 0.0361 | 0.0065 | 0.0108 | 10,000 bars |
-| walk-forward | 0.1583 | 0.1150 | 0.1047 | 0.0872 | 0.0844 | 50,000 bars |
-| CPCV | 0.4864 | 0.1228 | 0.0737 | 0.0073 | 0.0159 | 25,000 bars |
+  ```
+  what sets the alpha floor (alpha*): std(benchmark alphas, ddof=1) * sqrt(2 ln N) with N = 2
+    strategy alpha: -0.0325; benchmark alphas: -0.0325, -0.0392
+    benchmark alpha dispersion (ddof=1): 0.0047; alpha* from that dispersion: 0.0055; the framework's own alpha*: 0.0055
+    the framework's floor is reproduced from the benchmark alphas, so a higher alpha floor means a bigger gap between the strategy and its benchmark set -- not a bigger search, and not a worse test
+  ```
 
-So the walk-forward path's alpha floor is above the 10% bound at every rung up to 10,000
-bars and **under** it at 25,000; at 50,000 bars its minimum confirmable alpha is 0.0125 to
-0.0936, inside the bound on every draw. Criterion 5 on that path *can* confirm a plausible
-alpha at 50,000 bars. The CPCV path crosses at 25,000 and the out-of-sample path at 10,000
-(the same rung at which it crosses criterion 2). The 25,000- and 50,000-bar rungs were
-measured twice, in two independent runs, and the rows are byte-identical.
+- The module docstring gained a "WHAT SETS THE ALPHA FLOOR" section.
 
-### The code fix (`scripts/measure_resolution_vs_sample_size.py`)
+### 2. The reference doc (`references/validation_methods.md`)
 
-Three defects, all in how the tool *reports* the floor. No threshold, bound, criterion or
-verdict moved: `PLAUSIBLE_MAX_ANNUALIZED_ALPHA == 0.10` and the 2.00 Sharpe bound are
-untouched, and the shipped 0.6/0.2/0.2 split is unchanged.
+The previous session's edit of this file was **broken**: it had replaced the
+heading `#### What this does not establish` with the new section and left a
+stray `"` at the end of it, so the caveat bullet list was orphaned under the
+wrong heading. Repaired: the heading is restored, the stray quote is gone, and
+the new section `#### What sets the alpha floor (alpha*)` now sits directly
+after the alpha-floor table's discussion and before the caveats (it reads as
+the explanation of the table that precedes it).
 
-1. **The conclusion was an absolute claim resting on a finite ladder.** The summary printed
-   "no sample size would let this path confirm a plausible alpha" when the floor was above
-   the bound at every *measured* rung. The floor falls as the sample grows (it is estimated
-   from alphas/Sharpes that are themselves estimated on more data), so a ladder that stops
-   before the crossing cannot support that claim — and the measurement shows the claim is
-   false for the walk-forward path. The conclusion is now scoped ("no **measured** sample
-   size would let this path confirm a plausible alpha (up to N bars)"), and N is named.
-   The same scoping was applied to the Sharpe floor's message, which had the same defect.
-2. **The case where the floor stops blocking the path printed nothing.** Both branches that
-   reported the floor required it to be *above* the bound, so a floor that had come under
-   it — the one case in which the floor is no longer the reason a criterion cannot be
-   satisfied — was silently absent from the summary. A third branch now reports it ("the
-   alpha (alpha\*) floor is at or under the plausibility bound at the largest measured
-   sample size (N bars): the floor does not block criterion 5 at that size").
-3. **The default ladder could not see the crossing.** `DEFAULT_SIZES` stopped at 10,000
-   bars, which is before every criterion-5 crossing, so the default run reported "no
-   measured sample size" for paths that have one. It now carries 25,000 and 50,000 as well
-   (the two largest rungs are minutes per draw; the `--sizes` help text says so).
+The section states the identity, the measured numbers, the two consequences (the
+floor tracks the strategy's own edge over its benchmark set, not the size of
+the search; and it does not fall to zero as the sample grows), and which report
+keys carry the driver.
 
-The summary also carries a new `largest_measured_size` key, so the range of any conclusion
-drawn from the ladder is machine-readable and not only printed.
+### 3. Tests (`tests/test_resolution_vs_sample_size.py`)
 
-### Reconciliation with the parallel session's edits
+- `test_deflated_alpha_floor_identity_matches_benchmark_dispersion` was
+  strengthened: the formula is now re-derived with the **standard library**
+  (`statistics.stdev`, `math.sqrt(2 * math.log(n))`) instead of the
+  implementation's own estimator, so the test is an independent check of the
+  documented formula; and it now pins that the report's driver numbers *are*
+  the framework's own (the block's `benchmark_alphas` equal the framework's
+  `benchmark_metrics` alphas, `benchmark_alpha_std` equals the sample standard
+  deviation, and the strategy's own alpha is the primary benchmark's alpha).
+- New `test_the_summary_reports_what_sets_the_alpha_floor`: the summary carries
+  the driver, the identity holds on every measured draw, the driver reported is
+  the driver of the floor the summary quotes, and the printed report says what
+  sets the floor and what a higher floor does and does not mean.
+- The module docstring lists the new pin.
 
-A second session's uncommitted edits landed in the working tree during this one (a
-`HANDOFF.md` and an eight-line paragraph in `references/validation_methods.md`, both at
-21:49). Its **conclusion was right** — the message does not survive a larger sample — but
-the numbers it reported were mislabelled: 0.0390 and 0.0183 are *minimum confirmable
-alphas* (the MDE), not the alpha floor, and 0.8744 is the walk-forward path's minimum
-confirmable Sharpe, not its floor (SR\* = 0.7681 on that draw). Its doc paragraph has been
-replaced with the measured floors over three seeds and both series; its
-`HANDOFF.md` is superseded by this one. Its claim that "the conditional message code
-already handles this case" was half right: the *flag* flips, but the summary then printed
-nothing at all about the floor (defect 2 above).
+### 4. `SKILL.md`
 
-### Docs
-
-`references/validation_methods.md`: the "Is there such a sample size at all?" subsection now
-carries the per-path alpha-floor table over the full ladder, the measured crossings, the
-scoped conclusion, and the provenance of the captured ladder. `SKILL.md`: the script's entry
-and the "criteria are not unsatisfiable" bullet now state the criterion-5 crossings per path
-(10,000 / 50,000 / 25,000 bars) and the scoped conclusion.
+The script's entry and the "criteria are not unsatisfiable" bullet now state
+the identity and what a high alpha floor means ("a bigger gap, not a worse
+test").
 
 ## What was actually verified
 
-- `tests/test_resolution_vs_sample_size.py`: **27/27** (was 21; six new), ~10 min.
-  `pytest` collects the same 27.
-- **Negative controls**: four mutations applied one at a time, the pinned test required to
-  fail, the file restored — 4/4 bit.
-  1. the conclusion is unscoped again (absolute "no sample size") ->
-     `..._the_floor_conclusion_is_scoped_to_the_measured_range` fails;
-  2. the "floor no longer blocks" branch is removed ->
-     `..._the_summary_reports_the_floor_when_it_stops_blocking_the_path` fails;
-  3. the default ladder stops at 10,000 bars again ->
-     `..._the_default_ladder_brackets_the_measured_alpha_crossing` fails;
-  4. the summary drops the largest measured rung ->
-     `..._the_measured_ladder_finds_the_alpha_crossing_the_shorter_ladder_missed` fails.
-- **Live reproduction**: the 25,000-bar walk-forward rung is re-measured from scratch by
-  `..._the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars` (102.7 s), so the
-  captured fixture is checked against a fresh run of the framework, not against itself.
-- Neighbouring suites, all re-run after the change: `test_falsifiable_hypothesis_example`
-  14/14, `test_out_of_sample_window` 10/10, `test_examples_coverage` 7/7,
-  `test_test_window_observations` 7/7, `test_walk_forward` 183/183, `test_test_resolution`
-  38/38.
+- **The documented numbers were re-measured from scratch** (50,000-bar
+  walk-forward rung, seed 7, synthetic positive-control fixture, both series;
+  ~17 min on this machine). All four numbers quoted in the reference doc are
+  confirmed exactly, and the identity holds to the last floating-point bit
+  (`alpha_star_from_dispersion == expected_max_alpha`):
+
+  | Series | strategy alpha | benchmark alpha | gap | alpha* (framework) | alpha* (from the dispersion) |
+  | --- | --- | --- | --- | --- | --- |
+  | effect | 0.047046 | 0.135285 | 8.82pp | 0.073464 | 0.073464 |
+  | no-effect | -0.027123 | -0.014862 | 1.23pp | 0.010208 | 0.010208 |
+
+  (The doc rounds these to 4.70% / 13.53% / 7.35% and -2.71% / -1.49% /
+  1.02%; both match.) The script that produced them is
+  `/home/runner/work/_temp/kilo-tmp/kilo/verify_alpha_floor_50k.py`; its output
+  is at `/home/runner/work/_temp/kilo-tmp/kilo/alpha_floor_50k.json`.
+- **Negative controls**: three mutations applied one at a time, the pinned test
+  required to fail, the file restored -- 3/3 bit.
+  1. the summary drops `alpha_floor_driver` ->
+     `..._the_summary_reports_what_sets_the_alpha_floor` fails (KeyError);
+  2. the reported dispersion is computed with `ddof=0` instead of `ddof=1` ->
+     `..._deflated_alpha_floor_identity_matches_benchmark_dispersion` fails
+     (0.00332 against 0.00470);
+  3. the driver is not printed ->
+     `..._the_summary_reports_what_sets_the_alpha_floor` fails.
+- `tests/test_resolution_vs_sample_size.py`: **29/29** (was 28; one new), 11.5 min.
+  `pytest --collect-only` collects the same 29.
+- **Neighbouring suites, re-run after the change**:
+  `test_test_resolution.py` + `test_out_of_sample_window.py` +
+  `test_test_window_observations.py` = **55 passed**;
+  `test_examples_coverage.py` **7 passed**;
+  `test_falsifiable_hypothesis_example.py` **14 passed**.
 - `python3 -m py_compile` clean on both changed Python files.
-- `skills-ref validate skills/quantitative-backtesting/` -> "Valid skill" (the CI validator
-  used by `.github/workflows/validate-skills.yml`; installed from
+- `skills-ref validate skills/quantitative-backtesting/` -> "Valid skill" (the
+  CI validator used by `.github/workflows/validate-skills.yml`; installed from
   `git+https://github.com/agentskills/agentskills.git#subdirectory=skills-ref`).
-- The summary was printed by hand for all three paths on the measured ladder, and the
-  scoped message and the new branch were read off the output.
 
 ## What remains unresolved
 
-- **What actually sets the alpha floor is now known but not yet reported.** The Deflated
-  Alpha floor is `std(benchmark alphas, ddof=1) * sqrt(2 ln N)` with N the number of
-  benchmarks, verified exactly (ratio 1.0000) on four measurements: walk-forward path,
-  10,000 and 50,000 bars, seed 7, both series. With the shipped two-benchmark set,
-  `alpha* = 0.8326 * |alpha_strategy - alpha_benchmark|`. Measured: effect series at 50,000
-  bars, strategy alpha 4.70% against benchmark alpha 13.53% (gap 8.82pp) -> floor 7.35%;
-  no-effect series, -2.71% against -1.49% (gap 1.23pp) -> floor 1.02%. So the alpha floor
-  tracks the strategy's own edge over the benchmark set, not the size of the parameter
-  search, and it does not go to zero with more data. The framework reports the number
-  without saying what drives it. This is the next task.
-- The resolution ladder is still measured only on the **synthetic** fixture. The longest
-  real history in the repo is `assets/example_data/sample_panel_ohlcv.csv` (1,500 bars) and
-  `sample_ohlcv.csv` (504 bars), far below the range where the crossing happens, so the
-  `--data` path of the script has still never been exercised on a history long enough to
-  say anything about the crossing. Measuring it needs a longer history than the repository
-  carries.
-- The framework's `summary["test_resolution"]` block still does not report the realized
-  volatility its minimum detectable effect is conditional on, so a reader comparing two
-  runs at the same T can misread a volatility difference as a sample-size difference.
-  Measured on the held-out test window's own returns: the control's window is more volatile
-  than the null's (12.08% against 10.98% annualized at 5,000 bars), which is why the two
-  fixtures' alpha MDEs differ at the same T.
-- `validation_performance["val_n_periods"]` (`scripts/walk_forward.py:5708`) still carries the
-  mislabel the previous session removed from `test_performance`: it is `len(val_returns)`,
-  not a period count. The recipe (capture a pre-rename baseline the way
-  `tests/fixtures/test_performance_pre_rename_baseline.json` was captured, then extend
-  `tests/test_test_window_observations.py`) is in `HANDOFF_NEXT.md`.
-- The held-out-fraction sweep is defined only for the out-of-sample path (the path that
-  prices criterion 2 on the held-out window). The other two paths are configured in months,
-  not in fractions, so they have no held-out fraction to sweep.
+- **The committed ladder record predates the driver.** The per-path block
+  gained `strategy_alpha` / `benchmark_alphas` / `benchmark_alpha_std` after
+  the ladder was captured, so neither `results/resolution_floor/ladder_2500_to_50000.json`
+  nor the trimmed `tests/fixtures/resolution_ladder_2500_to_50000.json` carries
+  them; a summary built from those rows says "what sets the alpha floor: not
+  measurable on this ladder -- the benchmark alphas ... were not reported by
+  the framework", which is honest but thin. Re-capturing the full ladder is
+  expensive (the 50,000-bar rung alone took ~17 min for two draws here); a
+  cheap capture that carries the driver would be 2,500 / 5,000 / 10,000 bars
+  at one seed, both series.
+- The resolution ladder is still measured only on the **synthetic** fixture.
+  The longest real history in the repo is `assets/example_data/sample_panel_ohlcv.csv`
+  (1,500 bars) and `sample_ohlcv.csv` (504 bars), far below the range where
+  the crossing happens, so the `--data` path of the script has still never been
+  exercised on a history long enough to say anything about the crossing.
+  Measuring it needs a longer history than the repository carries.
+- The framework's `summary["test_resolution"]` block still does not report the
+  realized volatility its minimum detectable effect is conditional on, so a
+  reader comparing two runs at the same T can misread a volatility difference
+  as a sample-size difference. **This is the next task.**
+- `validation_performance["val_n_periods"]` (`scripts/walk_forward.py:5708`)
+  still carries the mislabel the completed rename removed from `test_performance`:
+  it is `len(val_returns)` (100 validation bars on the shipped sample), not a
+  period count. The recipe (capture a pre-rename baseline the way
+  `tests/fixtures/test_performance_pre_rename_baseline.json` was captured, then
+  extend `tests/test_test_window_observations.py`) is in `HANDOFF_NEXT.md`.
+- The held-out-fraction sweep is defined only for the out-of-sample path (the
+  path that prices criterion 2 on the held-out window). The other two paths are
+  configured in months, not in fractions, so they have no held-out fraction to
+  sweep -- worth stating explicitly in `references/validation_methods.md` if a
+  reader asks why the sweep is one-path-only.
 
 ## Approaches that failed
 
-- None in this session. The measurement ran to completion on the first attempt, and the
-  four negative controls all behaved as required. (The previous session reported that a
-  large single `edit` call was rejected by the tool; this session's edits were small and
-  went in one call each.)
+- None in this session. The measurement ran to completion on the first attempt
+  and the three negative controls all behaved as required. The one thing that
+  needed repair was the *previous* session's edit of
+  `references/validation_methods.md` (a clobbered heading and a stray quote),
+  which is described above.
 
 ## Next task (one, precise)
 
-**Report what sets the alpha floor: make the Deflated Alpha floor's driver visible in the
-resolution report and in the reference docs, and pin the identity with a test.**
+**Report the volatility the minimum detectable effect is conditional on, so two
+runs at the same sample size can be compared.**
 
-Evidence: the Deflated Alpha floor is `std(benchmark alphas, ddof=1) * sqrt(2 ln N)` with N
-the number of benchmarks — verified exactly (ratio 1.0000) on the four measurements listed
-above. With the shipped two-benchmark set, `alpha* = 0.8326 * |alpha_strategy -
-alpha_benchmark|`: on the control fixture the effect series' floor (7.35% at 50,000 bars)
-is set by its 8.82pp alpha gap to the benchmark series, and the null's (1.02%) by its
-1.23pp gap. The floor therefore tracks the strategy's own edge, not the size of the
-parameter search, and it does not vanish with more data — which is why the walk-forward
-path's criterion-5 crossing sits at 50,000 bars.
+Evidence: `summary["test_resolution"]` (built by `_build_test_resolution`,
+`scripts/walk_forward.py:2272`) reports the trial and benchmark counts, the
+minimum detectable effects and the plausibility bounds -- but not the realized
+volatility those minimum detectable effects are conditional on. The alpha side
+is volatility-scaled: the Deflated Alpha floor is
+`alpha* = sr_star * strat_vol_ann * sqrt(ann_factor)`
+(`scripts/walk_forward.py:1968`), i.e. proportional to the strategy's realized
+annualized volatility on the test window, and `minimum_detectable_alpha`
+(`scripts/walk_forward.py:2156`) inverts the DAR on that same scale. So two
+runs at the same T have different alpha MDEs purely because their test windows
+are more or less volatile, and a reader comparing the two would misread that as
+a sample-size effect. Measured on the control fixture (seed 7, 5,000 bars): the
+control's test window is 12.08% annualized against the null's 10.98%, and the
+two fixtures' alpha MDEs differ at the same T.
 
 Bounded work:
 
-1. `scripts/measure_resolution_vs_sample_size.py`: the per-path block (`_measure_path`)
-   reads only `expected_max_alpha` from the framework's Deflated Alpha block. Add the
-   driver — the strategy's alpha, the benchmark alphas' dispersion and the benchmark count
-   — so the summary can say *why* the floor is where it is, and the JSON carries it.
-2. `references/validation_methods.md`: a short subsection under the alpha-floor table
-   giving the identity, the measured numbers, and what it means for reading the floor (a
-   higher floor does not mean a worse search; it means a bigger edge relative to the
-   benchmark set).
-3. `tests/test_resolution_vs_sample_size.py`: pin the identity against the framework's own
-   block (`expected_max_alpha == std(trial alphas, ddof=1) * sqrt(2 ln N)`), so the
-   documented formula and the code cannot drift apart.
+1. `scripts/walk_forward.py`: add the conditioning to the `test_resolution`
+   block -- the realized annualized volatility of the very return series the
+   statistic was computed on (`returns`), which is the series the block is
+   already given -- and report it in the printed resolution
+   (`_print_test_resolution`). Additive only: no existing key changes value and
+   no threshold, bound, criterion or verdict moves.
+2. **Measure first whether the conditioning applies to the Sharpe side too.**
+   The Sharpe MDE is a Sharpe ratio and looks scale-free, but its floor
+   `SR* = std(trial Sharpes) * sqrt(2 ln N)` is estimated from trial alphas
+   divided by the strategy's volatility, so the claim "the volatility
+   conditioning is an alpha-side issue only" is a hypothesis, not a fact. If a
+   measurement contradicts it, report that rather than the expectation.
+3. `references/validation_methods.md`: state the conditioning next to the
+   resolution block, with the measured numbers, so two runs can be compared
+   correctly.
+4. `tests/test_test_resolution.py`: pin the new key against the series the
+   block is built on, and pin that the existing keys do not move.
 
-Constraint: change no threshold, bound, criterion or verdict — this is a reporting and
-documentation task. The estimator itself is not to be touched; if the identity turns out to
-be a defect rather than a design choice, that is a separate finding to report, not to fix
-here.
+Constraint: the change is additive reporting. `PLAUSIBLE_MAX_ANNUALIZED_ALPHA`,
+`PLAUSIBLE_MAX_ANNUALIZED_SHARPE`, the 0.6/0.2/0.2 split, the estimators and
+every verdict stay exactly as they are.
+
+Subsequent option (smaller, mechanical): the `val_n_periods` mislabel, with
+the recipe above.

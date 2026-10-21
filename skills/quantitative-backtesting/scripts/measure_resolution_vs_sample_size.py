@@ -82,6 +82,22 @@ WHAT THE NUMBERS MEAN
     every draw at 25,000; the walk-forward path needs 50,000. The report
     says so explicitly rather than leaving it implicit.
 
+WHAT SETS THE ALPHA FLOOR
+    The alpha floor is reported with the driver that sets it, because the
+    number is not what a reader would guess. The framework estimates
+    alpha* as the cross-sectional dispersion of the *benchmark* alphas
+    scaled by the expected maximum of N draws::
+
+        alpha* = std(benchmark alphas, ddof=1) * sqrt(2 * ln(N))
+
+    so the floor tracks the strategy's own edge over its benchmark set --
+    not the size of the parameter search -- and it does not fall to zero as
+    the sample grows: only the estimation noise in the alphas shrinks, the
+    gap between them survives. The report prints the driver and checks the
+    identity against the framework's own ``expected_max_alpha``, so the
+    floor can be reproduced from the numbers the summary carries. A higher
+    alpha floor is a bigger gap, not a worse test.
+
 THE DATA IS SYNTHETIC
     By default the measurement runs on the synthetic control fixture
     (``scripts/generate_positive_control_data.py``): a series produced by a
@@ -123,6 +139,7 @@ import argparse
 import contextlib
 import io
 import json
+import math
 import sys
 import tempfile
 from pathlib import Path
@@ -358,9 +375,14 @@ def _measure_path(
     deflated_sharpe = summary.get("deflated_sharpe") or {}
     deflated_alpha = summary.get("deflated_alpha") or {}
     benchmark_metrics = summary.get("benchmark_metrics") or []
+    # The same set the framework itself used as the trial alphas: the
+    # benchmark rows with a finite alpha. Those are the alphas the Deflated
+    # Alpha floor is estimated from, so the report can reconstruct the floor
+    # from them.
     benchmark_alphas = [
         float(b["alpha"]) for b in benchmark_metrics
         if isinstance(b, dict) and "alpha" in b and b.get("alpha") is not None
+        and np.isfinite(b["alpha"])
     ]
     benchmark_alpha_std = float(np.std(benchmark_alphas, ddof=1)) if len(benchmark_alphas) >= 2 else None
     return {
@@ -396,6 +418,58 @@ def _measure_path(
         "n_windows": n_windows,
         "plausible_max_annualized_sharpe": PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
         "plausible_max_annualized_alpha": PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
+    }
+
+
+def _alpha_floor_driver(block: Dict[str, Any]) -> Dict[str, Any]:
+    """One path block's Deflated Alpha floor, and what sets it.
+
+    The framework estimates the Deflated Alpha floor (alpha*) from the
+    cross-sectional dispersion of the *benchmark* alphas, scaled by the
+    expected maximum of N draws::
+
+        alpha* = std(benchmark alphas, ddof=1) * sqrt(2 * ln(N))
+
+    with N the number of benchmarks. So the floor tracks the strategy's own
+    edge over its benchmark set -- not the size of the parameter search --
+    and it does not fall to zero as the sample grows: only the estimation
+    noise in the two alphas shrinks, the gap between them survives.
+
+    The block carries the framework's own benchmark alphas, so the floor can
+    be reconstructed from the report and checked against the framework's own
+    ``expected_max_alpha``. When the reconstruction does not match, the
+    framework used its i.i.d.-normal null fallback instead of the
+    cross-sectional estimator (the benchmark alphas were not available in
+    sufficient number), and the driver says so rather than reporting a
+    floor it cannot back.
+    """
+    floor = block.get("expected_max_alpha")
+    alphas = [
+        float(a)
+        for a in (block.get("benchmark_alphas") or [])
+        if a is not None and np.isfinite(a)
+    ]
+    try:
+        n = int(block.get("n_benchmarks"))
+    except (TypeError, ValueError):
+        n = len(alphas)
+    std = float(np.std(alphas, ddof=1)) if len(alphas) >= 2 else None
+    predicted = None
+    if std is not None and n >= 2:
+        predicted = std * math.sqrt(2.0 * math.log(n))
+    identity_holds = None
+    if predicted is not None and floor is not None:
+        identity_holds = bool(
+            abs(predicted - float(floor)) <= 1e-9 * max(1.0, abs(float(floor)))
+        )
+    return {
+        "strategy_alpha": block.get("strategy_alpha"),
+        "benchmark_alphas": alphas,
+        "n_benchmarks": n,
+        "benchmark_alpha_std": std,
+        "alpha_star_from_dispersion": predicted,
+        "expected_max_alpha": floor,
+        "identity_holds": identity_holds,
     }
 
 
@@ -779,6 +853,11 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
     alphas: List[float] = []
     alpha_floors: List[float] = []
     per_size_alpha: Dict[int, Dict[str, Any]] = {}
+    # The driver of the alpha floor: what sets it, per draw. The framework
+    # estimates alpha* from the cross-sectional dispersion of the benchmark
+    # alphas (see `_alpha_floor_driver`), so each draw's floor is explained
+    # by its own dispersion -- and the report can say so.
+    alpha_drivers: Dict[int, List[Dict[str, Any]]] = {}
     for row in rows:
         block = _path_block(row, path)
         bars = row.get("bars")
@@ -791,6 +870,9 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
         if floor is not None:
             bucket["floors"].append(floor)
             alpha_floors.append(floor)
+        driver = _alpha_floor_driver(block)
+        if driver.get("expected_max_alpha") is not None:
+            alpha_drivers.setdefault(bars, []).append(driver)
         if value is None:
             continue
         bucket["values"].append(value)
@@ -836,6 +918,11 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
         bucket = per_size_alpha[bars]
         values = bucket["values"]
         rung_floors = bucket["floors"]
+        rung_drivers = alpha_drivers.get(bars, [])
+        rung_stds = [
+            d["benchmark_alpha_std"] for d in rung_drivers
+            if d.get("benchmark_alpha_std") is not None
+        ]
         alpha_size_summary.append(
             {
                 "bars": bars,
@@ -850,6 +937,10 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
                 # rather than the size of the parameter grid.
                 "max_expected_max_alpha": max(rung_floors) if rung_floors else None,
                 "min_expected_max_alpha": min(rung_floors) if rung_floors else None,
+                # What sets the floor at this rung: the dispersion of the
+                # benchmark alphas it is estimated from.
+                "min_benchmark_alpha_std": min(rung_stds) if rung_stds else None,
+                "max_benchmark_alpha_std": max(rung_stds) if rung_stds else None,
                 "draws_measured": bucket["measured"],
                 "draws_resolved": len(values),
                 "draws_within_bound": bucket["within"],
@@ -910,6 +1001,57 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
         f > PLAUSIBLE_MAX_ANNUALIZED_ALPHA for f in alpha_rung_floor_maxima
     )
 
+    # WHAT SETS THE ALPHA FLOOR
+    # The floor is a number without an explanation, and the explanation is
+    # not the one a reader would guess: it is the strategy's own edge over
+    # its benchmark set, not the size of the parameter search. The driver is
+    # reported here so the summary can say why the floor is where it is.
+    #
+    # It is reported at the largest measured rung, on the worst draw there
+    # -- the draw that sets the floor the summary quotes -- and the identity
+    # is checked on every measured draw, so a floor the framework did not
+    # estimate from the benchmark dispersion (its i.i.d.-normal null
+    # fallback) is reported as such instead of being explained away.
+    all_alpha_drivers = [d for drivers in alpha_drivers.values() for d in drivers]
+    # Only the draws whose benchmark alphas were reported can be checked; a
+    # draw that cannot be checked is not counted as a failure, and the
+    # counts are reported so a reader can see how many were checked.
+    identity_flags = [
+        d["identity_holds"] for d in all_alpha_drivers if d["identity_holds"] is not None
+    ]
+    worst_driver: Optional[Dict[str, Any]] = None
+    if alpha_size_summary:
+        largest_bars = alpha_size_summary[-1]["bars"]
+        candidates = alpha_drivers.get(largest_bars, [])
+        if candidates:
+            worst_driver = max(candidates, key=lambda d: d["expected_max_alpha"])
+    driver_stds = [
+        d["benchmark_alpha_std"] for d in all_alpha_drivers
+        if d.get("benchmark_alpha_std") is not None
+    ]
+    driver_strategy_alphas = [
+        d["strategy_alpha"] for d in all_alpha_drivers
+        if d.get("strategy_alpha") is not None
+    ]
+    alpha_floor_driver = {
+        "identity": "alpha* = std(benchmark alphas, ddof=1) * sqrt(2 ln N)",
+        "n_benchmarks": (worst_driver or {}).get("n_benchmarks"),
+        "identity_holds_on_every_measured_draw": (
+            all(identity_flags) if identity_flags else None
+        ),
+        "draws_measured": len(all_alpha_drivers),
+        "draws_checked": len(identity_flags),
+        "at_largest_measured_size": worst_driver,
+        "benchmark_alpha_std_range": {
+            "min": min(driver_stds) if driver_stds else None,
+            "max": max(driver_stds) if driver_stds else None,
+        },
+        "strategy_alpha_range": {
+            "min": min(driver_strategy_alphas) if driver_strategy_alphas else None,
+            "max": max(driver_strategy_alphas) if driver_strategy_alphas else None,
+        },
+    }
+
     return {
         "path": path,
         "plausible_max_annualized_sharpe": PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
@@ -938,6 +1080,9 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
         ),
         "floor_at_largest_size": floor_at_largest,
         "alpha_floor_at_largest_size": alpha_floor_at_largest,
+        # What sets the alpha floor (alpha*), and the check that the floor
+        # the framework reported is the one the driver reproduces.
+        "alpha_floor_driver": alpha_floor_driver,
         # The floor was above the plausibility bound at every measured rung:
         # no sample size would ever let this path confirm a plausible effect.
         "floor_beyond_plausible_bound": floor_beyond_bound,
@@ -1190,6 +1335,81 @@ def _print_floor_status(
         )
 
 
+def _print_alpha_floor_driver(stats: Dict[str, Any]) -> None:
+    """Print what sets the Deflated Alpha floor (alpha*).
+
+    The floor is reported as a bare number by the framework, and the number
+    is not what a reader would guess: it is the strategy's own edge over its
+    benchmark set, not the size of the parameter search. The report says so
+    explicitly, with the numbers that reproduce the floor::
+
+        alpha* = std(benchmark alphas, ddof=1) * sqrt(2 ln N)
+
+    so a reader can check the floor against their own run -- the benchmark
+    alphas and the benchmark count are in the block the summary carries --
+    and knows that a higher floor is a bigger gap, not a worse test.
+
+    The driver is reported for the worst draw at the largest measured rung
+    (the draw that sets the floor the summary quotes). If the framework did
+    not estimate the floor from the benchmark dispersion (its i.i.d.-normal
+    null fallback), the report says that instead of explaining the floor
+    with numbers that do not produce it.
+    """
+    driver = stats.get("alpha_floor_driver") or {}
+    at_largest = driver.get("at_largest_measured_size") or {}
+    if not at_largest or at_largest.get("benchmark_alpha_std") is None:
+        print(
+            "  what sets the alpha floor (alpha*): not measurable on this "
+            "ladder -- the benchmark alphas the floor is estimated from "
+            "were not reported by the framework"
+        )
+        return
+
+    n = at_largest.get("n_benchmarks")
+    std = at_largest.get("benchmark_alpha_std")
+    predicted = at_largest.get("alpha_star_from_dispersion")
+    reported = at_largest.get("expected_max_alpha")
+    benchmark_alphas = at_largest.get("benchmark_alphas") or []
+    print(
+        f"  what sets the alpha floor (alpha*): "
+        f"std(benchmark alphas, ddof=1) * sqrt(2 ln N) with N = "
+        f"{_fmt(n, '%.0f')}"
+    )
+    print(
+        f"    strategy alpha: {_fmt(at_largest.get('strategy_alpha'), '%.4f')}; "
+        f"benchmark alphas: "
+        + (
+            ", ".join(_fmt(a, '%.4f') for a in benchmark_alphas)
+            if benchmark_alphas
+            else "n/a"
+        )
+    )
+    print(
+        f"    benchmark alpha dispersion (ddof=1): {_fmt(std, '%.4f')}; "
+        f"alpha* from that dispersion: {_fmt(predicted, '%.4f')}; "
+        f"the framework's own alpha*: {_fmt(reported, '%.4f')}"
+    )
+    if at_largest.get("identity_holds"):
+        print(
+            "    the framework's floor is reproduced from the benchmark "
+            "alphas, so a higher alpha floor means a bigger gap between the "
+            "strategy and its benchmark set -- not a bigger search, and not "
+            "a worse test"
+        )
+    elif at_largest.get("identity_holds") is None:
+        print(
+            "    the identity could not be checked on this draw: the "
+            "framework did not report the benchmark alphas the floor is "
+            "estimated from"
+        )
+    else:
+        print(
+            "    the framework's floor was NOT reproduced from the benchmark "
+            "alphas (it used its i.i.d.-normal null fallback, so the floor "
+            "is set by the sample size, not by the benchmark dispersion)"
+        )
+
+
 def print_path_summary(summary: Dict[str, Any], path: str) -> None:
     """Print one path's summary: its crossing point and its floor."""
     by_path = summary.get("by_path") or {}
@@ -1278,6 +1498,7 @@ def print_path_summary(summary: Dict[str, Any], path: str) -> None:
         beyond_key="alpha_floor_beyond_plausible_bound",
         beyond_at_largest_key="alpha_floor_beyond_plausible_bound_at_largest_size",
     )
+    _print_alpha_floor_driver(stats)
     # The two criteria cross at different sample sizes. The alpha bound is
     # the stricter of the two -- a 10% annualized alpha is a much smaller
     # effect than a 2.0 annualized Sharpe -- so criterion 5's resolution

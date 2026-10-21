@@ -44,7 +44,12 @@ These tests pin:
     resolution is a property of the sample, the observed statistic is what
     carries the edge;
   * the sweep says which series it measured, and refuses to report a real
-    history it did not measure.
+    history it did not measure;
+  * the Deflated Alpha floor is the dispersion of the BENCHMARK alphas
+    scaled by the expected maximum of N draws -- so the floor tracks the
+    strategy's own edge over its benchmark set, not the size of the
+    parameter search -- and the report says so, with the numbers that
+    reproduce the floor.
 
 THE DATA IS THE SYNTHETIC POSITIVE-CONTROL FIXTURE
     The numbers are properties of a formula and of the decision machinery,
@@ -57,6 +62,8 @@ No third-party test framework is required; uses only the standard library.
 import contextlib
 import io
 import json
+import math
+import statistics
 import sys
 import tempfile
 import traceback
@@ -667,7 +674,16 @@ def test_test_frac_sweep_alpha_crossings_match_the_per_fraction_flags():
 
 
 def test_deflated_alpha_floor_identity_matches_benchmark_dispersion():
-    """The Deflated Alpha floor is std(benchmark alphas, ddof=1) * sqrt(2 ln N)."""
+    """The Deflated Alpha floor is std(benchmark alphas, ddof=1) * sqrt(2 ln N).
+
+    The floor is the number the report quotes, so its driver has to be the
+    framework's own: the cross-sectional dispersion of the *benchmark*
+    alphas, scaled by the expected maximum of N draws (N the number of
+    benchmarks). The identity is checked here against a live measurement of
+    the framework, and the formula is re-derived with the standard library
+    (not the implementation's own estimator), so the documented formula and
+    the code cannot drift apart.
+    """
     bars = SMALL_SAMPLE_BARS
     seed = 7
     measured = _measured(bars, seed, False)
@@ -679,17 +695,20 @@ def test_deflated_alpha_floor_identity_matches_benchmark_dispersion():
         if isinstance(b, dict) and b.get("alpha") is not None
     ]
     n = int(deflated_alpha.get("n_benchmarks", len(benchmark_alphas)))
-    import math
-    predicted = (
-        (sum((a - sum(benchmark_alphas) / len(benchmark_alphas)) ** 2
-             for a in benchmark_alphas) / (len(benchmark_alphas) - 1)) ** 0.5
-        * math.sqrt(2.0 * math.log(n))
-    )
+    predicted = statistics.stdev(benchmark_alphas) * math.sqrt(2.0 * math.log(n))
     assert abs(block["expected_max_alpha"] - predicted) < 1e-9, (
         "the measured deflation floor (alpha*) must equal "
         "std(benchmark alphas, ddof=1) * sqrt(2 ln N)"
     )
     assert abs(block["expected_max_alpha"] - deflated_alpha["expected_max_alpha"]) < 1e-12
+
+    # The report's driver is the framework's own numbers, not a private copy
+    # of them: the block carries the benchmark alphas the framework used, and
+    # the strategy's own alpha is the primary benchmark's alpha.
+    assert block["benchmark_alphas"] == benchmark_alphas
+    assert abs(block["benchmark_alpha_std"] - statistics.stdev(benchmark_alphas)) < 1e-12
+    assert abs(block["strategy_alpha"] - benchmark_alphas[0]) < 1e-12
+    assert block["n_benchmarks"] == n
 
 
 def _framework_wf_block(bars, seed, inject_effect):
@@ -1324,6 +1343,63 @@ def _printed_summary(rows, path):
     with contextlib.redirect_stdout(buffer):
         print_path_summary(summarize(rows), path)
     return buffer.getvalue()
+
+
+def test_the_summary_reports_what_sets_the_alpha_floor():
+    """The alpha floor is reported with the driver that sets it.
+
+    A floor quoted as a bare number is not readable: the number is not what
+    a reader would guess, and a *high* floor is easily misread as a bigger
+    search or a worse test. It is in fact the strategy's own edge over its
+    benchmark set (the dispersion of the benchmark alphas, scaled by the
+    expected maximum of N draws), so the summary has to say so and to carry
+    the numbers that reproduce the floor.
+    """
+    rows = [_measured(SMALL_SAMPLE_BARS, 7, False)]
+    stats = summarize(rows)["by_path"][WALK_FORWARD]
+
+    driver = stats["alpha_floor_driver"]
+    assert driver["identity"] == (
+        "alpha* = std(benchmark alphas, ddof=1) * sqrt(2 ln N)"
+    )
+    assert driver["identity_holds_on_every_measured_draw"] is True, (
+        "the floor the framework reported must be reproducible from the "
+        "benchmark alphas the framework reported"
+    )
+
+    at_largest = driver["at_largest_measured_size"]
+    assert at_largest is not None
+    assert at_largest["n_benchmarks"] == 2
+    assert abs(
+        at_largest["alpha_star_from_dispersion"] - at_largest["expected_max_alpha"]
+    ) < 1e-12, (
+        "the driver must reproduce the floor the framework reported"
+    )
+    assert abs(
+        at_largest["expected_max_alpha"] - stats["alpha_floor_at_largest_size"]
+    ) < 1e-12, (
+        "the driver reported must be the driver of the floor the summary "
+        "quotes"
+    )
+    # The strategy's own alpha is the primary benchmark's alpha, so the
+    # driver is the strategy's edge over its benchmark set.
+    assert any(
+        abs(a - at_largest["strategy_alpha"]) < 1e-12
+        for a in at_largest["benchmark_alphas"]
+    )
+
+    output = _printed_summary(rows, WALK_FORWARD)
+    assert "what sets the alpha floor" in output, (
+        "the report must say what sets the floor, not only what it is"
+    )
+    assert "std(benchmark alphas, ddof=1) * sqrt(2 ln N)" in output
+    assert "reproduced from the benchmark alphas" in output, (
+        "the report must state that the floor is reproduced from the "
+        "benchmark alphas"
+    )
+    assert "not a bigger search" in output, (
+        "the report must say what a higher floor does and does not mean"
+    )
 
 
 def test_the_floor_conclusion_is_scoped_to_the_measured_range():

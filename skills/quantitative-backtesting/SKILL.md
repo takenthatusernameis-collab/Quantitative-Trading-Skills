@@ -181,7 +181,14 @@ Risk Metrics:
   to N bars)"): the floor falls as the sample grows, so a ladder that stops
   before the crossing cannot settle "is there such a sample size at all?"
   -- and the measured walk-forward alpha floor, above the 10% bound at every
-  rung up to 10,000 bars, is under it at 25,000. On the positive control the
+  rung up to 10,000 bars, is under it at 25,000. The summary also reports
+  **what sets the alpha floor** (`alpha*`), because the number is not what a
+  reader would guess: the framework estimates it as the dispersion of the
+  *benchmark* alphas scaled by the expected maximum of N draws
+  (`alpha* = std(benchmark alphas, ddof=1) * sqrt(2 ln N)`), so it tracks the
+  strategy's own edge over its benchmark set -- not the size of the parameter
+  search -- and it does not fall to zero as the sample grows. A higher alpha
+  floor is a bigger gap, not a worse test. On the positive control the
   machinery *can* say yes: its observed statistic clears the plausibility
   bounds on every draw, while the null calibration's does not. See
   `references/validation_methods.md`, "How much data does criterion 2
@@ -593,7 +600,14 @@ Risk Metrics:
   available. The floor it converges onto is the framework's own
   `expected_max_sharpe` (SR\*), which is reported in every Deflated Sharpe
   block: no sample size can confirm an effect below it, so read that number
-  before asking for more data. `scripts/measure_resolution_vs_sample_size.py`
+  before asking for more data. The alpha floor (criterion 5) has its own
+  driver, and it is not the search either: `alpha* = std(benchmark alphas,
+  ddof=1) * sqrt(2 ln N)` -- the dispersion of the *benchmark* alphas scaled
+  by the expected maximum of N draws -- so it tracks the strategy's own edge
+  over its benchmark set, and it does not fall to zero as the sample grows
+  (only the estimation noise in the two alphas shrinks). A high alpha floor
+  is a bigger gap, not a worse test.
+  `scripts/measure_resolution_vs_sample_size.py`
   measures the whole curve (on the synthetic control fixture, or on the
   first N bars of a real history with `--data`), **for each analysis path**:
   the paths price their significance tests on different out-of-sample

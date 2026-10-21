@@ -1960,7 +1960,22 @@ The practical reading for a researcher: a *high* alpha floor is not a sign of a
 bigger search or a worse test -- it is a sign of a bigger gap between the
 strategy and its benchmark set, and it is the number to read before asking for
 more data. The fixture is a formula, not a market.
-"
+
+The report carries the driver, so a reader does not have to take the identity on
+trust. The per-path block of the measurement reports the strategy's own alpha
+(`strategy_alpha`), the benchmark alphas the floor was estimated from
+(`benchmark_alphas`) and their dispersion (`benchmark_alpha_std`); the per-path
+summary carries the same thing under `alpha_floor_driver`, with the identity
+checked against the framework's own `expected_max_alpha` on every measured
+draw. When the check fails the report says so: the framework then used its
+i.i.d.-normal null fallback, and the floor is set by the sample size rather
+than by the benchmark dispersion.
+
+`tests/test_resolution_vs_sample_size.py` pins the identity against a live
+measurement of the framework, so the documented formula and the estimator
+cannot drift apart.
+
+#### What this does not establish
 
 - **The floor is a property of the sample, not of the framework.** SR* is
   estimated from the dispersion of the trial Sharpes of *this* strategy on
