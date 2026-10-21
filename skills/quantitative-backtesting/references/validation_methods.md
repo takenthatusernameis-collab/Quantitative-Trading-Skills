@@ -1872,8 +1872,8 @@ is the positive control:
 | effect | 12 | 2 | 223 | 155 to 163 | 6,420 to 6,760 | 1,441 to 1,475 | 1.2295 to 1.4541 | 0.9904 to 1.2095 | 8.49% to 12.95% | 6.66% to 10.76% | 1.28 to 1.91 | 2.7% to 5.0% |
 | effect | 24 | 2 | 217 | 150 to 159 | 6,213 to 6,596 | 1,393 to 1,437 | 1.1143 to 1.4070 | 0.8713 to 1.1583 | 8.52% to 13.07% | 6.66% to 10.84% | 1.25 to 1.94 | 2.5% to 5.1% |
 
-And at 5,000 bars, where the resolution has not yet crossed the bound under
-every configuration:
+And at 5,000 bars, where the null calibration's resolution has not crossed
+the bound under every configuration:
 
 | Series | Train | Test | Smallest confirmable Sharpe | SR* | Smallest confirmable alpha | alpha* | Every draw inside the Sharpe bound? | Every draw inside the alpha bound? |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1903,8 +1903,9 @@ What the sweep shows:
   to 24 months of training drops the worst draw's minimum confirmable
   Sharpe from 1.8497 to 1.2230 and the worst draw's floor SR* from 1.6250
   to 1.0016. The cost is that the walk-forward starts later: 228 windows
-  become 217, and the pooled out-of-sample observations fall from 8,929 to
-  8,507. On this construction the resolution gain is the larger of the two.
+  become 217, and the pooled out-of-sample observations fall from 8,709 to
+  8,929 into 8,507 to 8,545. On this construction the resolution gain is
+  the larger of the two.
 - **The training window decides the criterion-2 crossing at 5,000 bars.**
   With 3 months of training the null calibration's worst draw (2.4452) is
   outside the 2.0 plausibility bound; with 6, 12 or 24 months of training
@@ -1931,20 +1932,22 @@ What the sweep shows:
 - **The alpha bound is the one that moves.** At 10,000 bars every
   configuration measured has every draw inside the 2.0 Sharpe bound, on
   both series -- the criterion-2 verdict is the same under all seven
-  configurations. The alpha bound is not: on the positive control it is
-  inside for every draw at test windows of 1 and 6 months and *above* the
-  bound on the worst draw at every test window of 2 and 3 months (10.47% at
-  the shipped 6/2 against the 10% bound), and at 5,000 bars the same split
-  appears on the null calibration's side of the table.
+  configurations. The alpha bound is not: on the positive control the
+  minimum confirmable alpha is inside the 10% bound for every draw at test
+  windows of 1 and 6 months and *above* the bound on the worst draw at
+  every test window of 2 and 3 months (12.65% at the shipped 6/2 against
+  the 10% bound), and at 5,000 bars the same split appears on the null
+  calibration's side of the table.
 - **The two series' resolutions are close; their observed statistics are
-  not.** At 10,000 bars the two series' minimum confirmable Sharpes are
-  within 0.50 annualized points of each other at every configuration, and
-  their minimum confirmable alphas within 7.5 percentage points. The
-  control's observed Sharpe is 1.25 to 2.93 and its observed alpha 2.5% to
-  32.4% on every draw measured, while the null's observed Sharpe never
-  reaches -0.08 and its observed alpha never reaches -0.03%. The resolution
-  is a property of the sample and of the window configuration; the observed
-  statistic is what carries the edge.
+  not.** At 10,000 bars, on the same draw at the same configuration, the two
+  series' minimum confirmable Sharpes are within 0.68 annualized points of
+  each other and their minimum confirmable alphas within 10.8 percentage
+  points. The control's observed Sharpe runs from 0.68 to 2.93 and its
+  observed alpha from -1.9% to 32.4% across the draws measured, while the
+  null's observed Sharpe runs from -0.70 to -0.12 and its observed alpha
+  never rises above -0.03%. The resolution is a property of the sample and
+  of the window configuration; the observed statistic is what carries the
+  edge.
 
 What this does not establish:
 

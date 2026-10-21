@@ -1,0 +1,1589 @@
+{
+  "provenance": {
+    "command": "python3 skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py --sizes 10000 --seeds 7,1,2024 --wf-windows 3:2,6:1,6:2,6:3,6:6,12:2,24:2 --series both --json",
+    "description": "The measured resolution of the WALK-FORWARD path across its own window configurations, on the synthetic positive-control fixture, at one sample size (10,000 bars) x three seeds x both series x seven (train_months, test_months) configurations. The step follows the test window, so the out-of-sample windows tile the sample without overlapping. Every number in each row is the framework's own block (summary['test_resolution'] and the Deflated Sharpe / Deflated Alpha blocks it was built from), read by scripts/measure_resolution_vs_sample_size.py; the row also carries the framework's own count of how many of the windows could price the strategy at all (n_periods, periods_with_position). This is a measurement of the decision machinery on a synthetic control -- a formula, not a market -- and never evidence about a security. No threshold, plausibility bound, criterion or verdict is changed by it.",
+    "environment": {
+      "numpy": "2.5.4",
+      "pandas": "3.0.6",
+      "python": "3.12.3"
+    },
+    "fixture_construction": {
+      "purpose": "TEST-MACHINERY CHECK ON SYNTHETIC DATA: a series produced by a known formula, used to check that the falsifiable-hypothesis machinery can return SUPPORTED. It is not evidence about any security or market.",
+      "periods": 5040,
+      "regime_bars": 126,
+      "drift": 0.004,
+      "volatility": 0.01,
+      "strategy_seed": 7,
+      "benchmark_seed": 1007,
+      "start_date": "2000-01-03",
+      "initial_price": 100.0
+    },
+    "measured": {
+      "bars": 10000,
+      "path": "walk_forward",
+      "windows": [
+        [
+          3,
+          2
+        ],
+        [
+          6,
+          1
+        ],
+        [
+          6,
+          2
+        ],
+        [
+          6,
+          3
+        ],
+        [
+          6,
+          6
+        ],
+        [
+          12,
+          2
+        ],
+        [
+          24,
+          2
+        ]
+      ],
+      "step": "follows the test window (non-overlapping out-of-sample windows)",
+      "seeds": [
+        7,
+        1,
+        2024
+      ],
+      "series": [
+        "no_effect",
+        "effect"
+      ],
+      "draws_per_configuration": 6,
+      "configurations_per_series": 7
+    },
+    "measured_at_utc": "2026-10-21T13:58Z",
+    "plausibility_bounds": {
+      "plausible_max_annualized_sharpe": 2.0,
+      "plausible_max_annualized_alpha": 0.1
+    },
+    "script_commit": "48bb1fb0e2cf02c8d2f58562ea6a0397fcfb82a1",
+    "note": "The companion sweep of the SAME measurement at 5,000 bars is not committed here; the reference document quotes its numbers and the capture for the 10,000-bar sweep is the pinned one."
+  },
+  "rows": [
+    {
+      "train_months": 3,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 7,
+      "series": "no_effect",
+      "n_periods": 228,
+      "periods_with_position": 215,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.002931356203476623,
+          "benchmark_alphas": [
+            -0.00034539045188183734,
+            0.0038001732472213094
+          ],
+          "expected_max_alpha": 0.0034514081735362873,
+          "expected_max_sharpe": 1.125441915347093,
+          "min_detectable_alpha": 0.021704697806791646,
+          "min_detectable_sharpe": 1.3429658847734671,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1734,
+          "n_test_observations": 8929,
+          "n_windows": 228,
+          "observed_annualized_alpha": -0.00034539045188183734,
+          "observed_annualized_sharpe": -0.1912092261244065,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.00034539045188183734
+        }
+      }
+    },
+    {
+      "train_months": 3,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 1,
+      "series": "no_effect",
+      "n_periods": 228,
+      "periods_with_position": 213,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.003010162665029636,
+          "benchmark_alphas": [
+            -0.026122860149359127,
+            -0.021865847283525076
+          ],
+          "expected_max_alpha": 0.0035441956912077833,
+          "expected_max_sharpe": 1.2783782162606345,
+          "min_detectable_alpha": 0.021151529758713067,
+          "min_detectable_sharpe": 1.4985884012030077,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1646,
+          "n_test_observations": 8829,
+          "n_windows": 228,
+          "observed_annualized_alpha": -0.026122860149359127,
+          "observed_annualized_sharpe": -0.5160850008136847,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.026122860149359127
+        }
+      }
+    },
+    {
+      "train_months": 3,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 2024,
+      "series": "no_effect",
+      "n_periods": 228,
+      "periods_with_position": 210,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.00923464784931259,
+          "benchmark_alphas": [
+            -0.028641434461710333,
+            -0.015581670229472936
+          ],
+          "expected_max_alpha": 0.010872966932181614,
+          "expected_max_sharpe": 1.6250303058142024,
+          "min_detectable_alpha": 0.024308923153262933,
+          "min_detectable_sharpe": 1.849672736861473,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1808,
+          "n_test_observations": 8709,
+          "n_windows": 228,
+          "observed_annualized_alpha": -0.028641434461710333,
+          "observed_annualized_sharpe": -0.5775283070461604,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.028641434461710333
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 1,
+      "step_months": 1,
+      "bars": 10000,
+      "seed": 7,
+      "series": "no_effect",
+      "n_periods": 453,
+      "periods_with_position": 297,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.0144751055544219,
+          "benchmark_alphas": [
+            -0.028226134799332152,
+            -0.007755244207486584
+          ],
+          "expected_max_alpha": 0.01704313435674576,
+          "expected_max_sharpe": 0.929395223212818,
+          "min_detectable_alpha": 0.02853106595942932,
+          "min_detectable_sharpe": 1.2025779222749897,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 717,
+          "n_test_observations": 5893,
+          "n_windows": 453,
+          "observed_annualized_alpha": -0.028226134799332152,
+          "observed_annualized_sharpe": -0.647085952608581,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.028226134799332152
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 1,
+      "step_months": 1,
+      "bars": 10000,
+      "seed": 1,
+      "series": "no_effect",
+      "n_periods": 453,
+      "periods_with_position": 284,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.012487520490665354,
+          "benchmark_alphas": [
+            -0.023700557487647735,
+            -0.006040536649336865
+          ],
+          "expected_max_alpha": 0.01470293178207675,
+          "expected_max_sharpe": 1.1472141534518878,
+          "min_detectable_alpha": 0.026106566681201277,
+          "min_detectable_sharpe": 1.4358954872603318,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 682,
+          "n_test_observations": 5612,
+          "n_windows": 453,
+          "observed_annualized_alpha": -0.023700557487647735,
+          "observed_annualized_sharpe": -0.6320769345414998,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.023700557487647735
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 1,
+      "step_months": 1,
+      "bars": 10000,
+      "seed": 2024,
+      "series": "no_effect",
+      "n_periods": 453,
+      "periods_with_position": 298,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.01680691273779666,
+          "benchmark_alphas": [
+            -0.033202107639267925,
+            -0.00943354370385476
+          ],
+          "expected_max_alpha": 0.01978862750502479,
+          "expected_max_sharpe": 0.9477121051724001,
+          "min_detectable_alpha": 0.031040904070759084,
+          "min_detectable_sharpe": 1.2184632702563467,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 781,
+          "n_test_observations": 5885,
+          "n_windows": 453,
+          "observed_annualized_alpha": -0.033202107639267925,
+          "observed_annualized_sharpe": -0.6979310641199493,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.033202107639267925
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 7,
+      "series": "no_effect",
+      "n_periods": 226,
+      "periods_with_position": 214,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.005018610894818025,
+          "benchmark_alphas": [
+            -0.021688095380613143,
+            -0.014590707788888118
+          ],
+          "expected_max_alpha": 0.005908962766664097,
+          "expected_max_sharpe": 1.1561900053145973,
+          "min_detectable_alpha": 0.024076758434328705,
+          "min_detectable_sharpe": 1.373247580245294,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1752,
+          "n_test_observations": 8882,
+          "n_windows": 226,
+          "observed_annualized_alpha": -0.021688095380613143,
+          "observed_annualized_sharpe": -0.4102484861276729,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.021688095380613143
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 1,
+      "series": "no_effect",
+      "n_periods": 226,
+      "periods_with_position": 214,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.0030674221254369596,
+          "benchmark_alphas": [
+            -0.016394021741802278,
+            -0.012056031770486024
+          ],
+          "expected_max_alpha": 0.0036116135537751946,
+          "expected_max_sharpe": 1.1018587687941581,
+          "min_detectable_alpha": 0.02153327640423499,
+          "min_detectable_sharpe": 1.3207134351372254,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1777,
+          "n_test_observations": 8879,
+          "n_windows": 226,
+          "observed_annualized_alpha": -0.016394021741802278,
+          "observed_annualized_sharpe": -0.38620363383462936,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.016394021741802278
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 2024,
+      "series": "no_effect",
+      "n_periods": 226,
+      "periods_with_position": 214,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.009016682439415488,
+          "benchmark_alphas": [
+            -0.026757434316482632,
+            -0.014005919723049926
+          ],
+          "expected_max_alpha": 0.010616332274007075,
+          "expected_max_sharpe": 0.8982150947956001,
+          "min_detectable_alpha": 0.024045366134096493,
+          "min_detectable_sharpe": 1.1195868329934748,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1870,
+          "n_test_observations": 8870,
+          "n_windows": 226,
+          "observed_annualized_alpha": -0.026757434316482632,
+          "observed_annualized_sharpe": -0.5473742062657861,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.026757434316482632
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 3,
+      "step_months": 3,
+      "bars": 10000,
+      "seed": 7,
+      "series": "no_effect",
+      "n_periods": 151,
+      "periods_with_position": 150,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.0025589355490205686,
+          "benchmark_alphas": [
+            -0.009380618612110645,
+            -0.012999499970774176
+          ],
+          "expected_max_alpha": 0.0030129163623879556,
+          "expected_max_sharpe": 1.1092202464291554,
+          "min_detectable_alpha": 0.021748506557912113,
+          "min_detectable_sharpe": 1.3190922147464912,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1819,
+          "n_test_observations": 9485,
+          "n_windows": 151,
+          "observed_annualized_alpha": -0.009380618612110645,
+          "observed_annualized_sharpe": -0.36770092604983035,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.009380618612110645
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 3,
+      "step_months": 3,
+      "bars": 10000,
+      "seed": 1,
+      "series": "no_effect",
+      "n_periods": 151,
+      "periods_with_position": 151,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.0029015228978265624,
+          "benchmark_alphas": [
+            -0.02772853935857858,
+            -0.03183191239222099
+          ],
+          "expected_max_alpha": 0.0034162821404591375,
+          "expected_max_sharpe": 1.074953098912403,
+          "min_detectable_alpha": 0.02087552245658919,
+          "min_detectable_sharpe": 1.286242286435622,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1848,
+          "n_test_observations": 9548,
+          "n_windows": 151,
+          "observed_annualized_alpha": -0.02772853935857858,
+          "observed_annualized_sharpe": -0.6203855986633389,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.02772853935857858
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 3,
+      "step_months": 3,
+      "bars": 10000,
+      "seed": 2024,
+      "series": "no_effect",
+      "n_periods": 151,
+      "periods_with_position": 150,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.005620183912525496,
+          "benchmark_alphas": [
+            -0.005306579247955975,
+            0.0026415610641686675
+          ],
+          "expected_max_alpha": 0.006617260866987753,
+          "expected_max_sharpe": 0.8811170649283889,
+          "min_detectable_alpha": 0.023002637017186564,
+          "min_detectable_sharpe": 1.090637955788583,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1916,
+          "n_test_observations": 9485,
+          "n_windows": 151,
+          "observed_annualized_alpha": -0.005306579247955975,
+          "observed_annualized_sharpe": -0.22097901773605613,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.005306579247955975
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 6,
+      "step_months": 6,
+      "bars": 10000,
+      "seed": 7,
+      "series": "no_effect",
+      "n_periods": 75,
+      "periods_with_position": 75,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.002777367027190373,
+          "benchmark_alphas": [
+            -0.0002548622373734419,
+            -0.004182652354913912
+          ],
+          "expected_max_alpha": 0.0032700997740179537,
+          "expected_max_sharpe": 1.3005097605297156,
+          "min_detectable_alpha": 0.02411384999866854,
+          "min_detectable_sharpe": 1.5082654890661824,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1103,
+          "n_test_observations": 9635,
+          "n_windows": 75,
+          "observed_annualized_alpha": -0.0002548622373734419,
+          "observed_annualized_sharpe": -0.2401140265890455,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.0002548622373734419
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 6,
+      "step_months": 6,
+      "bars": 10000,
+      "seed": 1,
+      "series": "no_effect",
+      "n_periods": 75,
+      "periods_with_position": 75,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.0043369433874393334,
+          "benchmark_alphas": [
+            -0.014699718818189194,
+            -0.020833082975950212
+          ],
+          "expected_max_alpha": 0.005106360611453286,
+          "expected_max_sharpe": 1.070255408718847,
+          "min_detectable_alpha": 0.025167721490583262,
+          "min_detectable_sharpe": 1.2786379701944484,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1093,
+          "n_test_observations": 9635,
+          "n_windows": 75,
+          "observed_annualized_alpha": -0.014699718818189194,
+          "observed_annualized_sharpe": -0.423662538689017,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.014699718818189194
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 6,
+      "step_months": 6,
+      "bars": 10000,
+      "seed": 2024,
+      "series": "no_effect",
+      "n_periods": 75,
+      "periods_with_position": 75,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.008130524249731296,
+          "benchmark_alphas": [
+            -0.0031105010648432674,
+            0.008387796598330067
+          ],
+          "expected_max_alpha": 0.009572960739938739,
+          "expected_max_sharpe": 0.8720336855863019,
+          "min_detectable_alpha": 0.029903612255963455,
+          "min_detectable_sharpe": 1.079965680401708,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1101,
+          "n_test_observations": 9635,
+          "n_windows": 75,
+          "observed_annualized_alpha": -0.0031105010648432674,
+          "observed_annualized_sharpe": -0.11830856887544915,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.0031105010648432674
+        }
+      }
+    },
+    {
+      "train_months": 12,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 7,
+      "series": "no_effect",
+      "n_periods": 223,
+      "periods_with_position": 211,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.006091925174693424,
+          "benchmark_alphas": [
+            -0.021481132680498307,
+            -0.01286584947748478
+          ],
+          "expected_max_alpha": 0.00717269375709837,
+          "expected_max_sharpe": 1.0794968754734129,
+          "min_detectable_alpha": 0.02556166810223279,
+          "min_detectable_sharpe": 1.2978281566655037,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1739,
+          "n_test_observations": 8756,
+          "n_windows": 223,
+          "observed_annualized_alpha": -0.021481132680498307,
+          "observed_annualized_sharpe": -0.38793982468011984,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.021481132680498307
+        }
+      }
+    },
+    {
+      "train_months": 12,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 1,
+      "series": "no_effect",
+      "n_periods": 223,
+      "periods_with_position": 212,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.003541294455623492,
+          "benchmark_alphas": [
+            -0.016131104807164155,
+            -0.011122958159664766
+          ],
+          "expected_max_alpha": 0.004169555584729581,
+          "expected_max_sharpe": 0.8890037816125825,
+          "min_detectable_alpha": 0.02224826088021602,
+          "min_detectable_sharpe": 1.1081617776181762,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1764,
+          "n_test_observations": 8794,
+          "n_windows": 223,
+          "observed_annualized_alpha": -0.016131104807164155,
+          "observed_annualized_sharpe": -0.373398604171651,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.016131104807164155
+        }
+      }
+    },
+    {
+      "train_months": 12,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 2024,
+      "series": "no_effect",
+      "n_periods": 223,
+      "periods_with_position": 211,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.008956391607188193,
+          "benchmark_alphas": [
+            -0.028870819931198104,
+            -0.016204569450388
+          ],
+          "expected_max_alpha": 0.010545345243876857,
+          "expected_max_sharpe": 0.8213625449531772,
+          "min_detectable_alpha": 0.024029072587205838,
+          "min_detectable_sharpe": 1.0441720029868877,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1847,
+          "n_test_observations": 8744,
+          "n_windows": 223,
+          "observed_annualized_alpha": -0.028870819931198104,
+          "observed_annualized_sharpe": -0.5846011185753017,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.028870819931198104
+        }
+      }
+    },
+    {
+      "train_months": 24,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 7,
+      "series": "no_effect",
+      "n_periods": 217,
+      "periods_with_position": 205,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.00793023853156412,
+          "benchmark_alphas": [
+            -0.02280328742238662,
+            -0.011588236538194945
+          ],
+          "expected_max_alpha": 0.009337142328001995,
+          "expected_max_sharpe": 1.0016358108197867,
+          "min_detectable_alpha": 0.0281556820486467,
+          "min_detectable_sharpe": 1.2229593975673823,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1702,
+          "n_test_observations": 8507,
+          "n_windows": 217,
+          "observed_annualized_alpha": -0.02280328742238662,
+          "observed_annualized_sharpe": -0.3693295627118805,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.02280328742238662
+        }
+      }
+    },
+    {
+      "train_months": 24,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 1,
+      "series": "no_effect",
+      "n_periods": 217,
+      "periods_with_position": 206,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.0032504061206329437,
+          "benchmark_alphas": [
+            -0.01957087400029755,
+            -0.014974105581277921
+          ],
+          "expected_max_alpha": 0.0038270607436788704,
+          "expected_max_sharpe": 0.506910492638033,
+          "min_detectable_alpha": 0.022221090529767038,
+          "min_detectable_sharpe": 0.728309438435695,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1718,
+          "n_test_observations": 8545,
+          "n_windows": 217,
+          "observed_annualized_alpha": -0.01957087400029755,
+          "observed_annualized_sharpe": -0.4183239783830749,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.01957087400029755
+        }
+      }
+    },
+    {
+      "train_months": 24,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 2024,
+      "series": "no_effect",
+      "n_periods": 217,
+      "periods_with_position": 206,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.008443671814004858,
+          "benchmark_alphas": [
+            -0.029481730145695755,
+            -0.017540574950102653
+          ],
+          "expected_max_alpha": 0.009941663820640741,
+          "expected_max_sharpe": 0.7372711028158684,
+          "min_detectable_alpha": 0.023425709428846052,
+          "min_detectable_sharpe": 0.9628080254269266,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1796,
+          "n_test_observations": 8536,
+          "n_windows": 217,
+          "observed_annualized_alpha": -0.029481730145695755,
+          "observed_annualized_sharpe": -0.6131945965485454,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.029481730145695755
+        }
+      }
+    },
+    {
+      "train_months": 3,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 7,
+      "series": "effect",
+      "n_periods": 228,
+      "periods_with_position": 171,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.05470934931355486,
+          "benchmark_alphas": [
+            0.052878779372511994,
+            0.13024948316034846
+          ],
+          "expected_max_alpha": 0.06441533620707961,
+          "expected_max_sharpe": 1.1109520774938162,
+          "min_detectable_alpha": 0.08294666769145377,
+          "min_detectable_sharpe": 1.3442368555195103,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1500,
+          "n_test_observations": 7100,
+          "n_windows": 228,
+          "observed_annualized_alpha": 0.052878779372511994,
+          "observed_annualized_sharpe": 1.5064450167249124,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.052878779372511994
+        }
+      }
+    },
+    {
+      "train_months": 3,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 1,
+      "series": "effect",
+      "n_periods": 228,
+      "periods_with_position": 159,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": true,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.07589299665261515,
+          "benchmark_alphas": [
+            0.07046459333879254,
+            0.1777934984940568
+          ],
+          "expected_max_alpha": 0.08935717489752246,
+          "expected_max_sharpe": 1.3129122487287894,
+          "min_detectable_alpha": 0.11010237733717403,
+          "min_detectable_sharpe": 1.553654817540649,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1415,
+          "n_test_observations": 6603,
+          "n_windows": 228,
+          "observed_annualized_alpha": 0.07046459333879254,
+          "observed_annualized_sharpe": 1.9748811522815037,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.07046459333879254
+        }
+      }
+    },
+    {
+      "train_months": 3,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 2024,
+      "series": "effect",
+      "n_periods": 228,
+      "periods_with_position": 169,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.06753816540676613,
+          "benchmark_alphas": [
+            0.05248554381708129,
+            0.14799893331312736
+          ],
+          "expected_max_alpha": 0.07952011285223437,
+          "expected_max_sharpe": 1.2370266131337728,
+          "min_detectable_alpha": 0.09908602211109631,
+          "min_detectable_sharpe": 1.470738240831429,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1472,
+          "n_test_observations": 7022,
+          "n_windows": 228,
+          "observed_annualized_alpha": 0.05248554381708129,
+          "observed_annualized_sharpe": 1.6389579140919526,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.05248554381708129
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 1,
+      "step_months": 1,
+      "bars": 10000,
+      "seed": 7,
+      "series": "effect",
+      "n_periods": 453,
+      "periods_with_position": 259,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.04576198433747362,
+          "benchmark_alphas": [
+            -0.019352553040125457,
+            0.045364665851034894
+          ],
+          "expected_max_alpha": 0.053880619009137605,
+          "expected_max_sharpe": 1.004336320909202,
+          "min_detectable_alpha": 0.06717706283766423,
+          "min_detectable_sharpe": 1.2720262175477994,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 707,
+          "n_test_observations": 5120,
+          "n_windows": 453,
+          "observed_annualized_alpha": -0.019352553040125457,
+          "observed_annualized_sharpe": 0.684242202116824,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.019352553040125457
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 1,
+      "step_months": 1,
+      "bars": 10000,
+      "seed": 1,
+      "series": "effect",
+      "n_periods": 453,
+      "periods_with_position": 240,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.04900591812984203,
+          "benchmark_alphas": [
+            -0.015066027325125752,
+            0.05423880673064239
+          ],
+          "expected_max_alpha": 0.05770005916864882,
+          "expected_max_sharpe": 0.8421793882289371,
+          "min_detectable_alpha": 0.07072110328546646,
+          "min_detectable_sharpe": 1.1172638703396538,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 680,
+          "n_test_observations": 4740,
+          "n_windows": 453,
+          "observed_annualized_alpha": -0.015066027325125752,
+          "observed_annualized_sharpe": 0.8092360108291283,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.015066027325125752
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 1,
+      "step_months": 1,
+      "bars": 10000,
+      "seed": 2024,
+      "series": "effect",
+      "n_periods": 453,
+      "periods_with_position": 255,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.05178343966221837,
+          "benchmark_alphas": [
+            -0.014741046065237403,
+            0.05849179661140066
+          ],
+          "expected_max_alpha": 0.060970340858621255,
+          "expected_max_sharpe": 0.8748745608009202,
+          "min_detectable_alpha": 0.07402744792041197,
+          "min_detectable_sharpe": 1.1408998632672755,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 715,
+          "n_test_observations": 5035,
+          "n_windows": 453,
+          "observed_annualized_alpha": -0.014741046065237403,
+          "observed_annualized_sharpe": 0.8390898229381583,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": -0.014741046065237403
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 7,
+      "series": "effect",
+      "n_periods": 226,
+      "periods_with_position": 164,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.055698918698646585,
+          "benchmark_alphas": [
+            0.026551302579632743,
+            0.10532146881277513
+          ],
+          "expected_max_alpha": 0.06558046511906107,
+          "expected_max_sharpe": 1.0286788564684408,
+          "min_detectable_alpha": 0.08389872019276381,
+          "min_detectable_sharpe": 1.2674485638327186,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1479,
+          "n_test_observations": 6802,
+          "n_windows": 226,
+          "observed_annualized_alpha": 0.026551302579632743,
+          "observed_annualized_sharpe": 1.2523636151317914,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.026551302579632743
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 1,
+      "series": "effect",
+      "n_periods": 226,
+      "periods_with_position": 156,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": true,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.08895894484674192,
+          "benchmark_alphas": [
+            0.05222522379255354,
+            0.17803217008921612
+          ],
+          "expected_max_alpha": 0.10474115325495527,
+          "expected_max_sharpe": 1.209133894331047,
+          "min_detectable_alpha": 0.12650123639627442,
+          "min_detectable_sharpe": 1.4529154811109037,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1442,
+          "n_test_observations": 6461,
+          "n_windows": 226,
+          "observed_annualized_alpha": 0.05222522379255354,
+          "observed_annualized_sharpe": 1.9001929184030157,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.05222522379255354
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 2024,
+      "series": "effect",
+      "n_periods": 226,
+      "periods_with_position": 164,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": true,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.07984941837927041,
+          "benchmark_alphas": [
+            0.03953513582322996,
+            0.15245926624279765
+          ],
+          "expected_max_alpha": 0.09401550549178432,
+          "expected_max_sharpe": 1.1552417987505994,
+          "min_detectable_alpha": 0.11428430408498985,
+          "min_detectable_sharpe": 1.3920845135942912,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1480,
+          "n_test_observations": 6790,
+          "n_windows": 226,
+          "observed_annualized_alpha": 0.03953513582322996,
+          "observed_annualized_sharpe": 1.6917718931957701,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.03953513582322996
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 3,
+      "step_months": 3,
+      "bars": 10000,
+      "seed": 7,
+      "series": "effect",
+      "n_periods": 151,
+      "periods_with_position": 122,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.05223812091061068,
+          "benchmark_alphas": [
+            0.13899618015571355,
+            0.21287203922038475
+          ],
+          "expected_max_alpha": 0.06150568711752821,
+          "expected_max_sharpe": 0.9985900881444896,
+          "min_detectable_alpha": 0.08307791379482264,
+          "min_detectable_sharpe": 1.223423478479453,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1479,
+          "n_test_observations": 7716,
+          "n_windows": 151,
+          "observed_annualized_alpha": 0.13899618015571355,
+          "observed_annualized_sharpe": 2.138333477837199,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.13899618015571355
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 3,
+      "step_months": 3,
+      "bars": 10000,
+      "seed": 1,
+      "series": "effect",
+      "n_periods": 151,
+      "periods_with_position": 120,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": true,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.06651710979435042,
+          "benchmark_alphas": [
+            0.18570764950272323,
+            0.27977704830375383
+          ],
+          "expected_max_alpha": 0.07831791174063042,
+          "expected_max_sharpe": 1.3778667499188704,
+          "min_detectable_alpha": 0.10162749315512294,
+          "min_detectable_sharpe": 1.603230231255046,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1439,
+          "n_test_observations": 7588,
+          "n_windows": 151,
+          "observed_annualized_alpha": 0.18570764950272323,
+          "observed_annualized_sharpe": 2.6572212550418794,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.18570764950272323
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 3,
+      "step_months": 3,
+      "bars": 10000,
+      "seed": 2024,
+      "series": "effect",
+      "n_periods": 151,
+      "periods_with_position": 128,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.055043164549592884,
+          "benchmark_alphas": [
+            0.1723950986221011,
+            0.2502378884440693
+          ],
+          "expected_max_alpha": 0.06480837361165914,
+          "expected_max_sharpe": 1.28083492094648,
+          "min_detectable_alpha": 0.08698313695953198,
+          "min_detectable_sharpe": 1.499168937004306,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1530,
+          "n_test_observations": 8094,
+          "n_windows": 151,
+          "observed_annualized_alpha": 0.1723950986221011,
+          "observed_annualized_sharpe": 2.3811237464280617,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.1723950986221011
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 6,
+      "step_months": 6,
+      "bars": 10000,
+      "seed": 7,
+      "series": "effect",
+      "n_periods": 75,
+      "periods_with_position": 74,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.0016774885889380053,
+          "benchmark_alphas": [
+            0.2833728796816293,
+            0.2857452067948315
+          ],
+          "expected_max_alpha": 0.001975091877270928,
+          "expected_max_sharpe": 1.0055465043631013,
+          "min_detectable_alpha": 0.02361323205545443,
+          "min_detectable_sharpe": 1.2087763233677467,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1004,
+          "n_test_observations": 9507,
+          "n_windows": 75,
+          "observed_annualized_alpha": 0.2833728796816293,
+          "observed_annualized_sharpe": 2.557204308422953,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.2833728796816293
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 6,
+      "step_months": 6,
+      "bars": 10000,
+      "seed": 1,
+      "series": "effect",
+      "n_periods": 75,
+      "periods_with_position": 72,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.006256247579632627,
+          "benchmark_alphas": [
+            0.3238229280973058,
+            0.3326705982739861
+          ],
+          "expected_max_alpha": 0.007366168603597617,
+          "expected_max_sharpe": 1.3823500291352182,
+          "min_detectable_alpha": 0.029982153171116206,
+          "min_detectable_sharpe": 1.5867092547647612,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1003,
+          "n_test_observations": 9251,
+          "n_windows": 75,
+          "observed_annualized_alpha": 0.3238229280973058,
+          "observed_annualized_sharpe": 2.9310842044651277,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.3238229280973058
+        }
+      }
+    },
+    {
+      "train_months": 6,
+      "test_months": 6,
+      "step_months": 6,
+      "bars": 10000,
+      "seed": 2024,
+      "series": "effect",
+      "n_periods": 75,
+      "periods_with_position": 74,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.011551440433323363,
+          "benchmark_alphas": [
+            0.30523540835909213,
+            0.321571612084843
+          ],
+          "expected_max_alpha": 0.01360078174068543,
+          "expected_max_sharpe": 1.314940178635438,
+          "min_detectable_alpha": 0.035836318607687635,
+          "min_detectable_sharpe": 1.5175394009305063,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1040,
+          "n_test_observations": 9505,
+          "n_windows": 75,
+          "observed_annualized_alpha": 0.30523540835909213,
+          "observed_annualized_sharpe": 2.823481129119068,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.30523540835909213
+        }
+      }
+    },
+    {
+      "train_months": 12,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 7,
+      "series": "effect",
+      "n_periods": 223,
+      "periods_with_position": 163,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.056560647352545866,
+          "benchmark_alphas": [
+            0.027294171499089182,
+            0.10728300608166144
+          ],
+          "expected_max_alpha": 0.06659507307285087,
+          "expected_max_sharpe": 1.026198744212778,
+          "min_detectable_alpha": 0.08494524471717546,
+          "min_detectable_sharpe": 1.2654912352078942,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1475,
+          "n_test_observations": 6760,
+          "n_windows": 223,
+          "observed_annualized_alpha": 0.027294171499089182,
+          "observed_annualized_sharpe": 1.2814358731860924,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.027294171499089182
+        }
+      }
+    },
+    {
+      "train_months": 12,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 1,
+      "series": "effect",
+      "n_periods": 223,
+      "periods_with_position": 155,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": true,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.09138912874220484,
+          "benchmark_alphas": [
+            0.04981481521286329,
+            0.1790585605335502
+          ],
+          "expected_max_alpha": 0.10760247613002898,
+          "expected_max_sharpe": 1.2094957807199116,
+          "min_detectable_alpha": 0.1294922869672194,
+          "min_detectable_sharpe": 1.45409739030485,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1441,
+          "n_test_observations": 6420,
+          "n_windows": 223,
+          "observed_annualized_alpha": 0.04981481521286329,
+          "observed_annualized_sharpe": 1.9077863781575863,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.04981481521286329
+        }
+      }
+    },
+    {
+      "train_months": 12,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 2024,
+      "series": "effect",
+      "n_periods": 223,
+      "periods_with_position": 162,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": true,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.08206557642289912,
+          "benchmark_alphas": [
+            0.03948694615162534,
+            0.155545197332855
+          ],
+          "expected_max_alpha": 0.09662483218383108,
+          "expected_max_sharpe": 0.9903905178194881,
+          "min_detectable_alpha": 0.11705892480225573,
+          "min_detectable_sharpe": 1.2295338899111057,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1465,
+          "n_test_observations": 6706,
+          "n_windows": 223,
+          "observed_annualized_alpha": 0.03948694615162534,
+          "observed_annualized_sharpe": 1.7259128859642958,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.03948694615162534
+        }
+      }
+    },
+    {
+      "train_months": 24,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 7,
+      "series": "effect",
+      "n_periods": 217,
+      "periods_with_position": 159,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": false,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.05655412655786892,
+          "benchmark_alphas": [
+            0.02531217824465512,
+            0.10529179103095779
+          ],
+          "expected_max_alpha": 0.06658739542384344,
+          "expected_max_sharpe": 0.9390330183047468,
+          "min_detectable_alpha": 0.08515154805993105,
+          "min_detectable_sharpe": 1.1817911023994232,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1437,
+          "n_test_observations": 6596,
+          "n_windows": 217,
+          "observed_annualized_alpha": 0.02531217824465512,
+          "observed_annualized_sharpe": 1.2547359003589036,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.02531217824465512
+        }
+      }
+    },
+    {
+      "train_months": 24,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 1,
+      "series": "effect",
+      "n_periods": 217,
+      "periods_with_position": 150,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": true,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.09203307378765646,
+          "benchmark_alphas": [
+            0.05111802536948327,
+            0.18127244650687083
+          ],
+          "expected_max_alpha": 0.10836066348049293,
+          "expected_max_sharpe": 1.1583117531589415,
+          "min_detectable_alpha": 0.13065023795664316,
+          "min_detectable_sharpe": 1.407026382336888,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1393,
+          "n_test_observations": 6213,
+          "n_windows": 217,
+          "observed_annualized_alpha": 0.05111802536948327,
+          "observed_annualized_sharpe": 1.9353877618227315,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.05111802536948327
+        }
+      }
+    },
+    {
+      "train_months": 24,
+      "test_months": 2,
+      "step_months": 2,
+      "bars": 10000,
+      "seed": 2024,
+      "series": "effect",
+      "n_periods": 217,
+      "periods_with_position": 157,
+      "paths": {
+        "walk_forward": {
+          "alpha_beyond_plausible_bound": true,
+          "alpha_reason": null,
+          "alpha_status": "resolvable",
+          "benchmark_alpha_std": 0.08105752117876033,
+          "benchmark_alphas": [
+            0.04247727647450099,
+            0.15710992225784823
+          ],
+          "expected_max_alpha": 0.09543793783613277,
+          "expected_max_sharpe": 0.8713300971675166,
+          "min_detectable_alpha": 0.1159372911347604,
+          "min_detectable_sharpe": 1.1143158063613265,
+          "n_benchmarks": 2,
+          "n_parameter_trials": 1421,
+          "n_test_observations": 6500,
+          "n_windows": 217,
+          "observed_annualized_alpha": 0.04247727647450099,
+          "observed_annualized_sharpe": 1.7725444516381414,
+          "sharpe_beyond_plausible_bound": false,
+          "sharpe_reason": null,
+          "sharpe_status": "resolvable",
+          "strategy_alpha": 0.04247727647450099
+        }
+      }
+    }
+  ]
+}

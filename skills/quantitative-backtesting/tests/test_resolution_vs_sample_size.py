@@ -109,9 +109,11 @@ from measure_resolution_vs_sample_size import (  # noqa: E402
     measure_real,
     measure_synthetic,
     measure_test_frac_sweep,
+    measure_wf_window_sweep,
     print_path_summary,
     summarize,
     _summarize_test_frac_sweep,
+    _summarize_wf_window_sweep,
 )
 from walk_forward import (  # noqa: E402
     PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
@@ -855,13 +857,23 @@ def test_deflated_alpha_floor_identity_matches_benchmark_dispersion():
     assert block["n_benchmarks"] == n
 
 
-def _framework_wf_block(bars, seed, inject_effect):
+def _framework_wf_block(
+    bars,
+    seed,
+    inject_effect,
+    train_months=WF_TRAIN_MONTHS,
+    test_months=WF_TEST_MONTHS,
+    step_months=WF_STEP_MONTHS,
+):
     """Run the framework's own walk_forward_analysis on the same fixture.
 
     Returns its summary, so callers can read the framework's own
     ``summary["test_resolution"]`` and ``summary["deflated_alpha"]`` blocks
     and compare them with what the measurement reports for the identical
     configuration.
+
+    The window configuration defaults to the shipped one, so the ladder's
+    parity check is unchanged; the window sweep passes its own windows in.
     """
     tmpdir, data, benchmarks = _control_fixture(bars, seed, inject_effect)
     try:
@@ -872,9 +884,9 @@ def _framework_wf_block(bars, seed, inject_effect):
                 data=data,
                 strategy_factory=strategy_factory,
                 param_grid=PARAM_GRID,
-                train_months=WF_TRAIN_MONTHS,
-                test_months=WF_TEST_MONTHS,
-                step_months=WF_STEP_MONTHS,
+                train_months=train_months,
+                test_months=test_months,
+                step_months=step_months,
                 initial_capital=INITIAL_CAPITAL,
                 commission=COMMISSION,
                 slippage=SLIPPAGE,
@@ -1417,6 +1429,492 @@ def test_the_sweep_refuses_to_report_a_real_history_it_did_not_measure():
     assert raised, (
         "the sweep must refuse --data instead of reporting the control "
         "fixture's numbers under the real history's name"
+    )
+
+
+# ---------------------------------------------------------------------------
+# WALK-FORWARD WINDOW SWEEP: the walk-forward path's resolution as a function
+# of its OWN configuration -- the training window and the test window, in
+# months.
+#
+# The held-out-fraction sweep is measured on the out-of-sample path only,
+# because that path is the only one whose split is expressed as fractions of
+# the sample. The walk-forward path is configured in months, so its lever is
+# the window configuration, and this sweep measures it.
+#
+# The step follows the test window, so the out-of-sample windows tile the
+# sample without overlapping. That is not a convenience: the framework
+# refuses `step_months < test_months` because overlapping windows
+# double-count bars in the pooled out-of-sample record and bias the
+# aggregate statistics.
+# ---------------------------------------------------------------------------
+
+# The capture of the sweep, with its provenance, and the trimmed fixture the
+# test file pins.
+WF_SWEEP_CAPTURE = (
+    SKILLS_DIR.parent.parent
+    / "results"
+    / "resolution_floor"
+    / "wf_window_sweep_10000.json"
+)
+
+WF_SWEEP_FIXTURE = (
+    SKILLS_DIR / "tests" / "fixtures" / "wf_window_sweep_10000.json"
+)
+
+# The window configurations the capture measured.
+WF_SWEEP_WINDOWS = ((3, 2), (6, 1), (6, 2), (6, 3), (6, 6), (12, 2), (24, 2))
+
+
+def _load_wf_sweep_capture():
+    """The window sweep capture: the tool's own --json output plus provenance."""
+    with open(WF_SWEEP_CAPTURE, "r") as handle:
+        return json.load(handle)
+
+
+def _load_wf_sweep_fixture():
+    """The trimmed window sweep fixture: provenance plus rows."""
+    with open(WF_SWEEP_FIXTURE, "r") as handle:
+        return json.load(handle)
+
+
+def test_the_window_sweep_measures_the_walk_forward_path_only():
+    """The window sweep measures the walk-forward path, and names it.
+
+    The sweep is the walk-forward path's own lever, so every row it produces
+    is a walk-forward row: the row names the path, and it carries that
+    path's block and no other path's.
+    """
+    rows = measure_wf_window_sweep(
+        SMALL_SAMPLE_BARS,
+        seeds=(7,),
+        windows=((WF_TRAIN_MONTHS, WF_TEST_MONTHS),),
+        inject_effect=False,
+    )
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["path"] == WALK_FORWARD
+    assert set(row["paths"]) == {WALK_FORWARD}, (
+        "the window sweep measures the walk-forward path only: a row must "
+        "not carry another path's block"
+    )
+    block = row["paths"][WALK_FORWARD]
+    assert block["path"] == WALK_FORWARD
+    assert block["min_detectable_sharpe"] is not None
+    assert block["n_test_observations"] is not None
+    assert row["series"] == "no_effect"
+    assert row["source"] == "synthetic control fixture"
+
+
+def test_the_window_sweep_steps_with_the_test_window():
+    """The step follows the test window, so the windows do not overlap.
+
+    The framework refuses ``step_months < test_months``: overlapping
+    out-of-sample windows double-count bars in the pooled record and bias
+    the aggregate statistics. The sweep therefore sets the step to the test
+    window, and the row records the step it used.
+    """
+    rows = measure_wf_window_sweep(
+        SMALL_SAMPLE_BARS,
+        seeds=(7,),
+        windows=((6, 1), (6, 3)),
+        inject_effect=False,
+    )
+    assert [row["test_months"] for row in rows] == [1, 3]
+    assert [row["step_months"] for row in rows] == [1, 3]
+    for row in rows:
+        assert row["step_months"] >= row["test_months"]
+
+    # And the framework's own refusal still holds for the configuration the
+    # sweep does not offer.
+    raised = False
+    try:
+        walk_forward_analysis(
+            data=_control_fixture(500, 7, False)[1],
+            strategy_factory=_make_strategy_factory("sma_crossover"),
+            param_grid=PARAM_GRID,
+            train_months=6,
+            test_months=3,
+            step_months=2,
+        )
+    except ValueError as exc:
+        raised = True
+        assert "step_months" in str(exc) and "test_months" in str(exc), str(exc)
+    assert raised, (
+        "the framework must still refuse an overlapping step: the sweep's "
+        "non-overlapping step is a choice, not a weakening of the check"
+    )
+
+
+def test_the_window_sweep_matches_the_framework_own_block():
+    """Each swept configuration's numbers equal the framework's own block.
+
+    The sweep's numbers are the framework's own resolution block, read off a
+    directly re-run analysis -- not a re-derivation of it.
+    """
+    for train_months, test_months in ((6, 2), (12, 3)):
+        rows = measure_wf_window_sweep(
+            SMALL_SAMPLE_BARS,
+            seeds=(7,),
+            windows=((train_months, test_months),),
+            inject_effect=False,
+        )
+        block = rows[0]["paths"][WALK_FORWARD]
+        framework_summary = _framework_wf_block(
+            SMALL_SAMPLE_BARS, 7, False, train_months, test_months, test_months
+        )
+        framework = framework_summary.get("test_resolution")
+        assert isinstance(framework, dict), (
+            "the framework did not attach a test_resolution block to its summary"
+        )
+        assert block["min_detectable_sharpe"] == framework["min_detectable_sharpe"], (
+            f"train={train_months} test={test_months}: the measured minimum "
+            "confirmable Sharpe must equal the framework's own block"
+        )
+        assert block["n_test_observations"] == framework["n_test_observations"]
+        assert block["expected_max_sharpe"] == (
+            framework_summary["deflated_sharpe"]["expected_max_sharpe"]
+        ), (
+            f"train={train_months} test={test_months}: the measured deflation "
+            "floor (SR*) must equal the framework's own Deflated Sharpe block"
+        )
+        assert block["min_detectable_alpha"] == framework["min_detectable_alpha"]
+        assert block["expected_max_alpha"] == (
+            framework_summary["deflated_alpha"]["expected_max_alpha"]
+        ), (
+            f"train={train_months} test={test_months}: the measured deflation "
+            "floor (alpha*) must equal the framework's own Deflated Alpha block"
+        )
+
+
+def test_the_shipped_window_configuration_is_unchanged_by_the_sweep():
+    """The sweep adds a lever; it does not move the shipped configuration.
+
+    The shipped walk-forward configuration is 6/2/2 months, and the ladder
+    measures that path at that configuration. The sweep's 6/2 row has to be
+    the same measurement the ladder reports, or the two would be measuring
+    two different things under one name.
+    """
+    assert (WF_TRAIN_MONTHS, WF_TEST_MONTHS, WF_STEP_MONTHS) == (6, 2, 2), (
+        "the shipped walk-forward configuration is 6/2/2 months and the "
+        "sweep must not change it"
+    )
+
+    rows = measure_wf_window_sweep(
+        SMALL_SAMPLE_BARS,
+        seeds=(7,),
+        windows=((WF_TRAIN_MONTHS, WF_TEST_MONTHS),),
+        inject_effect=False,
+    )
+    swept = rows[0]["paths"][WALK_FORWARD]
+    ladder = _measured(SMALL_SAMPLE_BARS, 7, False)["paths"][WALK_FORWARD]
+    assert swept["min_detectable_sharpe"] == ladder["min_detectable_sharpe"]
+    assert swept["min_detectable_alpha"] == ladder["min_detectable_alpha"]
+    assert swept["expected_max_sharpe"] == ladder["expected_max_sharpe"]
+    assert swept["expected_max_alpha"] == ladder["expected_max_alpha"]
+    assert swept["n_test_observations"] == ladder["n_test_observations"]
+
+
+def test_a_longer_training_window_leaves_fewer_windows_in_the_sample():
+    """The measured cost of a longer training window: fewer windows.
+
+    The walk-forward path's training window is *expanding* -- every window
+    trains on everything before it -- so a longer training window does not
+    buy a better-estimated parameter in the later windows; it starts the
+    walk-forward later, so fewer windows fit in the sample and fewer
+    out-of-sample observations are pooled. The sweep measures that cost
+    rather than assuming it.
+    """
+    rows = measure_wf_window_sweep(
+        SMALL_SAMPLE_BARS,
+        seeds=(7,),
+        windows=((3, 2), (12, 2), (24, 2)),
+        inject_effect=False,
+    )
+    by_train = {row["train_months"]: row for row in rows}
+    windows = [by_train[t]["paths"][WALK_FORWARD]["n_windows"] for t in (3, 12, 24)]
+    observations = [
+        by_train[t]["paths"][WALK_FORWARD]["n_test_observations"] for t in (3, 12, 24)
+    ]
+    assert windows == sorted(windows, reverse=True), (
+        f"a longer training window must leave fewer windows in the sample, got {windows}"
+    )
+    assert observations == sorted(observations, reverse=True), (
+        "a longer training window must leave fewer out-of-sample observations, "
+        f"got {observations}"
+    )
+
+
+def test_the_window_sweep_refuses_to_measure_both_series_at_once():
+    """The sweep measures one series at a time, and says which one.
+
+    The null calibration and the positive control answer different
+    questions, so a sweep that silently measured the no-effect series under
+    the name of the control would be reporting the wrong measurement.
+    """
+    raised = False
+    try:
+        measure_wf_window_sweep(
+            SMALL_SAMPLE_BARS,
+            seeds=(7,),
+            windows=((6, 2),),
+            inject_effect=None,
+        )
+    except ValueError as exc:
+        raised = True
+        assert "one series at a time" in str(exc), str(exc)
+    assert raised, (
+        "the sweep must refuse inject_effect=None instead of silently "
+        "measuring the no-effect series"
+    )
+
+
+def test_the_window_sweep_names_the_series_it_measured():
+    """A window sweep table says which series it is.
+
+    The default (``--series both``) measures both and prints both, each
+    labeled, and the labels are the ones the rows themselves carry.
+    """
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        exit_code = measurement_main(
+            ["--sizes", "2500", "--seeds", "7", "--wf-windows", "6:2"]
+        )
+    output = buffer.getvalue()
+
+    assert exit_code == 0
+    assert "series: no_effect" in output, (
+        "the window sweep must label the no-effect (null calibration) table"
+    )
+    assert "series: effect" in output, (
+        "the window sweep must label the effect (positive control) table"
+    )
+    assert output.count("window sweep") == 2, (
+        "the default window sweep must measure both series and print both tables"
+    )
+
+    # A single-series sweep says so too, and says which one.
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        exit_code = measurement_main(
+            ["--sizes", "2500", "--seeds", "7", "--wf-windows", "6:2", "--series", "effect"]
+        )
+    output = buffer.getvalue()
+    assert exit_code == 0
+    assert "series: effect" in output
+    assert "series: no_effect" not in output
+
+
+def test_the_window_sweep_refuses_to_report_a_real_history_it_did_not_measure():
+    """The window sweep measures the control fixture, and says so.
+
+    Combining it with ``--data`` would print the fixture's numbers under the
+    real history's name, so the combination is refused instead.
+    """
+    raised = False
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            measurement_main(
+                ["--sizes", "2500", "--wf-windows", "6:2", "--data", "history.csv"]
+            )
+    except SystemExit as exc:
+        raised = True
+        assert exc.code == 2, (
+            f"the refusal must be an argparse error (exit 2), got {exc.code}"
+        )
+    assert raised, (
+        "the window sweep must refuse --data instead of reporting the control "
+        "fixture's numbers under the real history's name"
+    )
+
+
+def test_the_window_sweep_refuses_to_sweep_two_paths_at_once():
+    """Two sweeps, two paths: they are measured one at a time.
+
+    The held-out-fraction sweep measures the out-of-sample path and the
+    window sweep measures the walk-forward path. Running both at once would
+    produce one table of numbers about two different paths, so the
+    combination is refused.
+    """
+    raised = False
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            measurement_main(
+                ["--sizes", "2500", "--test-fracs", "0.2", "--wf-windows", "6:2"]
+            )
+    except SystemExit as exc:
+        raised = True
+        assert exc.code == 2, (
+            f"the refusal must be an argparse error (exit 2), got {exc.code}"
+        )
+    assert raised, (
+        "the two sweeps measure two different paths and must be measured one "
+        "at a time"
+    )
+
+
+def test_the_window_sweep_moves_no_threshold_and_no_verdict():
+    """The sweep reads the framework's bounds; it never re-tunes them.
+
+    The plausibility bounds the sweep compares against are the framework's
+    own, and the sweep reports no verdict of its own: it measures what the
+    framework's own test could have confirmed.
+    """
+    rows = measure_wf_window_sweep(
+        SMALL_SAMPLE_BARS,
+        seeds=(7,),
+        windows=((6, 2), (12, 3)),
+        inject_effect=False,
+    )
+    for row in rows:
+        block = row["paths"][WALK_FORWARD]
+        assert block["plausible_max_annualized_sharpe"] == PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+        assert block["plausible_max_annualized_alpha"] == PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+        for key in block:
+            assert "verdict" not in key
+
+
+def test_the_window_sweep_capture_is_the_tools_own_json_output():
+    """The capture is the tool's own output, with its provenance.
+
+    The capture is what the tool printed with ``--json``, plus the command
+    that produced it, the environment, the fixture construction and the
+    bounds it compared against -- so a reader can re-run it.
+    """
+    capture = _load_wf_sweep_capture()
+    provenance = capture["provenance"]
+    assert "--wf-windows" in provenance["command"], (
+        "the capture must record the command that produced it"
+    )
+    assert "measure_resolution_vs_sample_size.py" in provenance["command"]
+    assert "--sizes 10000" in provenance["command"], (
+        "the capture must record the sample size it measured at"
+    )
+    assert provenance["plausibility_bounds"] == {
+        "plausible_max_annualized_sharpe": PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
+        "plausible_max_annualized_alpha": PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
+    }
+    assert provenance["environment"]["numpy"]
+    assert provenance["environment"]["pandas"]
+    assert provenance["script_commit"]
+    assert provenance["measured"]["path"] == WALK_FORWARD
+    assert provenance["measured"]["series"] == ["no_effect", "effect"]
+
+    # The rows are the tool's own: the summary rebuilt from them is the
+    # summary the tool printed for them.
+    measured_configurations = {
+        (row["train_months"], row["test_months"])
+        for series in capture["sweeps"].values()
+        for row in series["rows"]
+    }
+    assert measured_configurations == set(WF_SWEEP_WINDOWS), (
+        "the capture must carry the window configurations it measured, "
+        f"{sorted(measured_configurations)}"
+    )
+    for series, payload in capture["sweeps"].items():
+        rows = payload["rows"]
+        assert rows, "the capture must carry the rows it measured"
+        for row in rows:
+            assert set(row["paths"]) == {WALK_FORWARD}
+            assert row["series"] == series
+        stats, first_all, first_any, first_all_alpha, first_any_alpha = (
+            _summarize_wf_window_sweep(rows)
+        )
+        assert stats == payload["sweep"]["stats"], (
+            f"{series}: the summary rebuilt from the captured rows must equal "
+            "the summary the tool printed for them"
+        )
+        recorded = payload["sweep"]["first_all_within_bound"]
+        assert recorded == (list(first_all) if first_all else None)
+
+
+def test_the_window_sweep_fixture_is_a_trimmed_copy_of_the_capture():
+    """The trimmed fixture keeps everything the summary reads.
+
+    A summary rebuilt from the trimmed rows has to equal the summary the
+    tool printed for the full rows, or the fixture is a different
+    measurement.
+    """
+    capture = _load_wf_sweep_capture()
+    fixture = _load_wf_sweep_fixture()
+
+    assert fixture["provenance"] == capture["provenance"]
+    assert len(fixture["rows"]) == len(capture["sweeps"]["no_effect"]["rows"]) + len(
+        capture["sweeps"]["effect"]["rows"]
+    )
+
+    trimmed = []
+    for series in ("no_effect", "effect"):
+        for row in capture["sweeps"][series]["rows"]:
+            block = row["paths"][WALK_FORWARD]
+            trimmed.append(
+                {
+                    "train_months": row["train_months"],
+                    "test_months": row["test_months"],
+                    "step_months": row["step_months"],
+                    "bars": row["bars"],
+                    "seed": row["seed"],
+                    "series": row["series"],
+                    "n_periods": row["n_periods"],
+                    "periods_with_position": row["periods_with_position"],
+                    "paths": {
+                        WALK_FORWARD: {
+                            key: block[key] for key in RECAPTURE_PATH_KEYS
+                        }
+                    },
+                }
+            )
+    assert fixture["rows"] == trimmed, (
+        "the trimmed fixture must keep every key the sweep's summary reads, "
+        "and nothing that would change it"
+    )
+
+
+def test_the_window_sweep_is_documented_with_what_it_does_not_establish():
+    """The document states the sweep's scope and its limits.
+
+    A measurement of a synthetic control fixture is a property of a formula
+    and of the decision machinery. The document has to say what the sweep
+    does not establish, so a reader cannot carry the numbers further than
+    they go.
+    """
+    section = _doc_section("How long should the walk-forward windows be?")
+    assert "does not establish" in section, (
+        "the window sweep's section must say what it does not establish"
+    )
+    assert "synthetic" in section.lower(), (
+        "the window sweep's section must name the fixture it measured"
+    )
+    assert "no threshold" in section, (
+        "the window sweep's section must say that no threshold, bound, "
+        "criterion or verdict moves with it"
+    )
+    # The configuration the document names is the shipped one.
+    named = {
+        label: int(months)
+        for months, label in re.findall(
+            r"(\d+)-month\s+(training window|test window|step)\b", section
+        )
+    }
+    assert named == {
+        "training window": WF_TRAIN_MONTHS,
+        "test window": WF_TEST_MONTHS,
+        "step": WF_STEP_MONTHS,
+    }, (
+        "the window sweep's section must name the shipped walk-forward "
+        f"configuration, it names {named}"
+    )
+
+    # The skill's own entry point carries the flag, so a reader who meets it
+    # there knows which path it measures.
+    skill_doc = re.sub(
+        r"\s+", " ", (SKILLS_DIR / "SKILL.md").read_text(encoding="utf-8")
+    )
+    assert "--wf-windows" in skill_doc, (
+        "SKILL.md must carry the window sweep's flag"
+    )
+    assert "walk-forward path" in skill_doc, (
+        "SKILL.md must say which path the window sweep measures"
     )
 
 
@@ -2795,6 +3293,19 @@ TEST_REGISTRY = [
     ("test_the_effect_series_sweep_crossings_are_pinned", test_the_effect_series_sweep_crossings_are_pinned),
     ("test_the_sweep_names_the_series_it_measured", test_the_sweep_names_the_series_it_measured),
     ("test_the_sweep_refuses_to_report_a_real_history_it_did_not_measure", test_the_sweep_refuses_to_report_a_real_history_it_did_not_measure),
+    ("test_the_window_sweep_measures_the_walk_forward_path_only", test_the_window_sweep_measures_the_walk_forward_path_only),
+    ("test_the_window_sweep_steps_with_the_test_window", test_the_window_sweep_steps_with_the_test_window),
+    ("test_the_window_sweep_matches_the_framework_own_block", test_the_window_sweep_matches_the_framework_own_block),
+    ("test_the_shipped_window_configuration_is_unchanged_by_the_sweep", test_the_shipped_window_configuration_is_unchanged_by_the_sweep),
+    ("test_a_longer_training_window_leaves_fewer_windows_in_the_sample", test_a_longer_training_window_leaves_fewer_windows_in_the_sample),
+    ("test_the_window_sweep_refuses_to_measure_both_series_at_once", test_the_window_sweep_refuses_to_measure_both_series_at_once),
+    ("test_the_window_sweep_names_the_series_it_measured", test_the_window_sweep_names_the_series_it_measured),
+    ("test_the_window_sweep_refuses_to_report_a_real_history_it_did_not_measure", test_the_window_sweep_refuses_to_report_a_real_history_it_did_not_measure),
+    ("test_the_window_sweep_refuses_to_sweep_two_paths_at_once", test_the_window_sweep_refuses_to_sweep_two_paths_at_once),
+    ("test_the_window_sweep_moves_no_threshold_and_no_verdict", test_the_window_sweep_moves_no_threshold_and_no_verdict),
+    ("test_the_window_sweep_capture_is_the_tools_own_json_output", test_the_window_sweep_capture_is_the_tools_own_json_output),
+    ("test_the_window_sweep_fixture_is_a_trimmed_copy_of_the_capture", test_the_window_sweep_fixture_is_a_trimmed_copy_of_the_capture),
+    ("test_the_window_sweep_is_documented_with_what_it_does_not_establish", test_the_window_sweep_is_documented_with_what_it_does_not_establish),
     ("test_shipped_default_split_is_unchanged", test_shipped_default_split_is_unchanged),
     ("test_the_summary_reports_what_sets_the_alpha_floor", test_the_summary_reports_what_sets_the_alpha_floor),
     ("test_an_unpriceable_alpha_floor_is_reported_as_unpriceable", test_an_unpriceable_alpha_floor_is_reported_as_unpriceable),
