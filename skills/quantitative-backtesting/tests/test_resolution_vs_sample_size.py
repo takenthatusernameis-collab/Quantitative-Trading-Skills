@@ -1476,6 +1476,20 @@ WF_SWEEP_FIXTURE = (
 # The window configurations the capture measured.
 WF_SWEEP_WINDOWS = ((3, 2), (6, 1), (6, 2), (6, 3), (6, 6), (12, 2), (24, 2))
 
+# The capture of the same sweep at 5,000 bars, with its provenance, and the
+# trimmed fixture the test file pins. The reference document quotes the
+# 5,000-bar numbers; this capture is what a reader can verify them against.
+WF_SWEEP_5000_CAPTURE = (
+    SKILLS_DIR.parent.parent
+    / "results"
+    / "resolution_floor"
+    / "wf_window_sweep_5000.json"
+)
+
+WF_SWEEP_5000_FIXTURE = (
+    SKILLS_DIR / "tests" / "fixtures" / "wf_window_sweep_5000.json"
+)
+
 # The capture of the CPCV split sweep, with its provenance, and the trimmed
 # fixture the test file pins.
 CPCV_SWEEP_CAPTURE = (
@@ -1517,6 +1531,18 @@ def _load_wf_sweep_capture():
 def _load_wf_sweep_fixture():
     """The trimmed window sweep fixture: provenance plus rows."""
     with open(WF_SWEEP_FIXTURE, "r") as handle:
+        return json.load(handle)
+
+
+def _load_wf_sweep_5000_capture():
+    """The 5,000-bar window sweep capture: the tool's own --json output plus provenance."""
+    with open(WF_SWEEP_5000_CAPTURE, "r") as handle:
+        return json.load(handle)
+
+
+def _load_wf_sweep_5000_fixture():
+    """The trimmed 5,000-bar window sweep fixture: provenance plus rows."""
+    with open(WF_SWEEP_5000_FIXTURE, "r") as handle:
         return json.load(handle)
 
 
@@ -1957,6 +1983,95 @@ def test_the_window_sweep_is_documented_with_what_it_does_not_establish():
     )
     assert "walk-forward path" in skill_doc, (
         "SKILL.md must say which path the window sweep measures"
+    )
+
+
+def test_the_window_sweep_5000_capture_is_the_tools_own_json_output():
+    """The 5,000-bar capture is the tool's own output, with its provenance."""
+    capture = _load_wf_sweep_5000_capture()
+    provenance = capture["provenance"]
+    assert "--wf-windows" in provenance["command"], (
+        "the capture must record the command that produced it"
+    )
+    assert "measure_resolution_vs_sample_size.py" in provenance["command"]
+    assert "--sizes 5000" in provenance["command"], (
+        "the capture must record the sample size it measured at"
+    )
+    assert provenance["plausibility_bounds"] == {
+        "plausible_max_annualized_sharpe": PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
+        "plausible_max_annualized_alpha": PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
+    }
+    assert provenance["environment"]["numpy"]
+    assert provenance["environment"]["pandas"]
+    assert provenance["script_commit"]
+    assert provenance["measured"]["path"] == WALK_FORWARD
+    assert provenance["measured"]["series"] == ["no_effect", "effect"]
+
+    measured_configurations = {
+        (row["train_months"], row["test_months"])
+        for series in capture["sweeps"].values()
+        for row in series["rows"]
+    }
+    assert measured_configurations == set(WF_SWEEP_WINDOWS), (
+        "the capture must carry the window configurations it measured, "
+        f"{sorted(measured_configurations)}"
+    )
+    for series, payload in capture["sweeps"].items():
+        rows = payload["rows"]
+        assert rows, "the capture must carry the rows it measured"
+        for row in rows:
+            assert set(row["paths"]) == {WALK_FORWARD}
+            assert row["series"] == series
+        stats, first_all, first_any, first_all_alpha, first_any_alpha = (
+            _summarize_wf_window_sweep(rows)
+        )
+        assert stats == payload["sweep"]["stats"], (
+            f"{series}: the summary rebuilt from the captured rows must equal "
+            "the summary the tool printed for them"
+        )
+        recorded = payload["sweep"]["first_all_within_bound"]
+        assert recorded == (list(first_all) if first_all else None)
+
+
+def test_the_window_sweep_5000_fixture_is_a_trimmed_copy_of_the_capture():
+    """The trimmed 5,000-bar fixture keeps everything the summary reads.
+
+    A summary rebuilt from the trimmed rows has to equal the summary the
+    tool printed for the full rows, or the fixture is a different
+    measurement.
+    """
+    capture = _load_wf_sweep_5000_capture()
+    fixture = _load_wf_sweep_5000_fixture()
+
+    assert fixture["provenance"] == capture["provenance"]
+    assert len(fixture["rows"]) == len(capture["sweeps"]["no_effect"]["rows"]) + len(
+        capture["sweeps"]["effect"]["rows"]
+    )
+
+    trimmed = []
+    for series in ("no_effect", "effect"):
+        for row in capture["sweeps"][series]["rows"]:
+            block = row["paths"][WALK_FORWARD]
+            trimmed.append(
+                {
+                    "train_months": row["train_months"],
+                    "test_months": row["test_months"],
+                    "step_months": row["step_months"],
+                    "bars": row["bars"],
+                    "seed": row["seed"],
+                    "series": row["series"],
+                    "n_periods": row["n_periods"],
+                    "periods_with_position": row["periods_with_position"],
+                    "paths": {
+                        WALK_FORWARD: {
+                            key: block[key] for key in RECAPTURE_PATH_KEYS
+                        }
+                    },
+                }
+            )
+    assert fixture["rows"] == trimmed, (
+        "the trimmed fixture must keep every key the sweep's summary reads, "
+        "and nothing that would change it"
     )
 
 
@@ -3678,6 +3793,8 @@ TEST_REGISTRY = [
     ("test_the_window_sweep_capture_is_the_tools_own_json_output", test_the_window_sweep_capture_is_the_tools_own_json_output),
     ("test_the_window_sweep_fixture_is_a_trimmed_copy_of_the_capture", test_the_window_sweep_fixture_is_a_trimmed_copy_of_the_capture),
     ("test_the_window_sweep_is_documented_with_what_it_does_not_establish", test_the_window_sweep_is_documented_with_what_it_does_not_establish),
+    ("test_the_window_sweep_5000_capture_is_the_tools_own_json_output", test_the_window_sweep_5000_capture_is_the_tools_own_json_output),
+    ("test_the_window_sweep_5000_fixture_is_a_trimmed_copy_of_the_capture", test_the_window_sweep_5000_fixture_is_a_trimmed_copy_of_the_capture),
     ("test_the_cpcv_sweep_measures_the_cpcv_path_only", test_the_cpcv_sweep_measures_the_cpcv_path_only),
     ("test_the_cpcv_sweep_matches_the_framework_own_block", test_the_cpcv_sweep_matches_the_framework_own_block),
     ("test_the_shipped_cpcv_configuration_is_unchanged_by_the_sweep", test_the_shipped_cpcv_configuration_is_unchanged_by_the_sweep),
