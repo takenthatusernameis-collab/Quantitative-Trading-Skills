@@ -850,6 +850,7 @@ def measure_wf_window_sweep(
     seeds: Sequence[int],
     windows: Sequence[Tuple[int, int]],
     inject_effect: bool = True,
+    data_path: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Measure the walk-forward path's resolution across window configurations.
 
@@ -894,8 +895,21 @@ def measure_wf_window_sweep(
         # accepts (step_months >= test_months) and the one that pools every
         # bar after the training window into the out-of-sample record.
         step_months = test_months
-        for seed in seeds:
-            tmpdir, data, benchmarks = _control_sample(bars, seed, inject_effect)
+        if data_path:
+            base = Path(data_path).resolve().parent
+            full = load_data(str(data_path))
+            if len(full) < bars:
+                raise ValueError(f"{data_path} has {len(full)} rows, fewer than the {bars} requested")
+            data = full.iloc[:bars]
+            benchmarks = [load_data(str(base / name)).iloc[:bars] for name in BENCHMARK_FILES]
+            seed_iter = [None]
+        else:
+            seed_iter = list(seeds)
+        for seed in seed_iter:
+            if data_path is None:
+                tmpdir, data, benchmarks = _control_sample(bars, seed, inject_effect)
+            else:
+                tmpdir = None
             try:
                 results = _run_walk_forward(
                     data,
@@ -905,7 +919,8 @@ def measure_wf_window_sweep(
                     step_months=step_months,
                 )
             finally:
-                tmpdir.cleanup()
+                if tmpdir is not None:
+                    tmpdir.cleanup()
             summary = results.get("summary", {})
             block = _measure_path(
                 PATH_WALK_FORWARD,
@@ -921,13 +936,8 @@ def measure_wf_window_sweep(
                     "step_months": step_months,
                     "bars": bars,
                     "seed": seed,
-                    "series": "effect" if inject_effect else "no_effect",
-                    "source": "synthetic control fixture",
-                    # The framework's own record of how many of the windows
-                    # could price the strategy at all. A test window shorter
-                    # than the strategy's own indicator warmup leaves most
-                    # windows empty, and the number of windows that carry a
-                    # position is what shows it.
+                    "series": "real_history_prefix" if data_path else ("effect" if inject_effect else "no_effect"),
+                    "source": str(data_path) if data_path else "synthetic control fixture",
                     "n_periods": summary.get("n_periods"),
                     "periods_with_position": summary.get("periods_with_position"),
                     "paths": {PATH_WALK_FORWARD: block},
@@ -941,6 +951,7 @@ def measure_cpcv_sweep(
     seeds: Sequence[int],
     splits: Sequence[Tuple[int, float]],
     inject_effect: bool = True,
+    data_path: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Measure the CPCV path's resolution across split configurations.
 
@@ -1009,8 +1020,8 @@ def measure_cpcv_sweep(
                     "test_size": test_size,
                     "bars": bars,
                     "seed": seed,
-                    "series": "effect" if inject_effect else "no_effect",
-                    "source": "synthetic control fixture",
+                    "series": "real_history_prefix" if data_path else ("effect" if inject_effect else "no_effect"),
+                    "source": str(data_path) if data_path else "synthetic control fixture",
                     # The framework's own record of how many of the folds
                     # could price the strategy at all. A test window shorter
                     # than the strategy's own indicator warmup leaves most
@@ -2837,13 +2848,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             parser.error(str(exc))
         if len(sizes) != 1:
             parser.error("--wf-windows requires exactly one --size (fixed sample size)")
-        if args.data:
-            parser.error(
-                "--wf-windows sweeps the synthetic control fixture and cannot "
-                "be combined with --data: the sweep would report the "
-                "fixture's numbers under the real history's name. Measure a "
-                "real history with --sizes (the ladder) instead."
-            )
         size = sizes[0]
 
         series_to_measure = (
@@ -2858,6 +2862,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 seeds=seeds,
                 windows=windows,
                 inject_effect=inject_effect,
+                data_path=args.data,
             )
             stats, first_all, first_any, first_all_alpha, first_any_alpha = (
                 _summarize_wf_window_sweep(rows)
@@ -2901,13 +2906,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         splits = _parse_cpcv_splits(args.cpcv_splits)
         if len(sizes) != 1:
             parser.error("--cpcv-splits requires exactly one --size (fixed sample size)")
-        if args.data:
-            parser.error(
-                "--cpcv-splits sweeps the synthetic control fixture and cannot "
-                "be combined with --data: the sweep would report the "
-                "fixture's numbers under the real history's name. Measure a "
-                "real history with --sizes (the ladder) instead."
-            )
         size = sizes[0]
 
         # The sweep measures the series the flag asks for, and names it.
@@ -2926,6 +2924,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 seeds=seeds,
                 splits=splits,
                 inject_effect=inject_effect,
+                data_path=args.data,
             )
             stats, first_all, first_any, first_all_alpha, first_any_alpha = (
                 _summarize_cpcv_sweep(rows)
