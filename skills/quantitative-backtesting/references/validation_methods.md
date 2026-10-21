@@ -1905,6 +1905,16 @@ command, commit, environment and fixture construction -- in
 from scratch so the fixture is checked against a fresh run of the framework
 rather than against itself.
 
+A second capture, `tests/fixtures/resolution_ladder_2500_to_10000.json`,
+covers the cheap end of the same ladder (2,500 / 5,000 / 10,000 bars, seed
+7, both series, all three paths) and **carries the alpha-floor driver** in
+every per-path block. The capture above predates the driver keys, so a
+summary built from *it* says the driver is "not measurable on this ladder";
+the re-capture is the same measurement carrying the driver's own numbers
+with it, and it agrees with the longer capture on every shared rung to
+floating-point noise (worst relative difference 4.3e-14), so adding the
+driver moved no number.
+
 What this does **not** establish: the crossing points are properties of the
 synthetic control fixture and of the shipped configuration, not promises
 about a real history. What it does establish is the mechanism -- the paths
@@ -1997,9 +2007,30 @@ draw. When the check fails the report says so: the framework then used its
 i.i.d.-normal null fallback, and the floor is set by the sample size rather
 than by the benchmark dispersion.
 
+**Measured on the captured ladder.** The re-capture
+(`tests/fixtures/resolution_ladder_2500_to_10000.json`) carries the driver
+in every per-path block, so a summary built from it explains the floor at
+every rung it measured instead of saying the driver cannot be measured.
+At the largest rung of that capture (10,000 bars) the floor is set by the
+worst of the two draws measured there:
+
+| Path | strategy alpha | benchmark alpha | dispersion (ddof=1) | alpha\* from the dispersion | the framework's own alpha\* |
+| --- | --- | --- | --- | --- | --- |
+| out-of-sample | 0.4103 | 0.4392 | 0.0204 | 0.0240 | 0.0240 |
+| walk-forward | 0.0266 | 0.1053 | 0.0557 | 0.0656 | 0.0656 |
+| CPCV | 0.4500 | 0.5091 | 0.0418 | 0.0492 | 0.0492 |
+
+The identity holds on all 18 row-and-path blocks of that capture (three
+rungs x two series x three paths). The per-rung summary reports the
+dispersion each rung's floor was estimated from
+(`per_size_alpha[*].min_benchmark_alpha_std` /
+`max_benchmark_alpha_std`), so the driver is readable at every rung and not
+only at the largest one.
+
 `tests/test_resolution_vs_sample_size.py` pins the identity against a live
 measurement of the framework, so the documented formula and the estimator
-cannot drift apart.
+cannot drift apart, and against the captured ladder, so the committed
+record cannot quietly lose the driver.
 
 #### What this does not establish
 

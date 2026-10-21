@@ -285,7 +285,13 @@ Risk Metrics:
   the criteria), the crossing is not an artefact of one random draw, the
   measurement agrees with the worked example's own shipped path (so it
   measures the shipped configuration and not a private copy of it), and it
-  moves no threshold, no bound, no criterion and no verdict. The data is the
+  moves no threshold, no bound, no criterion and no verdict. The measured
+  ladder is captured with its provenance in
+  `tests/fixtures/resolution_ladder_2500_to_50000.json` and re-captured (the
+  cheap end of the same ladder) in
+  `tests/fixtures/resolution_ladder_2500_to_10000.json`, which carries the
+  alpha-floor driver, so a summary built from the committed record reports
+  what sets the floor at every measured rung. The data is the
   synthetic positive-control fixture. See `references/validation_methods.md`,
   "How much data does criterion 2 need?".
 

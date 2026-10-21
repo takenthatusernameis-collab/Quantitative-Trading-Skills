@@ -49,7 +49,10 @@ These tests pin:
     scaled by the expected maximum of N draws -- so the floor tracks the
     strategy's own edge over its benchmark set, not the size of the
     parameter search -- and the report says so, with the numbers that
-    reproduce the floor.
+    reproduce the floor;
+  * the re-captured ladder carries that driver, so a summary built from the
+    captured fixture reports what sets the floor at every measured rung
+    instead of saying the driver cannot be measured.
 
 THE DATA IS THE SYNTHETIC POSITIVE-CONTROL FIXTURE
     The numbers are properties of a formula and of the decision machinery,
@@ -1303,10 +1306,30 @@ LADDER_FIXTURE = (
     SKILLS_DIR / "tests" / "fixtures" / "resolution_ladder_2500_to_50000.json"
 )
 
+# The same ladder, re-captured so that it also carries WHAT SETS THE ALPHA
+# FLOOR. The capture above predates the alpha-floor driver: its per-path
+# blocks have no ``strategy_alpha`` / ``benchmark_alphas``, so a summary
+# built from those rows says the driver is "not measurable on this ladder" --
+# honest, but thin, because the ladder's whole point is to show the
+# crossing and the crossing is now reported without the driver that sets the
+# floor at every rung. The re-capture is the cheap ladder (2,500 / 5,000 /
+# 10,000 bars, one seed, both series): the 50,000-bar rung costs minutes
+# per draw, so the whole ladder is not worth re-running for the driver's own
+# numbers.
+DRIVER_LADDER_FIXTURE = (
+    SKILLS_DIR / "tests" / "fixtures" / "resolution_ladder_2500_to_10000.json"
+)
+
 
 def _load_ladder_fixture():
     """The measured ladder, with its provenance."""
     with open(LADDER_FIXTURE, "r") as handle:
+        return json.load(handle)
+
+
+def _load_driver_ladder_fixture():
+    """The re-captured ladder, with its provenance."""
+    with open(DRIVER_LADDER_FIXTURE, "r") as handle:
         return json.load(handle)
 
 
@@ -1576,6 +1599,134 @@ def test_the_measured_ladder_is_the_frameworks_own_numbers():
             assert block["expected_max_alpha"] <= block["min_detectable_alpha"]
 
 
+def test_the_re_captured_ladder_reports_what_sets_the_alpha_floor():
+    """The captured ladder carries the driver, at every rung it measured.
+
+    The ladder's point is the crossing, and the crossing is now reported
+    with the driver that sets the floor -- but the capture that crossed
+    predates the driver keys, so a summary built from it says the driver is
+    "not measurable on this ladder". That is honest and thin at once: the
+    numbers are there, the explanation is not.
+
+    The re-captured ladder (2,500 / 5,000 / 10,000 bars, one seed, both
+    series, all three paths) carries the driver's own numbers, so:
+
+      * the summary built from the fixture reports the driver at every
+        measured rung, for every path;
+      * the driver reproduces the framework's own ``expected_max_alpha``
+        on every rung where the identity holds -- re-derived here with the
+        standard library, so the fixture is checked against the documented
+        formula and not against the implementation's own estimator;
+      * the printed report says what sets the floor, instead of saying it
+        cannot be measured;
+      * the re-capture is the SAME measurement as the older capture of the
+        same rungs (they agree to floating-point noise), so nothing moved
+        while the driver was added.
+    """
+    fixture = _load_driver_ladder_fixture()
+    rows = fixture["rows"]
+    provenance = fixture["provenance"]
+
+    # The capture says what it is and where it came from.
+    assert provenance["measured"]["sizes"] == [2500, 5000, 10000]
+    assert provenance["measured"]["seeds"] == [7]
+    assert provenance["measured"]["draws_per_rung"] == 2
+    assert provenance["measured"]["split"] == {
+        "train_frac": TRAIN_FRAC,
+        "val_frac": VAL_FRAC,
+        "test_frac": TEST_FRAC,
+    }
+    assert "measure_resolution_vs_sample_size.py" in provenance["command"]
+    assert provenance["script_commit"]
+    assert len(rows) == 3 * 2
+
+    # The identity is the framework's own: the dispersion of the benchmark
+    # alphas, scaled by the expected maximum of N draws. Re-derived here
+    # with the standard library, not with the implementation's estimator.
+    checked = 0
+    for row in rows:
+        for path, block in row["paths"].items():
+            alphas = block["benchmark_alphas"]
+            n = int(block["n_benchmarks"])
+            predicted = statistics.stdev(alphas) * math.sqrt(2.0 * math.log(n))
+            assert abs(predicted - block["expected_max_alpha"]) < 1e-9, (
+                f"{path} at {row['bars']} bars ({row['series']}): the alpha "
+                "floor the framework reported must be reproducible from the "
+                "benchmark alphas it reported"
+            )
+            # The block's own dispersion is the sample standard deviation,
+            # and the strategy's own alpha is the primary benchmark's alpha.
+            assert abs(block["benchmark_alpha_std"] - statistics.stdev(alphas)) < 1e-12
+            assert abs(block["strategy_alpha"] - alphas[0]) < 1e-12
+            checked += 1
+    assert checked == 3 * 2 * 3, "every row and every path must be checked"
+
+    summary = summarize(rows)["by_path"]
+    for path, stats in summary.items():
+        driver = stats["alpha_floor_driver"]
+        assert driver["identity_holds_on_every_measured_draw"] is True, (
+            f"{path}: the floor the framework reported must be reproducible "
+            "from the benchmark alphas it reported"
+        )
+        assert driver["draws_measured"] == driver["draws_checked"] == 6
+        at_largest = driver["at_largest_measured_size"]
+        assert at_largest is not None
+        assert at_largest["benchmark_alpha_std"] is not None
+        assert at_largest["identity_holds"] is True
+        assert abs(
+            at_largest["alpha_star_from_dispersion"] - at_largest["expected_max_alpha"]
+        ) < 1e-12
+
+        # The driver is measurable at EVERY measured rung, not only at the
+        # largest one: each rung reports the dispersion its floor came from.
+        for entry in stats["per_size_alpha"]:
+            assert entry["min_benchmark_alpha_std"] is not None, (
+                f"{path} at {entry['bars']} bars: the rung must report the "
+                "dispersion its alpha floor was estimated from"
+            )
+            assert entry["max_benchmark_alpha_std"] is not None
+
+        # And the report says what sets the floor, instead of saying the
+        # floor cannot be explained.
+        output = _printed_summary(rows, path)
+        assert "what sets the alpha floor" in output
+        assert "not measurable on this ladder" not in output, (
+            f"{path}: the ladder carries the driver, so the report must not "
+            "say the floor cannot be measured"
+        )
+
+    # The re-capture is the SAME measurement as the older capture of the
+    # same rungs: the shared rows agree to floating-point noise, so adding
+    # the driver did not move a single number.
+    older = {
+        (row["bars"], row["seed"], row["series"], path): block
+        for row in _load_ladder_fixture()["rows"]
+        for path, block in row["paths"].items()
+    }
+    shared = 0
+    for row in rows:
+        for path, block in row["paths"].items():
+            old = older.get((row["bars"], row["seed"], row["series"], path))
+            if old is None:
+                continue
+            for key, value in block.items():
+                if key in ("strategy_alpha", "benchmark_alphas", "benchmark_alpha_std", "n_benchmarks"):
+                    continue  # the driver keys are new; the old capture has none
+                old_value = old[key]
+                if isinstance(value, float):
+                    assert abs(value - old_value) <= 1e-9 * max(1.0, abs(old_value)), (
+                        f"{path} at {row['bars']} bars ({row['series']}): {key} "
+                        f"moved between the two captures ({old_value} -> {value})"
+                    )
+                else:
+                    assert value == old_value, (
+                        f"{path} at {row['bars']} bars ({row['series']}): {key} "
+                        f"moved between the two captures ({old_value} -> {value})"
+                    )
+            shared += 1
+    assert shared == 3 * 2 * 3, "every shared rung must be compared"
+
+
 def test_the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars():
     """Live re-measurement of the rung the shorter ladder could not see.
 
@@ -1664,6 +1815,7 @@ TEST_REGISTRY = [
     ("test_the_summary_reports_the_floor_when_it_stops_blocking_the_path", test_the_summary_reports_the_floor_when_it_stops_blocking_the_path),
     ("test_the_measured_ladder_finds_the_alpha_crossing_the_shorter_ladder_missed", test_the_measured_ladder_finds_the_alpha_crossing_the_shorter_ladder_missed),
     ("test_the_measured_ladder_is_the_frameworks_own_numbers", test_the_measured_ladder_is_the_frameworks_own_numbers),
+    ("test_the_re_captured_ladder_reports_what_sets_the_alpha_floor", test_the_re_captured_ladder_reports_what_sets_the_alpha_floor),
     ("test_the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars", test_the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars),
     ("test_the_default_ladder_brackets_the_measured_alpha_crossing", test_the_default_ladder_brackets_the_measured_alpha_crossing),
 ]
