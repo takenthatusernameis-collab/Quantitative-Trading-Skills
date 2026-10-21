@@ -983,8 +983,12 @@ python3 skills/quantitative-backtesting/tests/test_resolution_vs_sample_size.py
     when it does), the adaptation is recorded in
     `summary["walk_forward_window"]`, a validation phase that cannot select
     reports its cause in `summary["no_selection_diagnosis"]` and the CLI
-    writes that diagnosis to `out_of_sample_summary.json`, and an inert
-    parameter grid is reported in `summary["inert_grid_params"]`.
+    writes that diagnosis to `out_of_sample_summary.json`, an inert
+    parameter grid is reported in `summary["inert_grid_params"]`, and the
+    validation window's observation count was reported under the same
+    mislabelled name the held-out window had (`val_n_periods` while its value
+    was `len(val_returns)`) and is now renamed to `val_n_observations`, the
+    rename pinned as a key rename against a pre-rename baseline fixture.
   - `test_inert_param_grid.py` - inert parameter grids on **all four**
     analysis paths: the measurement flags a grid key the strategy does not
     read (`lookback` for `sma_crossover`) and leaves a live key alone; a

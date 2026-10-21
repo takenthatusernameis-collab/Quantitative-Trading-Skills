@@ -1367,7 +1367,13 @@ Two rules keep the two p-values distinguishable, and both are pinned by
   (`len(test_returns)`), which is what the resolution arithmetic needs; the
   example reports the same number under the same name so that "100" is not
   read as 100 independent periods. The walk-forward *period* count is a
-  different number and lives in `summary["n_periods"]`.
+  different number and lives in `summary["n_periods"]`. The validation window
+  was reported under the same mislabelled name (`val_n_periods`, also
+  `len(val_returns)`) and is now `validation_performance["val_n_observations"]`;
+  the rename is pinned as a key rename against a pre-rename baseline fixture
+  (`tests/fixtures/validation_performance_pre_rename_baseline.json`), so the
+  value under the old name equals the value under the new name and every
+  other key and value of `validation_performance` is unchanged.
 
 ### The framework's own verdicts report their resolution
 

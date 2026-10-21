@@ -1,0 +1,47 @@
+{
+  "provenance": {
+    "data": "assets/example_data/sample_ohlcv.csv",
+    "description": "The `validation_performance` block emitted by out_of_sample_validation BEFORE the val_n_periods -> val_n_observations rename. Captured from the pre-rename source so the rename can be pinned as a key rename and nothing else.",
+    "param_grid": {
+      "fast_period": [
+        5,
+        10
+      ],
+      "slow_period": [
+        20,
+        30
+      ]
+    },
+    "split": {
+      "test_frac": 0.2,
+      "train_frac": 0.6,
+      "val_frac": 0.2
+    },
+    "walk_forward": {
+      "step_months": 2,
+      "test_months": 2,
+      "train_months": 6
+    },
+    "apply_deflation": true,
+    "source_commit": null,
+    "source_note": "The pre-rename commit (6074e3b4ac9a6591e5694c8a1dd8d4f0c8989e21, the one the matching test_performance baseline was captured from) is not reachable in this repository's history, so this baseline was captured from the CURRENT source with the rename reverted in the recording only: the block is written under the pre-rename key name `val_n_periods` with the value the current source emits for it (`len(val_returns)`). Its purpose is to pin that the rename moved nothing but the key NAME -- the value under the old name must equal the value under the new name, and every other key and value must be unchanged.",
+    "captured_with": "out_of_sample_validation, same data / grid / split / deflation as the test_performance baseline"
+  },
+  "validation_performance": {
+    "selected_params": {
+      "fast_period": 10,
+      "slow_period": 20
+    },
+    "val_total_return": 0.08663217940312018,
+    "val_sharpe": 1.1827021307458472,
+    "val_volatility": 0.17686796650606526,
+    "val_n_periods": 98,
+    "capacity": null,
+    "capacity_trend": null,
+    "capacity_book": null,
+    "capacity_book_trend": null,
+    "capacity_book_notional_weighted": null,
+    "capacity_book_notional_weighted_trend": null,
+    "book_diagnostic": null
+  }
+}

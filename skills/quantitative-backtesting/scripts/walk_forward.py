@@ -5744,7 +5744,14 @@ def out_of_sample_validation(
         "val_total_return": val_total_return,
         "val_sharpe": val_sharpe,
         "val_volatility": float(val_returns.std() * np.sqrt(ann_factor)) if len(val_returns) > 1 else 0.0,
-        "val_n_periods": len(val_returns),
+        # The number of return observations the validation statistics were
+        # computed on -- `len(val_returns)`, the same series the Sharpe and
+        # volatility above are computed from. This is the count the
+        # resolution arithmetic needs, so it is reported as observations, not
+        # periods: the walk-forward PERIOD count is a different quantity and
+        # still lives in `validation_results["summary"]["n_periods"]`. It used
+        # to be emitted under the mislabelled name `val_n_periods`.
+        "val_n_observations": len(val_returns),
         "capacity": val_capacity_point,
         "capacity_trend": val_capacity_trend,
         # Book-based capacity for the validation window (see above).

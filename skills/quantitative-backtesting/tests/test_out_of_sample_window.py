@@ -19,6 +19,10 @@ These tests guard the repaired behaviour:
     collapsing every failure into one sentence;
   * a parameter grid that does not change the strategy's behaviour is
     reported as the null experiment it is.
+  * the validation window's observation count was reported under the same
+    mislabelled name the held-out window had (`val_n_periods` while its value
+    was `len(val_returns)`) and is now renamed to `val_n_observations`; the
+    rename is pinned as a key rename against a pre-rename baseline.
 
 Run with: python3 skills/quantitative-backtesting/tests/test_out_of_sample_window.py
 No third-party test framework is required; uses only the standard library.
@@ -47,6 +51,9 @@ from walk_forward import (  # noqa: E402
 
 SAMPLE_DATA = SKILLS_DIR / "assets" / "example_data" / "sample_ohlcv.csv"
 WALK_FORWARD_CLI = SKILLS_DIR / "scripts" / "walk_forward.py"
+BASELINE_VALIDATION = (
+    SKILLS_DIR / "tests" / "fixtures" / "validation_performance_pre_rename_baseline.json"
+)
 
 # A grid the strategy actually reads. `sma_crossover` uses `fast_period` and
 # `slow_period`; a grid over any other name is inert (see the inertness
@@ -182,7 +189,93 @@ def test_out_of_sample_validation_adapts_the_window_to_the_training_split():
     # The out-of-sample report is complete: a selection, a validation window
     # and a held-out test window.
     assert results["test_performance"]["test_n_observations"] > 0
-    assert results["validation_performance"]["val_n_periods"] > 0
+    # The validation window's observation count is reported as observations,
+    # not periods: the validation phase runs on the same return series the
+    # Sharpe is computed from, so the count that matters for the resolution
+    # arithmetic is the number of return observations, not the number of
+    # walk-forward periods.
+    assert results["validation_performance"]["val_n_observations"] > 0
+    assert "val_n_periods" not in results["validation_performance"], (
+        "the validation window is still reported under the mislabelled "
+        "`val_n_periods` key"
+    )
+    # The count is the number of return observations the validation
+    # statistics were computed on (`len(val_returns)`), which is what the
+    # resolution arithmetic needs -- not the number of walk-forward periods
+    # (a different quantity, still reported under `n_periods`). The series
+    # itself is not exposed by `validation_performance`, so the pin is that
+    # the count is the observation count the Sharpe and volatility were
+    # computed over: it is positive, it is an integer, and it is not the
+    # walk-forward period count.
+    walk_periods = results["validation_results"]["summary"]["n_periods"]
+    assert isinstance(
+        results["validation_performance"]["val_n_observations"], int
+    ), "the validation observation count must be an integer"
+    assert results["validation_performance"]["val_n_observations"] != walk_periods, (
+        "the validation observation count must not be conflated with the "
+        "walk-forward period count"
+    )
+
+
+BASELINE_VALIDATION = (
+    SKILLS_DIR / "tests" / "fixtures" / "validation_performance_pre_rename_baseline.json"
+)
+
+
+def _run_validation_for_baseline() -> dict:
+    """The exact data / grid / split the baseline fixture was captured on."""
+    data = _load_sample()
+    return out_of_sample_validation(
+        data=data,
+        strategy_factory=_make_strategy_factory("sma_crossover"),
+        param_grid=MEANINGFUL_GRID,
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+        apply_deflation=True,
+    )
+
+
+def test_the_validation_window_rename_moved_no_metric():
+    """The `val_n_periods` -> `val_n_observations` rename is a key rename.
+
+    The validation window was reported under the same mislabelled name the
+    held-out window had (`val_n_periods` while its value was the number of
+    return observations in it, `len(val_returns)`). The rename is a breaking
+    API change, so it is pinned against a pre-rename baseline: the value under
+    the old name must equal the value under the new name, and every other key
+    and value of `validation_performance` must be bit-identical to the
+    pre-rename output.
+    """
+    baseline = json.loads(BASELINE_VALIDATION.read_text())
+    results = _run_validation_for_baseline()
+    validation_performance = results["validation_performance"]
+
+    expected = dict(baseline["validation_performance"])
+    old_count = expected.pop("val_n_periods")
+
+    assert "val_n_observations" in validation_performance, (
+        "the validation window is no longer reported at all"
+    )
+    assert "val_n_periods" not in validation_performance, (
+        "the mislabelled key is still emitted: the rename is not complete"
+    )
+    assert validation_performance["val_n_observations"] == old_count, (
+        "the renamed key carries a different number than before the rename"
+    )
+    # Same key set, modulo the rename itself (the new key and nothing else).
+    current_keys = set(validation_performance) - {"val_n_observations"}
+    assert set(expected) == current_keys, (
+        "the rename added or removed a key beyond the rename itself"
+    )
+    for key, value in expected.items():
+        assert validation_performance[key] == value, (
+            f"the rename changed the value of `{key}`"
+        )
 
 
 def test_out_of_sample_validation_keeps_the_window_when_it_fits():
@@ -332,6 +425,8 @@ TEST_REGISTRY = [
      test_resolve_walk_forward_window_reports_an_infeasible_split),
     ("test_out_of_sample_validation_adapts_the_window_to_the_training_split",
      test_out_of_sample_validation_adapts_the_window_to_the_training_split),
+    ("test_the_validation_window_rename_moved_no_metric",
+     test_the_validation_window_rename_moved_no_metric),
     ("test_out_of_sample_validation_keeps_the_window_when_it_fits",
      test_out_of_sample_validation_keeps_the_window_when_it_fits),
     ("test_out_of_sample_validation_flags_an_inert_parameter_grid",
