@@ -2032,6 +2032,48 @@ measurement of the framework, so the documented formula and the estimator
 cannot drift apart, and against the captured ladder, so the committed
 record cannot quietly lose the driver.
 
+#### A floor that was never measured is not a floor of zero
+
+The floor above is a **measurement**: the framework priced the Deflated Alpha
+criterion on that draw and estimated alpha* from the benchmark alphas it
+reported. It is not always possible to price that criterion. The framework
+records why (`alpha_status` / `alpha_reason` in the per-path block), and the
+measurement carries that record instead of re-deriving it.
+
+When the criterion could not be priced, the alpha numbers the block carries
+are the degenerate output of the failed pricing, not measurements. On a
+zero-volatility draw the strategy's alpha, every benchmark alpha and the
+dispersion between them are all exactly zero, so the block's `expected_max_alpha`
+is `0.0` -- a **placeholder**, not a measured floor of zero. Read as a
+measurement it produces two false statements: that the floor is zero (it was
+never estimated), and that the floor "does not block criterion 5" (criterion 5
+was never evaluated on that draw).
+
+So the report keeps the two apart:
+
+| | floor measured | floor not measured |
+| --- | --- | --- |
+| `alpha_floor_at_largest_size` | the floor, at the largest rung whose floor was measured | `None` (never `0.0`) |
+| `alpha_floor_beyond_plausible_bound` | `True` / `False` | `None` -- the question was not settled, not answered "no" |
+| `alpha_floor_beyond_plausible_bound_at_largest_size` | `True` / `False` | `None` |
+| `alpha_floor_measured` | `True` | `False` |
+| `alpha_floor_unmeasured_rungs` / `alpha_floor_unmeasured_reason` | empty | the rungs, and the framework's own reason |
+| `alpha_floor_driver` | the identity, the dispersion, the check against the framework's own floor | no driver: the identity is not checked on a placeholder draw |
+| the printed conclusion | where the floor stands against the bound | "the floor was not measured on this path: the framework could not price the alpha criterion (<reason>)" |
+
+**Measured.** The shipped 504-bar history
+(`assets/example_data/sample_ohlcv.csv`, measured with `--data`) is the
+reproducer: its CPCV path cannot price the Deflated Alpha criterion on 504
+bars, and the framework's own reason is `zero_volatility`. The out-of-sample
+and walk-forward paths on the same history price it normally, and their floors
+(0.0159 and 0.0650) are reported with their drivers as before.
+
+The rule the report follows is the framework's own status, not the size of the
+number: a block whose criterion was priced is a measurement even when the
+floor it carries is zero, and a block whose criterion was not priced is a
+placeholder whatever it carries. `tests/test_resolution_vs_sample_size.py`
+pins both sides.
+
 #### What this does not establish
 
 - **The floor is a property of the sample, not of the framework.** SR* is

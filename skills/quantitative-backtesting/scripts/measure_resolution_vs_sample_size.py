@@ -98,6 +98,23 @@ WHAT SETS THE ALPHA FLOOR
     floor can be reproduced from the numbers the summary carries. A higher
     alpha floor is a bigger gap, not a worse test.
 
+A FLOOR THAT WAS NEVER MEASURED IS NOT A FLOOR OF ZERO
+    The floor above is a measurement: the framework priced the Deflated
+    Alpha criterion on that draw. When it could not price it, the alpha
+    numbers the block carries are the degenerate output of the failed
+    pricing -- on a zero-volatility draw the strategy's alpha, every
+    benchmark alpha and the dispersion between them are all exactly zero --
+    so the block's floor is a placeholder, not a measured floor of zero.
+
+    Read as a measurement, that placeholder produces two false statements:
+    that the floor is zero (it was never estimated), and that the floor
+    "does not block criterion 5" (criterion 5 was never evaluated on that
+    draw). The framework's own ``alpha_status`` / ``alpha_reason`` say
+    which is which, and the report follows them: the floor is reported as
+    not measured, with the framework's own reason, and the summary's floor
+    flags are ``None`` (unknown) rather than ``False`` (measured, and not
+    above the bound).
+
 THE DATA IS SYNTHETIC
     By default the measurement runs on the synthetic control fixture
     (``scripts/generate_positive_control_data.py``): a series produced by a
@@ -421,6 +438,33 @@ def _measure_path(
     }
 
 
+def _alpha_floor_measured(block: Dict[str, Any]) -> bool:
+    """Whether a block's alpha floor is a measurement or a placeholder.
+
+    The framework's own ``alpha_status`` is the record of whether the
+    Deflated Alpha criterion (criterion 5) could be *priced* on that draw.
+    When it could not, the alpha numbers the block carries are the
+    degenerate output of the failed pricing: on a zero-volatility draw the
+    strategy's alpha, every benchmark alpha and the dispersion between them
+    are all exactly zero, so the floor the block reports is a placeholder,
+    not a measured floor of zero.
+
+    That distinction is the difference between "the floor is zero" and
+    "the floor was never measured", and the report has to keep it: a floor
+    that was never measured cannot be said not to block criterion 5, because
+    criterion 5 was never evaluated on that draw.
+
+    A block that carries no status at all (an older capture, written before
+    the status was recorded) is treated as measured: every block in the
+    committed captures is a resolvable one, and the alternative would
+    silently drop a real floor from a summary that used to report it.
+    """
+    status = block.get("alpha_status")
+    if status is None:
+        return True
+    return status == "resolvable"
+
+
 def _alpha_floor_driver(block: Dict[str, Any]) -> Dict[str, Any]:
     """One path block's Deflated Alpha floor, and what sets it.
 
@@ -442,6 +486,12 @@ def _alpha_floor_driver(block: Dict[str, Any]) -> Dict[str, Any]:
     cross-sectional estimator (the benchmark alphas were not available in
     sufficient number), and the driver says so rather than reporting a
     floor it cannot back.
+
+    A floor the framework could not price at all is reported as unpriceable,
+    not as a floor of zero: the driver carries the framework's own status
+    and reason, and neither the reconstruction nor the identity check is
+    claimed for a draw whose alphas are placeholders (see
+    ``_alpha_floor_measured``).
     """
     floor = block.get("expected_max_alpha")
     alphas = [
@@ -454,8 +504,13 @@ def _alpha_floor_driver(block: Dict[str, Any]) -> Dict[str, Any]:
     except (TypeError, ValueError):
         n = len(alphas)
     std = float(np.std(alphas, ddof=1)) if len(alphas) >= 2 else None
+    # The floor is a measurement only where the framework priced the alpha
+    # criterion on this draw AND reported a floor. Otherwise the block's
+    # alphas are the degenerate output of a failed pricing, and neither the
+    # reconstruction nor the identity is claimed for them.
+    measured = _alpha_floor_measured(block) and floor is not None
     predicted = None
-    if std is not None and n >= 2:
+    if measured and std is not None and n >= 2:
         predicted = std * math.sqrt(2.0 * math.log(n))
     identity_holds = None
     if predicted is not None and floor is not None:
@@ -470,6 +525,11 @@ def _alpha_floor_driver(block: Dict[str, Any]) -> Dict[str, Any]:
         "alpha_star_from_dispersion": predicted,
         "expected_max_alpha": floor,
         "identity_holds": identity_holds,
+        # The framework's own record of whether criterion 5 could be priced
+        # on this draw, and why not when it could not.
+        "alpha_status": block.get("alpha_status"),
+        "alpha_reason": block.get("alpha_reason"),
+        "floor_measured": measured,
     }
 
 
@@ -858,21 +918,30 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
     # alphas (see `_alpha_floor_driver`), so each draw's floor is explained
     # by its own dispersion -- and the report can say so.
     alpha_drivers: Dict[int, List[Dict[str, Any]]] = {}
+    # The draws whose alpha floor could NOT be measured: the framework could
+    # not price the Deflated Alpha criterion on them, so the floor they
+    # carry is a placeholder, not a measurement. They are kept apart from
+    # the measured floors so that a placeholder zero is never read as a
+    # measured floor of zero.
+    alpha_unmeasured: Dict[int, List[Dict[str, Any]]] = {}
     for row in rows:
         block = _path_block(row, path)
         bars = row.get("bars")
         value = block.get("min_detectable_alpha")
         bucket = per_size_alpha.setdefault(
-            bars, {"values": [], "within": 0, "measured": 0, "floors": []}
+            bars,
+            {"values": [], "within": 0, "measured": 0, "floors": [], "unmeasured": []},
         )
         bucket["measured"] += 1
-        floor = block.get("expected_max_alpha")
-        if floor is not None:
+        driver = _alpha_floor_driver(block)
+        if driver["floor_measured"]:
+            floor = block.get("expected_max_alpha")
             bucket["floors"].append(floor)
             alpha_floors.append(floor)
-        driver = _alpha_floor_driver(block)
-        if driver.get("expected_max_alpha") is not None:
             alpha_drivers.setdefault(bars, []).append(driver)
+        else:
+            bucket["unmeasured"].append(driver)
+            alpha_unmeasured.setdefault(bars, []).append(driver)
         if value is None:
             continue
         bucket["values"].append(value)
@@ -919,6 +988,7 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
         values = bucket["values"]
         rung_floors = bucket["floors"]
         rung_drivers = alpha_drivers.get(bars, [])
+        rung_unmeasured = alpha_unmeasured.get(bars, [])
         rung_stds = [
             d["benchmark_alpha_std"] for d in rung_drivers
             if d.get("benchmark_alpha_std") is not None
@@ -935,6 +1005,13 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
                 # maximum of N draws (N the number of benchmarks), so it
                 # tracks the strategy's own alpha gap to its benchmark set
                 # rather than the size of the parameter grid.
+                #
+                # A draw whose floor could not be measured is NOT in this
+                # number: the framework could not price the Deflated Alpha
+                # criterion there, so the block's floor is a placeholder
+                # (on a zero-volatility draw, a zero) rather than a
+                # measurement. The count of those draws is reported
+                # alongside, so a rung with no floor says why.
                 "max_expected_max_alpha": max(rung_floors) if rung_floors else None,
                 "min_expected_max_alpha": min(rung_floors) if rung_floors else None,
                 # What sets the floor at this rung: the dispersion of the
@@ -943,6 +1020,17 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
                 "max_benchmark_alpha_std": max(rung_stds) if rung_stds else None,
                 "draws_measured": bucket["measured"],
                 "draws_resolved": len(values),
+                # The draws at this rung whose alpha floor could not be
+                # measured, and the framework's own reason why.
+                "draws_floor_unmeasured": len(rung_unmeasured),
+                "floor_unmeasured_reason": next(
+                    (
+                        d.get("alpha_reason")
+                        for d in rung_unmeasured
+                        if d.get("alpha_reason")
+                    ),
+                    None,
+                ),
                 "draws_within_bound": bucket["within"],
                 "all_within_bound": bool(values)
                 and len(values) == bucket["measured"]
@@ -987,18 +1075,32 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
     # The alpha crossing, mirrored off the Sharpe crossing. The alpha floor
     # (alpha*) is the deflation benchmark for criterion 5, and the bound is
     # the framework's own 10% annualized alpha.
-    alpha_floor_at_largest = (
-        alpha_size_summary[-1].get("max_expected_max_alpha")
-        if alpha_size_summary
-        else None
-    )
+    #
+    # The floor the summary quotes is the floor at the largest rung where
+    # the floor could be MEASURED. A rung where the framework could not
+    # price the Deflated Alpha criterion carries a placeholder, not a
+    # measurement, so it cannot set the floor the summary quotes -- and the
+    # flag below is about the rungs whose floor was measured.
+    alpha_floor_at_largest = None
+    alpha_floor_at_largest_bars = None
+    for entry in reversed(alpha_size_summary):
+        if entry.get("max_expected_max_alpha") is not None:
+            alpha_floor_at_largest = entry["max_expected_max_alpha"]
+            alpha_floor_at_largest_bars = entry["bars"]
+            break
     alpha_rung_floor_maxima = [
         entry["max_expected_max_alpha"]
         for entry in alpha_size_summary
         if entry.get("max_expected_max_alpha") is not None
     ]
-    alpha_floor_beyond_bound = bool(alpha_rung_floor_maxima) and all(
-        f > PLAUSIBLE_MAX_ANNUALIZED_ALPHA for f in alpha_rung_floor_maxima
+    # The floor was above the bound at every rung whose floor was measured.
+    # When no rung's floor could be measured the flag is None, not False:
+    # "the floor does not block criterion 5" is not established on a path
+    # where criterion 5 was never evaluated.
+    alpha_floor_beyond_bound = (
+        all(f > PLAUSIBLE_MAX_ANNUALIZED_ALPHA for f in alpha_rung_floor_maxima)
+        if alpha_rung_floor_maxima
+        else None
     )
 
     # WHAT SETS THE ALPHA FLOOR
@@ -1013,6 +1115,7 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
     # estimate from the benchmark dispersion (its i.i.d.-normal null
     # fallback) is reported as such instead of being explained away.
     all_alpha_drivers = [d for drivers in alpha_drivers.values() for d in drivers]
+    all_alpha_unmeasured = [d for drivers in alpha_unmeasured.values() for d in drivers]
     # Only the draws whose benchmark alphas were reported can be checked; a
     # draw that cannot be checked is not counted as a failure, and the
     # counts are reported so a reader can see how many were checked.
@@ -1020,8 +1123,8 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
         d["identity_holds"] for d in all_alpha_drivers if d["identity_holds"] is not None
     ]
     worst_driver: Optional[Dict[str, Any]] = None
-    if alpha_size_summary:
-        largest_bars = alpha_size_summary[-1]["bars"]
+    if alpha_drivers:
+        largest_bars = max(alpha_drivers)
         candidates = alpha_drivers.get(largest_bars, [])
         if candidates:
             worst_driver = max(candidates, key=lambda d: d["expected_max_alpha"])
@@ -1041,6 +1144,20 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
         ),
         "draws_measured": len(all_alpha_drivers),
         "draws_checked": len(identity_flags),
+        # The draws whose floor could not be measured, and the framework's
+        # own reason: the floor they carry is a placeholder, so the driver
+        # is not claimed for them.
+        "floor_measured": bool(all_alpha_drivers),
+        "draws_unmeasured": len(all_alpha_unmeasured),
+        "unmeasured_rungs": sorted(alpha_unmeasured),
+        "unmeasured_reason": next(
+            (
+                d.get("alpha_reason")
+                for d in all_alpha_unmeasured
+                if d.get("alpha_reason")
+            ),
+            None,
+        ),
         "at_largest_measured_size": worst_driver,
         "benchmark_alpha_std_range": {
             "min": min(driver_stds) if driver_stds else None,
@@ -1080,6 +1197,15 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
         ),
         "floor_at_largest_size": floor_at_largest,
         "alpha_floor_at_largest_size": alpha_floor_at_largest,
+        # The rung the alpha floor above was measured at, and whether the
+        # floor could be measured at all: where the framework could not
+        # price the Deflated Alpha criterion, the floor it carries is a
+        # placeholder, not a measurement, and the summary says so instead
+        # of quoting a zero.
+        "alpha_floor_at_largest_measured_size": alpha_floor_at_largest_bars,
+        "alpha_floor_measured": bool(all_alpha_drivers),
+        "alpha_floor_unmeasured_rungs": sorted(alpha_unmeasured),
+        "alpha_floor_unmeasured_reason": alpha_floor_driver["unmeasured_reason"],
         # What sets the alpha floor (alpha*), and the check that the floor
         # the framework reported is the one the driver reproduces.
         "alpha_floor_driver": alpha_floor_driver,
@@ -1088,12 +1214,14 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
         "floor_beyond_plausible_bound": floor_beyond_bound,
         "alpha_floor_beyond_plausible_bound": alpha_floor_beyond_bound,
         # The floor is still above the bound at the largest rung measured:
-        # more data may bring it under.
+        # more data may bring it under. None (not False) when the floor was
+        # never measured: the question was not settled.
         "floor_beyond_plausible_bound_at_largest_size": floor_at_largest is not None
         and floor_at_largest > PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
         "alpha_floor_beyond_plausible_bound_at_largest_size": (
-            alpha_floor_at_largest is not None
-            and alpha_floor_at_largest > PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+            alpha_floor_at_largest > PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+            if alpha_floor_at_largest is not None
+            else None
         ),
         "all_rungs_within_bound": bool(finite_sharpes)
         and all(s <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE for s in finite_sharpes),
@@ -1276,6 +1404,8 @@ def _print_floor_status(
     floor_key: str,
     beyond_key: str,
     beyond_at_largest_key: str,
+    measured_key: Optional[str] = None,
+    unmeasured_reason_key: Optional[str] = None,
 ) -> None:
     """Print where one criterion's deflation floor stands.
 
@@ -1305,9 +1435,33 @@ def _print_floor_status(
     that had come under it was silently dropped from the summary -- the
     one case in which the floor stops being the reason a criterion cannot
     be satisfied.
+
+    A fourth case is reported when the floor was never measured at all:
+    the framework could not price the criterion, so the block carries a
+    placeholder rather than a floor. That is not "a floor of zero" and it
+    is not "a floor that does not block the criterion" -- the criterion was
+    never evaluated on that path, so nothing about it is settled here.
     """
     largest = stats.get("largest_measured_size")
     floor = stats.get(floor_key)
+    if measured_key is not None and not stats.get(measured_key, True):
+        reason = stats.get(unmeasured_reason_key) if unmeasured_reason_key else None
+        if reason:
+            print(
+                f"  the {label} floor was not measured on this path: the "
+                f"framework could not price the "
+                f"{'alpha' if criterion == 5 else 'Sharpe'} criterion "
+                f"({reason}), so the floor it carries is a placeholder rather "
+                f"than a measurement, and nothing here settles criterion "
+                f"{criterion}"
+            )
+        else:
+            print(
+                f"  the {label} floor could not be measured on this path: the "
+                f"deflation benchmark is missing from the summary, so nothing "
+                f"here settles criterion {criterion}"
+            )
+        return
     if floor is None:
         print(
             f"  the {label} floor could not be measured on this path: the "
@@ -1354,8 +1508,28 @@ def _print_alpha_floor_driver(stats: Dict[str, Any]) -> None:
     not estimate the floor from the benchmark dispersion (its i.i.d.-normal
     null fallback), the report says that instead of explaining the floor
     with numbers that do not produce it.
+
+    A floor the framework could not price at all is reported as unpriceable:
+    the report does not quote the block's placeholder alphas as a dispersion
+    and does not claim the identity is reproduced on them.
     """
     driver = stats.get("alpha_floor_driver") or {}
+    if not driver.get("floor_measured", True):
+        reason = driver.get("unmeasured_reason")
+        if reason:
+            print(
+                "  what sets the alpha floor (alpha*): not measurable on this "
+                "ladder -- the framework could not price the alpha criterion "
+                f"({reason}), so the alphas the block carries are placeholders "
+                "and the floor they imply is not a measurement"
+            )
+        else:
+            print(
+                "  what sets the alpha floor (alpha*): not measurable on this "
+                "ladder -- the framework did not report a floor, so there is "
+                "nothing to explain"
+            )
+        return
     at_largest = driver.get("at_largest_measured_size") or {}
     if not at_largest or at_largest.get("benchmark_alpha_std") is None:
         print(
@@ -1407,6 +1581,21 @@ def _print_alpha_floor_driver(stats: Dict[str, Any]) -> None:
             "    the framework's floor was NOT reproduced from the benchmark "
             "alphas (it used its i.i.d.-normal null fallback, so the floor "
             "is set by the sample size, not by the benchmark dispersion)"
+        )
+    # The draws whose floor could not be measured at all: their alphas are
+    # placeholders, so the driver is not claimed for them and their floor
+    # is not compared against the bound.
+    unmeasured = driver.get("draws_unmeasured") or 0
+    if unmeasured:
+        rungs = driver.get("unmeasured_rungs") or []
+        reason = driver.get("unmeasured_reason")
+        rungs_text = ", ".join(str(r) for r in rungs) if rungs else "?"
+        print(
+            f"    {unmeasured} draw(s) measured at {rungs_text} bars could "
+            f"not price the alpha criterion"
+            + (f" ({reason})" if reason else "")
+            + ", so their floor is a placeholder and is not compared against "
+            "the bound"
         )
 
 
@@ -1465,10 +1654,27 @@ def print_path_summary(summary: Dict[str, Any], path: str) -> None:
         f"  highest deflation benchmark (alpha*) seen on the ladder: "
         f"{_fmt(stats.get('max_expected_max_alpha'), '%.4f')}"
     )
-    print(
-        f"  deflation benchmark (alpha*) at the largest measured sample size: "
-        f"{_fmt(stats.get('alpha_floor_at_largest_size'), '%.4f')}"
-    )
+    # The floor the summary quotes is the floor at the largest rung where it
+    # could be MEASURED. When that rung is not the largest rung measured (a
+    # larger rung's floor could not be measured), the rung is named.
+    alpha_floor_bars = stats.get("alpha_floor_at_largest_measured_size")
+    largest = stats.get("largest_measured_size")
+    if stats.get("alpha_floor_at_largest_size") is None:
+        print(
+            f"  deflation benchmark (alpha*) at the largest measured sample size: "
+            f"not measured"
+        )
+    elif alpha_floor_bars is not None and alpha_floor_bars != largest:
+        print(
+            f"  deflation benchmark (alpha*) at the largest sample size whose "
+            f"floor could be measured ({alpha_floor_bars} bars): "
+            f"{_fmt(stats.get('alpha_floor_at_largest_size'), '%.4f')}"
+        )
+    else:
+        print(
+            f"  deflation benchmark (alpha*) at the largest measured sample size: "
+            f"{_fmt(stats.get('alpha_floor_at_largest_size'), '%.4f')}"
+        )
     print(
         f"  plausibility bound for an annualized alpha: "
         f"{_fmt(stats['plausible_max_annualized_alpha'], '%.2f')}"
@@ -1497,6 +1703,8 @@ def print_path_summary(summary: Dict[str, Any], path: str) -> None:
         floor_key="alpha_floor_at_largest_size",
         beyond_key="alpha_floor_beyond_plausible_bound",
         beyond_at_largest_key="alpha_floor_beyond_plausible_bound_at_largest_size",
+        measured_key="alpha_floor_measured",
+        unmeasured_reason_key="alpha_floor_unmeasured_reason",
     )
     _print_alpha_floor_driver(stats)
     # The two criteria cross at different sample sizes. The alpha bound is

@@ -2,115 +2,103 @@
 
 ## Task
 
-**Report an unpriceable alpha floor as unpriceable, not as 0.0000.**
+**Capture the resolution curve on the longest real history in the repository,
+and state honestly what it does and does not show.**
 
-The alpha floor (alpha*) is quoted by the resolution report and by the
-summary. When the framework cannot price the alpha test on a path, it
-carries placeholder zeros in the per-path block, and the report quotes them
-as a measured floor — including telling the reader that "the floor does not
-block criterion 5" on a path where criterion 5 was never evaluated.
+The resolution ladder -- "at the shipped configuration, how large must the
+sample be before the pre-registered significance criteria can confirm an
+effect of a plausible size?" -- has only ever been captured on the synthetic
+positive-control fixture. The `--data` path that measures the same curve on
+a real history works, but no real-history measurement is committed, so the
+repository's only evidence for the crossing is a formula.
 
 ## Evidence
 
-- The `--data` path of `scripts/measure_resolution_vs_sample_size.py` was
-  exercised for the first time in this repository's history, on the
-  repository's own 504-bar sample:
+- The `--data` path of `scripts/measure_resolution_vs_sample_size.py` works
+  on the longest real history the repository carries,
+  `skills/quantitative-backtesting/assets/example_data/sample_panel_ohlcv.csv`
+  (1,500 bars, a `symbol` column, with `sample_benchmark.csv` beside it for
+  the two-benchmark Deflated Alpha path). Measured this session:
 
   ```
   python3 skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py \
-      --data skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv \
-      --sizes 504 --paths out_of_sample,walk_forward,cpcv
+      --data skills/quantitative-backtesting/assets/example_data/sample_panel_ohlcv.csv \
+      --sizes 1500 --paths out_of_sample
   ```
 
-  The CPCV path cannot price the alpha test on 504 bars, and the framework
-  says so in its own block:
-
-  ```
-  min_detectable_alpha: None
-  observed_annualized_alpha: 0.0
-  expected_max_alpha: 0.0
-  strategy_alpha: 0.0
-  benchmark_alphas: [0.0, 0.0]
-  alpha_status: not_resolvable
-  alpha_reason: zero_volatility
-  ```
-
-  but the report then prints:
-
-  ```
-  the alpha (alpha*) floor is at or under the plausibility bound at the
-  largest measured sample size (504 bars): the floor does not block
-  criterion 5 at that size
-  what sets the alpha floor (alpha*): std(benchmark alphas, ddof=1) * sqrt(2 ln N) with N = 2
-    strategy alpha: 0.0000; benchmark alphas: 0.0000, 0.0000
-    benchmark alpha dispersion (ddof=1): 0.0000; alpha* from that dispersion: 0.0000; the framework's own alpha*: 0.0000
-    the framework's floor is reproduced from the benchmark alphas, so a higher alpha floor means a bigger gap ...
-  ```
-
-  Both statements are wrong for that path: the floor is 0 because the test
-  could not be priced, not because the benchmark dispersion is zero, and
-  "the floor does not block criterion 5" is not established when criterion 5
-  was not resolvable. The driver reports the identity as *reproduced* on a
-  degenerate zero-dispersion draw, and the summary's
-  `alpha_floor_beyond_plausible_bound` is `False` with
-  `alpha_floor_at_largest_size == 0.0` — the summary says the alpha floor
-  never blocks criterion 5 on a path where it blocked nothing because it
-  was never measured.
-
-- The mechanism is in the report, not in the framework: the framework's own
-  `alpha_status` / `alpha_reason` are already in the per-path block
-  (`_measure_path` copies them), and the *reporting* layer
-  (`_alpha_floor_driver`, `_print_floor_status`, `_summarize_path`) is what
-  reads the placeholders as measurements. `scripts/walk_forward.py` is not
-  in this task's diff.
-
-- Every block in the two committed synthetic captures is `resolvable`
-  (checked: `results/resolution_floor/ladder_2500_to_50000.json`,
-  `results/resolution_floor/ladder_2500_to_10000.json`), which is why the
-  synthetic ladder never showed this.
+  The out-of-sample path at 1,500 bars: minimum confirmable annualized
+  Sharpe **2.5806** (still beyond the 2.0 plausibility bound), SR\* 1.4980,
+  minimum confirmable annualized alpha 2.3963, alpha\* 0.0109 (driver
+  reported, identity reproduced). So the mechanism is visible on real data
+  and the crossing is **not** reached: the repository's data cannot settle
+  "is there a sample size at which criterion 2 can confirm a plausible
+  effect?" on a real history.
+- The committed captures are synthetic only:
+  `results/resolution_floor/ladder_2500_to_50000.json` and
+  `results/resolution_floor/ladder_2500_to_10000.json` (and their
+  fixtures). `references/validation_methods.md` says in prose that "the
+  crossing points are properties of the synthetic control fixture and of the
+  shipped configuration, not promises about a real history" -- but there is
+  no measured real-history record to show what the same curve looks like on
+  the data the repository has.
+- The previous session's task (now done) found the `--data` path's first
+  exercise; this is the same path, used for what it is for.
 
 ## Bounded work
 
-1. `scripts/measure_resolution_vs_sample_size.py`: make the alpha side
-   distinguish "the framework could not price this criterion" from "the
-   floor is zero".
-   - `_alpha_floor_driver` and `_print_alpha_floor_driver` should report an
-     unpriceable floor as unpriceable (with the framework's own reason),
-     not quote a zero dispersion and call the identity reproduced;
-   - `_print_floor_status` should not say "the floor does not block
-     criterion N" for a floor that was never measured;
-   - `_summarize_path` should not read a placeholder zero as a measurement
-     in `alpha_floor_at_largest_size` / `alpha_floor_beyond_plausible_bound`
-     / `alpha_floor_beyond_plausible_bound_at_largest_size`.
-   Additive only: where the floor *was* measured, no existing key changes
-   value, and no threshold, bound, criterion or verdict moves.
-2. `tests/test_resolution_vs_sample_size.py`: pin the distinction — a
-   measured floor still reports the driver and the identity (the existing
-   pins must keep passing), and an unpriceable one says so instead of
-   quoting zeros. The 504-bar `--data` measurement above is a cheap
-   reproducer (a few seconds), or the block can be constructed directly.
-3. `references/validation_methods.md`: state the distinction next to the
-   alpha-floor discussion, so a reader is not told that a criterion that
-   could not be evaluated did not block.
+1. Capture the real-history curve at 500 / 1,000 / 1,500 bars, all three
+   paths, with its provenance (command, environment, source file, script
+   commit) into `results/resolution_floor/`, and a trimmed fixture into
+   `tests/fixtures/`, following the shape the two synthetic captures
+   already use (`provenance` + `rows`).
+2. Pin it in `tests/test_resolution_vs_sample_size.py`:
+   - the capture is the tool's own `--json` output;
+   - the summary rebuilt from the fixture agrees with the committed summary
+     key by key (as the synthetic capture's pin does);
+   - the report says the crossing is **not** reached on this history
+     ("no measured sample size brought criterion 2 within the plausibility
+     bound on every draw measured at that size") and claims nothing about
+     sample sizes the capture did not measure;
+   - the alpha-floor driver is reported at every rung (the fixture carries
+     the driver keys, so a summary built from it does not say "not
+     measurable on this ladder").
+3. `references/validation_methods.md`: state the real-history measurement
+   next to the synthetic curve, with the numbers, and say plainly that the
+   crossing is a property of the fixture and has **not** been reproduced on
+   a real history of the length the crossing needs (>= 10,000 bars for
+   criterion 2; 25,000-50,000 for criterion 5).
+
+## Constraints
+
+- A measurement beside the verdict, never part of it: no threshold, bound,
+  criterion or verdict moves, and `scripts/walk_forward.py` is not in this
+  task's diff.
+- The 1,500-bar panel is the longest real history in the repository, so the
+  honest result is "the crossing is out of reach with the data here" --
+  that is the finding, not a failure to find one.
 
 ## Subsequent options (after this task)
 
+- **Apply the "was it measured at all?" distinction to criterion 2.** The
+  Sharpe floor (SR*) is printed through the same `_print_floor_status`
+  (`scripts/measure_resolution_vs_sample_size.py:1403`) but only the alpha
+  side is gated on the framework's status. The framework records the same
+  record for criterion 2 (`sharpe_status` / `sharpe_reason`, copied by
+  `_measure_path`), and the report's own table already prints "n/a" for a
+  criterion it could not resolve, so the table and the summary can
+  disagree. The reachable reasons are `target_unattainable` (a dispersed
+  parameter grid on few observations), `returns_do_not_match_statistic`,
+  `no_returns` and `insufficient_returns`.
 - The 50,000-bar capture (`results/resolution_floor/ladder_2500_to_50000.json`
   and its fixture) still predates the driver keys, so a summary built from
-  it still prints "not measurable on this ladder". The cheap re-capture
-  (`results/resolution_floor/ladder_2500_to_10000.json` and
+  it still prints "not measurable on this ladder" for the driver. The cheap
+  re-capture (`results/resolution_floor/ladder_2500_to_10000.json` and
   `tests/fixtures/resolution_ladder_2500_to_10000.json`) carries the driver
   and is pinned, so this is a nice-to-have: the 50,000-bar rung alone costs
   ~17 min on this machine.
-- The resolution ladder has still never been measured on a history long
-  enough to say anything about the crossing: the longest real history in
-  the repository is `assets/example_data/sample_panel_ohlcv.csv` (1,500
-  bars) and `sample_ohlcv.csv` (504 bars), far below the 2,500-50,000-bar
-  range where the crossings happen. The `--data` path works (exercised this
-  session), but it needs a longer history than the repository carries.
 - The held-out-fraction sweep is defined only for the out-of-sample path
   (the path that prices criterion 2 on the held-out window). The other two
-  paths are configured in months, not in fractions, so they have no
-  held-out fraction to sweep — worth stating explicitly in
+  paths are configured in months, not in fractions, so they have no held-out
+  fraction to sweep -- worth stating explicitly in
   `references/validation_methods.md` if a reader asks why the sweep is
   one-path-only.

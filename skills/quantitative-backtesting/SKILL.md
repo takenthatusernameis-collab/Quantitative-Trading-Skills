@@ -618,7 +618,11 @@ Risk Metrics:
   by the expected maximum of N draws -- so it tracks the strategy's own edge
   over its benchmark set, and it does not fall to zero as the sample grows
   (only the estimation noise in the two alphas shrinks). A high alpha floor
-  is a bigger gap, not a worse test.
+  is a bigger gap, not a worse test. A floor the framework could not *price*
+  is reported as unpriceable rather than as a floor of zero: where the
+  Deflated Alpha criterion could not be evaluated, the block's zeros are
+  placeholders, so the report says the floor was not measured (with the
+  framework's own reason) instead of saying it does not block criterion 5.
   `scripts/measure_resolution_vs_sample_size.py`
   measures the whole curve (on the synthetic control fixture, or on the
   first N bars of a real history with `--data`), **for each analysis path**:

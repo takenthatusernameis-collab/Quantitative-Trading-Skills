@@ -66,6 +66,7 @@ import contextlib
 import io
 import json
 import math
+import re
 import statistics
 import sys
 import tempfile
@@ -99,6 +100,7 @@ from measure_resolution_vs_sample_size import (  # noqa: E402
     WF_TEST_MONTHS,
     WF_TRAIN_MONTHS,
     main as measurement_main,
+    measure_real,
     measure_synthetic,
     measure_test_frac_sweep,
     print_path_summary,
@@ -1425,6 +1427,270 @@ def test_the_summary_reports_what_sets_the_alpha_floor():
     )
 
 
+# ---------------------------------------------------------------------------
+# A FLOOR THE FRAMEWORK COULD NOT PRICE
+#
+# The report used to read the block's placeholder zeros as a measured floor.
+# On a path whose Deflated Alpha criterion could not be priced, it said "the
+# floor does not block criterion 5" and claimed the floor was reproduced
+# from the benchmark alphas -- on a draw where criterion 5 was never
+# evaluated and the alphas are placeholders rather than measurements.
+#
+# The reproducer is the shipped 504-bar history: its CPCV path cannot price
+# the alpha criterion, and the framework says so in its own block.
+# ---------------------------------------------------------------------------
+
+# The shipped sample the reproducer is measured on.
+SAMPLE_HISTORY = (
+    SKILLS_DIR / "assets" / "example_data" / "sample_ohlcv.csv"
+)
+
+# The bars the shipped history carries.
+SAMPLE_HISTORY_BARS = 504
+
+_REAL_HISTORY_MEASUREMENTS = {}
+
+
+def _real_history(bars):
+    """The measurement on the shipped history, measured once and shared."""
+    if bars not in _REAL_HISTORY_MEASUREMENTS:
+        _REAL_HISTORY_MEASUREMENTS[bars] = measure_real(
+            str(SAMPLE_HISTORY), bars, paths=(OUT_OF_SAMPLE, WALK_FORWARD, CPCV)
+        )
+    return _REAL_HISTORY_MEASUREMENTS[bars]
+
+
+def test_an_unpriceable_alpha_floor_is_reported_as_unpriceable():
+    """A floor that was never measured is not a floor of zero.
+
+    The Deflated Alpha criterion could not be priced on this path, so the
+    alpha numbers the block carries are the degenerate output of the failed
+    pricing: the strategy's alpha, every benchmark alpha and the dispersion
+    between them are all exactly zero. That is a placeholder, not a measured
+    floor of zero, and it says nothing about criterion 5 -- the criterion
+    was never evaluated on this draw.
+
+    So the summary must not quote the placeholder as a floor, and the report
+    must not tell the reader that the floor "does not block criterion 5".
+    """
+    measured = _real_history(SAMPLE_HISTORY_BARS)
+    block = measured["paths"][CPCV]
+
+    # The framework's own record: the criterion could not be priced, and it
+    # says why. The measurement reports that record; it does not re-derive
+    # it.
+    assert block["alpha_status"] == "not_resolvable", (
+        "the reproducer is a path whose Deflated Alpha criterion could not "
+        "be priced; if the framework can price it now, this test is no "
+        "longer measuring what it claims to measure"
+    )
+    assert block["alpha_reason"], (
+        "the framework must say why it could not price the criterion"
+    )
+    # The block still carries the framework's own numbers -- the
+    # measurement does not edit them.
+    assert block["expected_max_alpha"] == 0.0
+    assert block["min_detectable_alpha"] is None
+
+    stats = summarize([measured])["by_path"][CPCV]
+
+    # The floor was never measured, so nothing about it is quoted.
+    assert stats["alpha_floor_measured"] is False
+    assert stats["alpha_floor_at_largest_size"] is None, (
+        "a placeholder zero must not be reported as a measured floor"
+    )
+    assert stats["max_expected_max_alpha"] is None
+    assert stats["alpha_floor_beyond_plausible_bound"] is None, (
+        "'the floor does not block criterion 5' is not established where "
+        "criterion 5 was never evaluated"
+    )
+    assert stats["alpha_floor_beyond_plausible_bound_at_largest_size"] is None
+    assert stats["alpha_floor_unmeasured_rungs"] == [SAMPLE_HISTORY_BARS]
+    assert stats["alpha_floor_unmeasured_reason"] == block["alpha_reason"]
+
+    # The per-rung block says the same thing, so a reader of the ladder
+    # table is not misled either.
+    rung = stats["per_size_alpha"][-1]
+    assert rung["max_expected_max_alpha"] is None
+    assert rung["min_expected_max_alpha"] is None
+    assert rung["draws_floor_unmeasured"] == 1
+    assert rung["floor_unmeasured_reason"] == block["alpha_reason"]
+
+    # The driver does not claim an identity on a placeholder draw.
+    driver = stats["alpha_floor_driver"]
+    assert driver["floor_measured"] is False
+    assert driver["draws_measured"] == 0
+    assert driver["draws_checked"] == 0
+    assert driver["draws_unmeasured"] == 1
+    assert driver["unmeasured_rungs"] == [SAMPLE_HISTORY_BARS]
+    assert driver["unmeasured_reason"] == block["alpha_reason"]
+    assert driver["at_largest_measured_size"] is None
+    assert driver["identity_holds_on_every_measured_draw"] is None
+
+    # And the report says so, instead of quoting zeros.
+    output = _printed_summary([measured], CPCV)
+    assert "does not block criterion 5" not in output, (
+        "a criterion that was never evaluated did not block anything: the "
+        "report must not say that it did not"
+    )
+    assert "the framework's floor is reproduced" not in output, (
+        "the identity cannot be checked on a placeholder draw: the report "
+        "must not claim it was reproduced"
+    )
+    assert "the alpha (alpha*) floor was not measured" in output
+    assert "placeholder" in output
+    assert block["alpha_reason"] in output, (
+        "the report must carry the framework's own reason"
+    )
+
+
+def test_a_measured_alpha_floor_is_still_reported_with_its_driver():
+    """The fix silences nothing: a measured floor still reports everything.
+
+    The same history, on a path where the framework could price the
+    criterion, is the control for the test above: the floor, the driver
+    that sets it, the identity check and the conclusion about criterion 5
+    are all still reported.
+    """
+    measured = _real_history(SAMPLE_HISTORY_BARS)
+    block = measured["paths"][OUT_OF_SAMPLE]
+    assert block["alpha_status"] == "resolvable"
+
+    stats = summarize([measured])["by_path"][OUT_OF_SAMPLE]
+
+    assert stats["alpha_floor_measured"] is True
+    assert stats["alpha_floor_at_largest_size"] == block["expected_max_alpha"]
+    assert stats["alpha_floor_at_largest_measured_size"] == SAMPLE_HISTORY_BARS
+    assert stats["alpha_floor_unmeasured_rungs"] == []
+    assert stats["alpha_floor_beyond_plausible_bound"] is False
+    assert stats["alpha_floor_beyond_plausible_bound_at_largest_size"] is False
+
+    driver = stats["alpha_floor_driver"]
+    assert driver["floor_measured"] is True
+    assert driver["draws_measured"] == driver["draws_checked"] == 1
+    assert driver["draws_unmeasured"] == 0
+    assert driver["identity_holds_on_every_measured_draw"] is True
+    at_largest = driver["at_largest_measured_size"]
+    assert at_largest is not None
+    assert at_largest["identity_holds"] is True
+    assert abs(
+        at_largest["alpha_star_from_dispersion"] - at_largest["expected_max_alpha"]
+    ) < 1e-12
+
+    output = _printed_summary([measured], OUT_OF_SAMPLE)
+    assert "the framework's floor is reproduced from the benchmark alphas" in output
+    assert "does not block criterion 5" in output, (
+        "a floor that was measured and is under the bound still settles "
+        "criterion 5: the report must say so"
+    )
+    assert "was not measured" not in output
+
+
+def test_a_placeholder_floor_is_not_read_as_a_measurement():
+    """The distinction, on a block built to exercise it directly.
+
+    The live reproducer above depends on the shipped history and on the
+    framework's behaviour on it. This one pins the rule itself: a block
+    whose criterion could not be priced carries placeholder numbers, and
+    the summary must not read them as a measured floor -- whatever those
+    placeholders happen to be.
+    """
+    rows = [
+        {
+            "bars": SAMPLE_HISTORY_BARS,
+            "seed": None,
+            "series": "real_history_prefix",
+            "paths": {
+                CPCV: {
+                    "min_detectable_sharpe": 4.02,
+                    "min_detectable_alpha": None,
+                    "expected_max_sharpe": 0.53,
+                    # The placeholders: a zero floor on a zero dispersion.
+                    "expected_max_alpha": 0.0,
+                    "strategy_alpha": 0.0,
+                    "benchmark_alphas": [0.0, 0.0],
+                    "n_benchmarks": 2,
+                    "alpha_status": "not_resolvable",
+                    "alpha_reason": "zero_volatility",
+                }
+            },
+        }
+    ]
+    stats = summarize(rows)["by_path"][CPCV]
+
+    assert stats["alpha_floor_measured"] is False
+    assert stats["alpha_floor_at_largest_size"] is None
+    assert stats["max_expected_max_alpha"] is None
+    assert stats["alpha_floor_beyond_plausible_bound"] is None
+    assert stats["alpha_floor_beyond_plausible_bound_at_largest_size"] is None
+    assert stats["alpha_floor_unmeasured_rungs"] == [SAMPLE_HISTORY_BARS]
+    assert stats["alpha_floor_unmeasured_reason"] == "zero_volatility"
+
+    driver = stats["alpha_floor_driver"]
+    assert driver["floor_measured"] is False
+    assert driver["at_largest_measured_size"] is None
+    assert driver["identity_holds_on_every_measured_draw"] is None, (
+        "a zero dispersion reproduces a zero floor trivially: that is not "
+        "the identity being checked, and the report must not claim it"
+    )
+
+    output = _printed_summary(rows, CPCV)
+    assert "does not block criterion 5" not in output
+    assert "the framework's floor is reproduced" not in output
+    assert "the alpha (alpha*) floor was not measured" in output
+    assert "zero_volatility" in output
+
+    # The same block with the criterion priced is a measured floor again:
+    # the gate is the framework's own status, not the size of the number.
+    measured_rows = [
+        {
+            "bars": SAMPLE_HISTORY_BARS,
+            "seed": None,
+            "series": "real_history_prefix",
+            "paths": {
+                CPCV: {
+                    "min_detectable_sharpe": 4.02,
+                    "min_detectable_alpha": 0.35,
+                    "expected_max_sharpe": 0.53,
+                    "expected_max_alpha": 0.0,
+                    "strategy_alpha": 0.0,
+                    "benchmark_alphas": [0.0, 0.0],
+                    "n_benchmarks": 2,
+                    "alpha_status": "resolvable",
+                    "alpha_reason": None,
+                }
+            },
+        }
+    ]
+    measured_stats = summarize(measured_rows)["by_path"][CPCV]
+    assert measured_stats["alpha_floor_measured"] is True
+    assert measured_stats["alpha_floor_at_largest_size"] == 0.0
+    assert measured_stats["alpha_floor_beyond_plausible_bound"] is False
+    assert measured_stats["alpha_floor_beyond_plausible_bound_at_largest_size"] is False
+    measured_output = _printed_summary(measured_rows, CPCV)
+    assert "does not block criterion 5" in measured_output
+    assert "was not measured" not in measured_output
+
+
+def test_every_test_in_this_file_is_registered():
+    """A pin that is not registered is not a pin.
+
+    The runner walks ``TEST_REGISTRY``, so a test defined in this file but
+    missing from that list never runs -- the suite reports itself as
+    passing while one of its checks is dormant. Two tests were in exactly
+    that state (both about the alpha-floor driver), so the registry is
+    checked against the file itself.
+    """
+    source = Path(__file__).read_text(encoding="utf-8")
+    defined = set(re.findall(r"^def (test_\w+)", source, re.M))
+    registered = {name for name, _ in TEST_REGISTRY}
+    assert defined == registered, (
+        "every test defined in this file must be in TEST_REGISTRY; not "
+        f"registered: {sorted(defined - registered)}; registered but not "
+        f"defined: {sorted(registered - defined)}"
+    )
+
+
 def test_the_floor_conclusion_is_scoped_to_the_measured_range():
     """A floor above the bound is a statement about the ladder, not about
     every sample size.
@@ -1805,12 +2071,18 @@ TEST_REGISTRY = [
     ("test_test_frac_sweep_each_split_matches_the_framework_own_block", test_test_frac_sweep_each_split_matches_the_framework_own_block),
     ("test_test_frac_sweep_at_larger_sizes_matches_the_framework_own_block", test_test_frac_sweep_at_larger_sizes_matches_the_framework_own_block),
     ("test_test_frac_sweep_alpha_crossings_match_the_per_fraction_flags", test_test_frac_sweep_alpha_crossings_match_the_per_fraction_flags),
+    ("test_deflated_alpha_floor_identity_matches_benchmark_dispersion", test_deflated_alpha_floor_identity_matches_benchmark_dispersion),
     ("test_the_effect_series_sweep_matches_the_framework_own_block", test_the_effect_series_sweep_matches_the_framework_own_block),
     ("test_the_control_discriminates_the_effect_series_from_the_null", test_the_control_discriminates_the_effect_series_from_the_null),
     ("test_the_effect_series_sweep_crossings_are_pinned", test_the_effect_series_sweep_crossings_are_pinned),
     ("test_the_sweep_names_the_series_it_measured", test_the_sweep_names_the_series_it_measured),
     ("test_the_sweep_refuses_to_report_a_real_history_it_did_not_measure", test_the_sweep_refuses_to_report_a_real_history_it_did_not_measure),
     ("test_shipped_default_split_is_unchanged", test_shipped_default_split_is_unchanged),
+    ("test_the_summary_reports_what_sets_the_alpha_floor", test_the_summary_reports_what_sets_the_alpha_floor),
+    ("test_an_unpriceable_alpha_floor_is_reported_as_unpriceable", test_an_unpriceable_alpha_floor_is_reported_as_unpriceable),
+    ("test_a_measured_alpha_floor_is_still_reported_with_its_driver", test_a_measured_alpha_floor_is_still_reported_with_its_driver),
+    ("test_a_placeholder_floor_is_not_read_as_a_measurement", test_a_placeholder_floor_is_not_read_as_a_measurement),
+    ("test_every_test_in_this_file_is_registered", test_every_test_in_this_file_is_registered),
     ("test_the_floor_conclusion_is_scoped_to_the_measured_range", test_the_floor_conclusion_is_scoped_to_the_measured_range),
     ("test_the_summary_reports_the_floor_when_it_stops_blocking_the_path", test_the_summary_reports_the_floor_when_it_stops_blocking_the_path),
     ("test_the_measured_ladder_finds_the_alpha_crossing_the_shorter_ladder_missed", test_the_measured_ladder_finds_the_alpha_crossing_the_shorter_ladder_missed),

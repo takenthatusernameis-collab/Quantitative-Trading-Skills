@@ -2,225 +2,221 @@
 
 ## What changed
 
-Completed the assigned task in `HANDOFF_NEXT.md`: **the committed resolution
-ladder now carries the alpha-floor driver**, so a summary built from the
-committed record says what sets the alpha floor at every measured rung
-instead of saying the driver "is not measurable on this ladder".
+Completed the assigned task in `HANDOFF_NEXT.md`: **an alpha floor the
+framework could not price is now reported as unpriceable, not as 0.0000.**
 
 No threshold, bound, criterion or verdict moved. `PLAUSIBLE_MAX_ANNUALIZED_ALPHA
 == 0.10`, `PLAUSIBLE_MAX_ANNUALIZED_SHARPE == 2.00` and the shipped 0.6/0.2/0.2
 split are untouched, and **the estimator itself was not touched**:
-`scripts/walk_forward.py` and `scripts/measure_resolution_vs_sample_size.py`
-are not in this session's diff at all. The only code change is a new test.
+`scripts/walk_forward.py` is not in this session's diff at all. The framework's
+own `alpha_status` / `alpha_reason` already carried the fact; it was only the
+*report* that misread it.
 
-### 1. The re-captured ladder (`results/resolution_floor/ladder_2500_to_10000.json`)
+### 1. The rule (`scripts/measure_resolution_vs_sample_size.py`)
 
-The raw capture — the tool's own `--json` output (6 rows + the summary),
-from
+A new helper, `_alpha_floor_measured(block)`, reads the framework's own
+`alpha_status`: a block whose Deflated Alpha criterion could not be priced
+carries a **placeholder** floor, not a measured floor of zero. On a
+zero-volatility draw the strategy's alpha, every benchmark alpha and the
+dispersion between them are all exactly zero, so the block's
+`expected_max_alpha` is `0.0` because nothing could be estimated.
 
-```
-python3 skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py \
-    --sizes 2500,5000,10000 --paths out_of_sample,walk_forward,cpcv \
-    --series both --seeds 7 --json
-```
+A block that carries no status at all (an older capture) is treated as
+measured, so every committed capture keeps reporting the floor it reported.
 
-2,500 / 5,000 / 10,000 bars, seed 7, both series, all three paths. The
-50,000-bar rung costs minutes per draw, so the whole ladder was not worth
-re-running for the driver's own numbers; the cheap end of the same ladder is.
+### 2. The report no longer reads a placeholder as a measurement
 
-### 2. The trimmed fixture (`tests/fixtures/resolution_ladder_2500_to_10000.json`)
+- `_alpha_floor_driver` (`:451`) carries the framework's own `alpha_status` /
+  `alpha_reason` and a new `floor_measured` flag, and claims neither the
+  reconstruction (`alpha_star_from_dispersion`) nor the identity
+  (`identity_holds`) for a draw whose alphas are placeholders.
+- `_summarize_path` (`:900`) keeps the unpriceable draws apart from the
+  measured ones. The floor the summary quotes is now the floor at the
+  largest rung **whose floor was measured**; `alpha_floor_at_largest_size`
+  is `None` (never `0.0`) when no rung's floor could be measured, and
+  `alpha_floor_beyond_plausible_bound` /
+  `alpha_floor_beyond_plausible_bound_at_largest_size` are `None` (unknown),
+  not `False` ("measured, and not above the bound").
+- New keys (all additive): `alpha_floor_measured`,
+  `alpha_floor_at_largest_measured_size`, `alpha_floor_unmeasured_rungs`,
+  `alpha_floor_unmeasured_reason`; per rung
+  `per_size_alpha[*].draws_floor_unmeasured` and `floor_unmeasured_reason`;
+  in the driver, `floor_measured`, `draws_unmeasured`, `unmeasured_rungs`,
+  `unmeasured_reason`.
+- `_print_floor_status` (`:1403`) and `_print_alpha_floor_driver` (`:1500`)
+  report the fourth case -- the floor was never measured -- with the
+  framework's own reason, and no longer say "the floor does not block
+  criterion 5" or "the framework's floor is reproduced from the benchmark
+  alphas" for a draw whose criterion was never evaluated.
 
-Six rows, with the same provenance shape as the 50,000-bar fixture (command,
-description, environment, fixture construction, measured, measured_at_utc,
-plausibility bounds, script commit), plus the split under
-`provenance["measured"]["split"]`.
+### 3. The pins (`tests/test_resolution_vs_sample_size.py`)
 
-The trim keeps **every key the 50,000-bar fixture keeps** and *adds* the
-driver keys: `strategy_alpha`, `benchmark_alphas`, `benchmark_alpha_std`,
-`n_benchmarks`. The old capture is left exactly as it is — it is the record
-of the long ladder, and the two agree.
+Four new tests:
 
-### 3. The pin (`tests/test_resolution_vs_sample_size.py`)
+- `test_an_unpriceable_alpha_floor_is_reported_as_unpriceable` -- the live
+  reproducer: the shipped 504-bar history measured with `--data`, whose
+  CPCV path cannot price the Deflated Alpha criterion (the framework's own
+  reason is `zero_volatility`). The summary reports the floor as not
+  measured, and the printed report does not say the floor does not block
+  criterion 5 and does not claim the identity was reproduced.
+- `test_a_measured_alpha_floor_is_still_reported_with_its_driver` -- the
+  control: the same history's out-of-sample path prices the criterion
+  normally, and its floor, driver, identity check and conclusion are all
+  still reported.
+- `test_a_placeholder_floor_is_not_read_as_a_measurement` -- the rule
+  itself on a block built to exercise it: the gate is the framework's own
+  status, not the size of the number (a priced criterion with a zero floor
+  is still a measurement).
+- `test_every_test_in_this_file_is_registered` -- a pin that is not
+  registered is not a pin (see below).
 
-New `test_the_re_captured_ladder_reports_what_sets_the_alpha_floor`:
+**Two tests that existed but never ran are now registered.** The runner
+walks `TEST_REGISTRY`, and `test_the_summary_reports_what_sets_the_alpha_floor`
+and `test_deflated_alpha_floor_identity_matches_benchmark_dispersion` were
+defined in the file but missing from that list, so the suite reported itself
+as passing while two of its checks were dormant. Both pass when run (checked
+directly before registering them). The new registry pin compares the file's
+`def test_` definitions with the registry, so the gap cannot recur.
 
-- the fixture's provenance says what was measured (rungs, seed, draws per
-  rung, the split);
-- the identity is re-derived with the **standard library**
-  (`statistics.stdev`, `math.sqrt(2 * math.log(n))`), not with the
-  implementation's own estimator, and reproduces the framework's own
-  `expected_max_alpha` on **all 18 row-and-path blocks**; the block's
-  `benchmark_alpha_std` is the sample standard deviation and the block's
-  `strategy_alpha` is the primary benchmark's alpha;
-- the summary built from the fixture reports the driver for every path
-  (`identity_holds_on_every_measured_draw is True`, 6 draws measured and 6
-  checked), and every rung reports the dispersion its floor came from
-  (`per_size_alpha[*].min/max_benchmark_alpha_std`);
-- the printed report says what sets the floor and does **not** say
-  "not measurable on this ladder";
-- the re-capture is the *same measurement* as the older capture: every
-  shared rung agrees to floating-point noise, so adding the driver moved no
-  number.
-
-The module docstring lists the new pin.
+The suite now runs **34** tests; it ran **28** before this session, and the
+previous handoff's "30/30" was a miscount (two of those were the dormant
+ones).
 
 ### 4. The docs
 
-- `references/validation_methods.md`: the ladder section now names the
-  second capture and says why it exists (the long capture predates the
-  driver keys); the alpha-floor section gains a measured table of the driver
-  at the largest rung of the re-capture, the count of blocks the identity
-  holds on, and the per-rung keys that carry the driver.
-- `SKILL.md`: the `test_resolution_vs_sample_size.py` entry names both
-  captures and says which one carries the driver.
+- `references/validation_methods.md`: a new section, "A floor that was never
+  measured is not a floor of zero", next to the alpha-floor discussion: the
+  table of what each key reports in the measured and unmeasured case, the
+  504-bar reproducer, and the rule.
+- `SKILL.md`: one sentence next to the alpha-floor driver -- a floor the
+  framework could not *price* is reported as unpriceable rather than as a
+  floor of zero.
 
 ## What was actually verified
 
-- **The capture was made from the tool itself** (the command above, run to
-  completion) and the committed raw file is its stdout; the fixture is a
-  trimmed copy of that file, checked value by value (252 values, all
-  identical to 1e-12).
-- **A summary built from the trimmed fixture reports the driver at every
-  measured rung**, for all three paths, and the printed report says what
-  sets the floor. The same summary built from the *older* fixture still
-  prints "not measurable on this ladder" for all three paths — the contrast
-  is the point of the new capture, and it is what the new pin asserts.
-- **The driver reproduces the framework's own floor** on all 18 row/path
-  blocks of the new capture (worst absolute difference below 1e-9 against
-  the standard-library re-derivation; the framework's own numbers and the
-  re-derived ones agree to the last floating-point bit in the printed
-  output).
-- **The re-capture did not move the measurement**: the 2,500 / 5,000 /
-  10,000 rungs it shares with the 50,000-bar capture agree on every key —
-  worst absolute difference 3.6e-15, worst relative difference 4.3e-14
-  (floating-point noise between processes).
-- **Negative controls**: five mutations applied one at a time to the
-  fixture, the pinned test required to fail each time, the file restored
-  byte-identically — 5/5.
-  1. `benchmark_alphas` dropped from one block → fails (KeyError);
-  2. `expected_max_alpha` changed on one rung → fails (the identity);
-  3. `strategy_alpha` no longer the primary benchmark's alpha → fails;
-  4. one measured number moved relative to the older capture → fails (the
-     two captures must agree);
-  5. the provenance's rung list changed → fails.
-- `tests/test_resolution_vs_sample_size.py`: **30/30** (was 29; one new),
-  11.4 min.
+- **The defect was reproduced first**, from the tool itself:
+
+  ```
+  python3 skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py \
+      --data skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv \
+      --sizes 504 --paths out_of_sample,walk_forward,cpcv
+  ```
+
+  Before the change, the CPCV path printed "the alpha (alpha\*) floor is at
+  or under the plausibility bound at the largest measured sample size (504
+  bars): the floor does not block criterion 5 at that size" and "the
+  framework's floor is reproduced from the benchmark alphas" -- on a draw
+  whose criterion 5 was never evaluated and whose benchmark alphas are
+  placeholders. After the change, the same command prints "the alpha (alpha\*)
+  floor was not measured on this path: the framework could not price the
+  alpha criterion (zero_volatility), so the floor it carries is a placeholder
+  rather than a measurement, and nothing here settles criterion 5". The
+  out-of-sample and walk-forward paths on the same history are unchanged
+  (floors 0.0159 and 0.0650, drivers reported).
+- **Nothing moved where the floor was measured.** The summary rebuilt from
+  both committed captures (`results/resolution_floor/ladder_2500_to_50000.json`
+  and `ladder_2500_to_10000.json`) was compared key by key with the summary
+  committed in the capture itself: **no pre-existing key changed value** on
+  any path, at any rung -- only the new keys were added.
+- **Negative controls** (each applied alone, then reverted):
+  1. the `_alpha_floor_measured` gate forced open -> the two unpriceable-floor
+     pins fail, the measured-floor control still passes;
+  2. one registry entry removed -> `test_every_test_in_this_file_is_registered`
+     fails and names the missing test. 2/2.
+- `tests/test_resolution_vs_sample_size.py`: **34/34** (was 28 registered;
+  4 new, 2 previously dormant now registered).
 - **Neighbouring suites, re-run after the change**:
-  `test_test_resolution.py` + `test_out_of_sample_window.py` +
-  `test_test_window_observations.py` + `test_examples_coverage.py` +
-  `test_falsifiable_hypothesis_example.py` = **78 passed**.
-- `skills-ref validate skills/quantitative-backtesting/` → "Valid skill"
+  `test_test_resolution.py` (39) + `test_out_of_sample_window.py` (11) +
+  `test_test_window_observations.py` (7) + `test_examples_coverage.py` (7) +
+  `test_falsifiable_hypothesis_example.py` (14) = **78 passed**.
+- `skills-ref validate skills/quantitative-backtesting/` -> "Valid skill"
   (the CI validator used by `.github/workflows/validate-skills.yml`).
 
 ## What remains unresolved
 
-- **The alpha floor is reported as 0.0000 on a path the framework could not
-  price.** Found while exercising the `--data` path for the first time (see
-  the next task): when the framework's alpha side is `not_resolvable`, the
-  per-path block carries placeholder zeros and the report quotes them as a
-  measured floor. **This is the next task.**
+- **The same distinction has not been applied to criterion 2.** The Sharpe
+  floor (SR\*) is reported through the same `_print_floor_status`, but only
+  the alpha side is gated on the framework's status. The framework records
+  the same record for criterion 2 (`sharpe_status` / `sharpe_reason`, copied
+  by `_measure_path`), and the report's own table already prints "n/a" for a
+  criterion it could not resolve, so the table and the summary can disagree.
+  The reachable reasons are `target_unattainable` (a dispersed parameter
+  grid on few observations), `returns_do_not_match_statistic`, `no_returns`
+  and `insufficient_returns`. This is the next task.
+- **The resolution ladder has still never been measured on a real history
+  long enough to say anything about the crossing.** The `--data` path works
+  (it was exercised for the first time in the previous session, and again
+  this session on the 1,500-bar panel sample), but the longest real history
+  in the repository is `assets/example_data/sample_panel_ohlcv.csv` (1,500
+  bars) and `sample_ohlcv.csv` (504 bars), far below the 2,500-50,000-bar
+  range where the crossings happen. At 1,500 bars the out-of-sample path's
+  minimum confirmable Sharpe is 2.5806 -- still beyond the 2.0 bound. The
+  crossings remain properties of the synthetic control fixture.
 - The 50,000-bar capture still predates the driver keys, so a summary built
-  from *it* still says "not measurable on this ladder". Re-capturing it
-  would cost ~17 min for the 50,000-bar rung alone on this machine; the
-  cheap capture now covers the driver's contract, so this is a
+  from *it* still says "not measurable on this ladder" for the driver.
+  Re-capturing it would cost ~17 min for the 50,000-bar rung alone on this
+  machine; the cheap capture covers the driver's contract, so this is a
   nice-to-have, not a blocker.
-- The resolution ladder has still never been measured on a history long
-  enough to say anything about the crossing. The longest real history in
-  the repo is `assets/example_data/sample_panel_ohlcv.csv` (1,500 bars) and
-  `sample_ohlcv.csv` (504 bars), far below the 2,500-50,000-bar range where
-  the crossings happen. The `--data` path was exercised for the first time
-  this session on the 504-bar shipped sample (it works), but 504 bars is
-  below the range that matters.
 - The held-out-fraction sweep is defined only for the out-of-sample path
   (the path that prices criterion 2 on the held-out window). The other two
-  paths are configured in months, not in fractions, so they have no
-  held-out fraction to sweep — worth stating explicitly in
+  paths are configured in months, not in fractions, so they have no held-out
+  fraction to sweep -- worth stating explicitly in
   `references/validation_methods.md` if a reader asks why the sweep is
   one-path-only.
 
 ## Approaches that failed
 
-- None. The capture ran to completion on the first attempt, the five
-  negative controls all behaved as required, and every suite passed on the
-  first run.
+- None. The reproducer ran on the first attempt, the two negative controls
+  both behaved as required, and every suite passed on the first run.
 
 ## Next task (one, precise)
 
-**Report an unpriceable alpha floor as unpriceable, not as 0.0000.**
+**Capture the resolution curve on the longest real history in the repository,
+and state honestly what it does and does not show.**
 
-Evidence: the `--data` path of
-`scripts/measure_resolution_vs_sample_size.py` was exercised for the first
-time this session, on the repository's own 504-bar history:
+Evidence:
 
-```
-python3 skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py \
-    --data skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv \
-    --sizes 504 --paths out_of_sample,walk_forward,cpcv
-```
+- The `--data` path of `scripts/measure_resolution_vs_sample_size.py` works
+  on the longest real history the repository carries,
+  `skills/quantitative-backtesting/assets/example_data/sample_panel_ohlcv.csv`
+  (1,500 bars, `symbol` column, `sample_benchmark.csv` beside it):
 
-The CPCV path cannot price the alpha test on 504 bars, and the framework
-says so — but the report then quotes its placeholder zeros as a measured
-floor. The CPCV block (`measure_real(..., 504)["paths"]["cpcv"]`) is:
+  ```
+  python3 skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py \
+      --data skills/quantitative-backtesting/assets/example_data/sample_panel_ohlcv.csv \
+      --sizes 1500 --paths out_of_sample
+  ```
 
-```
-min_detectable_alpha: None
-observed_annualized_alpha: 0.0
-expected_max_alpha: 0.0
-strategy_alpha: 0.0
-benchmark_alphas: [0.0, 0.0]
-alpha_status: not_resolvable
-alpha_reason: zero_volatility
-```
-
-and the printed report says, for that path:
-
-```
-  the alpha (alpha*) floor is at or under the plausibility bound at the
-  largest measured sample size (504 bars): the floor does not block
-  criterion 5 at that size
-  what sets the alpha floor (alpha*): std(benchmark alphas, ddof=1) * sqrt(2 ln N) with N = 2
-    strategy alpha: 0.0000; benchmark alphas: 0.0000, 0.0000
-    benchmark alpha dispersion (ddof=1): 0.0000; alpha* from that dispersion: 0.0000; the framework's own alpha*: 0.0000
-    the framework's floor is reproduced from the benchmark alphas, so a higher alpha floor means a bigger gap ...
-```
-
-Both statements are wrong for a path whose criterion 5 was never evaluated:
-the floor is 0 because the test could not be priced, not because the
-dispersion is zero; and "the floor does not block criterion 5" is not
-established when criterion 5 was not resolvable. The driver even reports the
-identity as "reproduced" on a degenerate zero-dispersion draw. The same
-zero-dispersion case makes `alpha_floor_beyond_plausible_bound` false and
-`alpha_floor_at_largest_size` 0.0, so the *summary* says the alpha floor
-never blocks criterion 5 on a path where it blocked nothing because it was
-never measured.
+  Measured this session: the out-of-sample path's minimum confirmable
+  Sharpe at 1,500 bars is **2.5806** -- still beyond the 2.0 plausibility
+  bound -- with SR\* 1.4980 and a minimum confirmable alpha of 2.3963. So
+  the mechanism is visible on real data, and the crossing is not reached:
+  the repository's data cannot settle "is there a sample size at which
+  criterion 2 can confirm a plausible effect?" on a real history.
+- The ladder has only ever been captured on the synthetic control fixture
+  (`results/resolution_floor/ladder_2500_to_50000.json` and
+  `ladder_2500_to_10000.json`). There is no committed real-data record, and
+  the docs' "What this does not establish" says so in prose only.
 
 Bounded work:
 
-1. `scripts/measure_resolution_vs_sample_size.py`: make the alpha side
-   distinguish "the framework could not price this criterion" from "the
-   floor is zero". The per-path block already carries the framework's own
-   `alpha_status` / `alpha_reason`; the driver (`_alpha_floor_driver`) and
-   the floor status (`_print_floor_status`) should report a floor that was
-   never measured as unpriceable, and the summary's
-   `alpha_floor_beyond_plausible_bound` / `alpha_floor_at_largest_size`
-   should not read a placeholder zero as a measurement. Additive only: no
-   existing key changes value where the floor *was* measured, and no
-   threshold, bound, criterion or verdict moves.
-2. `tests/test_resolution_vs_sample_size.py`: pin the distinction — a
-   measured floor still reports the driver and the identity, and an
-   unpriceable one says so instead of quoting zeros. Use the 504-bar
-   `--data` measurement above as the reproducer (it is cheap: a few
-   seconds) or construct the block directly.
-3. `references/validation_methods.md`: state the distinction next to the
-   alpha-floor discussion, so a reader is not told that a criterion that
-   could not be evaluated did not block.
+1. Capture the real-history curve at 500 / 1,000 / 1,500 bars (all three
+   paths, `--data`), with its provenance -- command, environment, source
+   file, script commit -- into `results/resolution_floor/`, and a trimmed
+   fixture into `tests/fixtures/`, following the shape the two synthetic
+   captures already use.
+2. Pin it in `tests/test_resolution_vs_sample_size.py`: the capture is the
+   tool's own `--json` output; the summary rebuilt from it agrees with the
+   committed summary key by key; and the report says the crossing is not
+   reached -- "no measured sample size brought criterion 2 within the
+   plausibility bound on every draw measured at that size" -- without
+   claiming anything about sample sizes the capture did not measure.
+3. `references/validation_methods.md`: state the real-history measurement
+   next to the synthetic curve, with the numbers, and say plainly that the
+   crossing is a property of the fixture and has **not** been reproduced on
+   a real history of the length the crossing needs (>= 10,000 bars for
+   criterion 2, >= 25,000-50,000 for criterion 5).
 
-Constraint: additive reporting. `PLAUSIBLE_MAX_ANNUALIZED_ALPHA`,
-`PLAUSIBLE_MAX_ANNUALIZED_SHARPE`, the 0.6/0.2/0.2 split, the estimators
-and every verdict stay exactly as they are. `scripts/walk_forward.py` is
-not in this task's diff: the framework's own `alpha_status` /
-`alpha_reason` already carry the fact, it is only the *report* that
-misreads it.
-
-Subsequent option (smaller, mechanical): the held-out-fraction sweep is
-one-path-only; say why in `references/validation_methods.md`.
+Constraint: a measurement beside the verdict, never part of it. No threshold,
+bound, criterion or verdict moves, and `scripts/walk_forward.py` is not in
+that task's diff.
