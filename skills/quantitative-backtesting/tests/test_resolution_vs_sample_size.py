@@ -690,7 +690,9 @@ def test_deflated_alpha_floor_identity_matches_benchmark_dispersion():
         "std(benchmark alphas, ddof=1) * sqrt(2 ln N)"
     )
     assert abs(block["expected_max_alpha"] - deflated_alpha["expected_max_alpha"]) < 1e-12
-"
+
+
+def _framework_wf_block(bars, seed, inject_effect):
     """Run the framework's own walk_forward_analysis on the same fixture.
 
     Returns its summary, so callers can read the framework's own
