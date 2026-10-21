@@ -2072,6 +2072,51 @@ measurement of the framework, so the documented formula and the estimator
 cannot drift apart, and against the captured ladder, so the committed
 record cannot quietly lose the driver.
 
+**Measured on the full ladder.** The re-capture above stops at 10,000 bars,
+so the rungs where the criterion-5 crossings happen -- 25,000 and 50,000
+bars -- were still only in the pre-driver capture
+(`results/resolution_floor/ladder_2500_to_50000.json`, whose per-path
+blocks carry no `strategy_alpha` / `benchmark_alphas`). The whole ladder has
+now been re-captured with the current tool, so every rung of it carries the
+driver and the framework's own per-criterion status:
+
+- the capture: `results/resolution_floor/ladder_2500_to_50000_recapture.json`
+  (`provenance` + `rows` + `summary` -- the tool's own `--json` output);
+- the trimmed fixture:
+  `tests/fixtures/resolution_ladder_2500_to_50000_recapture.json`
+  (`provenance` + `rows`), pinned by
+  `test_the_full_ladder_re_capture_carries_the_driver_and_the_status`.
+
+It is the SAME measurement, not a new one: every number the two captures
+share is identical (max absolute difference 0.0 over 1,080 shared values in
+90 path blocks), so no threshold, no bound, no crossing and no verdict moved
+while the explanation was added. The pre-driver capture stays committed as
+the numerical baseline.
+
+At the largest rung of the full ladder (50,000 bars) the floor is set by the
+worst draw measured there, on each path:
+
+| Path | strategy alpha | benchmark alphas | dispersion (ddof=1) | alpha\* from the dispersion | the framework's own alpha\* |
+| --- | --- | --- | --- | --- | --- |
+| out-of-sample | 0.3928 | 0.3928 / 0.4057 | 0.0092 | 0.0108 | 0.0108 |
+| walk-forward | 0.0460 | 0.0460 / 0.1474 | 0.0717 | 0.0844 | 0.0844 |
+| CPCV | -0.0050 | -0.0050 / -0.0241 | 0.0135 | 0.0159 | 0.0159 |
+
+The identity holds on all 90 row-and-path blocks of the capture (five rungs x
+three seeds x both series x three paths), and every one of them is a *priced*
+draw: `sharpe_status` and `alpha_status` are `resolvable`, with no reason, on
+every block. Every floor on this ladder is therefore a measurement, and none
+of them is a placeholder zero.
+
+The crossings are the measured ones, and they did not move: criterion 5
+(`first_size_all_within_alpha_bound`) is crossed at 10,000 bars on the
+out-of-sample path, at 25,000 on CPCV and at 50,000 on the walk-forward path;
+criterion 2 (`first_size_all_within_bound`) at 10,000 / 2,500 / 5,000 bars
+respectively. The short ladder's falsifiable verdict stands too: on the rungs
+up to 10,000 bars the walk-forward alpha floor is still above the 10% bound
+(`alpha_floor_beyond_plausible_bound` is `True`), which is exactly what the
+longer ladder overturns.
+
 #### A floor that was never measured is not a floor of zero
 
 The floor above is a **measurement**: the framework priced the Deflated Alpha

@@ -52,7 +52,12 @@ These tests pin:
     reproduce the floor;
   * the re-captured ladder carries that driver, so a summary built from the
     captured fixture reports what sets the floor at every measured rung
-    instead of saying the driver cannot be measured.
+    instead of saying the driver cannot be measured;
+  * the FULL ladder (2,500-50,000 bars, three seeds, both series, all three
+    paths), re-captured, carries that driver AND the framework's own
+    per-criterion status at every rung of every path -- and every number it
+    shares with the pre-driver capture is identical, so the crossings and
+    the verdicts did not move while the explanation was added.
 
 THE DATA IS THE SYNTHETIC POSITIVE-CONTROL FIXTURE
     The numbers are properties of a formula and of the decision machinery,
@@ -1322,6 +1327,60 @@ DRIVER_LADDER_FIXTURE = (
     SKILLS_DIR / "tests" / "fixtures" / "resolution_ladder_2500_to_10000.json"
 )
 
+# The FULL ladder (2,500 / 5,000 / 10,000 / 25,000 / 50,000 bars, three
+# seeds, both series, all three paths), re-captured with the current tool.
+# The capture above is the same measurement taken before the alpha-floor
+# driver existed, and it stays committed as the numerical baseline; this one
+# is the same measurement carrying, at every rung, WHAT SETS THE ALPHA FLOOR
+# and the framework's own per-criterion status fields.
+RECAPTURE_CAPTURE = (
+    SKILLS_DIR.parent.parent
+    / "results"
+    / "resolution_floor"
+    / "ladder_2500_to_50000_recapture.json"
+)
+
+RECAPTURE_FIXTURE = (
+    SKILLS_DIR
+    / "tests"
+    / "fixtures"
+    / "resolution_ladder_2500_to_50000_recapture.json"
+)
+
+# The pre-driver capture of the same ladder, kept as the numerical baseline
+# the re-capture is checked against.
+BASELINE_CAPTURE = (
+    SKILLS_DIR.parent.parent
+    / "results"
+    / "resolution_floor"
+    / "ladder_2500_to_50000.json"
+)
+
+# Every per-path key the trimmed re-capture fixture keeps. Each one is read
+# by the summary builder, so a summary rebuilt from the trimmed rows equals
+# the summary the tool printed for the full rows.
+RECAPTURE_PATH_KEYS = (
+    "alpha_beyond_plausible_bound",
+    "alpha_reason",
+    "alpha_status",
+    "benchmark_alpha_std",
+    "benchmark_alphas",
+    "expected_max_alpha",
+    "expected_max_sharpe",
+    "min_detectable_alpha",
+    "min_detectable_sharpe",
+    "n_benchmarks",
+    "n_parameter_trials",
+    "n_test_observations",
+    "n_windows",
+    "observed_annualized_alpha",
+    "observed_annualized_sharpe",
+    "sharpe_beyond_plausible_bound",
+    "sharpe_reason",
+    "sharpe_status",
+    "strategy_alpha",
+)
+
 
 def _load_ladder_fixture():
     """The measured ladder, with its provenance."""
@@ -1332,6 +1391,24 @@ def _load_ladder_fixture():
 def _load_driver_ladder_fixture():
     """The re-captured ladder, with its provenance."""
     with open(DRIVER_LADDER_FIXTURE, "r") as handle:
+        return json.load(handle)
+
+
+def _load_recapture():
+    """The full ladder, re-captured: the tool's own --json output plus provenance."""
+    with open(RECAPTURE_CAPTURE, "r") as handle:
+        return json.load(handle)
+
+
+def _load_recapture_fixture():
+    """The trimmed re-capture: provenance plus rows."""
+    with open(RECAPTURE_FIXTURE, "r") as handle:
+        return json.load(handle)
+
+
+def _load_baseline_capture():
+    """The pre-driver capture of the same ladder, kept as the baseline."""
+    with open(BASELINE_CAPTURE, "r") as handle:
         return json.load(handle)
 
 
@@ -2209,6 +2286,211 @@ def test_the_re_captured_ladder_reports_what_sets_the_alpha_floor():
     assert shared == 3 * 2 * 3, "every shared rung must be compared"
 
 
+def test_the_full_ladder_re_capture_carries_the_driver_and_the_status():
+    """The full ladder, re-captured: the driver and the status at every rung.
+
+    The ladder that established the walk-forward alpha crossing at 50,000
+    bars was captured before the alpha-floor driver existed, so a summary
+    built from its fixture says the driver is "not measurable on this
+    ladder" -- and that fixture carries neither the driver's numbers nor the
+    framework's own per-criterion status, so it cannot say whether each
+    criterion could be *priced* on the draw that carries the floor.
+
+    The re-capture is the SAME measurement, taken with the current tool, and
+    it carries at every rung of every path:
+
+      * what sets the alpha floor (the strategy's own alpha, the benchmark
+        alphas and their dispersion), re-derived here with the standard
+        library, so the fixture is checked against the documented formula
+        and not against the implementation's own estimator;
+      * the framework's own per-criterion status and reason, so a floor that
+        was never priced can never be read as a measured floor;
+      * the same numbers, the same crossings and the same verdicts as the
+        pre-driver capture, which stays committed as the baseline.
+    """
+    capture = _load_recapture()
+    fixture = _load_recapture_fixture()
+    baseline = _load_baseline_capture()
+    provenance = capture["provenance"]
+
+    # The capture says what it is and where it came from.
+    assert provenance["measured"]["sizes"] == [2500, 5000, 10000, 25000, 50000]
+    assert provenance["measured"]["seeds"] == [7, 1, 2024]
+    assert provenance["measured"]["draws_per_rung"] == 6
+    assert set(provenance["measured"]["paths"]) == {
+        OUT_OF_SAMPLE,
+        WALK_FORWARD,
+        CPCV,
+    }
+    assert provenance["measured"]["split"] == {
+        "train_frac": TRAIN_FRAC,
+        "val_frac": VAL_FRAC,
+        "test_frac": TEST_FRAC,
+    }
+    assert "measure_resolution_vs_sample_size.py" in provenance["command"]
+    assert provenance["script_commit"]
+    assert provenance["measured_at_utc"]
+    assert provenance["plausibility_bounds"]["plausible_max_annualized_sharpe"] == (
+        PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+    )
+    assert provenance["plausibility_bounds"]["plausible_max_annualized_alpha"] == (
+        PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+    )
+
+    # The capture is the tool's own --json output (rows plus the summary it
+    # prints for them) with provenance added on top; the fixture is the
+    # trimmed copy the tests read.
+    assert set(capture.keys()) == {"provenance", "rows", "summary"}
+    assert set(fixture.keys()) == {"provenance", "rows"}
+    assert fixture["provenance"] == provenance
+
+    rows = fixture["rows"]
+    assert len(rows) == 5 * 3 * 2
+    for row in rows:
+        assert set(row.keys()) == {"bars", "seed", "series", "paths"}
+        assert set(row["paths"].keys()) == {OUT_OF_SAMPLE, WALK_FORWARD, CPCV}
+
+    # Every per-path block carries the driver's own numbers AND the
+    # framework's own status, at every rung.
+    checked = 0
+    for row in rows:
+        for path, block in row["paths"].items():
+            assert set(block.keys()) == set(RECAPTURE_PATH_KEYS), (
+                f"{path} at {row['bars']} bars ({row['series']}): the block must "
+                "carry the driver keys and the status fields"
+            )
+            # The identity is the framework's own: the dispersion of the
+            # benchmark alphas, scaled by the expected maximum of N draws.
+            # Re-derived here with the standard library, not with the
+            # implementation's estimator.
+            alphas = block["benchmark_alphas"]
+            n = int(block["n_benchmarks"])
+            predicted = statistics.stdev(alphas) * math.sqrt(2.0 * math.log(n))
+            assert abs(predicted - block["expected_max_alpha"]) < 1e-9, (
+                f"{path} at {row['bars']} bars ({row['series']}): the alpha "
+                "floor the framework reported must be reproducible from the "
+                "benchmark alphas it reported"
+            )
+            assert abs(block["benchmark_alpha_std"] - statistics.stdev(alphas)) < 1e-12
+            assert abs(block["strategy_alpha"] - alphas[0]) < 1e-12
+
+            # The status says the criterion could be priced on this draw, and
+            # the reason is empty because it could. Every draw on this
+            # synthetic ladder is a priced one: a status of "not_applicable"
+            # or "unmeasurable" here would mean a floor that was never
+            # measured was being read as a measurement.
+            assert block["sharpe_status"] == "resolvable", (
+                f"{path} at {row['bars']} bars ({row['series']}): the Sharpe "
+                "criterion was priced on every draw of this ladder"
+            )
+            assert block["alpha_status"] == "resolvable", (
+                f"{path} at {row['bars']} bars ({row['series']}): the alpha "
+                "criterion was priced on every draw of this ladder"
+            )
+            assert block["sharpe_reason"] is None
+            assert block["alpha_reason"] is None
+            checked += 1
+    assert checked == 5 * 3 * 2 * 3, "every row and every path must be checked"
+
+    # The summary rebuilt from the trimmed fixture equals the committed
+    # summary key by key: nothing was added, dropped or re-computed.
+    rebuilt = summarize(rows)
+    assert rebuilt == capture["summary"], (
+        "the summary rebuilt from the fixture must equal the committed summary"
+    )
+
+    # And the driver is reported at the largest rung, on every path, for
+    # every draw measured.
+    by_path = rebuilt["by_path"]
+    for path, stats in by_path.items():
+        driver = stats["alpha_floor_driver"]
+        assert driver["floor_measured"] is True, (
+            f"{path}: every draw of this ladder had a measured alpha floor"
+        )
+        assert driver["identity_holds_on_every_measured_draw"] is True
+        assert driver["draws_measured"] == driver["draws_checked"] == 30
+        at_largest = driver["at_largest_measured_size"]
+        assert at_largest is not None
+        assert at_largest["alpha_status"] == "resolvable"
+        assert abs(
+            at_largest["alpha_star_from_dispersion"] - at_largest["expected_max_alpha"]
+        ) < 1e-12
+        assert stats["alpha_floor_at_largest_measured_size"] == 50000
+        # The report says what sets the floor, instead of saying the floor
+        # cannot be measured.
+        output = _printed_summary(rows, path)
+        assert "what sets the alpha floor" in output
+        assert "not measurable on this ladder" not in output, (
+            f"{path}: the ladder carries the driver, so the report must not "
+            "say the floor cannot be measured"
+        )
+
+    # The crossings are the measured ones: they did not move while the
+    # driver and the status were added.
+    assert by_path[OUT_OF_SAMPLE]["first_size_all_within_alpha_bound"] == 10000
+    assert by_path[WALK_FORWARD]["first_size_all_within_alpha_bound"] == 50000
+    assert by_path[CPCV]["first_size_all_within_alpha_bound"] == 25000
+    assert by_path[WALK_FORWARD]["first_size_all_within_bound"] == 5000
+    assert by_path[CPCV]["first_size_all_within_bound"] == 2500
+    assert by_path[OUT_OF_SAMPLE]["first_size_all_within_bound"] == 10000
+
+    # And the shorter ladder's verdict is the falsifiable one: on the rungs
+    # up to 10,000 bars the walk-forward alpha floor is still above the
+    # bound, which the longer ladder overturns.
+    short = summarize([row for row in rows if row["bars"] <= LARGE_SAMPLE_BARS])
+    short_walk = short["by_path"][WALK_FORWARD]
+    assert short_walk["alpha_floor_beyond_plausible_bound"] is True
+    assert short_walk["first_size_all_within_alpha_bound"] is None
+
+    # The re-capture is the SAME measurement as the pre-driver capture of
+    # the same ladder: every shared number agrees, so nothing moved while
+    # the driver and the status were added. The baseline predates the
+    # driver -- it carries the status fields but none of the driver's
+    # numbers -- which is why it is kept as the baseline and not as the
+    # fixture.
+    older = {
+        (row["bars"], row["seed"], row["series"], path): block
+        for row in baseline["rows"]
+        for path, block in row["paths"].items()
+    }
+    assert len(older) == 5 * 3 * 2 * 3
+    shared = 0
+    for row in rows:
+        for path, block in row["paths"].items():
+            old = older[(row["bars"], row["seed"], row["series"], path)]
+            assert "strategy_alpha" not in old, (
+                "the baseline is the pre-driver capture, so it must not carry "
+                "the driver's keys"
+            )
+            assert "benchmark_alphas" not in old
+            assert "benchmark_alpha_std" not in old
+            for key, value in block.items():
+                if key not in old:
+                    continue  # the driver keys are new
+                old_value = old[key]
+                if isinstance(value, float):
+                    assert abs(value - old_value) <= 1e-9 * max(1.0, abs(old_value)), (
+                        f"{path} at {row['bars']} bars ({row['series']}): {key} "
+                        f"moved between the two captures ({old_value} -> {value})"
+                    )
+                else:
+                    assert value == old_value, (
+                        f"{path} at {row['bars']} bars ({row['series']}): {key} "
+                        f"moved between the two captures ({old_value} -> {value})"
+                    )
+            shared += 1
+    assert shared == 5 * 3 * 2 * 3, "every shared rung must be compared"
+
+    # And the trimmed fixture says what was added: the committed fixture
+    # carries neither the driver's numbers nor the status, the re-captured
+    # one carries both.
+    for row in _load_ladder_fixture()["rows"]:
+        for block in row["paths"].values():
+            assert "strategy_alpha" not in block
+            assert "alpha_status" not in block
+            assert "sharpe_status" not in block
+
+
 def test_the_real_history_ladder_reports_what_it_measured():
     """The real-history curve is the tool's own output, scoped to what it measured.
 
@@ -2392,6 +2674,7 @@ TEST_REGISTRY = [
     ("test_the_measured_ladder_finds_the_alpha_crossing_the_shorter_ladder_missed", test_the_measured_ladder_finds_the_alpha_crossing_the_shorter_ladder_missed),
     ("test_the_measured_ladder_is_the_frameworks_own_numbers", test_the_measured_ladder_is_the_frameworks_own_numbers),
     ("test_the_re_captured_ladder_reports_what_sets_the_alpha_floor", test_the_re_captured_ladder_reports_what_sets_the_alpha_floor),
+    ("test_the_full_ladder_re_capture_carries_the_driver_and_the_status", test_the_full_ladder_re_capture_carries_the_driver_and_the_status),
     ("test_the_real_history_ladder_reports_what_it_measured", test_the_real_history_ladder_reports_what_it_measured),
     ("test_the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars", test_the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars),
     ("test_the_default_ladder_brackets_the_measured_alpha_crossing", test_the_default_ladder_brackets_the_measured_alpha_crossing),
