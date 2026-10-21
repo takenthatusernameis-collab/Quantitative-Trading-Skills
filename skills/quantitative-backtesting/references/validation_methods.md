@@ -1923,7 +1923,44 @@ p-value of 0.10. Two things follow.
 That is why the curve falls, and why it flattens: the resolution converges
 onto the floor rather than onto zero.
 
-#### What this does not establish
+#### What sets the alpha floor (alpha*)
+
+The Deflated Alpha floor is not a property of the parameter search; it is the
+cross-sectional dispersion of the **benchmark** alphas scaled by the expected
+maximum of N draws:
+
+```
+alpha* = std(benchmark alphas, ddof=1) * sqrt(2 * ln(N)),   N = number of benchmarks
+```
+
+With the shipped two-benchmark set (the strategy's own series as the primary
+benchmark and the alternative benchmark) that is `alpha* = 0.8326 * |alpha_strategy - alpha_benchmark|`.
+
+Verified exactly against the framework's own `expected_max_alpha` block (ratio
+1.0000) on four measurements (walk-forward path, seed 7, synthetic
+positive-control fixture): 10,000 and 50,000 bars, effect and no-effect series.
+Measured: effect series at 50,000 bars, strategy alpha 4.70% against benchmark
+alpha 13.53% (gap 8.82pp) -> floor 7.35%; no-effect series, -2.71% against
+-1.49% (gap 1.23pp) -> floor 1.02%.
+
+Two consequences:
+
+- **The alpha floor tracks the strategy's own edge over the benchmark set, not
+  the size of the parameter search.** The Deflated Sharpe floor is set by the
+  dispersion of the trial Sharpes (the search); the Deflated Alpha floor is
+  set by the spread of the *benchmark* alphas. A wider search does not raise
+  it; a bigger edge does.
+- **The floor does not go to zero with more data.** Only the estimation noise in
+  the two alphas shrinks; the systematic gap survives. That is why the
+  walk-forward path's criterion-5 crossing sits at 50,000 bars on this fixture:
+  its floor plateaus at 0.084-0.087 rather than falling away, and the alpha
+  bound (0.10) is close to it.
+
+The practical reading for a researcher: a *high* alpha floor is not a sign of a
+bigger search or a worse test -- it is a sign of a bigger gap between the
+strategy and its benchmark set, and it is the number to read before asking for
+more data. The fixture is a formula, not a market.
+"
 
 - **The floor is a property of the sample, not of the framework.** SR* is
   estimated from the dispersion of the trial Sharpes of *this* strategy on

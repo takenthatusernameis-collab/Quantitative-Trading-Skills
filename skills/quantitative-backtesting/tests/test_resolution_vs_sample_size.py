@@ -665,7 +665,32 @@ def test_test_frac_sweep_alpha_crossings_match_the_per_fraction_flags():
             assert first_any_alpha == min(flag_any)
 
 
-def _framework_wf_block(bars, seed, inject_effect):
+
+def test_deflated_alpha_floor_identity_matches_benchmark_dispersion():
+    """The Deflated Alpha floor is std(benchmark alphas, ddof=1) * sqrt(2 ln N)."""
+    bars = SMALL_SAMPLE_BARS
+    seed = 7
+    measured = _measured(bars, seed, False)
+    framework = _framework_wf_block(bars, seed, False)
+    block = measured["paths"][WALK_FORWARD]
+    deflated_alpha = framework["deflated_alpha"]
+    benchmark_alphas = [
+        float(b["alpha"]) for b in (framework.get("benchmark_metrics") or [])
+        if isinstance(b, dict) and b.get("alpha") is not None
+    ]
+    n = int(deflated_alpha.get("n_benchmarks", len(benchmark_alphas)))
+    import math
+    predicted = (
+        (sum((a - sum(benchmark_alphas) / len(benchmark_alphas)) ** 2
+             for a in benchmark_alphas) / (len(benchmark_alphas) - 1)) ** 0.5
+        * math.sqrt(2.0 * math.log(n))
+    )
+    assert abs(block["expected_max_alpha"] - predicted) < 1e-9, (
+        "the measured deflation floor (alpha*) must equal "
+        "std(benchmark alphas, ddof=1) * sqrt(2 ln N)"
+    )
+    assert abs(block["expected_max_alpha"] - deflated_alpha["expected_max_alpha"]) < 1e-12
+"
     """Run the framework's own walk_forward_analysis on the same fixture.
 
     Returns its summary, so callers can read the framework's own
