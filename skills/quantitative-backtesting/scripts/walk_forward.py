@@ -2286,6 +2286,17 @@ def _build_test_resolution(
     The numbers are measurements, not corrections: no verdict, no p-value and
     no other reported number is changed here.
 
+    The block also reports the **realized annualized volatility of the very
+    return series the statistic was computed on** -- the conditioning
+    quantity for the minimum detectable effects. The alpha MDE is
+    volatility-scaled, so two runs at the same sample size can have different
+    alpha MDEs purely because their test windows are more or less volatile,
+    and the block states what the MDE is conditional on. It is reported only
+    when a statistic was actually resolved on that series; when the series
+    does not match the statistic (or no statistic exists), the conditioning
+    is unknown and the key stays ``None`` rather than carrying a volatility
+    computed from the wrong series.
+
     Args:
         summary: An analysis summary carrying ``deflated_sharpe`` and/or
             ``deflated_alpha`` (as produced by the walk-forward, CPCV and
@@ -2299,8 +2310,9 @@ def _build_test_resolution(
         The ``test_resolution`` block: the sample size the statistics were
         computed on, the number of parameter trials and benchmarks behind
         them, the smallest annualized Sharpe / alpha each statistic could
-        confirm, the plausibility bounds used to judge those, and the reason
-        a statistic could not be resolved when that is the case.
+        confirm, the plausibility bounds used to judge those, the realized
+        annualized volatility the MDEs are conditional on, and the reason a
+        statistic could not be resolved when that is the case.
     """
     resolution: Dict[str, Any] = {
         "n_test_observations": None,
@@ -2332,15 +2344,13 @@ def _build_test_resolution(
     deflated_alpha = summary.get("deflated_alpha")
 
     # Realized annualized volatility of the series the statistic was computed
-    # on: the conditioning quantity for the minimum detectable effects.
-    if returns is not None:
-        try:
-            _series = returns.dropna() if hasattr(returns, "dropna") else returns
-            if len(_series) >= 2:
-                _ann = _annualization_factor(_series.index)
-                resolution["realized_annualized_volatility"] = float(_series.std() * math.sqrt(_ann))
-        except Exception:
-            pass
+    # on: the conditioning quantity for the minimum detectable effects. It is
+    # only reported when a statistic was actually resolved on that series --
+    # when the series does not match the statistic (or no statistic exists),
+    # the conditioning is unknown and the key stays None, so a reader cannot
+    # mistake a volatility computed from the wrong series for the one the MDE
+    # is conditional on.
+    _vol_resolvable = False
 
     if isinstance(deflated_sharpe, dict):
         resolution["n_test_observations"] = deflated_sharpe.get("n_observations")
@@ -2360,6 +2370,7 @@ def _build_test_resolution(
                 resolution["sharpe_beyond_plausible_bound"] = bool(
                     resolution["min_detectable_sharpe"] > PLAUSIBLE_MAX_ANNUALIZED_SHARPE
                 )
+            _vol_resolvable = True
         else:
             resolution["sharpe_status"] = "not_resolvable"
             resolution["sharpe_reason"] = mde.get("reason")
@@ -2386,12 +2397,24 @@ def _build_test_resolution(
                 resolution["alpha_beyond_plausible_bound"] = bool(
                     resolution["min_detectable_alpha"] > PLAUSIBLE_MAX_ANNUALIZED_ALPHA
                 )
+            _vol_resolvable = True
         else:
             resolution["alpha_status"] = "not_resolvable"
             resolution["alpha_reason"] = mde.get("reason")
     elif deflated_alpha is not None:
         resolution["alpha_status"] = "not_resolvable"
         resolution["alpha_reason"] = "no_deflated_alpha"
+
+    if _vol_resolvable and returns is not None:
+        try:
+            _series = returns.dropna() if hasattr(returns, "dropna") else returns
+            if len(_series) >= 2:
+                _ann = _annualization_factor(_series.index)
+                resolution["realized_annualized_volatility"] = float(
+                    _series.std() * math.sqrt(_ann)
+                )
+        except Exception:
+            pass
 
     resolution["message"] = _test_resolution_message(resolution)
     return resolution

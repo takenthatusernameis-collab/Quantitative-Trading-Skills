@@ -526,7 +526,13 @@ Risk Metrics:
   return series does not match the one it was computed on is reported as
   **not resolvable** with a reason, never as a number. The block changes no
   number: it is reporting-only, and a run without a significance test says so
-  instead of staying silent. Guarded by
+  instead of staying silent. It also carries the **realized annualized
+  volatility of the very return series the statistic was computed on** — the
+  conditioning quantity for the minimum detectable effects, which is
+  volatility-scaled on the alpha side — so two runs at the same sample size
+  are comparable; when a statistic was not resolved on that series the key is
+  `null`, so a volatility computed from the wrong series is never mistaken for
+  the conditioning. Guarded by
   `tests/test_test_resolution.py`.
 
 - **A resolution without its statistic is not checkable.** The alpha

@@ -1388,6 +1388,7 @@ attach a `summary["test_resolution"]` block:
 | `observed_annualized_sharpe` / `observed_annualized_alpha` | the observed effect, for comparison with the two above |
 | `sharpe_status` / `alpha_status` | `resolvable`, `not_resolvable` (with a `*_reason`) or `not_applicable` |
 | `sharpe_beyond_plausible_bound` / `alpha_beyond_plausible_bound` | whether the required effect exceeds `PLAUSIBLE_MAX_ANNUALIZED_SHARPE` (2.0) / `PLAUSIBLE_MAX_ANNUALIZED_ALPHA` (0.10) |
+| `realized_annualized_volatility` | the annualized standard deviation (ddof=1) of the very return series the statistic was computed on -- the conditioning quantity for the minimum detectable effects. Populated only when a statistic was actually resolved on that series; `null` when the series does not match the statistic or no statistic exists |
 | `message` | the same statement the console prints |
 
 The CLI prints it next to the Deflated Sharpe line, labelled *"measurement, not
@@ -1420,7 +1421,11 @@ a correction"*. Three properties are deliberate:
   10.98%, and the two fixtures' alpha MDEs differ at the same T. The Sharpe
   MDE is a ratio and looks scale-free, but its floor is estimated from trial
   alphas divided by the strategy's volatility, so the conditioning is reported
-  rather than assumed away.
+  rather than assumed away. The key is only populated when a statistic was
+  actually resolved on that series: when the series does not match the
+  statistic, or no statistic exists, the conditioning is unknown and the key
+  stays `null` rather than carrying a volatility computed from the wrong
+  series.
 
 ### Cost sweeps report the resolution of every point
 

@@ -25,6 +25,11 @@ console. These tests pin:
     test can be read as a statement about the sample rather than about the
     strategy;
   * the block is reporting-only: it mutates nothing and changes no number;
+  * the block reports the realized annualized volatility of the very return
+    series the statistic was computed on -- the conditioning quantity for the
+    minimum detectable effects -- and reports nothing when the series does not
+    match the statistic, so a reader cannot mistake a volatility computed from
+    the wrong series for the one the MDE is conditional on;
   * a run without a significance test says so instead of staying silent;
   * the cost sweeps (`run_backtest.py --commissions` and its siblings) report
     the resolution of every sweep point beside its Sharpe, flag the points
@@ -61,6 +66,7 @@ from walk_forward import (  # noqa: E402
     out_of_sample_validation,
     walk_forward_analysis,
 )
+from utils import _annualization_factor  # noqa: E402
 from run_backtest import (  # noqa: E402
     _sweep_resolution_fields,
     _sweep_sharpe_below_resolution,
@@ -572,6 +578,48 @@ def test_the_out_of_sample_cli_prints_the_aggregate_deflated_alpha():
 # ---------------------------------------------------------------------------
 # The console
 # ---------------------------------------------------------------------------
+
+def test_the_resolution_reports_the_realized_volatility_of_the_statistics_own_series():
+    """The conditioning volatility is the series the statistic was computed on.
+
+    The minimum detectable alpha is volatility-scaled, so the block reports the
+    realized annualized volatility of the very return series the statistic was
+    computed on -- not a recomputation from a different series, and not a
+    constant. Two runs at the same sample size can therefore have different
+    alpha MDEs, and the block says what the MDE is conditional on.
+    """
+    import math
+
+    summary, oos_returns = _walk_forward_summary(benchmark=_make_benchmark_data())
+    resolution = summary["test_resolution"]
+
+    vol = resolution.get("realized_annualized_volatility")
+    assert vol is not None, "the block does not report the conditioning volatility"
+    assert math.isfinite(vol) and vol > 0.0
+
+    # It is the volatility of the series the statistic was computed on, not a
+    # recomputation from some other series.
+    series = oos_returns.dropna()
+    ann = _annualization_factor(series.index)
+    expected = float(series.std() * math.sqrt(ann))
+    assert vol == expected
+
+    # A different series must not silently report the same conditioning.
+    other = _build_test_resolution(summary, oos_returns.iloc[:10])
+    assert other["realized_annualized_volatility"] is None
+    assert other["sharpe_status"] == "not_resolvable"
+
+    # The console prints it, so the artifact and the console agree.
+    import io
+    from contextlib import redirect_stdout
+
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):
+        _print_test_resolution(resolution)
+    printed = buffer.getvalue()
+    assert "Realized annualized volatility of the test window" in printed
+    assert f"{vol:.2%}" in printed
+
 
 def test_the_console_prints_the_resolution_and_its_wording():
     """The console states that the block is a measurement, not a correction."""
@@ -1130,6 +1178,8 @@ TEST_REGISTRY = [
      test_the_cpcv_cli_prints_the_aggregate_deflated_alpha),
     ("test_the_out_of_sample_cli_prints_the_aggregate_deflated_alpha",
      test_the_out_of_sample_cli_prints_the_aggregate_deflated_alpha),
+    ("test_the_resolution_reports_the_realized_volatility_of_the_statistics_own_series",
+     test_the_resolution_reports_the_realized_volatility_of_the_statistics_own_series),
     ("test_the_console_prints_the_resolution_and_its_wording",
      test_the_console_prints_the_resolution_and_its_wording),
     ("test_the_walk_forward_cli_prints_the_test_resolution",
