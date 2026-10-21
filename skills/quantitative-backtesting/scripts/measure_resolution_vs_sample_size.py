@@ -892,18 +892,26 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
     sharpes = []
     floors = []
     per_size: Dict[int, Dict[str, Any]] = {}
+    # Draws whose Sharpe floor could NOT be measured: the framework could
+    # not price the Deflated Sharpe criterion on them, so the floor they
+    # carry is a placeholder, not a measurement.
+    sharpe_unmeasured: Dict[int, List[Dict[str, Any]]] = {}
     for row in rows:
         block = _path_block(row, path)
         bars = row.get("bars")
         value = block.get("min_detectable_sharpe")
         bucket = per_size.setdefault(
-            bars, {"values": [], "within": 0, "measured": 0, "floors": []}
+            bars, {"values": [], "within": 0, "measured": 0, "floors": [], "unmeasured": []}
         )
         bucket["measured"] += 1
-        floor = block.get("expected_max_sharpe")
-        if floor is not None:
-            bucket["floors"].append(floor)
-            floors.append(floor)
+        if _sharpe_floor_measured(block):
+            floor = block.get("expected_max_sharpe")
+            if floor is not None:
+                bucket["floors"].append(floor)
+                floors.append(floor)
+        else:
+            sharpe_unmeasured.setdefault(bars, []).append(block)
+            bucket["unmeasured"].append(block)
         if value is None:
             continue
         bucket["values"].append(value)
@@ -983,10 +991,15 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
                 "draws_measured": bucket["measured"],
                 "draws_resolved": len(values),
                 "draws_within_bound": bucket["within"],
-                # A draw whose resolution could not be computed is not
-                # inside the bound -- it says nothing -- so "every draw
-                # inside the bound" requires every draw to have resolved
-                # *and* to be inside it.
+                "draws_floor_unmeasured": len(bucket.get("unmeasured", [])),
+                "floor_unmeasured_reason": next(
+                    (
+                        b.get("sharpe_reason")
+                        for b in bucket.get("unmeasured", [])
+                        if b.get("sharpe_reason")
+                    ),
+                    None,
+                ),
                 "all_within_bound": bool(values)
                 and len(values) == bucket["measured"]
                 and all(v <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE for v in values),
@@ -1082,8 +1095,10 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
         for entry in size_summary
         if entry.get("max_expected_max_sharpe") is not None
     ]
-    floor_beyond_bound = bool(rung_floor_maxima) and all(
-        f > PLAUSIBLE_MAX_ANNUALIZED_SHARPE for f in rung_floor_maxima
+    floor_beyond_bound = (
+        all(f > PLAUSIBLE_MAX_ANNUALIZED_SHARPE for f in rung_floor_maxima)
+        if rung_floor_maxima
+        else None
     )
 
     # The alpha crossing, mirrored off the Sharpe crossing. The alpha floor
@@ -1210,6 +1225,17 @@ def _summarize_path(rows: Sequence[Dict[str, Any]], path: str) -> Dict[str, Any]
             max(finite_alpha_floors) if finite_alpha_floors else None
         ),
         "floor_at_largest_size": floor_at_largest,
+        "sharpe_floor_measured": bool(floors),
+        "sharpe_floor_unmeasured_rungs": sorted(sharpe_unmeasured),
+        "sharpe_floor_unmeasured_reason": next(
+            (
+                b.get("sharpe_reason")
+                for bs in sharpe_unmeasured.values()
+                for b in bs
+                if b.get("sharpe_reason")
+            ),
+            None,
+        ),
         "alpha_floor_at_largest_size": alpha_floor_at_largest,
         # The rung the alpha floor above was measured at, and whether the
         # floor could be measured at all: where the framework could not
@@ -1659,6 +1685,8 @@ def print_path_summary(summary: Dict[str, Any], path: str) -> None:
         floor_key="floor_at_largest_size",
         beyond_key="floor_beyond_plausible_bound",
         beyond_at_largest_key="floor_beyond_plausible_bound_at_largest_size",
+        measured_key="sharpe_floor_measured",
+        unmeasured_reason_key="sharpe_floor_unmeasured_reason",
     )
     print(
         f"  smallest measured annualized alpha criterion 5 could confirm: "
