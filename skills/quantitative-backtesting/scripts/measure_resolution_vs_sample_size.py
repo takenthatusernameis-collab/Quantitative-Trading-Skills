@@ -3256,6 +3256,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
     parser.add_argument(
+        "--cost-regimes",
+        default=None,
+        help=(
+            "Comma-separated cost regimes to measure the ladder at, written "
+            "label:commission_bps:slippage_bps[:impact[:borrow_bps[:funding_bps]]]. "
+            "The label ``shipped`` names the worked example's own costs and "
+            "takes no numbers. Commission, slippage, borrow and funding are in "
+            "basis points; impact is the framework's own dimensionless "
+            "coefficient. Omitted numbers are zero (the framework's own "
+            "defaults). When set, the ladder is replaced by one ladder per "
+            "regime, measured at the same --sizes on the same fixture (or on "
+            "prefixes of ``--data``). Each regime's numbers are the framework's "
+            "own resolution block priced at that regime, so the sweep reports "
+            "which of the ladder's crossings and floors survive a different "
+            "cost assumption. It names the series and the paths it measured, "
+            "and it cannot be combined with another sweep -- measure one thing "
+            "at a time. Costs are a lever of the measurement, not of a path's "
+            "configuration, so a row measured at one regime is never reported "
+            "under another regime's name."
+        ),
+    )
+    parser.add_argument(
         "--data",
         default=None,
         help=(
