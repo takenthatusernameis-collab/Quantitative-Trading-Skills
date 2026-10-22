@@ -258,10 +258,224 @@ MEASUREMENT_NOTE = (
 )
 
 
+# ---------------------------------------------------------------------------
+# COST REGIMES
+#
+# Every resolution number in this repository is measured at ONE cost
+# assumption: the worked example's 2 bps of commission and 1 bps of slippage
+# per trade, with no market impact, no borrow cost and no funding cost (the
+# framework's own defaults). That assumption is not a detail of the
+# measurement -- it moves the numbers.
+#
+# The floors move a little with it: the trial Sharpes the Deflated Sharpe
+# benchmark SR* is estimated from are net of commission and slippage, so a
+# costlier regime raises SR* a little. The *observed* statistics move more:
+# they are the strategy's own net returns, so every basis point of cost is
+# taken straight out of them.
+#
+# So the cost assumptions are a lever of the MEASUREMENT, not of a path's
+# configuration: the same sample, priced at different costs, is a different
+# measurement. The cost sweep measures the ladder at each regime and reports
+# which of the ladder's verdicts survive. It never reports a ladder measured
+# at one regime under another regime's name: every row carries the regime it
+# was measured at, and the sweep's output is a sweep, not a ladder.
+#
+# The shipped regime is named `shipped` and takes no numbers: it is the
+# worked example's own costs, read from the example module, so the baseline
+# every other regime is compared against cannot drift from the example.
+# ---------------------------------------------------------------------------
+
+# One basis point as a decimal rate.
+BPS = 1e-4
+
+# The label of the shipped cost regime: the worked example's own costs.
+SHIPPED_COST_REGIME = "shipped"
+
+# The cost levers the framework supports and the sweep can vary. The first
+# two are per-trade rates; the last three are the framework's own defaults
+# (no market impact, no borrow cost, no funding cost), which the shipped
+# configuration leaves at zero.
+COST_FIELDS = (
+    "commission",
+    "slippage",
+    "impact_coefficient",
+    "borrow_cost",
+    "funding_cost",
+)
+
+
 # The strategy factory the worked example builds: the framework's own
 # `sma_crossover` factory, so the strategy under test is the same object
 # the example trades.
 _STRATEGY_FACTORY = _make_strategy_factory("sma_crossover")
+
+
+def _shipped_cost_regime() -> Dict[str, Any]:
+    """The cost assumption every committed number in this repo was measured at.
+
+    Read from the worked example at call time, so the baseline cannot drift
+    from the example the ladder is compared against.
+    """
+    return _cost_regime_record(
+        SHIPPED_COST_REGIME,
+        commission=COMMISSION,
+        slippage=SLIPPAGE,
+    )
+
+
+def _cost_regime_record(
+    label: str,
+    commission: float,
+    slippage: float,
+    impact_coefficient: float = 0.0,
+    borrow_cost: float = 0.0,
+    funding_cost: float = 0.0,
+) -> Dict[str, Any]:
+    """One cost regime, in the framework's own decimal rates.
+
+    The basis-point mirror is carried alongside, because a cost is read in
+    basis points and a regime printed in decimals is a regime nobody can
+    check.
+    """
+    return {
+        "label": label,
+        "commission": float(commission),
+        "slippage": float(slippage),
+        "impact_coefficient": float(impact_coefficient),
+        "borrow_cost": float(borrow_cost),
+        "funding_cost": float(funding_cost),
+        "commission_bps": float(commission) / BPS,
+        "slippage_bps": float(slippage) / BPS,
+        "borrow_bps": float(borrow_cost) / BPS,
+        "funding_bps": float(funding_cost) / BPS,
+    }
+
+
+def _parse_cost_regimes(spec: str) -> List[Dict[str, Any]]:
+    """Parse the cost regimes named by ``--cost-regimes``.
+
+    Each regime is written::
+
+        label:commission_bps:slippage_bps[:impact[:borrow_bps[:funding_bps]]]
+
+    The commission, slippage, borrow and funding numbers are in BASIS
+    POINTS (2 bps = 0.0002 per trade); the impact coefficient is the
+    framework's own dimensionless multiplier and is written as a plain
+    decimal. Omitted numbers are zero -- the framework's own defaults.
+
+    The label ``shipped`` names the worked example's own costs and takes no
+    numbers, so the baseline the other regimes are compared against is the
+    example's, not a copy of it.
+
+    A regime is refused rather than silently corrected when it is
+    ambiguous: a negative cost, a non-numeric cost, a duplicate label or a
+    missing commission/slippage is an error, because a regime read the
+    wrong way is a measurement reported under the wrong name.
+    """
+    regimes: List[Dict[str, Any]] = []
+    seen: Dict[str, int] = {}
+    for raw in spec.split(","):
+        item = raw.strip()
+        if not item:
+            continue
+        parts = [p.strip() for p in item.split(":")]
+        label = parts[0]
+        if not label:
+            raise ValueError(
+                f"a cost regime needs a label, got {item!r}"
+            )
+        if label in seen:
+            raise ValueError(
+                f"duplicate cost regime label {label!r}: each regime must be "
+                "named once, or the numbers would be reported under the same "
+                "name twice"
+            )
+        seen[label] = len(regimes)
+        if label.lower() == SHIPPED_COST_REGIME:
+            if len(parts) > 1:
+                raise ValueError(
+                    f"the {SHIPPED_COST_REGIME!r} regime is the worked "
+                    "example's own costs and takes no numbers; write the "
+                    "costs you mean as their own labelled regime"
+                )
+            regimes.append(_shipped_cost_regime())
+            continue
+        if len(parts) < 3:
+            raise ValueError(
+                f"the cost regime {item!r} is incomplete: write "
+                "label:commission_bps:slippage_bps (the commission and the "
+                "slippage are both required, in basis points)"
+            )
+        numbers = []
+        for index, part in enumerate(parts[1:], start=1):
+            try:
+                value = float(part)
+            except ValueError:
+                raise ValueError(
+                    f"the cost regime {item!r} has a non-numeric cost: {part!r}"
+                ) from None
+            if not math.isfinite(value):
+                raise ValueError(
+                    f"the cost regime {item!r} has a non-finite cost: {part!r}"
+                )
+            if value < 0.0:
+                raise ValueError(
+                    f"the cost regime {item!r} has a negative cost: {part!r}. "
+                    "A negative cost is a rebate, and a rebate is not a "
+                    "trading cost assumption this tool measures."
+                )
+            numbers.append(value)
+        commission_bps = numbers[0]
+        slippage_bps = numbers[1]
+        impact = numbers[2] if len(numbers) > 2 else 0.0
+        borrow_bps = numbers[3] if len(numbers) > 3 else 0.0
+        funding_bps = numbers[4] if len(numbers) > 4 else 0.0
+        regimes.append(
+            _cost_regime_record(
+                label,
+                commission=commission_bps * BPS,
+                slippage=slippage_bps * BPS,
+                impact_coefficient=impact,
+                borrow_cost=borrow_bps * BPS,
+                funding_cost=funding_bps * BPS,
+            )
+        )
+    if not regimes:
+        raise ValueError("--cost-regimes must name at least one cost regime")
+    return regimes
+
+
+def _resolved_costs(costs: Optional[Dict[str, Any]]) -> Dict[str, float]:
+    """The cost assumptions one run is priced at.
+
+    ``None`` means the shipped assumptions: the worked example's commission
+    and slippage and the framework's own zeros for the other three levers.
+    """
+    if costs is None:
+        return {
+            "commission": COMMISSION,
+            "slippage": SLIPPAGE,
+            "impact_coefficient": 0.0,
+            "borrow_cost": 0.0,
+            "funding_cost": 0.0,
+        }
+    return {field: float(costs[field]) for field in COST_FIELDS}
+
+
+def _cost_payload(regime: Dict[str, Any]) -> Dict[str, Any]:
+    """A cost regime as it is recorded in a row, a capture and a fixture."""
+    return {
+        "label": regime["label"],
+        "commission": regime["commission"],
+        "slippage": regime["slippage"],
+        "impact_coefficient": regime["impact_coefficient"],
+        "borrow_cost": regime["borrow_cost"],
+        "funding_cost": regime["funding_cost"],
+        "commission_bps": regime["commission_bps"],
+        "slippage_bps": regime["slippage_bps"],
+        "borrow_bps": regime["borrow_bps"],
+        "funding_bps": regime["funding_bps"],
+    }
 
 
 def _run_framework(call, **kwargs) -> Dict[str, Any]:
@@ -281,13 +495,25 @@ def _run_framework(call, **kwargs) -> Dict[str, Any]:
 
 
 def _run_validation(
-    data, benchmarks, train_frac=TRAIN_FRAC, val_frac=VAL_FRAC, test_frac=TEST_FRAC
+    data,
+    benchmarks,
+    train_frac=TRAIN_FRAC,
+    val_frac=VAL_FRAC,
+    test_frac=TEST_FRAC,
+    costs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Run the out-of-sample validation on one prepared sample.
 
     Defaults to the shipped 0.6/0.2/0.2 split; passing other fractions sweeps
     the held-out fraction (train_frac = 0.8 - test_frac, val_frac = 0.2).
+
+    ``costs`` prices the run at another cost regime; ``None`` is the shipped
+    assumption. The benchmarks are priced at the same commission and
+    slippage as the strategy, exactly as the shipped configuration does, so
+    the benchmark alphas the Deflated Alpha floor is estimated from are net
+    of the same costs.
     """
+    cost = _resolved_costs(costs)
     return _run_framework(
         out_of_sample_validation,
         data=data,
@@ -301,12 +527,15 @@ def _run_validation(
         walk_forward_test_months=WF_TEST_MONTHS,
         walk_forward_step_months=WF_STEP_MONTHS,
         initial_capital=INITIAL_CAPITAL,
-        commission=COMMISSION,
-        slippage=SLIPPAGE,
+        commission=cost["commission"],
+        slippage=cost["slippage"],
+        impact_coefficient=cost["impact_coefficient"],
+        borrow_cost=cost["borrow_cost"],
+        funding_cost=cost["funding_cost"],
         benchmark=benchmarks,
         total_return_benchmark=False,
-        benchmark_commission=COMMISSION,
-        benchmark_slippage=SLIPPAGE,
+        benchmark_commission=cost["commission"],
+        benchmark_slippage=cost["slippage"],
         benchmark_expense_ratio=0.0,
         benchmark_cost_is_periodic=False,
         apply_deflation=True,
@@ -321,6 +550,7 @@ def _run_walk_forward(
     train_months: int = WF_TRAIN_MONTHS,
     test_months: int = WF_TEST_MONTHS,
     step_months: int = WF_STEP_MONTHS,
+    costs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Run the walk-forward analysis on one prepared sample.
 
@@ -332,7 +562,11 @@ def _run_walk_forward(
     window, 2-month test window, 2-month step), so the ladder is unchanged
     by the existence of the window sweep: the sweep passes its own windows
     in, and the default stays the default.
+
+    ``costs`` prices the run at another cost regime; ``None`` is the shipped
+    assumption.
     """
+    cost = _resolved_costs(costs)
     return _run_framework(
         walk_forward_analysis,
         data=data,
@@ -342,12 +576,15 @@ def _run_walk_forward(
         test_months=test_months,
         step_months=step_months,
         initial_capital=INITIAL_CAPITAL,
-        commission=COMMISSION,
-        slippage=SLIPPAGE,
+        commission=cost["commission"],
+        slippage=cost["slippage"],
+        impact_coefficient=cost["impact_coefficient"],
+        borrow_cost=cost["borrow_cost"],
+        funding_cost=cost["funding_cost"],
         benchmark=benchmarks,
         total_return_benchmark=False,
-        benchmark_commission=COMMISSION,
-        benchmark_slippage=SLIPPAGE,
+        benchmark_commission=cost["commission"],
+        benchmark_slippage=cost["slippage"],
         benchmark_expense_ratio=0.0,
         benchmark_cost_is_periodic=False,
         apply_deflation=True,
@@ -360,6 +597,7 @@ def _run_cpcv(
     benchmarks,
     n_splits: int = CPCV_N_SPLITS,
     test_size: float = CPCV_TEST_SIZE,
+    costs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Run the CPCV analysis on one prepared sample.
 
@@ -367,10 +605,14 @@ def _run_cpcv(
     and the resolution measured here is the resolution of the test that
     path runs on its pooled out-of-sample fold returns. The split
     configuration defaults to the shipped one (5 splits, a test window of
-    20% of each group), so the ladder is unchanged by the sweep's
-    existence: the sweep passes its own configuration in, and the default
+    20% of each group), so the ladder is unchanged by the existence of the
+    sweep: the sweep passes its own configuration in, and the default
     stays the default.
+
+    ``costs`` prices the run at another cost regime; ``None`` is the shipped
+    assumption.
     """
+    cost = _resolved_costs(costs)
     return _run_framework(
         cpcv_analysis,
         data=data,
@@ -379,12 +621,15 @@ def _run_cpcv(
         n_splits=n_splits,
         test_size=test_size,
         initial_capital=INITIAL_CAPITAL,
-        commission=COMMISSION,
-        slippage=SLIPPAGE,
+        commission=cost["commission"],
+        slippage=cost["slippage"],
+        impact_coefficient=cost["impact_coefficient"],
+        borrow_cost=cost["borrow_cost"],
+        funding_cost=cost["funding_cost"],
         benchmark=benchmarks,
         total_return_benchmark=False,
-        benchmark_commission=COMMISSION,
-        benchmark_slippage=SLIPPAGE,
+        benchmark_commission=cost["commission"],
+        benchmark_slippage=cost["slippage"],
         benchmark_expense_ratio=0.0,
         benchmark_cost_is_periodic=False,
         apply_deflation=True,
@@ -574,6 +819,7 @@ def _measure_sample(
     train_frac: float = TRAIN_FRAC,
     val_frac: float = VAL_FRAC,
     test_frac: float = TEST_FRAC,
+    costs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Measure the resolution on one prepared sample, for every path.
 
@@ -583,8 +829,18 @@ def _measure_sample(
 
     The top-level fields are the primary (out-of-sample) path's fields;
     ``paths`` carries every measured path's own block.
+
+    ``costs`` prices the sample at another cost regime; ``None`` is the
+    shipped assumption.
     """
-    results = _run_validation(data, benchmarks, train_frac=train_frac, val_frac=val_frac, test_frac=test_frac)
+    results = _run_validation(
+        data,
+        benchmarks,
+        train_frac=train_frac,
+        val_frac=val_frac,
+        test_frac=test_frac,
+        costs=costs,
+    )
     summary = results.get("summary", {})
     test_performance = results.get("test_performance") or {}
     test_returns = test_performance.get("test_returns")
@@ -642,7 +898,7 @@ def _measure_sample(
         )
     }
     if PATH_WALK_FORWARD in requested:
-        wf_results = _run_walk_forward(data, benchmarks)
+        wf_results = _run_walk_forward(data, benchmarks, costs=costs)
         wf_summary = wf_results.get("summary", {})
         blocks[PATH_WALK_FORWARD] = _measure_path(
             PATH_WALK_FORWARD,
@@ -651,7 +907,7 @@ def _measure_sample(
             n_windows=len(wf_results.get("periods") or []),
         )
     if PATH_CPCV in requested:
-        cpcv_results = _run_cpcv(data, benchmarks)
+        cpcv_results = _run_cpcv(data, benchmarks, costs=costs)
         cpcv_summary = cpcv_results.get("summary", {})
         blocks[PATH_CPCV] = _measure_path(
             PATH_CPCV,
@@ -699,16 +955,28 @@ def measure_synthetic(
     train_frac: float = TRAIN_FRAC,
     val_frac: float = VAL_FRAC,
     test_frac: float = TEST_FRAC,
+    costs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Measure the resolution on a synthetic control fixture of `bars` bars.
 
     The fixture is the worked example's positive control
     (`generate_positive_control_data.py`): the same construction, regenerated
     at the requested length, with the same seeds.
+
+    ``costs`` prices the measurement at another cost regime; ``None`` is the
+    shipped assumption, and the row is then the ladder's row unchanged.
     """
     tmpdir, data, benchmarks = _control_sample(bars, seed, inject_effect)
     try:
-        measured = _measure_sample(data, benchmarks, paths=paths, train_frac=train_frac, val_frac=val_frac, test_frac=test_frac)
+        measured = _measure_sample(
+            data,
+            benchmarks,
+            paths=paths,
+            train_frac=train_frac,
+            val_frac=val_frac,
+            test_frac=test_frac,
+            costs=costs,
+        )
     finally:
         tmpdir.cleanup()
     measured.update(
@@ -729,12 +997,16 @@ def measure_real(
     data_path: str,
     bars: int,
     paths: Sequence[str] = PATHS,
+    costs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Measure the resolution on the first `bars` bars of a real history.
 
     The benchmark set is resolved the way the worked example resolves it --
     from the directory of the data file -- so the same multiple-benchmark
     Deflated Alpha path is exercised.
+
+    ``costs`` prices the measurement at another cost regime; ``None`` is the
+    shipped assumption.
     """
     base = Path(data_path).resolve().parent
     full = load_data(str(data_path))
@@ -748,7 +1020,7 @@ def measure_real(
         candidate = base / name
         frame = load_data(str(candidate)).iloc[:bars]
         benchmarks.append(frame)
-    measured = _measure_sample(data, benchmarks, paths=paths)
+    measured = _measure_sample(data, benchmarks, paths=paths, costs=costs)
     measured.update(
         {
             "bars": bars,
@@ -1007,6 +1279,62 @@ def measure_cpcv_sweep(
                     "paths": {PATH_CPCV: block},
                 }
             )
+    return rows
+
+
+def measure_cost_sweep(
+    sizes: Sequence[int],
+    seeds: Sequence[int],
+    regimes: Sequence[Dict[str, Any]],
+    inject_effect: Optional[bool] = None,
+    data_path: Optional[str] = None,
+    paths: Sequence[str] = PATHS,
+) -> List[Dict[str, Any]]:
+    """Measure the resolution ladder at each cost regime.
+
+    The cost assumptions are a lever of the MEASUREMENT, not of a path's
+    configuration: the same sample priced at different costs is a different
+    measurement, and every path's resolution is measured at each regime with
+    that path's own shipped configuration. So this sweep measures the whole
+    ladder, rung by rung, once per regime.
+
+    Every row carries the regime it was measured at (``cost_regime``) and
+    the regime's own numbers (``costs``), so a row measured at one regime
+    can never be read as a row of the shipped ladder.
+
+    One series at a time, as the other sweeps do: the no-effect series is
+    the null calibration and the effect series the positive control, and
+    their numbers answer different questions. ``inject_effect=None`` is
+    refused rather than silently measuring the no-effect series.
+    """
+    if inject_effect is None:
+        raise ValueError(
+            "the sweep measures one series at a time: pass inject_effect=True "
+            "(the effect series) or inject_effect=False (the no-effect "
+            "series). None would silently measure the no-effect series."
+        )
+    if not regimes:
+        raise ValueError("the sweep measures at least one cost regime")
+    rows: List[Dict[str, Any]] = []
+    for regime in regimes:
+        for bars in sizes:
+            if data_path:
+                measured = [measure_real(data_path, bars, paths=paths, costs=regime)]
+            else:
+                measured = [
+                    measure_synthetic(
+                        bars,
+                        seed,
+                        bool(inject_effect),
+                        paths=paths,
+                        costs=regime,
+                    )
+                    for seed in seeds
+                ]
+            for row in measured:
+                row["cost_regime"] = regime["label"]
+                row["costs"] = _cost_payload(regime)
+                rows.append(row)
     return rows
 
 
@@ -1967,6 +2295,101 @@ def _summarize_cpcv_sweep(
     return stats, first_all, first_any, first_all_alpha, first_any_alpha
 
 
+def _summarize_cost_sweep(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Summarise a cost sweep: the ladder's own summary, per regime and path.
+
+    Each regime is summarised with the ladder's own ``_summarize_path``, so
+    a regime's crossing rungs, floors and bound flags are the same numbers
+    the ladder reports for the same rungs -- the only difference between the
+    regimes is the cost they were measured at.
+
+    The crossings are reported per regime and per path, and a crossing that
+    was not reached is reported as ``None`` (not reached), never as a rung
+    that was not measured.
+    """
+    by_regime: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        label = row.get("cost_regime")
+        by_regime.setdefault(label, []).append(row)
+    summaries: List[Dict[str, Any]] = []
+    for label, regime_rows in by_regime.items():
+        paths_measured = _measured_paths(regime_rows)
+        per_path = {
+            path: _summarize_path(regime_rows, path) for path in paths_measured
+        }
+        summaries.append(
+            {
+                "cost_regime": label,
+                "costs": regime_rows[0].get("costs"),
+                "paths": per_path,
+                # The observed statistics, per rung and per path: the cost
+                # assumptions are taken straight out of them, so they are the
+                # numbers that move most with the regime.
+                "observed_by_size": {
+                    path: _observed_by_size(regime_rows, path)
+                    for path in paths_measured
+                },
+                "crossings": {
+                    path: {
+                        "criterion_2_all_draws_within_bound": per_path[path][
+                            "first_size_all_within_bound"
+                        ],
+                        "criterion_2_any_draw_within_bound": per_path[path][
+                            "first_size_any_within_bound"
+                        ],
+                        "criterion_5_all_draws_within_bound": per_path[path][
+                            "first_size_all_within_alpha_bound"
+                        ],
+                        "criterion_5_any_draw_within_bound": per_path[path][
+                            "first_size_any_within_alpha_bound"
+                        ],
+                    }
+                    for path in paths_measured
+                },
+            }
+        )
+    return summaries
+
+
+def _observed_by_size(
+    rows: Sequence[Dict[str, Any]], path: str
+) -> Dict[Any, Dict[str, Any]]:
+    """The observed statistics of one path, per rung, over the draws.
+
+    The observed Sharpe and alpha are the strategy's own net returns, so
+    they are the numbers the cost assumptions are taken straight out of.
+    """
+    buckets: Dict[Any, Dict[str, Any]] = {}
+    for row in rows:
+        block = _path_block(row, path)
+        bars = row.get("bars")
+        bucket = buckets.setdefault(
+            bars,
+            {
+                "sharpes": [],
+                "alphas": [],
+                "draws_measured": 0,
+            },
+        )
+        bucket["draws_measured"] += 1
+        sharpe = block.get("observed_annualized_sharpe")
+        if sharpe is not None and np.isfinite(sharpe):
+            bucket["sharpes"].append(sharpe)
+        alpha = block.get("observed_annualized_alpha")
+        if alpha is not None and np.isfinite(alpha):
+            bucket["alphas"].append(alpha)
+    return {
+        bars: {
+            "draws_measured": bucket["draws_measured"],
+            "min_observed_annualized_sharpe": min(bucket["sharpes"]) if bucket["sharpes"] else None,
+            "max_observed_annualized_sharpe": max(bucket["sharpes"]) if bucket["sharpes"] else None,
+            "min_observed_annualized_alpha": min(bucket["alphas"]) if bucket["alphas"] else None,
+            "max_observed_annualized_alpha": max(bucket["alphas"]) if bucket["alphas"] else None,
+        }
+        for bars, bucket in buckets.items()
+    }
+
+
 def summarize(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """Summarise a ladder: the crossing of the plausibility bound and the floor.
 
@@ -2578,6 +3001,93 @@ def print_cpcv_sweep(
                 f"  first split configuration at which {label}: "
                 f"{value[0]} splits, {value[1]:.0%} of each group"
             )
+
+
+def _cost_regime_text(costs: Optional[Dict[str, Any]]) -> str:
+    """One cost regime as a line of text: what was charged, and for what."""
+    if not costs:
+        return "cost regime not recorded"
+    parts = [
+        f"commission {costs['commission_bps']:.4g} bps",
+        f"slippage {costs['slippage_bps']:.4g} bps",
+    ]
+    if costs.get("impact_coefficient"):
+        parts.append(f"impact coefficient {costs['impact_coefficient']:.6g}")
+    if costs.get("borrow_bps"):
+        parts.append(f"borrow {costs['borrow_bps']:.4g} bps/yr")
+    if costs.get("funding_bps"):
+        parts.append(f"funding {costs['funding_bps']:.4g} bps/yr")
+    return ", ".join(parts)
+
+
+def print_cost_sweep(
+    summaries: Sequence[Dict[str, Any]],
+    path: str,
+    series: str,
+) -> None:
+    """Print one path's cost sweep: a table per cost regime.
+
+    One row per rung: the framework's own minimum confirmable Sharpe and
+    deflation floor SR* for that rung at that regime, the observed
+    statistics, and the plausibility-bound crossing -- and, in parallel, the
+    minimum confirmable alpha and deflation floor alpha* for criterion 5.
+
+    The regime's own costs are printed above its table, so a table can
+    never be read as the shipped ladder's table.
+    """
+    for summary in summaries:
+        costs = summary.get("costs") or {}
+        print(
+            f"COST REGIME: {summary.get('cost_regime')} -- "
+            f"{_cost_regime_text(costs)}"
+        )
+        stats = (summary.get("paths") or {}).get(path)
+        if not stats:
+            print(f"  (the {path} path was not measured at this regime)")
+            print()
+            continue
+        header = (
+            f"{'bars':>7} {'series':>10} {'seed':>5} {'T':>6} "
+            f"{'min SR':>8} {'SR*':>8} {'obs SR':>8} {'min alpha':>10} "
+            f"{'alpha*':>10} {'obs alpha':>10} {'criterion 2':>12}"
+        )
+        print(header)
+        print("-" * len(header))
+        for entry in stats.get("per_size", []):
+            bars = entry.get("bars")
+            floor = entry.get("max_expected_max_sharpe")
+            within = (
+                floor is not None and floor <= PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+            )
+            print(
+                f"{bars:>7} {series:>10} {'-':>5} "
+                f"{str(entry.get('draws_measured') or '-'):>6} "
+                f"{_fmt(entry.get('min_min_detectable_sharpe')):>8} "
+                f"{_fmt(floor):>8} "
+                f"{'-':>8} "
+                f"{_fmt(entry.get('min_min_detectable_alpha'), '%.4f'):>10} "
+                f"{'-':>10} {'-':>10} "
+                f"{('within bound' if within else 'beyond bound'):>12}"
+            )
+        print()
+        crossings = (summary.get("crossings") or {}).get(path, {})
+        for label, key in (
+            ("every draw is within the plausibility bound", "criterion_2_all_draws_within_bound"),
+            ("some draw is within the plausibility bound", "criterion_2_any_draw_within_bound"),
+            ("every draw is within the alpha plausibility bound", "criterion_5_all_draws_within_bound"),
+            ("some draw is within the alpha plausibility bound", "criterion_5_any_draw_within_bound"),
+        ):
+            value = crossings.get(key)
+            if value is None:
+                print(
+                    f"  no measured sample size at this cost regime brought "
+                    f"{label}"
+                )
+            else:
+                print(
+                    f"  first sample size at which {label}: {value} bars"
+                )
+        print()
 
 
 def _parse_wf_windows(spec: str) -> List[Tuple[int, int]]:
