@@ -3261,13 +3261,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         help=(
             "Comma-separated cost regimes to measure the ladder at, written "
             "label:commission_bps:slippage_bps[:impact[:borrow_bps[:funding_bps]]]. "
-            "The label ``shipped`` names the worked example's own costs and "
+            "The label 'shipped' names the worked example's own costs and "
             "takes no numbers. Commission, slippage, borrow and funding are in "
             "basis points; impact is the framework's own dimensionless "
             "coefficient. Omitted numbers are zero (the framework's own "
             "defaults). When set, the ladder is replaced by one ladder per "
             "regime, measured at the same --sizes on the same fixture (or on "
-            "prefixes of ``--data``). Each regime's numbers are the framework's "
+            "prefixes of --data). Each regime's numbers are the framework's "
             "own resolution block priced at that regime, so the sweep reports "
             "which of the ladder's crossings and floors survive a different "
             "cost assumption. It names the series and the paths it measured, "
@@ -3471,6 +3471,77 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
             print()
 
+        if args.json:
+            if len(sweeps) == 1:
+                label, payload = next(iter(sweeps.items()))
+                print(json.dumps({"series": label, **payload}, indent=2, default=str))
+            else:
+                print(json.dumps({"sweeps": sweeps}, indent=2, default=str))
+        return 0
+
+    if args.test_fracs and args.cost_regimes:
+        parser.error(
+            "--test-fracs and --cost-regimes are two different sweeps: measure one at a time."
+        )
+    if args.wf_windows and args.cost_regimes:
+        parser.error(
+            "--wf-windows and --cost-regimes are two different sweeps: measure one at a time."
+        )
+    if args.cpcv_splits and args.cost_regimes:
+        parser.error(
+            "--cpcv-splits and --cost-regimes are two different sweeps: measure one at a time."
+        )
+
+    if args.cost_regimes:
+        try:
+            regimes = _parse_cost_regimes(args.cost_regimes)
+        except ValueError as exc:
+            parser.error(str(exc))
+        if args.data:
+            series_to_measure = [("real_history_prefix", None)]
+        else:
+            series_to_measure = (
+                [("no_effect", False), ("effect", True)]
+                if inject is None
+                else [("effect" if inject else "no_effect", inject)]
+            )
+        sweeps: Dict[str, Dict[str, Any]] = {}
+        for label, inject_effect in series_to_measure:
+            if label == "real_history_prefix":
+                rows = measure_cost_sweep(
+                    sizes,
+                    seeds=seeds,
+                    regimes=regimes,
+                    inject_effect=True,
+                    data_path=args.data,
+                    paths=paths,
+                )
+            else:
+                rows = measure_cost_sweep(
+                    sizes,
+                    seeds=seeds,
+                    regimes=regimes,
+                    inject_effect=inject_effect,
+                    data_path=args.data,
+                    paths=paths,
+                )
+            summaries = _summarize_cost_sweep(rows)
+            sweeps[label] = {
+                "rows": rows,
+                "sweep": {
+                    "series": label,
+                    "paths": list(paths),
+                    "regimes": [r["label"] for r in regimes],
+                    "summaries": summaries,
+                },
+            }
+            if args.json:
+                continue
+            print(f"COST SWEEP -- series: {label}, paths: {', '.join(paths)}")
+            print()
+            for path in paths:
+                print_cost_sweep(summaries, path, label)
+            print()
         if args.json:
             if len(sweeps) == 1:
                 label, payload = next(iter(sweeps.items()))
