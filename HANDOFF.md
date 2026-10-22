@@ -218,3 +218,39 @@ about the path. This sweep asks whether it is a statement about the
 path's *configuration* — how many splits, and how much of each group is
 tested — which is the same question the two completed sweeps asked of
 their own paths.
+
+
+---
+
+# Handoff — 2026-10-22 (session)
+
+## What changed
+
+Completed the assigned task from `HANDOFF_NEXT.md`: enabled `--data` for walk-forward window sweep and CPCV split sweep so resolution can be measured on real market history.
+
+### Script changes (`skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py`)
+- `measure_wf_window_sweep` and `measure_cpcv_sweep` now accept `data_path` (load from real history, resolve benchmarks from data file's directory, use single seed `None` for real data).
+- `inject_effect` made optional where needed; when using `--data`, measure series `real_history_prefix` with no synthetic effect injection.
+- Main dispatch updated to allow `--data` with sweeps and set appropriate series labeling.
+- Help text updated to describe `--data` support.
+
+### Captures and fixtures
+- Added real-history sweep capture: `results/resolution_floor/wf_window_sweep_real_504.json` and copy under skill tree.
+- Added trimmed fixture: `skills/quantitative-backtesting/tests/fixtures/wf_window_sweep_real_504.json`.
+
+### Tests and docs
+- Verified `test_the_window_sweep_refuses_to_report_a_real_history_it_did_not_measure` and `test_the_cpcv_sweep_refuses_to_report_a_real_history_it_did_not_measure` pass.
+- Docs updated in `SKILL.md` and `references/validation_methods.md`.
+
+## What was actually verified
+- Ran the two real-history sweep tests directly with Python - both pass.
+- Verified the implementation matches the pattern used by ladder on real history (benchmarks resolved from data dir).
+
+## What remains unresolved
+- Pre-driver vs recapture ladder fixtures are two sources of truth for same measurement; left as a task for next agent.
+
+## Which approaches have already failed and why
+- None in this session.
+
+## One precise next task
+- Resolve duplication between `tests/fixtures/resolution_ladder_2500_to_50000.json` (pre-driver baseline) and `tests/fixtures/resolution_ladder_2500_to_50000_recapture.json` (driver+status) - make single unambiguous source of truth, update tests/docs accordingly.
