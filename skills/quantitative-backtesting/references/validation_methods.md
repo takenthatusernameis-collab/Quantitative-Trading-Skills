@@ -1843,8 +1843,9 @@ out-of-sample windows tile the sample without overlapping: the framework
 refuses `step_months < test_months`, because overlapping windows
 double-count bars in the pooled out-of-sample record and bias the aggregate
 statistics. The sweep is measured on the same synthetic control fixture,
-names the series it measured, and refuses `--data` for the same reason the
-fraction sweep does.
+names the series it measured, and with `--data` measures prefixes of a real
+history with benchmarks resolved from the file's directory (the same
+pattern as the ladder).
 
 The shipped configuration -- a 6-month training window, a 2-month test
 window and a 2-month step -- is the `6:2` column, and it is unchanged by

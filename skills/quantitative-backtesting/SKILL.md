@@ -172,16 +172,18 @@ Risk Metrics:
   configuration instead -- `train_months:test_months` pairs at a fixed
   sample size, with the step following the test window so the out-of-sample
   windows tile the sample without overlapping (the framework refuses
-  `step_months < test_months`). It runs on the same control fixture, names
-  the series it measured, and refuses `--data` for the same reason. The
+  `step_months < test_months`). It runs on the same control fixture by
+  default, names the series it measured, and with `--data` measures prefixes
+  of a real history with benchmarks resolved from the file's directory. The
   shipped 6/2/2 configuration is unchanged and is one of the swept points.
   `--cpcv-splits 3:0.2,5:0.1,5:0.2,5:0.3,10:0.1,10:0.2,20:0.2` sweeps the
   **CPCV path's** own split configuration instead -- `n_splits:test_size`
   pairs at a fixed sample size -- where `test_size` is the fraction of
   *each group* held out of a fold (so the effective out-of-sample fraction
-  is `test_size / n_splits`). It runs on the same control fixture, names the
-  series it measured, and refuses `--data` for the same reason. The shipped
-  5-split / 20% test-size configuration is unchanged and is one of the swept
+  is `test_size / n_splits`). It runs on the same control fixture by
+  default, names the series it measured, and with `--data` measures prefixes
+  of a real history with benchmarks resolved from the file's directory. The
+  shipped 5-split / 20% test-size configuration is unchanged and is one of the swept
   points.
   The measured answer: the walk-forward path's training window is a
   resolution lever (its training window is *expanding*, so a longer initial

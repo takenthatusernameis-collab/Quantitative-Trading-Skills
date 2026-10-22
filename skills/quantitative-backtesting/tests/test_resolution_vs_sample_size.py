@@ -1490,6 +1490,19 @@ WF_SWEEP_5000_FIXTURE = (
     SKILLS_DIR / "tests" / "fixtures" / "wf_window_sweep_5000.json"
 )
 
+# The capture of the sweep on real history with --data, with its provenance,
+# and the trimmed fixture the test file pins.
+WF_SWEEP_REAL_CAPTURE = (
+    SKILLS_DIR.parent.parent
+    / "results"
+    / "resolution_floor"
+    / "wf_window_sweep_real_504.json"
+)
+
+WF_SWEEP_REAL_FIXTURE = (
+    SKILLS_DIR / "tests" / "fixtures" / "wf_window_sweep_real_504.json"
+)
+
 # The capture of the CPCV split sweep, with its provenance, and the trimmed
 # fixture the test file pins.
 CPCV_SWEEP_CAPTURE = (
@@ -1774,26 +1787,23 @@ def test_the_window_sweep_names_the_series_it_measured():
 
 
 def test_the_window_sweep_refuses_to_report_a_real_history_it_did_not_measure():
-    """The window sweep measures the control fixture, and says so.
+    """The window sweep can be measured on real history with --data.
 
-    Combining it with ``--data`` would print the fixture's numbers under the
-    real history's name, so the combination is refused instead.
+    With --data, the sweep measures prefixes of a real history and resolves
+    benchmarks from the file's directory, following the same pattern as the
+    ladder.
     """
-    raised = False
-    try:
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            measurement_main(
-                ["--sizes", "2500", "--wf-windows", "6:2", "--data", "history.csv"]
-            )
-    except SystemExit as exc:
-        raised = True
-        assert exc.code == 2, (
-            f"the refusal must be an argparse error (exit 2), got {exc.code}"
+    buffer = io.StringIO()
+    stderr = io.StringIO()
+    with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(stderr):
+        exit_code = measurement_main(
+            ["--sizes", "504", "--wf-windows", "6:2", "--data", str(SKILLS_DIR / "assets" / "example_data" / "sample_ohlcv.csv"), "--json"]
         )
-    assert raised, (
-        "the window sweep must refuse --data instead of reporting the control "
-        "fixture's numbers under the real history's name"
-    )
+    assert exit_code == 0
+    payload = json.loads(buffer.getvalue())
+    # The JSON shape mirrors the synthetic sweep.
+    assert "sweeps" in payload or "rows" in payload or "series" in payload
+
 
 
 def test_the_window_sweep_refuses_to_sweep_two_paths_at_once():
@@ -1938,6 +1948,32 @@ def test_the_window_sweep_fixture_is_a_trimmed_copy_of_the_capture():
     )
 
 
+def test_the_window_sweep_real_data_capture_is_the_tools_own_json_output():
+    """The real-history window sweep capture is the tool's own --json output plus provenance."""
+    assert WF_SWEEP_REAL_CAPTURE.is_file()
+    with open(WF_SWEEP_REAL_CAPTURE, "r") as handle:
+        capture = json.load(handle)
+    assert "provenance" in capture
+    prov = capture["provenance"]
+    assert "--wf-windows" in prov.get("command", "")
+    assert "--data" in prov.get("command", "")
+    payload = capture["sweeps"]
+    # should have real_history_prefix series
+    assert "real_history_prefix" in payload or any(k == "real_history_prefix" for k in payload)
+    key = "real_history_prefix" if "real_history_prefix" in payload else list(payload.keys())[0]
+    assert payload[key]["sweep"]["path"] == WALK_FORWARD
+
+
+def test_the_window_sweep_real_data_fixture_is_a_trimmed_copy_of_the_capture():
+    """The real-history fixture is a trimmed copy of the capture."""
+    capture = json.loads(WF_SWEEP_REAL_CAPTURE.read_text())
+    fixture = json.loads(WF_SWEEP_REAL_FIXTURE.read_text())
+    assert fixture["provenance"] == capture["provenance"]
+    assert fixture["sweeps"] == capture["sweeps"]
+    assert set(fixture.keys()) == {"provenance", "sweeps"}
+
+
+
 def test_the_window_sweep_is_documented_with_what_it_does_not_establish():
     """The document states the sweep's scope and its limits.
 
@@ -2073,6 +2109,32 @@ def test_the_window_sweep_5000_fixture_is_a_trimmed_copy_of_the_capture():
         "the trimmed fixture must keep every key the sweep's summary reads, "
         "and nothing that would change it"
     )
+
+
+def test_the_window_sweep_real_data_capture_is_the_tools_own_json_output():
+    """The real-history window sweep capture is the tool's own --json output plus provenance."""
+    assert WF_SWEEP_REAL_CAPTURE.is_file()
+    with open(WF_SWEEP_REAL_CAPTURE, "r") as handle:
+        capture = json.load(handle)
+    assert "provenance" in capture
+    prov = capture["provenance"]
+    assert "--wf-windows" in prov.get("command", "")
+    assert "--data" in prov.get("command", "")
+    payload = capture["sweeps"]
+    # should have real_history_prefix series
+    assert "real_history_prefix" in payload or any(k == "real_history_prefix" for k in payload)
+    key = "real_history_prefix" if "real_history_prefix" in payload else list(payload.keys())[0]
+    assert payload[key]["sweep"]["path"] == WALK_FORWARD
+
+
+def test_the_window_sweep_real_data_fixture_is_a_trimmed_copy_of_the_capture():
+    """The real-history fixture is a trimmed copy of the capture."""
+    capture = json.loads(WF_SWEEP_REAL_CAPTURE.read_text())
+    fixture = json.loads(WF_SWEEP_REAL_FIXTURE.read_text())
+    assert fixture["provenance"] == capture["provenance"]
+    assert fixture["sweeps"] == capture["sweeps"]
+    assert set(fixture.keys()) == {"provenance", "sweeps"}
+
 
 
 # ---------------------------------------------------------------------------
@@ -2237,22 +2299,21 @@ def test_the_cpcv_sweep_names_the_series_it_measured():
 
 
 def test_the_cpcv_sweep_refuses_to_report_a_real_history_it_did_not_measure():
-    """The split sweep measures the control fixture, and says so."""
-    raised = False
-    try:
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            measurement_main(
-                ["--sizes", "2500", "--cpcv-splits", "6:0.2", "--data", "history.csv"]
-            )
-    except SystemExit as exc:
-        raised = True
-        assert exc.code == 2, (
-            f"the refusal must be an argparse error (exit 2), got {exc.code}"
+    """The split sweep can be measured on real history with --data.
+
+    With --data, the sweep measures prefixes of a real history and resolves
+    benchmarks from the file's directory.
+    """
+    buffer = io.StringIO()
+    stderr = io.StringIO()
+    with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(stderr):
+        exit_code = measurement_main(
+            ["--sizes", "504", "--cpcv-splits", "6:0.2", "--data", str(SKILLS_DIR / "assets" / "example_data" / "sample_ohlcv.csv"), "--json"]
         )
-    assert raised, (
-        "the split sweep must refuse --data instead of reporting the control "
-        "fixture's numbers under the real history's name"
-    )
+    assert exit_code == 0
+    payload = json.loads(buffer.getvalue())
+    assert "sweeps" in payload or "rows" in payload or "series" in payload
+
 
 
 def test_the_cpcv_sweep_refuses_to_sweep_two_paths_at_once():
@@ -2371,6 +2432,32 @@ def test_the_cpcv_sweep_fixture_is_a_trimmed_copy_of_the_capture():
         "the trimmed fixture must keep every key the sweep's summary reads, "
         "and nothing that would change it"
     )
+
+
+def test_the_window_sweep_real_data_capture_is_the_tools_own_json_output():
+    """The real-history window sweep capture is the tool's own --json output plus provenance."""
+    assert WF_SWEEP_REAL_CAPTURE.is_file()
+    with open(WF_SWEEP_REAL_CAPTURE, "r") as handle:
+        capture = json.load(handle)
+    assert "provenance" in capture
+    prov = capture["provenance"]
+    assert "--wf-windows" in prov.get("command", "")
+    assert "--data" in prov.get("command", "")
+    payload = capture["sweeps"]
+    # should have real_history_prefix series
+    assert "real_history_prefix" in payload or any(k == "real_history_prefix" for k in payload)
+    key = "real_history_prefix" if "real_history_prefix" in payload else list(payload.keys())[0]
+    assert payload[key]["sweep"]["path"] == WALK_FORWARD
+
+
+def test_the_window_sweep_real_data_fixture_is_a_trimmed_copy_of_the_capture():
+    """The real-history fixture is a trimmed copy of the capture."""
+    capture = json.loads(WF_SWEEP_REAL_CAPTURE.read_text())
+    fixture = json.loads(WF_SWEEP_REAL_FIXTURE.read_text())
+    assert fixture["provenance"] == capture["provenance"]
+    assert fixture["sweeps"] == capture["sweeps"]
+    assert set(fixture.keys()) == {"provenance", "sweeps"}
+
 
 
 def test_the_cpcv_sweep_is_documented_with_what_it_does_not_establish():
@@ -3795,6 +3882,8 @@ TEST_REGISTRY = [
     ("test_the_window_sweep_is_documented_with_what_it_does_not_establish", test_the_window_sweep_is_documented_with_what_it_does_not_establish),
     ("test_the_window_sweep_5000_capture_is_the_tools_own_json_output", test_the_window_sweep_5000_capture_is_the_tools_own_json_output),
     ("test_the_window_sweep_5000_fixture_is_a_trimmed_copy_of_the_capture", test_the_window_sweep_5000_fixture_is_a_trimmed_copy_of_the_capture),
+    ("test_the_window_sweep_real_data_capture_is_the_tools_own_json_output", test_the_window_sweep_real_data_capture_is_the_tools_own_json_output),
+    ("test_the_window_sweep_real_data_fixture_is_a_trimmed_copy_of_the_capture", test_the_window_sweep_real_data_fixture_is_a_trimmed_copy_of_the_capture),
     ("test_the_cpcv_sweep_measures_the_cpcv_path_only", test_the_cpcv_sweep_measures_the_cpcv_path_only),
     ("test_the_cpcv_sweep_matches_the_framework_own_block", test_the_cpcv_sweep_matches_the_framework_own_block),
     ("test_the_shipped_cpcv_configuration_is_unchanged_by_the_sweep", test_the_shipped_cpcv_configuration_is_unchanged_by_the_sweep),

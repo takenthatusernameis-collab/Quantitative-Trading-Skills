@@ -849,7 +849,7 @@ def measure_wf_window_sweep(
     bars: int,
     seeds: Sequence[int],
     windows: Sequence[Tuple[int, int]],
-    inject_effect: bool = True,
+    inject_effect: Optional[bool] = True,
     data_path: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Measure the walk-forward path's resolution across window configurations.
@@ -861,27 +861,21 @@ def measure_wf_window_sweep(
     -- the framework refuses ``step_months < test_months`` because
     overlapping windows double-count bars in the pooled out-of-sample record
     and bias the aggregate statistics.
-
-    The trade-off measured: a longer training window starts the walk-forward
-    later, so fewer windows fit in the sample (fewer out-of-sample
-    observations), while a longer test window gives fewer and longer windows
-    over the same span. Both are levers on the same pooled out-of-sample
-    series, and where they cross is the answer to "how long should the
-    training and test windows be?".
-
-    One series at a time: the no-effect series is the null calibration and
-    the effect series is the positive control, and their numbers answer
-    different questions, so the series is named rather than defaulted.
-    ``inject_effect=None`` is refused instead of silently measuring the
-    no-effect series.
     """
-    if inject_effect is None:
+    if data_path is None and inject_effect is None:
         raise ValueError(
             "the sweep measures one series at a time: pass inject_effect=True "
             "(the effect series) or inject_effect=False (the no-effect "
             "series). None would silently measure the no-effect series."
         )
     rows: List[Dict[str, Any]] = []
+    if data_path:
+        base = Path(data_path).resolve().parent
+        full = load_data(str(data_path))
+        if len(full) < bars:
+            raise ValueError(f"{data_path} has {len(full)} rows, fewer than the {bars} requested")
+        data_all = full.iloc[:bars]
+        benchmarks_all = [load_data(str(base / name)).iloc[:bars] for name in BENCHMARK_FILES]
     for train_months, test_months in windows:
         if int(train_months) <= 0 or int(test_months) <= 0:
             raise ValueError(
@@ -890,26 +884,18 @@ def measure_wf_window_sweep(
             )
         train_months = int(train_months)
         test_months = int(test_months)
-        # The step follows the test window: the windows tile the sample
-        # without overlapping, which is the configuration the framework
-        # accepts (step_months >= test_months) and the one that pools every
-        # bar after the training window into the out-of-sample record.
         step_months = test_months
         if data_path:
-            base = Path(data_path).resolve().parent
-            full = load_data(str(data_path))
-            if len(full) < bars:
-                raise ValueError(f"{data_path} has {len(full)} rows, fewer than the {bars} requested")
-            data = full.iloc[:bars]
-            benchmarks = [load_data(str(base / name)).iloc[:bars] for name in BENCHMARK_FILES]
             seed_iter = [None]
         else:
             seed_iter = list(seeds)
         for seed in seed_iter:
             if data_path is None:
-                tmpdir, data, benchmarks = _control_sample(bars, seed, inject_effect)
+                tmpdir, data, benchmarks = _control_sample(bars, seed, bool(inject_effect))
             else:
                 tmpdir = None
+                data = data_all
+                benchmarks = benchmarks_all
             try:
                 results = _run_walk_forward(
                     data,
@@ -950,40 +936,24 @@ def measure_cpcv_sweep(
     bars: int,
     seeds: Sequence[int],
     splits: Sequence[Tuple[int, float]],
-    inject_effect: bool = True,
+    inject_effect: Optional[bool] = True,
     data_path: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Measure the CPCV path's resolution across split configurations.
-
-    At a fixed sample size, runs the **CPCV** path once per
-    ``(n_splits, test_size)`` configuration and reports the framework's own
-    resolution block for that configuration. ``test_size`` is the fraction
-    of *each group* used as that group's test set -- not of the sample -- so
-    the effective out-of-sample fraction is ``test_size / n_splits`` and the
-    total pooled test observations are about ``test_size * bars`` regardless
-    of the number of splits (what changes with splits is the fold count, the
-    training data per fold, and the per-fold test window).
-
-    The trade-off measured: more splits means more folds (more pooled
-    out-of-sample observations and more trial Sharpes for the deflation
-    floor) but a smaller test window per fold, while a larger test fraction
-    gives each fold more test observations (better resolution) at the cost of
-    less training data per fold, which raises the deflation floor SR* because
-    the trial Sharpes it is estimated from are then estimated on less data.
-
-    One series at a time: the no-effect series is the null calibration and
-    the effect series is the positive control, and their numbers answer
-    different questions, so the series is named rather than defaulted.
-    ``inject_effect=None`` is refused instead of silently measuring the
-    no-effect series.
-    """
-    if inject_effect is None:
+    """Measure the CPCV path's resolution across split configurations."""
+    if data_path is None and inject_effect is None:
         raise ValueError(
             "the sweep measures one series at a time: pass inject_effect=True "
             "(the effect series) or inject_effect=False (the no-effect "
             "series). None would silently measure the no-effect series."
         )
     rows: List[Dict[str, Any]] = []
+    if data_path:
+        base = Path(data_path).resolve().parent
+        full = load_data(str(data_path))
+        if len(full) < bars:
+            raise ValueError(f"{data_path} has {len(full)} rows, fewer than the {bars} requested")
+        data_all = full.iloc[:bars]
+        benchmarks_all = [load_data(str(base / name)).iloc[:bars] for name in BENCHMARK_FILES]
     for n_splits, test_size in splits:
         if int(n_splits) < 2:
             raise ValueError(
@@ -995,8 +965,17 @@ def measure_cpcv_sweep(
             )
         n_splits = int(n_splits)
         test_size = float(test_size)
-        for seed in seeds:
-            tmpdir, data, benchmarks = _control_sample(bars, seed, inject_effect)
+        if data_path:
+            seed_iter = [None]
+        else:
+            seed_iter = list(seeds)
+        for seed in seed_iter:
+            if data_path is None:
+                tmpdir, data, benchmarks = _control_sample(bars, seed, bool(inject_effect))
+            else:
+                tmpdir = None
+                data = data_all
+                benchmarks = benchmarks_all
             try:
                 results = _run_cpcv(
                     data,
@@ -1005,7 +984,8 @@ def measure_cpcv_sweep(
                     test_size=test_size,
                 )
             finally:
-                tmpdir.cleanup()
+                if tmpdir is not None:
+                    tmpdir.cleanup()
             summary = results.get("summary", {})
             block = _measure_path(
                 PATH_CPCV,
@@ -1022,11 +1002,6 @@ def measure_cpcv_sweep(
                     "seed": seed,
                     "series": "real_history_prefix" if data_path else ("effect" if inject_effect else "no_effect"),
                     "source": str(data_path) if data_path else "synthetic control fixture",
-                    # The framework's own record of how many of the folds
-                    # could price the strategy at all. A test window shorter
-                    # than the strategy's own indicator warmup leaves most
-                    # folds empty, and the number of folds that carry a
-                    # position is what shows it.
                     "n_folds": summary.get("n_folds"),
                     "folds_with_position": summary.get("folds_with_position"),
                     "paths": {PATH_CPCV: block},
@@ -2748,8 +2723,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             "the sample without overlapping. When set, the ladder is replaced "
             "by this sweep at the single --size given; the shipped 6/2/2 "
             "configuration remains the default and is unchanged. The sweep "
-            "measures the synthetic control fixture -- it cannot be combined "
-            "with --data -- and it names the series it measured."
+            "measures the synthetic control fixture by default; with --data it "
+            "measures prefixes of a real history and resolves benchmarks from "
+            "the file's directory. It names the series it measured."
         ),
     )
     parser.add_argument(
@@ -2764,8 +2740,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             "set, the ladder is replaced by this sweep at the single --size "
             "given; the shipped 5 splits / 20% configuration remains the "
             "default and is unchanged. The sweep measures the synthetic "
-            "control fixture -- it cannot be combined with --data -- and it "
-            "names the series it measured."
+            "control fixture by default; with --data it measures prefixes of "
+            "a real history and resolves benchmarks from the file's "
+            "directory. It names the series it measured."
         ),
     )
     parser.add_argument(
@@ -2850,11 +2827,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             parser.error("--wf-windows requires exactly one --size (fixed sample size)")
         size = sizes[0]
 
-        series_to_measure = (
-            [("no_effect", False), ("effect", True)]
-            if inject is None
-            else [("effect" if inject else "no_effect", inject)]
-        )
+        if args.data:
+            series_to_measure = [("real_history_prefix", None)]
+        else:
+            series_to_measure = (
+                [("no_effect", False), ("effect", True)]
+                if inject is None
+                else [("effect" if inject else "no_effect", inject)]
+            )
         sweeps: Dict[str, Dict[str, Any]] = {}
         for label, inject_effect in series_to_measure:
             rows = measure_wf_window_sweep(
@@ -2908,15 +2888,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             parser.error("--cpcv-splits requires exactly one --size (fixed sample size)")
         size = sizes[0]
 
-        # The sweep measures the series the flag asks for, and names it.
-        # "both" measures the null calibration and the positive control and
-        # prints both: their numbers answer different questions, and a
-        # table that does not say which one it is cannot be read.
-        series_to_measure = (
-            [("no_effect", False), ("effect", True)]
-            if inject is None
-            else [("effect" if inject else "no_effect", inject)]
-        )
+        if args.data:
+            series_to_measure = [("real_history_prefix", None)]
+        else:
+            # The sweep measures the series the flag asks for, and names it.
+            # "both" measures the null calibration and the positive control and
+            # prints both: their numbers answer different questions, and a
+            # table that does not say which one it is cannot be read.
+            series_to_measure = (
+                [("no_effect", False), ("effect", True)]
+                if inject is None
+                else [("effect" if inject else "no_effect", inject)]
+            )
         sweeps: Dict[str, Dict[str, Any]] = {}
         for label, inject_effect in series_to_measure:
             rows = measure_cpcv_sweep(
