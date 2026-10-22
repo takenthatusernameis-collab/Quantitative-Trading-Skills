@@ -1,4 +1,61 @@
 {
+  "provenance": {
+    "command": "python3 /home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py --sizes 2500,5000,10000 --seeds 7,1,2024 --cost-regimes shipped --series both --json",
+    "description": "A measurement of the decision machinery on the synthetic control fixture, captured with its provenance so it can be re-run.",
+    "environment": {
+      "numpy": "2.5.4",
+      "pandas": "3.0.6",
+      "python": "3.12.3"
+    },
+    "fixture_construction": {
+      "purpose": "TEST-MACHINERY CHECK ON SYNTHETIC DATA: a series produced by a known formula, used to check that the falsifiable-hypothesis machinery can return SUPPORTED. It is not evidence about any security or market.",
+      "periods": 5040,
+      "regime_bars": 126,
+      "drift": 0.004,
+      "volatility": 0.01,
+      "strategy_seed": 7,
+      "benchmark_seed": 1007,
+      "start_date": "2000-01-03",
+      "initial_price": 100.0
+    },
+    "measured": {
+      "sizes": [
+        2500,
+        5000,
+        10000
+      ],
+      "seeds": [
+        7,
+        1,
+        2024
+      ],
+      "series": [
+        "no_effect",
+        "effect"
+      ],
+      "cost_regimes": [
+        "shipped"
+      ],
+      "path": "out_of_sample",
+      "paths": [
+        "out_of_sample",
+        "walk_forward",
+        "cpcv"
+      ],
+      "draws_per_rung": 6,
+      "split": {
+        "train_frac": 0.6,
+        "val_frac": 0.2,
+        "test_frac": 0.2
+      }
+    },
+    "measured_at_utc": "2026-10-22T18:22:46Z",
+    "plausibility_bounds": {
+      "plausible_max_annualized_sharpe": 2.0,
+      "plausible_max_annualized_alpha": 0.1
+    },
+    "script_commit": "7560710a1d73b1ef14d8a7d8bdcdc8603e37f57f"
+  },
   "sweeps": {
     "no_effect": {
       "rows": [
