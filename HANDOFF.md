@@ -254,3 +254,167 @@ Completed the assigned task from `HANDOFF_NEXT.md`: enabled `--data` for walk-fo
 
 ## One precise next task
 - Resolve duplication between `tests/fixtures/resolution_ladder_2500_to_50000.json` (pre-driver baseline) and `tests/fixtures/resolution_ladder_2500_to_50000_recapture.json` (driver+status) - make single unambiguous source of truth, update tests/docs accordingly.
+
+---
+
+# Handoff — 2026-10-22 (second session)
+
+## What changed
+
+Completed the assigned task from `HANDOFF_NEXT.md`: **the full-ladder
+measurement now has ONE source of truth, and the pre-driver capture is a
+self-describing historical record rather than a second reading of it.**
+
+### 1. The arrangement (one measurement, one fixture)
+
+The ladder was measured twice — once before the alpha-floor driver existed
+and once after — and both records were committed as *fixtures*. A summary
+built from the older one reported the driver as "not measurable on this
+ladder", which is a statement about that capture and not about the ladder.
+So the older fixture was removed and the older capture was kept, in its
+place, as the thing it always was: the historical baseline.
+
+- **Removed** `skills/quantitative-backtesting/tests/fixtures/resolution_ladder_2500_to_50000.json`
+  (the pre-driver trimmed fixture; 10-key path blocks, no driver, no
+  status).
+- **Now the only fixture for the full ladder**:
+  `skills/quantitative-backtesting/tests/fixtures/resolution_ladder_2500_to_50000_recapture.json`
+  (19-key path blocks: the driver `strategy_alpha` / `benchmark_alphas` /
+  `benchmark_alpha_std` / `n_benchmarks` and the per-criterion
+  `sharpe_status` / `alpha_status` + reasons).
+- **Kept as the historical baseline**:
+  `results/resolution_floor/ladder_2500_to_50000.json` — the pre-driver
+  capture. It is what the re-capture is compared against to show that no
+  number, no threshold, no bound, no crossing and no verdict moved while the
+  driver and the status were added.
+- **The baseline capture is now self-describing.** It used to be the tool's
+  bare `--json` output with no provenance at all, and the *fixture* that
+  was removed was the only place the pre-driver measurement's provenance
+  (command, script commit, environment, fixture construction, measured
+  sizes/seeds/series, `measured_at_utc`) was recorded. That provenance was
+  moved into the baseline capture as a `provenance` block; its `rows` and
+  its `summary` are byte-for-byte unchanged.
+- **The re-capture's own provenance** now records the arrangement: the
+  `baseline` block names the baseline capture, carries
+  `capture_script_commit` and `measured_at_utc`, and sets `fixture: null`
+  with a note saying what was removed and why. The capture in `results/` and
+  the fixture in `tests/fixtures/` were updated identically, so the test
+  that asserts `fixture["provenance"] == capture["provenance"]` still holds.
+
+### 2. The pins (`skills/quantitative-backtesting/tests/test_resolution_vs_sample_size.py`)
+
+- The two tests that read the ladder's numbers
+  (`test_the_measured_ladder_finds_the_alpha_crossing_the_shorter_ladder_missed`,
+  `test_the_measured_ladder_is_the_frameworks_own_numbers`) now read the
+  single fixture. Their assertions are unchanged and still hold on it.
+- The cheap 10,000-bar ladder's "same measurement" check now compares it
+  against the full ladder's own capture instead of the removed fixture, and
+  compares the driver keys too (they are present on both sides). The
+  comparison helper `_assert_same_measured_value` handles a list of numbers
+  (the per-path `benchmark_alphas`) element by element, so a float-noise
+  difference is a difference and not a failure.
+- The "nothing moved between the captures" check now also counts the values
+  it compared: **1,080 shared values over 90 path blocks**, which is exactly
+  the number the capture's own provenance states. That count is now pinned.
+- **New registered test `test_the_full_ladder_has_one_fixture`** (69th test):
+  - exactly one fixture in `tests/fixtures/` covers the full ladder, and it
+    is the re-capture (structural: a future session that re-adds a second
+    one fails here instead of quietly restoring the ambiguity);
+  - that one fixture carries the driver and the status at every rung;
+  - the pre-driver capture still exists, still lives with the other
+    captures, and says what it is ("pre-driver" in its own description);
+  - the re-capture's provenance names that capture, points at no fixture,
+    and agrees with it on the commit and the timestamp;
+  - `SKILL.md` and `references/validation_methods.md` name the same single
+    source of truth, and `SKILL.md` no longer points a reader at the
+    removed fixture.
+
+### 3. The documentation
+
+- `references/validation_methods.md`: the ladder's capture paragraph now
+  names the single fixture and says why the pre-driver capture is kept
+  (the historical baseline, not a second reading); a new "**One
+  measurement, one fixture**" paragraph records what was removed and that
+  no measurement and no provenance was lost.
+- `SKILL.md`: the test-file description names the single fixture and the
+  baseline capture.
+
+## What was actually verified
+
+- **`tests/test_resolution_vs_sample_size.py`: 69/69 passed, exit 0** (was
+  68/68; the new pin is the 69th).
+- **The whole skill suite: 19 test files, every one exit 0** —
+  `test_cpcv` 29/29, `test_data_loader` 32/32, `test_examples_coverage`
+  7/7, `test_execution_warmup` 8/8, `test_falsifiable_hypothesis_example`
+  14/14, `test_generate_sample_data` 2/2, `test_inert_param_grid` 27/27,
+  `test_monte_carlo` 20/20, `test_no_selection_diagnosis` 34/34,
+  `test_out_of_sample_window` 11/11, `test_panel_reference_pinned` 2/2,
+  `test_performance` 33/33, `test_reporting` (no summary line, exit 0),
+  `test_resolution_vs_sample_size` 69/69, `test_run_backtest` 104/104,
+  `test_strategy_builder` 33/33, `test_test_resolution` 39/39,
+  `test_test_window_observations` 7/7, `test_walk_forward` 183/183.
+- **The numbers were compared, not assumed.** Pre-driver fixture vs the
+  baseline capture: 720 shared values, max absolute difference **0.0**.
+  Baseline capture vs the re-capture: **1,080 shared values, max absolute
+  difference 0.0** — the claim the provenance makes is now the number the
+  test asserts. Cheap 10,000-bar ladder vs the full ladder at their shared
+  rungs: 234 values, worst absolute difference 3.55e-15 (worst relative
+  6.5e-14).
+- **The new pins were negative-controlled**, one mutation at a time, with
+  the tree restored after each: a duplicate fixture re-added → the
+  one-fixture pin fails; the driver's `strategy_alpha` dropped from the
+  fixture → the driver pins fail; a number moved in the fixture → the
+  "nothing moved" and the framework's-own-numbers pins fail; the baseline's
+  provenance removed → the provenance pin fails; the baseline pointer put
+  back to a fixture path → the pointer pin fails; `SKILL.md` pointed at the
+  removed fixture → the document pin fails; the document's "single source of
+  truth" wording changed → the document pin fails.
+- **matplotlib is available in this environment** (3.11.2), so the previous
+  handoff's "the environment has no matplotlib" note is stale:
+  `tests/test_reporting.py` runs and passes here.
+- The skills marketplace generator **could not be run** here (`bin/node_modules`
+  is absent and `pnpm`/`npm` cannot reach the network). The `SKILL.md`
+  frontmatter is byte-identical to HEAD (the diff starts at line 320, in the
+  body) and the generator reads only the frontmatter, so
+  `skills/marketplace.yaml` cannot have drifted.
+
+## What remains unresolved
+
+- **No cost sensitivity exists for any of this.** Every number above is
+  measured at the shipped cost assumptions (2 bps commission + 1 bps
+  slippage per trade, and the framework's defaults `impact_coefficient=0`,
+  `borrow_cost=0`, `funding_cost=0` — no impact, no borrow, no funding), and
+  the trial Sharpes that set the floor are net of commission+slippage, so
+  the floor itself moves with the cost assumptions. This is the next task.
+- **The ladder is still a property of the synthetic control fixture.** The
+  real-history ladder reaches 1,500 bars and does not reach the crossing;
+  no longer real history is reachable from this environment (the public
+  market-data endpoints tried were blocked: stooq serves a JS challenge,
+  Yahoo returns HTTP 429).
+- `results/resolution_floor/ladder_2500_to_50000.json` still has no
+  `summary`-level provenance of its own beyond the new block; the block
+  records the measurement's command, commit, environment, construction and
+  timestamp, which is what the removed fixture held.
+
+## Which approaches have already failed and why
+
+- **A mutation harness that ran the whole suite per mutation was killed by
+  the 40-minute command timeout** (six suite runs at ~7 minutes each). It
+  left a mutated copy of the baseline capture and a duplicated fixture on
+  disk; both were restored from the `.orig` backups it had written and the
+  tree was re-verified against `git status` before any further work. The
+  retry ran only the five affected test functions (they read committed
+  artifacts and take 0.0s), which is what the negative controls needed.
+- The skills marketplace generator cannot be run offline in this
+  environment; the frontmatter was left untouched so the generated catalog
+  cannot change.
+
+## One precise next task
+
+**Measure the resolution ladder under different cost assumptions, and report
+which of its verdicts survive.**
+
+`HANDOFF_NEXT.md` carries the full task, the exploratory evidence already
+collected (the floors barely move with costs; the *observed* statistic moves
+by an order of magnitude on the walk-forward path at 2,500 bars), the exact
+build steps and the constraints.

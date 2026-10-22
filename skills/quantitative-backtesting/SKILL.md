@@ -320,11 +320,15 @@ Risk Metrics:
   measures the shipped configuration and not a private copy of it), and it
   moves no threshold, no bound, no criterion and no verdict. The measured
   ladder is captured with its provenance in
-  `tests/fixtures/resolution_ladder_2500_to_50000.json` and re-captured (the
-  cheap end of the same ladder) in
-  `tests/fixtures/resolution_ladder_2500_to_10000.json`, which carries the
-  alpha-floor driver, so a summary built from the committed record reports
-  what sets the floor at every measured rung. The data is the
+  `tests/fixtures/resolution_ladder_2500_to_50000_recapture.json` -- the
+  single fixture for that measurement, carrying the alpha-floor driver and
+  the framework's own per-criterion status, so a summary built from the
+  committed record reports what sets the floor at every measured rung. The
+  pre-driver capture it was re-captured from stays committed in
+  `results/resolution_floor/` as the baseline the re-capture is checked
+  against (no number moved between the two captures). The cheap end of the
+  same ladder is also captured, in
+  `tests/fixtures/resolution_ladder_2500_to_10000.json`. The data is the
   synthetic positive-control fixture. See `references/validation_methods.md`,
   "How much data does criterion 2 need?".
 

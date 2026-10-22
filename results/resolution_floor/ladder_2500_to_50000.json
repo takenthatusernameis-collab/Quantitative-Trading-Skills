@@ -1,4 +1,59 @@
 {
+  "provenance": {
+    "command": "python3 skills/quantitative-backtesting/scripts/measure_resolution_vs_sample_size.py --sizes 2500,5000,10000,25000,50000 --paths out_of_sample,walk_forward,cpcv --series both --seeds 7,1,2024 --json",
+    "description": "The PRE-DRIVER capture of the measured resolution ladder on the synthetic positive-control fixture, at five sample sizes x three seeds x both series, for all three analysis paths. It is the tool's own --json output (rows plus the summary it prints for them). Every number in each row is the framework's own block (summary['test_resolution'] and the Deflated Sharpe / Deflated Alpha blocks it was built from), read by scripts/measure_resolution_vs_sample_size.py. It was taken before the alpha-floor driver existed, so its per-path blocks carry the framework's own per-criterion status but none of the driver's numbers (strategy_alpha / benchmark_alphas / benchmark_alpha_std). It is kept as the HISTORICAL RECORD of the ladder -- the baseline the re-capture is compared against to show that no number, no threshold, no bound, no crossing and no verdict moved while the driver and the status were added. The single source of truth for the ladder is the re-capture (results/resolution_floor/ladder_2500_to_50000_recapture.json, trimmed fixture tests/fixtures/resolution_ladder_2500_to_50000_recapture.json). The fixture is a formula, not a market: these are properties of a construction and of the decision machinery, never evidence about a security.",
+    "environment": {
+      "numpy": "2.5.4",
+      "pandas": "3.0.6",
+      "python": "3.12.3"
+    },
+    "fixture_construction": {
+      "benchmark_seed": 1007,
+      "drift": 0.004,
+      "initial_price": 100.0,
+      "periods": 5040,
+      "purpose": "TEST-MACHINERY CHECK ON SYNTHETIC DATA: a series produced by a known formula, used to check that the falsifiable-hypothesis machinery can return SUPPORTED. It is not evidence about any security or market.",
+      "regime_bars": 126,
+      "start_date": "2000-01-03",
+      "strategy_seed": 7,
+      "volatility": 0.01
+    },
+    "measured": {
+      "draws_per_rung": 6,
+      "paths": [
+        "out_of_sample",
+        "walk_forward",
+        "cpcv"
+      ],
+      "seeds": [
+        7,
+        1,
+        2024
+      ],
+      "series": [
+        "no_effect",
+        "effect"
+      ],
+      "sizes": [
+        2500,
+        5000,
+        10000,
+        25000,
+        50000
+      ],
+      "split": {
+        "train_frac": 0.6,
+        "val_frac": 0.2,
+        "test_frac": 0.2
+      }
+    },
+    "measured_at_utc": "2026-10-20T21:56Z",
+    "plausibility_bounds": {
+      "plausible_max_annualized_alpha": 0.1,
+      "plausible_max_annualized_sharpe": 2.0
+    },
+    "script_commit": "d9f19aa6d70ce2be5c3d3e4d0a3038e348c7d60c"
+  },
   "rows": [
     {
       "walk_forward_periods": 31,

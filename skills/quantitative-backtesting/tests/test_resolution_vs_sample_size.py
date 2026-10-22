@@ -2510,35 +2510,25 @@ def test_the_cpcv_sweep_is_documented_with_what_it_does_not_establish():
 # reported instead of being silently dropped.
 #
 # The measured ladder this rests on is captured in
-# ``tests/fixtures/resolution_ladder_2500_to_50000.json`` with its
+# ``tests/fixtures/resolution_ladder_2500_to_50000_recapture.json`` with its
 # provenance (command, commit, environment, fixture construction), and one
 # rung of it is re-measured live below.
 # ---------------------------------------------------------------------------
 
-LADDER_FIXTURE = (
-    SKILLS_DIR / "tests" / "fixtures" / "resolution_ladder_2500_to_50000.json"
-)
-
-# The same ladder, re-captured so that it also carries WHAT SETS THE ALPHA
-# FLOOR. The capture above predates the alpha-floor driver: its per-path
-# blocks have no ``strategy_alpha`` / ``benchmark_alphas``, so a summary
-# built from those rows says the driver is "not measurable on this ladder" --
-# honest, but thin, because the ladder's whole point is to show the
-# crossing and the crossing is now reported without the driver that sets the
-# floor at every rung. The re-capture is the cheap ladder (2,500 / 5,000 /
-# 10,000 bars, one seed, both series): the 50,000-bar rung costs minutes
-# per draw, so the whole ladder is not worth re-running for the driver's own
-# numbers.
-DRIVER_LADDER_FIXTURE = (
-    SKILLS_DIR / "tests" / "fixtures" / "resolution_ladder_2500_to_10000.json"
-)
-
 # The FULL ladder (2,500 / 5,000 / 10,000 / 25,000 / 50,000 bars, three
 # seeds, both series, all three paths), re-captured with the current tool.
-# The capture above is the same measurement taken before the alpha-floor
-# driver existed, and it stays committed as the numerical baseline; this one
-# is the same measurement carrying, at every rung, WHAT SETS THE ALPHA FLOOR
-# and the framework's own per-criterion status fields.
+#
+# It is the SINGLE source of truth for this measurement. The ladder was
+# measured twice: once before the alpha-floor driver existed (the pre-driver
+# capture, kept below as the numerical baseline) and once after (this one).
+# The pre-driver capture's per-path blocks carry no ``strategy_alpha`` /
+# ``benchmark_alphas``, so a summary built from those rows says the driver is
+# "not measurable on this ladder" -- honest, but thin, because the ladder's
+# whole point is to show the crossing and the crossing is now reported
+# without the driver that sets the floor at every rung. The re-capture is
+# the same measurement carrying, at every rung, WHAT SETS THE ALPHA FLOOR and
+# the framework's own per-criterion status fields, so its trimmed fixture is
+# the only fixture that covers the full ladder.
 RECAPTURE_CAPTURE = (
     SKILLS_DIR.parent.parent
     / "results"
@@ -2554,12 +2544,25 @@ RECAPTURE_FIXTURE = (
 )
 
 # The pre-driver capture of the same ladder, kept as the numerical baseline
-# the re-capture is checked against.
+# the re-capture is checked against. It is the historical record of the
+# measurement, not a second reading of it: the re-capture above is what a
+# reader reads, and this file is what the re-capture is compared against to
+# show that no number, no threshold, no bound and no verdict moved while the
+# driver and the status fields were added.
 BASELINE_CAPTURE = (
     SKILLS_DIR.parent.parent
     / "results"
     / "resolution_floor"
     / "ladder_2500_to_50000.json"
+)
+
+# The cheap ladder (2,500 / 5,000 / 10,000 bars, one seed, both series), also
+# re-captured so that it carries the driver: the 50,000-bar rung costs minutes
+# per draw, so the whole ladder is not worth re-running for the driver's own
+# numbers. It is a second, INDEPENDENT capture of the cheap end of the same
+# ladder, and the two agree at every rung they share.
+DRIVER_LADDER_FIXTURE = (
+    SKILLS_DIR / "tests" / "fixtures" / "resolution_ladder_2500_to_10000.json"
 )
 
 # Every per-path key the trimmed re-capture fixture keeps. Each one is read
@@ -2588,14 +2591,8 @@ RECAPTURE_PATH_KEYS = (
 )
 
 
-def _load_ladder_fixture():
-    """The measured ladder, with its provenance."""
-    with open(LADDER_FIXTURE, "r") as handle:
-        return json.load(handle)
-
-
 def _load_driver_ladder_fixture():
-    """The re-captured ladder, with its provenance."""
+    """The cheap ladder, re-captured, with its provenance."""
     with open(DRIVER_LADDER_FIXTURE, "r") as handle:
         return json.load(handle)
 
@@ -2616,6 +2613,31 @@ def _load_baseline_capture():
     """The pre-driver capture of the same ladder, kept as the baseline."""
     with open(BASELINE_CAPTURE, "r") as handle:
         return json.load(handle)
+
+
+def _assert_same_measured_value(value, old_value, context):
+    """Two captures of the same measurement must agree to float noise.
+
+    A number is compared with a relative tolerance; a list of numbers is
+    compared element by element (the per-path block carries the benchmark
+    alphas as a list); anything else must be exactly equal.
+    """
+    if isinstance(value, bool) or isinstance(old_value, bool):
+        assert value == old_value, f"{context}: {value} != {old_value}"
+        return
+    if isinstance(value, (int, float)) and isinstance(old_value, (int, float)):
+        assert abs(value - old_value) <= 1e-9 * max(1.0, abs(old_value)), (
+            f"{context}: {value} != {old_value}"
+        )
+        return
+    if isinstance(value, list) and isinstance(old_value, list):
+        assert len(value) == len(old_value), (
+            f"{context}: {len(value)} values against {len(old_value)}"
+        )
+        for index, (one, other) in enumerate(zip(value, old_value)):
+            _assert_same_measured_value(one, other, f"{context}[{index}]")
+        return
+    assert value == old_value, f"{context}: {value} != {old_value}"
 
 
 # The measured resolution curve on the longest real history in the
@@ -3276,9 +3298,10 @@ def test_the_measured_ladder_finds_the_alpha_crossing_the_shorter_ladder_missed(
     statement about the rungs it measured, not about the path.
 
     The numbers are the measured ones, captured with their provenance in
-    ``tests/fixtures/resolution_ladder_2500_to_50000.json``.
+    ``tests/fixtures/resolution_ladder_2500_to_50000_recapture.json`` -- the
+    single fixture that covers the full ladder.
     """
-    fixture = _load_ladder_fixture()
+    fixture = _load_recapture_fixture()
     rows = fixture["rows"]
 
     # The fixture says what it is and where it came from.
@@ -3339,7 +3362,7 @@ def test_the_measured_ladder_is_the_frameworks_own_numbers():
     plausibility bound ever moves, this test fails and the fixture is
     visibly stale rather than quietly wrong.
     """
-    fixture = _load_ladder_fixture()
+    fixture = _load_recapture_fixture()
     provenance = fixture["provenance"]
 
     assert provenance["plausibility_bounds"]["plausible_max_annualized_sharpe"] == (
@@ -3384,9 +3407,9 @@ def test_the_re_captured_ladder_reports_what_sets_the_alpha_floor():
         formula and not against the implementation's own estimator;
       * the printed report says what sets the floor, instead of saying it
         cannot be measured;
-      * the re-capture is the SAME measurement as the older capture of the
-        same rungs (they agree to floating-point noise), so nothing moved
-        while the driver was added.
+      * the cheap capture agrees with the full ladder's own capture at every
+        rung they share (they agree to floating-point noise), so two
+        independent captures of the same rungs are the same measurement.
     """
     fixture = _load_driver_ladder_fixture()
     rows = fixture["rows"]
@@ -3460,12 +3483,13 @@ def test_the_re_captured_ladder_reports_what_sets_the_alpha_floor():
             "say the floor cannot be measured"
         )
 
-    # The re-capture is the SAME measurement as the older capture of the
-    # same rungs: the shared rows agree to floating-point noise, so adding
-    # the driver did not move a single number.
+    # This cheap capture and the full ladder's own capture are the SAME
+    # measurement at every rung they share: the shared rows agree to
+    # floating-point noise, driver keys included, so two independent
+    # captures of the same rungs are the same measurement.
     older = {
         (row["bars"], row["seed"], row["series"], path): block
-        for row in _load_ladder_fixture()["rows"]
+        for row in _load_recapture_fixture()["rows"]
         for path, block in row["paths"].items()
     }
     shared = 0
@@ -3475,19 +3499,14 @@ def test_the_re_captured_ladder_reports_what_sets_the_alpha_floor():
             if old is None:
                 continue
             for key, value in block.items():
-                if key in ("strategy_alpha", "benchmark_alphas", "benchmark_alpha_std", "n_benchmarks"):
-                    continue  # the driver keys are new; the old capture has none
-                old_value = old[key]
-                if isinstance(value, float):
-                    assert abs(value - old_value) <= 1e-9 * max(1.0, abs(old_value)), (
-                        f"{path} at {row['bars']} bars ({row['series']}): {key} "
-                        f"moved between the two captures ({old_value} -> {value})"
-                    )
-                else:
-                    assert value == old_value, (
-                        f"{path} at {row['bars']} bars ({row['series']}): {key} "
-                        f"moved between the two captures ({old_value} -> {value})"
-                    )
+                if key not in old:
+                    continue  # the status fields are not in the cheap capture
+                _assert_same_measured_value(
+                    value,
+                    old[key],
+                    f"{path} at {row['bars']} bars ({row['series']}): {key} "
+                    f"moved between the two captures ({old[key]} -> {value})",
+                )
             shared += 1
     assert shared == 3 * 2 * 3, "every shared rung must be compared"
 
@@ -3497,9 +3516,9 @@ def test_the_full_ladder_re_capture_carries_the_driver_and_the_status():
 
     The ladder that established the walk-forward alpha crossing at 50,000
     bars was captured before the alpha-floor driver existed, so a summary
-    built from its fixture says the driver is "not measurable on this
-    ladder" -- and that fixture carries neither the driver's numbers nor the
-    framework's own per-criterion status, so it cannot say whether each
+    built from that capture's rows says the driver is "not measurable on
+    this ladder" -- and the capture carries neither the driver's numbers nor
+    the framework's own per-criterion status, so it cannot say whether each
     criterion could be *priced* on the draw that carries the floor.
 
     The re-capture is the SAME measurement, taken with the current tool, and
@@ -3513,6 +3532,10 @@ def test_the_full_ladder_re_capture_carries_the_driver_and_the_status():
         was never priced can never be read as a measured floor;
       * the same numbers, the same crossings and the same verdicts as the
         pre-driver capture, which stays committed as the baseline.
+
+    The re-capture is also the SINGLE source of truth for this measurement:
+    its trimmed fixture is the only fixture that covers the full ladder (see
+    ``test_the_full_ladder_has_one_fixture``).
     """
     capture = _load_recapture()
     fixture = _load_recapture_fixture()
@@ -3661,6 +3684,7 @@ def test_the_full_ladder_re_capture_carries_the_driver_and_the_status():
     }
     assert len(older) == 5 * 3 * 2 * 3
     shared = 0
+    values = 0
     for row in rows:
         for path, block in row["paths"].items():
             old = older[(row["bars"], row["seed"], row["series"], path)]
@@ -3674,27 +3698,129 @@ def test_the_full_ladder_re_capture_carries_the_driver_and_the_status():
                 if key not in old:
                     continue  # the driver keys are new
                 old_value = old[key]
-                if isinstance(value, float):
-                    assert abs(value - old_value) <= 1e-9 * max(1.0, abs(old_value)), (
-                        f"{path} at {row['bars']} bars ({row['series']}): {key} "
-                        f"moved between the two captures ({old_value} -> {value})"
-                    )
-                else:
-                    assert value == old_value, (
-                        f"{path} at {row['bars']} bars ({row['series']}): {key} "
-                        f"moved between the two captures ({old_value} -> {value})"
-                    )
+                _assert_same_measured_value(
+                    value,
+                    old_value,
+                    f"{path} at {row['bars']} bars ({row['series']}): {key} "
+                    f"moved between the two captures ({old_value} -> {value})",
+                )
+                if isinstance(value, (int, float, bool)):
+                    values += 1
             shared += 1
     assert shared == 5 * 3 * 2 * 3, "every shared rung must be compared"
+    assert values == 5 * 3 * 2 * 3 * 12, (
+        "every shared value must be compared: 12 numbers or flags per path "
+        "block, over the 90 blocks of the ladder (1,080 in all), which is the "
+        "count the capture's own provenance states"
+    )
 
-    # And the trimmed fixture says what was added: the committed fixture
-    # carries neither the driver's numbers nor the status, the re-captured
-    # one carries both.
-    for row in _load_ladder_fixture()["rows"]:
-        for block in row["paths"].values():
-            assert "strategy_alpha" not in block
-            assert "alpha_status" not in block
-            assert "sharpe_status" not in block
+
+def test_the_full_ladder_has_one_fixture():
+    """One measurement, one fixture: the ladder has a single source of truth.
+
+    The full ladder was measured twice: once before the alpha-floor driver
+    existed and once after. Both records describe the same five rungs, the
+    same three seeds, the same two series and the same three paths, so a
+    reader who opened both would have two records of ONE measurement -- and
+    the older one reports the driver as "not measurable on this ladder",
+    which is a statement about that capture and not about the ladder.
+
+    The re-capture is therefore the single source of truth: its trimmed
+    fixture is the only fixture that covers the full ladder, and it carries
+    the driver and the status. The pre-driver capture stays committed in
+    ``results/resolution_floor/`` as the historical record the re-capture is
+    checked against -- the check that no number moved between the captures.
+
+    The check is structural, so a future session that re-adds a second
+    fixture for the same ladder fails here instead of quietly restoring the
+    ambiguity.
+    """
+    fixtures = sorted(
+        path.name
+        for path in (SKILLS_DIR / "tests" / "fixtures").glob(
+            "resolution_ladder_2500_to_50000*.json"
+        )
+    )
+    assert fixtures == ["resolution_ladder_2500_to_50000_recapture.json"], (
+        "the full ladder must have exactly one fixture -- the re-capture, "
+        f"which carries the driver and the status; found {fixtures}"
+    )
+
+    # And that one fixture is the source of truth: it carries the driver and
+    # the status, so a summary built from it reports what sets the floor at
+    # every measured rung.
+    fixture = _load_recapture_fixture()
+    for row in fixture["rows"]:
+        for path, block in row["paths"].items():
+            assert "strategy_alpha" in block, (
+                f"{path} at {row['bars']} bars ({row['series']}): the single "
+                "fixture must carry the driver"
+            )
+            assert "benchmark_alphas" in block
+            assert "alpha_status" in block
+            assert "sharpe_status" in block
+
+    # The pre-driver capture is kept as the baseline, not as a second
+    # fixture: it is the historical record the re-capture is compared
+    # against, and it lives with the other captures.
+    assert BASELINE_CAPTURE.exists(), (
+        "the pre-driver capture must stay committed: it is what the "
+        "re-capture is compared against to show that nothing moved"
+    )
+    assert BASELINE_CAPTURE.parent == RECAPTURE_CAPTURE.parent, (
+        "the pre-driver capture belongs with the other captures"
+    )
+
+    # The baseline says what it is: it is self-describing, so a reader who
+    # opens it alone knows it is the pre-driver record of the ladder and not
+    # a second reading of it.
+    baseline = _load_baseline_capture()
+    baseline_provenance = baseline["provenance"]
+    assert "measure_resolution_vs_sample_size.py" in baseline_provenance["command"]
+    assert baseline_provenance["script_commit"]
+    assert baseline_provenance["measured_at_utc"]
+    assert baseline_provenance["measured"]["sizes"] == [2500, 5000, 10000, 25000, 50000]
+    assert baseline_provenance["measured"]["seeds"] == [7, 1, 2024]
+    assert baseline_provenance["plausibility_bounds"][
+        "plausible_max_annualized_sharpe"
+    ] == PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+    assert baseline_provenance["plausibility_bounds"][
+        "plausible_max_annualized_alpha"
+    ] == PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+    assert "pre-driver" in baseline_provenance["description"].lower(), (
+        "the baseline must say what it is, so it cannot be read as the current "
+        "source of truth"
+    )
+
+    # And the re-capture's own provenance names the baseline it was measured
+    # against -- with no pointer to a fixture that no longer exists.
+    baseline_block = fixture["provenance"]["baseline"]
+    assert baseline_block["capture"] == (
+        "results/resolution_floor/ladder_2500_to_50000.json"
+    ), baseline_block
+    assert baseline_block["fixture"] is None, baseline_block
+    assert baseline_block["capture_script_commit"] == (
+        baseline_provenance["script_commit"]
+    ), baseline_block
+    assert baseline_block["measured_at_utc"] == baseline_provenance["measured_at_utc"]
+
+    # And the documents name the same single source of truth.
+    skill_doc = (SKILLS_DIR / "SKILL.md").read_text(encoding="utf-8")
+    methods_doc = (SKILLS_DIR / "references" / "validation_methods.md").read_text(
+        encoding="utf-8"
+    )
+    assert "resolution_ladder_2500_to_50000_recapture.json" in skill_doc, (
+        "SKILL.md must name the fixture that carries the ladder"
+    )
+    assert "resolution_ladder_2500_to_50000.json" not in skill_doc, (
+        "SKILL.md must not point a reader at the removed pre-driver fixture"
+    )
+    assert "resolution_ladder_2500_to_50000_recapture.json" in methods_doc, (
+        "validation_methods.md must name the fixture that carries the ladder"
+    )
+    assert "single source of truth" in methods_doc, (
+        "validation_methods.md must say that the ladder has one source of truth"
+    )
 
 
 def test_the_real_history_ladder_reports_what_it_measured():
@@ -3910,6 +4036,7 @@ TEST_REGISTRY = [
     ("test_the_measured_ladder_is_the_frameworks_own_numbers", test_the_measured_ladder_is_the_frameworks_own_numbers),
     ("test_the_re_captured_ladder_reports_what_sets_the_alpha_floor", test_the_re_captured_ladder_reports_what_sets_the_alpha_floor),
     ("test_the_full_ladder_re_capture_carries_the_driver_and_the_status", test_the_full_ladder_re_capture_carries_the_driver_and_the_status),
+    ("test_the_full_ladder_has_one_fixture", test_the_full_ladder_has_one_fixture),
     ("test_the_real_history_ladder_reports_what_it_measured", test_the_real_history_ladder_reports_what_it_measured),
     ("test_the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars", test_the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars),
     ("test_the_default_ladder_brackets_the_measured_alpha_crossing", test_the_default_ladder_brackets_the_measured_alpha_crossing),

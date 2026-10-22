@@ -55,8 +55,10 @@
     "script_commit": "929c0d17d47b8e8ed15c360e6c130a257c3b6939",
     "baseline": {
       "capture": "results/resolution_floor/ladder_2500_to_50000.json",
-      "fixture": "skills/quantitative-backtesting/tests/fixtures/resolution_ladder_2500_to_50000.json",
       "capture_script_commit": "d9f19aa6d70ce2be5c3d3e4d0a3038e348c7d60c",
+      "measured_at_utc": "2026-10-20T21:56Z",
+      "fixture": null,
+      "fixture_note": "The pre-driver trimmed fixture (tests/fixtures/resolution_ladder_2500_to_50000.json) was removed: it measured the same ladder as this re-capture and carried neither the driver's numbers nor the status fields, so a summary built from it reported the driver as 'not measurable on this ladder'. The capture above is the pre-driver record of the same measurement and carries the same provenance (command, commit, environment, fixture construction), so no measurement and no provenance was lost. This re-capture is the single source of truth for the ladder.",
       "note": "The pre-driver capture of the same ladder, kept as the numerical baseline. Every number the two captures share is identical (max absolute difference 0.0 over 1,080 shared values in 90 path blocks); the re-capture adds the alpha-floor driver keys and the per-criterion status fields, and moves no number, no threshold, no bound and no verdict."
     }
   },

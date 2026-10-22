@@ -2194,20 +2194,28 @@ measured rung" is set by that worst draw. So:
 
 The measured ladder behind this table is captured with its provenance --
 command, commit, environment and fixture construction -- in
-`tests/fixtures/resolution_ladder_2500_to_50000.json`, and
+`tests/fixtures/resolution_ladder_2500_to_50000_recapture.json`, and
 `tests/test_resolution_vs_sample_size.py` re-measures the 25,000-bar rung
 from scratch so the fixture is checked against a fresh run of the framework
 rather than against itself.
 
+That fixture is the **single source of truth** for the ladder. The ladder was
+measured twice: the pre-driver capture
+(`results/resolution_floor/ladder_2500_to_50000.json`) predates the driver
+keys, so a summary built from its rows says the driver is "not measurable on
+this ladder"; the re-capture is the same measurement carrying the driver's
+own numbers with it, and it agrees with the pre-driver capture on every
+shared value (max absolute difference 0.0 over 1,080 shared values in 90 path
+blocks), so adding the driver moved no number. The pre-driver capture stays
+committed as the historical baseline the re-capture is checked against, and
+the re-capture's trimmed fixture is the only fixture for this ladder.
+
 A second capture, `tests/fixtures/resolution_ladder_2500_to_10000.json`,
 covers the cheap end of the same ladder (2,500 / 5,000 / 10,000 bars, seed
 7, both series, all three paths) and **carries the alpha-floor driver** in
-every per-path block. The capture above predates the driver keys, so a
-summary built from *it* says the driver is "not measurable on this ladder";
-the re-capture is the same measurement carrying the driver's own numbers
-with it, and it agrees with the longer capture on every shared rung to
-floating-point noise (worst relative difference 4.3e-14), so adding the
-driver moved no number.
+every per-path block. It is an independent capture of the cheap end, and it
+agrees with the full ladder on every rung they share to floating-point noise
+(worst relative difference 6.5e-14).
 
 What this does **not** establish: the crossing points are properties of the
 synthetic control fixture and of the shipped configuration, not promises
@@ -2386,6 +2394,18 @@ share is identical (max absolute difference 0.0 over 1,080 shared values in
 90 path blocks), so no threshold, no bound, no crossing and no verdict moved
 while the explanation was added. The pre-driver capture stays committed as
 the numerical baseline.
+
+**One measurement, one fixture.** The pre-driver capture's own trimmed
+fixture (`tests/fixtures/resolution_ladder_2500_to_50000.json`) has been
+removed. It measured the same ladder and carried neither the driver's
+numbers nor the status fields, so a summary built from it reported the
+driver as "not measurable on this ladder" -- a statement about that capture,
+not about the ladder, and a second record of one measurement that a reader
+could mistake for the current one. The pre-driver capture itself stays
+committed (carrying the provenance the removed fixture held) and is still
+what the re-capture is checked against, so no measurement and no provenance
+was lost. `test_the_full_ladder_has_one_fixture` pins the arrangement:
+exactly one fixture covers the full ladder, and it is the re-capture.
 
 At the largest rung of the full ladder (50,000 bars) the floor is set by the
 worst draw measured there, on each path:
