@@ -6,21 +6,21 @@ Strategy: bollinger_bands
 
 --- Return Metrics ---
 Total Return:          3.18%
-Annualized Return:     8.04%
-Annualized Volatility: 13.26%
+Annualized Return:     8.12%
+Annualized Volatility: 13.33%
 
 --- Risk-Adjusted Returns ---
 Sharpe Ratio:          0.50
-Sortino Ratio:         0.77
-Calmar Ratio:          1.52
+Sortino Ratio:         0.78
+Calmar Ratio:          1.54
 
 --- Risk Metrics ---
 Max Drawdown:          -5.29%
 Avg Drawdown:          -1.66%
 VaR (95%):             -1.05%
 CVaR (95%):            -1.89%
-Skewness:              0.57
-Kurtosis:              5.86
+Skewness:              0.56
+Kurtosis:              5.78
 
 --- Trade-Level Analytics ---
 Total Trades:          3
@@ -37,16 +37,16 @@ Trades Closed at End:      1
 % of Trades Closed at End: 33.33%
 
 --- Benchmark Comparison ---
-Benchmark Total Return:      7.60%
-Benchmark Annualized Return: 19.84%
+Benchmark Total Return:      8.09%
+Benchmark Annualized Return: 21.41%
 Benchmark Return Type:       price
 Benchmark Commission:        0.0002
 Benchmark Slippage:          0.0001
 Correlation:                 0.07
-Alpha:                       7.44%
+Alpha:                       7.45%
 Beta:                        0.06
-Alpha t-stat:                0.3553059891640211
-Alpha p-value:               0.7231087011642346
-R-squared:                   0.005370494123820957
+Alpha t-stat:                0.35199777948183364
+Alpha p-value:               0.7255880911659984
+R-squared:                   0.005353991673029634
 
 ============================================================
