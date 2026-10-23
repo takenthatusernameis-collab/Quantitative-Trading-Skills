@@ -340,6 +340,25 @@ def test_simple_momentum_hypothesis_uses_point_in_time_split():
     assert "Point-in-time validation" in result.stdout
 
 
+def test_simple_momentum_hypothesis_emits_falsification_verdict():
+    """simple_momentum_hypothesis emits falsification criteria and verdict outputs."""
+    result = subprocess.run(
+        [sys.executable, str(_SIMPLE_MOMENTUM_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"simple_momentum_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "FALSIFICATION CRITERIA" in result.stdout
+    assert re.search(r"\[(PASS|FAIL)\].*oos_sharpe_gt_zero", result.stdout)
+    assert re.search(r"\[(PASS|FAIL)\].*oos_total_return_positive", result.stdout)
+    assert re.search(r"VERDICT:\s*(SUPPORTED|NOT SUPPORTED)", result.stdout)
+    # Criteria must include numeric values (Sharpe/returns) in numerically sane form
+    assert "Sharpe" in result.stdout
+    assert "Total Return" in result.stdout
+
+
 # ---------------------------------------------------------------------------
 # mean_reversion_hypothesis.py
 # ---------------------------------------------------------------------------
@@ -397,6 +416,24 @@ def test_mean_reversion_hypothesis_uses_point_in_time_split():
     assert "METHODOLOGY CONTROLS" in result.stdout
     assert "train/val/test" in result.stdout
     assert "Point-in-time validation" in result.stdout
+
+
+def test_mean_reversion_hypothesis_emits_falsification_verdict():
+    """mean_reversion_hypothesis emits falsification criteria and verdict outputs."""
+    result = subprocess.run(
+        [sys.executable, str(_MEAN_REVERSION_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"mean_reversion_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "FALSIFICATION CRITERIA" in result.stdout
+    assert re.search(r"\[(PASS|FAIL)\].*oos_sharpe_gt_zero", result.stdout)
+    assert re.search(r"\[(PASS|FAIL)\].*oos_total_return_positive", result.stdout)
+    assert re.search(r"VERDICT:\s*(SUPPORTED|NOT SUPPORTED)", result.stdout)
+    assert "Sharpe" in result.stdout
+    assert "Total Return" in result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +499,24 @@ def test_rsi_mean_reversion_hypothesis_uses_point_in_time_split():
     assert "Point-in-time validation" in result.stdout
 
 
+def test_rsi_mean_reversion_hypothesis_emits_falsification_verdict():
+    """rsi_mean_reversion_hypothesis emits falsification criteria and verdict outputs."""
+    result = subprocess.run(
+        [sys.executable, str(_RSI_MR_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"rsi_mean_reversion_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "FALSIFICATION CRITERIA" in result.stdout
+    assert re.search(r"\[(PASS|FAIL)\].*oos_sharpe_gt_zero", result.stdout)
+    assert re.search(r"\[(PASS|FAIL)\].*oos_total_return_positive", result.stdout)
+    assert re.search(r"VERDICT:\s*(SUPPORTED|NOT SUPPORTED)", result.stdout)
+    assert "Sharpe" in result.stdout
+    assert "Total Return" in result.stdout
+
+
 # ---------------------------------------------------------------------------
 # zscore_mean_reversion_hypothesis.py
 # ---------------------------------------------------------------------------
@@ -519,6 +574,24 @@ def test_zscore_mean_reversion_hypothesis_uses_point_in_time_split():
     assert "METHODOLOGY CONTROLS" in result.stdout
     assert "train/val/test" in result.stdout
     assert "Point-in-time validation" in result.stdout
+
+
+def test_zscore_mean_reversion_hypothesis_emits_falsification_verdict():
+    """zscore_mean_reversion_hypothesis emits falsification criteria and verdict outputs."""
+    result = subprocess.run(
+        [sys.executable, str(_ZSCORE_MR_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"zscore_mean_reversion_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "FALSIFICATION CRITERIA" in result.stdout
+    assert re.search(r"\[(PASS|FAIL)\].*oos_sharpe_gt_zero", result.stdout)
+    assert re.search(r"\[(PASS|FAIL)\].*oos_total_return_positive", result.stdout)
+    assert re.search(r"VERDICT:\s*(SUPPORTED|NOT SUPPORTED)", result.stdout)
+    assert "Sharpe" in result.stdout
+    assert "Total Return" in result.stdout
     # Must surface book panel pricing as documented
     assert "book" in result.stdout.lower()
     assert "Panel pricing" in result.stdout
@@ -626,18 +699,22 @@ TEST_REGISTRY = [
     ("test_simple_momentum_hypothesis_runs", test_simple_momentum_hypothesis_runs),
     ("test_simple_momentum_hypothesis_emits_hypothesis_and_costs", test_simple_momentum_hypothesis_emits_hypothesis_and_costs),
     ("test_simple_momentum_hypothesis_uses_point_in_time_split", test_simple_momentum_hypothesis_uses_point_in_time_split),
+    ("test_simple_momentum_hypothesis_emits_falsification_verdict", test_simple_momentum_hypothesis_emits_falsification_verdict),
     ("test_mean_reversion_hypothesis_imports", test_mean_reversion_hypothesis_imports),
     ("test_mean_reversion_hypothesis_runs", test_mean_reversion_hypothesis_runs),
     ("test_mean_reversion_hypothesis_emits_hypothesis_and_costs", test_mean_reversion_hypothesis_emits_hypothesis_and_costs),
     ("test_mean_reversion_hypothesis_uses_point_in_time_split", test_mean_reversion_hypothesis_uses_point_in_time_split),
+    ("test_mean_reversion_hypothesis_emits_falsification_verdict", test_mean_reversion_hypothesis_emits_falsification_verdict),
     ("test_rsi_mean_reversion_hypothesis_imports", test_rsi_mean_reversion_hypothesis_imports),
     ("test_rsi_mean_reversion_hypothesis_runs", test_rsi_mean_reversion_hypothesis_runs),
     ("test_rsi_mean_reversion_hypothesis_emits_hypothesis_and_costs", test_rsi_mean_reversion_hypothesis_emits_hypothesis_and_costs),
     ("test_rsi_mean_reversion_hypothesis_uses_point_in_time_split", test_rsi_mean_reversion_hypothesis_uses_point_in_time_split),
+    ("test_rsi_mean_reversion_hypothesis_emits_falsification_verdict", test_rsi_mean_reversion_hypothesis_emits_falsification_verdict),
     ("test_zscore_mean_reversion_hypothesis_imports", test_zscore_mean_reversion_hypothesis_imports),
     ("test_zscore_mean_reversion_hypothesis_runs", test_zscore_mean_reversion_hypothesis_runs),
     ("test_zscore_mean_reversion_hypothesis_emits_hypothesis_and_costs", test_zscore_mean_reversion_hypothesis_emits_hypothesis_and_costs),
     ("test_zscore_mean_reversion_hypothesis_uses_point_in_time_split", test_zscore_mean_reversion_hypothesis_uses_point_in_time_split),
+    ("test_zscore_mean_reversion_hypothesis_emits_falsification_verdict", test_zscore_mean_reversion_hypothesis_emits_falsification_verdict),
     ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
     ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
     ("test_real_data_pipeline_example_emits_deflated_alpha_outputs", test_real_data_pipeline_example_emits_deflated_alpha_outputs),
