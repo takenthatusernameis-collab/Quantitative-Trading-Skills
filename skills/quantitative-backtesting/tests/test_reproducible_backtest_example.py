@@ -25,6 +25,10 @@ def test_reproducible_metrics_byte_identical():
     h2 = _hash(METRICS)
     assert h1 == h2, f"metrics changed between runs: {h1} vs {h2}"
     assert METRICS.exists()
+    import json
+    summary = json.loads((SKILLS_DIR / "examples" / "example_reproducible_output" / "tear_sheet_summary.json").read_text())
+    pit = summary.get("point_in_time_validation")
+    assert pit and pit.get("passed", False), f"point-in-time validation did not pass: {pit}"
 
 TEST_REGISTRY.append(("reproducible_metrics_byte_identical", test_reproducible_metrics_byte_identical))
 
