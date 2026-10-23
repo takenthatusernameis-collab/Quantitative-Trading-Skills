@@ -1,0 +1,39 @@
+============================================================
+BACKTEST PERFORMANCE REPORT
+============================================================
+Symbol: SPY
+Strategy: sma_crossover
+
+--- Return Metrics ---
+Total Return:          -10.72%
+Annualized Return:     -5.52%
+Annualized Volatility: 15.89%
+
+--- Risk-Adjusted Returns ---
+Sharpe Ratio:          -0.40
+Sortino Ratio:         -0.54
+Calmar Ratio:          0.27
+
+--- Risk Metrics ---
+Max Drawdown:          -20.44%
+Avg Drawdown:          -10.57%
+VaR (95%):             -1.84%
+CVaR (95%):            -2.56%
+Skewness:              -0.16
+Kurtosis:              2.67
+
+--- Trade-Level Analytics ---
+Total Trades:          8
+Winning Trades:        2
+Losing Trades:         6
+Win Rate:              25.00%
+Avg Win:               5.88%
+Avg Loss:              3.19%
+Profit Factor:         0.63
+Expectancy:            -0.9210
+
+--- End-of-Sample Closes ---
+Trades Closed at End:      1
+% of Trades Closed at End: 12.50%
+
+============================================================
