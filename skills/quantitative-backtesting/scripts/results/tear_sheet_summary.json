@@ -1,0 +1,188 @@
+{
+  "symbol": "SPY",
+  "strategy": "sma_crossover",
+  "metrics": {
+    "total_return": -0.050604520187668256,
+    "annualized_return": -0.1215247164236195,
+    "annualized_volatility": 0.15260267940243682,
+    "sharpe_ratio": -0.9042213516703458,
+    "sortino_ratio": -1.1932923637184083,
+    "max_drawdown": -0.10141769876462135,
+    "avg_drawdown": -0.054699927255637354,
+    "calmar_ratio": 1.1982594547492562,
+    "max_drawdown_recovery_days": null,
+    "var_95": -0.021687286844968123,
+    "cvar_95": -0.025372388966979353,
+    "skewness": -0.14674451135591793,
+    "kurtosis": 3.526899500191972,
+    "total_trades": 2,
+    "winning_trades": 0,
+    "losing_trades": 2,
+    "win_rate": 0.0,
+    "trades_closed_at_end": 1,
+    "pct_trades_closed_at_end": 0.5,
+    "avg_win": 0.0,
+    "avg_loss": 0.0467024932009406,
+    "profit_factor": 0.0,
+    "expectancy": -5.6320347986221435,
+    "avg_trade_duration": 27.5,
+    "benchmark_total_return": 0.08085897435279055,
+    "benchmark_annualized_return": 0.21410265460936206,
+    "benchmark_total_return_type": "price",
+    "benchmark_commission": 0.0002,
+    "benchmark_slippage": 0.0001,
+    "benchmark_expense_ratio": 0.0,
+    "benchmark_cost_is_periodic": false,
+    "correlation_with_benchmark": -0.06032129806104686,
+    "alpha": -0.10630219851290938,
+    "beta": -0.0561319969304552,
+    "tracking_error": 0.23065139904623888,
+    "information_ratio": -0.4608781865294426,
+    "alpha_tstat": -0.43817937822027164,
+    "alpha_pvalue": 0.6622108773159597,
+    "r_squared": 0.003638658999769784,
+    "omega_ratio": 4.518349213426243,
+    "tail_ratio": 0.6150036258830756,
+    "initial_capital": 100000,
+    "capacity": null,
+    "capacity_trend": null,
+    "capacity_book": null,
+    "capacity_book_trend": null,
+    "book_diagnostic": null
+  },
+  "plot_files": [
+    "equity_curve.png",
+    "returns_distribution.png"
+  ],
+  "panel_pricing": "net-exposure",
+  "train_val_test_split": {
+    "train_start": "2018-01-01 00:00:00",
+    "train_end": "2019-02-26 00:00:00",
+    "val_start": "2019-02-27 00:00:00",
+    "val_end": "2019-07-16 00:00:00",
+    "test_start": "2019-07-17 00:00:00",
+    "test_end": "2019-12-05 00:00:00",
+    "train_size": 302,
+    "val_size": 100,
+    "test_size": 102,
+    "train_frac": 0.6,
+    "val_frac": 0.2,
+    "test_frac": 0.2,
+    "separation_check": {
+      "disjoint": true,
+      "chronological": true,
+      "train_val_overlap": 0,
+      "val_test_overlap": 0,
+      "train_test_overlap": 0,
+      "train_end": "2019-02-26 00:00:00",
+      "val_start": "2019-02-27 00:00:00",
+      "val_end": "2019-07-16 00:00:00",
+      "test_start": "2019-07-17 00:00:00",
+      "train_size": 302,
+      "val_size": 100,
+      "test_size": 102
+    }
+  },
+  "data_provenance": {
+    "source_path": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv",
+    "load_timestamp": "2026-10-23T12:40:38.940526Z",
+    "file_format": ".csv",
+    "file_size_bytes": 46812,
+    "symbol_filter": "SPY",
+    "start_date_filter": null,
+    "end_date_filter": null,
+    "original_shape": [
+      504,
+      6
+    ],
+    "final_shape": [
+      504,
+      5
+    ],
+    "columns_original": [
+      "date",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "columns_final": [
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "date_range_original": null,
+    "date_range_final": [
+      "2018-01-01 00:00:00",
+      "2019-12-05 00:00:00"
+    ],
+    "validation_passed": true,
+    "validation_messages": [],
+    "transformations_applied": [
+      "column_names_lowercase_stripped",
+      "set_index_from_date",
+      "sorted_index",
+      "coerced_numeric_types"
+    ],
+    "checksum": "9a66ca5364695907",
+    "total_return_type": "price",
+    "name": null
+  },
+  "benchmark_provenance": {
+    "source_path": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/sample_benchmark.csv",
+    "load_timestamp": "2026-10-23T16:00:30.289462Z",
+    "file_format": ".csv",
+    "file_size_bytes": 46928,
+    "symbol_filter": null,
+    "start_date_filter": null,
+    "end_date_filter": null,
+    "original_shape": [
+      504,
+      6
+    ],
+    "final_shape": [
+      504,
+      5
+    ],
+    "columns_original": [
+      "date",
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "columns_final": [
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume"
+    ],
+    "date_range_original": null,
+    "date_range_final": [
+      "2018-01-01 00:00:00",
+      "2019-12-05 00:00:00"
+    ],
+    "validation_passed": true,
+    "validation_messages": [],
+    "transformations_applied": [
+      "column_names_lowercase_stripped",
+      "set_index_from_date",
+      "sorted_index",
+      "coerced_numeric_types"
+    ],
+    "checksum": "4cfa64af4b5f1fef",
+    "total_return_type": "price",
+    "name": "sample_benchmark"
+  },
+  "point_in_time_validation": {
+    "passed": true,
+    "violations": [],
+    "warnings": []
+  },
+  "bias_controls_engaged": true
+}
