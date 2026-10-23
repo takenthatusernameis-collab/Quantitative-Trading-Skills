@@ -956,23 +956,30 @@ class MeanReversionZScore(StrategyBase):
         spread = log1 - beta * log2 - alpha
         return spread
 
-    def _generate_pairs_signals_from_two_series(
+    def _pairs_positions_from_two_series(
         self, series1: pd.Series, series2: pd.Series, period: int, entry_z: float, exit_z: float,
         spread_method: str, hedge_ratio: float, hedge_lookback: Optional[int] = None
     ) -> pd.Series:
-        """Generate signals from two aligned price series."""
+        """Position (1 long spread, -1 short spread, 0 flat) per bar for a pair.
+
+        The spread is built from ``series1`` (numerator) and ``series2``
+        (denominator); when the z-score of the spread is below ``-entry_z`` the
+        spread is bought (long series1 / short series2), when above
+        ``+entry_z`` it is sold (short series1 / long series2), and positions
+        are exited once the z-score retraces into ``[-exit_z, +exit_z]``.
+        """
         spread = self._construct_spread(series1, series2, spread_method, hedge_ratio, hedge_lookback)
         rolling_mean = spread.rolling(period).mean()
         rolling_std = spread.rolling(period).std()
         zscore = (spread - rolling_mean) / rolling_std
 
-        signals = pd.Series(0.0, index=spread.index)
+        positions = pd.Series(0.0, index=spread.index)
         position = 0
 
         for i in range(len(spread)):
             z = zscore.iloc[i]
             if pd.isna(z):
-                signals.iloc[i] = position
+                positions.iloc[i] = position
                 continue
 
             if position == 0:
@@ -985,9 +992,51 @@ class MeanReversionZScore(StrategyBase):
             elif position == -1 and z <= exit_z:
                 position = 0
 
-            signals.iloc[i] = position
+            positions.iloc[i] = position
 
-        return signals
+        return positions
+
+    def _generate_pairs_signals_from_two_series(
+        self, series1: pd.Series, series2: pd.Series, period: int, entry_z: float, exit_z: float,
+        spread_method: str, hedge_ratio: float, hedge_lookback: Optional[int] = None
+    ) -> pd.Series:
+        """Generate scalar signals from two aligned price series.
+
+        Returns the position series (1 long spread, -1 short spread, 0 flat).
+        For a market-neutral pair the net exposure of the corresponding book
+        is flat by construction; the directional bet lives in the book (which
+        leg is long), not in the scalar net exposure.
+        """
+        return self._pairs_positions_from_two_series(
+            series1, series2, period, entry_z, exit_z, spread_method, hedge_ratio, hedge_lookback
+        )
+
+    def _pairs_weights_from_two_series(
+        self, series1: pd.Series, series2: pd.Series, symbol1: str, symbol2: str,
+        period: int, entry_z: float, exit_z: float,
+        spread_method: str, hedge_ratio: float, hedge_lookback: Optional[int] = None
+    ) -> pd.DataFrame:
+        """Per-asset target book implied by the Z-Score pair position.
+
+        Long the spread (position 1): ``+0.5`` in series1, ``-0.5`` in
+        series2. Short the spread (position -1): ``-0.5`` in series1,
+        ``+0.5`` in series2. Flat (position 0): zero in both. The book's net
+        exposure is therefore flat (market-neutral) and its gross book is
+        ``1.0`` whenever a position is held.
+        """
+        positions = self._pairs_positions_from_two_series(
+            series1, series2, period, entry_z, exit_z, spread_method, hedge_ratio, hedge_lookback
+        )
+        weights = pd.DataFrame(0.0, index=positions.index, columns=[symbol1, symbol2])
+        long_spread = positions == 1
+        short_spread = positions == -1
+        if long_spread.any():
+            weights.loc[long_spread, symbol1] = 0.5
+            weights.loc[long_spread, symbol2] = -0.5
+        if short_spread.any():
+            weights.loc[short_spread, symbol1] = -0.5
+            weights.loc[short_spread, symbol2] = 0.5
+        return weights
 
     def _generate_pairs_signals_dict(
         self, data_dict: dict, period: int, entry_z: float, exit_z: float,
@@ -1042,6 +1091,67 @@ class MeanReversionZScore(StrategyBase):
         return self._generate_pairs_signals_from_two_series(
             series1, series2, period, entry_z, exit_z, spread_method, hedge_ratio, hedge_lookback
         )
+
+    def generate_target_weights(self, data) -> Optional[pd.DataFrame]:
+        """Per-asset target book implied by the Z-Score pair position.
+
+        Long the spread (position 1): ``+0.5`` in the numerator asset,
+        ``-0.5`` in the denominator asset. Short the spread (position -1):
+        the reverse. Flat (position 0): zero in both. The book is
+        market-neutral (net exposure 0, gross book 1.0 while a position is
+        held), so it is only backtestable under ``--panel-pricing book``,
+        which prices the true per-asset book return ``sum_i w_i r_i`` and
+        charges costs on the book's rotation. Under net-exposure pricing a
+        market-neutral book has flat net exposure and is correctly reported
+        as taking no priced position.
+
+        Returns ``None`` for single-asset data (the single-asset fallback
+        z-scores the close price and does not model a book) and for panel
+        data that does not contain exactly two assets.
+        """
+        period = self.parameters.get("period", 20)
+        entry_z = self.parameters.get("entry_z", 2.0)
+        exit_z = self.parameters.get("exit_z", 0.5)
+        spread_method = self.parameters.get("spread_method", "log_ratio")
+        hedge_ratio = self.parameters.get("hedge_ratio", 1.0)
+        hedge_lookback = self.parameters.get("hedge_lookback", 30)
+
+        if isinstance(data, dict):
+            symbols = list(data.keys())
+            if len(symbols) != 2:
+                return None
+            sym1, sym2 = symbols[0], symbols[1]
+            df1 = data[sym1]
+            df2 = data[sym2]
+            common_index = df1.index.intersection(df2.index).sort_values()
+            if len(common_index) == 0:
+                return None
+            series1 = df1.loc[common_index, "close"]
+            series2 = df2.loc[common_index, "close"]
+            return self._pairs_weights_from_two_series(
+                series1, series2, sym1, sym2,
+                period, entry_z, exit_z, spread_method, hedge_ratio, hedge_lookback,
+            )
+
+        if isinstance(data.columns, pd.MultiIndex):
+            try:
+                symbols = sorted(set(data.columns.get_level_values(1)))
+            except Exception:
+                return None
+            if len(symbols) != 2:
+                return None
+            sym1, sym2 = symbols[0], symbols[1]
+            if "close" not in data.columns.get_level_values(0):
+                return None
+            series1 = data[("close", sym1)]
+            series2 = data[("close", sym2)]
+            return self._pairs_weights_from_two_series(
+                series1, series2, sym1, sym2,
+                period, entry_z, exit_z, spread_method, hedge_ratio, hedge_lookback,
+            )
+
+        return None
+
 
 class VolatilityTargeting(StrategyBase):
     """Volatility Targeting Position Sizing.

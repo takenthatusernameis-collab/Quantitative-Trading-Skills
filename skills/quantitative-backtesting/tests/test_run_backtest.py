@@ -2525,12 +2525,20 @@ def test_run_backtest_book_diagnostic_absent_for_single_asset():
     assert results.get("book_diagnostic") is None
 
 
-def test_run_backtest_book_diagnostic_absent_for_strategy_without_a_book():
-    """A panel run of a strategy that exposes no book has no diagnostic."""
+def test_run_backtest_pairs_strategy_exposes_a_book():
+    """The two-asset Z-Score pairs strategy holds a long/short book, so it
+    exposes target weights and book pricing prices the true book return
+    (sum_i w_i r_i). This mirrors CrossSectionalMomentum and DualMomentum,
+    which also implement generate_target_weights."""
     data = _make_multiasset_multiindex(n=300, n_assets=2, seed=5)
     strategy = build_strategy("zscore_mean_reversion", '{"period": 20}')
-    results = run_backtest(data, strategy, _Args())
-    assert results.get("book_diagnostic") is None
+    results = run_backtest(data, strategy, _Args(panel_pricing="book"))
+    assert results["panel_pricing"] == "book"
+    diag = results.get("book_diagnostic")
+    assert diag is not None
+    assert diag["gross_book"] > 0
+    assert abs(diag["net_exposure"]) < 1e-12  # market-neutral
+    assert diag["n_periods_with_book"] > 0
 
 
 def test_run_backtest_flat_net_exposure_panel_reports_the_book_it_holds():
@@ -2659,17 +2667,20 @@ def test_run_backtest_net_exposure_pricing_is_the_default_and_is_unchanged():
     pd.testing.assert_series_equal(default["returns"], explicit["returns"])
 
 
-def test_run_backtest_book_pricing_falls_back_when_no_book_is_available():
-    """A strategy that exposes no book falls back to net-exposure pricing,
-    and the fallback is recorded rather than silently applied."""
+def test_run_backtest_book_pricing_prices_the_pairs_book():
+    """With --panel-pricing book the pairs strategy's book is priced
+    (effective pricing is book, no net-exposure fallback) because it exposes
+    target weights; the cost basis is the book's own rotation."""
     data = _make_multiasset_multiindex(n=300, n_assets=2, seed=5)
     strategy = build_strategy("zscore_mean_reversion", '{"period": 20}')
     results = run_backtest(data, strategy, _Args(panel_pricing="book"))
 
     assert results["config"]["panel_pricing"] == "book"
-    assert results["config"]["panel_pricing_effective"] == "net-exposure"
-    assert results["panel_pricing"] == "net-exposure"
-    assert results.get("book_diagnostic") is None
+    assert results["config"]["panel_pricing_effective"] == "book"
+    assert results["panel_pricing"] == "book"
+    diag = results.get("book_diagnostic")
+    assert diag is not None
+    assert diag["cost_basis"] == "book"
 
 
 def test_run_backtest_book_pricing_on_a_single_asset_is_net_exposure_pricing():
@@ -3843,12 +3854,12 @@ TEST_REGISTRY = [
     ("test_run_backtest_surfaces_book_diagnostic_for_a_panel", test_run_backtest_surfaces_book_diagnostic_for_a_panel),
     ("test_run_backtest_book_diagnostic_book_return_matches_manual_computation", test_run_backtest_book_diagnostic_book_return_matches_manual_computation),
     ("test_run_backtest_book_diagnostic_absent_for_single_asset", test_run_backtest_book_diagnostic_absent_for_single_asset),
-    ("test_run_backtest_book_diagnostic_absent_for_strategy_without_a_book", test_run_backtest_book_diagnostic_absent_for_strategy_without_a_book),
+    ("test_run_backtest_pairs_strategy_exposes_a_book", test_run_backtest_pairs_strategy_exposes_a_book),
     ("test_run_backtest_flat_net_exposure_panel_reports_the_book_it_holds", test_run_backtest_flat_net_exposure_panel_reports_the_book_it_holds),
     ("test_run_backtest_book_pricing_backtests_a_market_neutral_book", test_run_backtest_book_pricing_backtests_a_market_neutral_book),
     ("test_run_backtest_book_pricing_differs_by_the_measured_return_gap", test_run_backtest_book_pricing_differs_by_the_measured_return_gap),
     ("test_run_backtest_net_exposure_pricing_is_the_default_and_is_unchanged", test_run_backtest_net_exposure_pricing_is_the_default_and_is_unchanged),
-    ("test_run_backtest_book_pricing_falls_back_when_no_book_is_available", test_run_backtest_book_pricing_falls_back_when_no_book_is_available),
+    ("test_run_backtest_book_pricing_prices_the_pairs_book", test_run_backtest_book_pricing_prices_the_pairs_book),
     ("test_run_backtest_book_pricing_on_a_single_asset_is_net_exposure_pricing", test_run_backtest_book_pricing_on_a_single_asset_is_net_exposure_pricing),
     ("test_run_backtest_book_pricing_charges_the_gross_turnover_of_the_book", test_run_backtest_book_pricing_charges_the_gross_turnover_of_the_book),
     ("test_run_backtest_book_pricing_charges_borrow_on_the_short_leg", test_run_backtest_book_pricing_charges_borrow_on_the_short_leg),
