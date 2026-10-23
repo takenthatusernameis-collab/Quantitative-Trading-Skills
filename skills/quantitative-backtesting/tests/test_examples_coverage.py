@@ -519,6 +519,9 @@ def test_zscore_mean_reversion_hypothesis_uses_point_in_time_split():
     assert "METHODOLOGY CONTROLS" in result.stdout
     assert "train/val/test" in result.stdout
     assert "Point-in-time validation" in result.stdout
+    # Must surface book panel pricing as documented
+    assert "book" in result.stdout.lower()
+    assert "Panel pricing" in result.stdout
 
 
 # ---------------------------------------------------------------------------
