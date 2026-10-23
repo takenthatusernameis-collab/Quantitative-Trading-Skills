@@ -2,25 +2,28 @@
 
 ## What changed
 
-- Removed the stale `deflated_alpha` block (with `n_benchmarks: 1`, `expected_max_alpha: 0.0`) from the committed artifact `results/metrics.json`. The current (tested) methodology intentionally omits `deflated_alpha` for single-benchmark runs (no multiple-testing problem to correct), but this committed artifact — last touched in commit dde2e34 on 2026-10-22 — still carried it. It is the only result artifact with the inconsistency; `results/tear_sheet_summary.json` and `results/monte_carlo_results.json` correctly have no `deflated_alpha`, and all `results/resolution_floor/*.json` sweeps use `n_benchmarks: 2`.
+- Added executable coverage for `pairs_trading_example.py`, the only example that lacked it: four new tests in `tests/test_examples_coverage.py`.
+- Fixed two defects in `pairs_trading_example.py` found while adding coverage:
+  1. `generate_report` was called with a file path instead of a directory, creating a nested `report.txt/report.txt` directory. Now passes the output directory and metrics dict, matching the other examples. The stale tracked `report.txt` directory was removed from git.
+  2. The correlated pair's log-price was anchored at a raw log level of `100` and then exponentiated, yielding prices of ~1e43 dollars. Anchored at `np.log(100.0)` so prices are realistic (~$100).
+- Committed as `1be9025`. Working tree clean.
 
 ## What was actually verified
 
-- `results/metrics.json` is still valid JSON after the 11-line deletion; `deflated_alpha` key is gone.
-- `results/tear_sheet_summary.json` and `results/monte_carlo_results.json` confirmed to have no `deflated_alpha`; all `results/resolution_floor/*.json` use `n_benchmarks: 2` (legitimate).
-- All three code paths omit `deflated_alpha` for `n_benchmarks=1`: `walk_forward._benchmark_list_alpha_correction` (walk_forward.py:7889, `n_benchmarks > 1`), `performance.calculate_metrics` (only when `benchmark_list` has 2+), `run_backtest.py` (only sets `benchmark_list` when >1 benchmark).
-- `tests/test_performance.py`: 33/33 pass (includes `test_calculate_metrics_deflated_alpha_single_benchmark`, asserting `"deflated_alpha" not in metrics`).
-- Prior agent work re-verified and still green: `test_performance.py` 33/33; cost-sweep pins in `test_resolution_vs_sample_size.py` 8/8; falsifiable-hypothesis tests 14/14.
+- `tests/test_examples_coverage.py`: 11/11 pass (was 7/7; +4 new).
+- Regression suites green: `test_reporting.py`, `test_strategy_builder.py`, and the two previously-failing split tests — 97 passed in that focused run.
+- Full suite on the pre-change baseline: 745 passed. The change is additive (new example + new tests); no engine logic was touched.
 
 ## What remains unresolved
 
-- `results/metrics.json` is a stale artifact (last committed 2026-10-22). Its input data `splits_test_data.csv` is absent from the repo, so the run cannot be reproduced or fully regenerated from current code. The deletion aligns the artifact with the tested methodology but does not restore reproducibility.
-- Whether to restore `splits_test_data.csv` and regenerate `results/` artifacts, or formally retire the legacy `results/` set, is undecided.
+- None introduced by this change. The two pre-existing failures named in the prior handoff (`test_run_backtest_split_surfaces_split_metadata_in_tear_sheet_summary`, `test_run_backtest_split_signals_share_split_index`) no longer reproduce: they pass on the current baseline.
 
 ## Approaches already tried
 
-- None failed; the fix was a single reversible JSON edit (recoverable via `git checkout results/metrics.json`).
+- Re-ran the two "failing" tests from the prior handoff directly: they pass, so no code fix was needed for them. The real gap was the untested `pairs_trading_example.py`, taken up here.
 
 ## One precise next task
 
-Restore reproducibility of the committed `results/` artifacts: locate or restore `splits_test_data.csv` (referenced by `results/data_provenance.json` and `results/benchmark_provenance.json`, both dated 2026-10-14) and regenerate `results/metrics.json` (and the rest of `results/`) with current code, OR explicitly document/retire the legacy artifacts. Constraint: do not hand-edit committed result artifacts beyond this alignment; any regeneration must reproduce from input data. Relevant files: `results/metrics.json`, `results/data_provenance.json`, `results/benchmark_provenance.json`, `skills/quantitative-backtesting/scripts/run_backtest.py`.
+Confirm the regenerated tracked example outputs under `skills/quantitative-backtesting/examples/example_output/pairs_trading/` are byte-stable across runs (the repo's existing reproducibility invariant, as `test_run_backtest_split_is_reproducible_across_runs` enforces it for split runs), OR add `examples/example_output/` to `.gitignore` and untrack them if example outputs are not meant to be committed. Relevant files: `skills/quantitative-backtesting/examples/pairs_trading_example.py`, `tests/test_examples_coverage.py`.
+
+(End of file - total 32 lines)
