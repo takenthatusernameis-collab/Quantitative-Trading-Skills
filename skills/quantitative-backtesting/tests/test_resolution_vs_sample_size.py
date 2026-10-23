@@ -118,6 +118,7 @@ from measure_resolution_vs_sample_size import (  # noqa: E402
     _summarize_wf_window_sweep,
     _summarize_cpcv_sweep,
     _summarize_cost_sweep,
+    _summarize_path,
 )
 from walk_forward import (  # noqa: E402
     PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
@@ -2606,18 +2607,41 @@ def test_the_cost_sweep_is_negative_controlled():
     """Higher costs must generally degrade the observed effect on the effect
     series; the null series must not be made 'significant' by costs."""
     capture = _load_cost_sweep_capture()
-    # check effect
     effect_rows = capture["sweeps"]["effect"]["rows"]
     noeffect_rows = capture["sweeps"]["no_effect"]["rows"]
-    # for each size/path, shipped vs commissions_10bps
-    # simple check
+
+    # Positive control: the effect series must stay resolvable at every cost
+    # regime, and its observed alpha must not rise with cost.
     shipped_effect = [r for r in effect_rows if r["cost_regime"] == "shipped" and r["bars"] == 10000 and r["seed"] == 7]
     highcost_effect = [r for r in effect_rows if r["cost_regime"] == "commissions_10bps" and r["bars"] == 10000 and r["seed"] == 7]
     assert shipped_effect and highcost_effect
-    # not all can become better
-    # just ensure structure is fine
     assert shipped_effect[0]["costs"]["commission_bps"] == 0
     assert highcost_effect[0]["costs"]["commission_bps"] == 10.0
+    shipped_alpha = shipped_effect[0]["paths"][OUT_OF_SAMPLE]["observed_annualized_alpha"]
+    highcost_alpha = highcost_effect[0]["paths"][OUT_OF_SAMPLE]["observed_annualized_alpha"]
+    assert shipped_alpha > highcost_alpha, (
+        f"higher costs must degrade the effect series' alpha: shipped={shipped_alpha} "
+        f"commissions_10bps={highcost_alpha}"
+    )
+    for r in effect_rows:
+        if r["bars"] != 10000:
+            continue
+        block = r["paths"][OUT_OF_SAMPLE]
+        assert block["alpha_status"] == "resolvable", (
+            f"the effect series must stay resolvable at {r['cost_regime']}"
+        )
+
+    # Negative control: costs must not manufacture significance on the null
+    # series. Every null-series alpha must stay inside the plausibility bound
+    # at every cost regime, so a cost assumption cannot turn noise into a
+    # resolvable effect.
+    for r in noeffect_rows:
+        block = r["paths"][OUT_OF_SAMPLE]
+        alpha = block["observed_annualized_alpha"]
+        assert abs(alpha) <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA, (
+            f"the null series must not become significant at {r['cost_regime']}: "
+            f"alpha={alpha} exceeds the bound {PLAUSIBLE_MAX_ANNUALIZED_ALPHA}"
+        )
 
 
 def test_the_cost_sweep_is_documented():

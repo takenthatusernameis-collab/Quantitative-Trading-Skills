@@ -487,18 +487,26 @@ def _resolved_costs(costs: Optional[Dict[str, Any]]) -> Dict[str, float]:
 
 
 def _cost_payload(regime: Dict[str, Any]) -> Dict[str, Any]:
-    """A cost regime as it is recorded in a row, a capture and a fixture."""
+    """A cost regime as it is recorded in a row, a capture and a fixture.
+
+    The regime may be carried in the framework's own decimal rates (as
+    ``_cost_regime_record`` writes it) or in basis points alone (as a test
+    fixture writes it). Both are resolved through ``_resolved_costs`` so the
+    payload a row reports is the resolved decimal rates plus the bps mirror,
+    and a regime written in bps is never reported as though it were a decimal.
+    """
+    resolved = _resolved_costs(regime)
     return {
         "label": regime["label"],
-        "commission": regime["commission"],
-        "slippage": regime["slippage"],
-        "impact_coefficient": regime["impact_coefficient"],
-        "borrow_cost": regime["borrow_cost"],
-        "funding_cost": regime["funding_cost"],
-        "commission_bps": regime["commission_bps"],
-        "slippage_bps": regime["slippage_bps"],
-        "borrow_bps": regime["borrow_bps"],
-        "funding_bps": regime["funding_bps"],
+        "commission": resolved["commission"],
+        "slippage": resolved["slippage"],
+        "impact_coefficient": resolved["impact_coefficient"],
+        "borrow_cost": resolved["borrow_cost"],
+        "funding_cost": resolved["funding_cost"],
+        "commission_bps": resolved["commission"] / BPS,
+        "slippage_bps": resolved["slippage"] / BPS,
+        "borrow_bps": resolved["borrow_cost"] / BPS,
+        "funding_bps": resolved["funding_cost"] / BPS,
     }
 
 
@@ -2403,7 +2411,7 @@ def _observed_by_size(
         if alpha is not None and np.isfinite(alpha):
             bucket["alphas"].append(alpha)
     return {
-        bars: {
+        str(bars): {
             "draws_measured": bucket["draws_measured"],
             "min_observed_annualized_sharpe": min(bucket["sharpes"]) if bucket["sharpes"] else None,
             "max_observed_annualized_sharpe": max(bucket["sharpes"]) if bucket["sharpes"] else None,
