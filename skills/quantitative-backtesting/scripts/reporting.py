@@ -869,7 +869,7 @@ def generate_tear_sheet(
                 bias_flag = _analysis["summary"].get("bias_controls_engaged")
                 if bias_flag is not None:
                     break
-    if data_prov or pit_val or bias_flag is not None:
+    if data_prov or pit_val or bias_flag is not None or isinstance(results.get("train_val_test_split"), dict):
         html_parts.append("<h2>Data Provenance</h2>")
         html_parts.append("<table><tr><th>Field</th><th>Value</th></tr>")
 

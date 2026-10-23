@@ -575,7 +575,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     else:
         effective_pricing = "net-exposure"
         strategy_returns = positions * raw_returns - costs
-    strategy_returns = strategy_returns.dropna()
+    strategy_returns = strategy_returns.fillna(0.0)
 
     # Panel book diagnostic: the per-asset book the strategy actually holds
     # against the framework's net-exposure pricing, measured on exactly the
