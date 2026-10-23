@@ -34,7 +34,7 @@
     "initial_capital": null
   },
   "plot_files": [
-    "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/examples/example_output/equity_curve.png",
-    "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/examples/example_output/returns_distribution.png"
+    "equity_curve.png",
+    "returns_distribution.png"
   ]
 }

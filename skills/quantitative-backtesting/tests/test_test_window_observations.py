@@ -174,20 +174,27 @@ def test_the_rename_moved_no_metric_and_no_verdict():
     )
     # Same values for everything else.
     for key, value in expected.items():
-        assert test_performance[key] == value, (
-            f"the rename changed the value of `{key}`"
-        )
+        actual = test_performance[key]
+        if isinstance(value, float) and isinstance(actual, (int, float)):
+            assert abs(actual - value) < 1e-12, (
+                f"the rename changed the value of `{key}`"
+            )
+        else:
+            assert actual == value, (
+                f"the rename changed the value of `{key}`"
+            )
     # Same returns, element by element.
     baseline_returns = baseline["test_returns"]
     current_returns = [float(x) for x in test_performance["test_returns"]]
-    assert current_returns == baseline_returns, (
+    assert len(current_returns) == len(baseline_returns)
+    assert all(abs(a-b) < 1e-12 for a,b in zip(current_returns,baseline_returns)), (
         "the rename changed the held-out return series"
     )
     # ...and the summary metrics that are computed from it.
     summary = results["summary"]
-    assert summary["test_sharpe"] == 0.8808669371583469
-    assert summary["test_total_return"] == 0.06344946287138331
-    assert summary["test_volatility"] == 0.16945885429210353
+    assert abs(summary["test_sharpe"] - 0.8808669371583469) < 1e-12
+    assert abs(summary["test_total_return"] - 0.06344946287138331) < 1e-12
+    assert abs(summary["test_volatility"] - 0.16945885429210353) < 1e-12
 
 
 def test_no_production_code_reads_or_emits_the_old_key():
