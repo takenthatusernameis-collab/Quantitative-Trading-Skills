@@ -27,6 +27,7 @@ _DEFLATED_PATH = SKILLS_DIR / "examples" / "deflated_alpha_example.py"
 _MULTIPLE_PATH = SKILLS_DIR / "examples" / "multiple_benchmarks_example.py"
 _FULL_PIPELINE_PATH = SKILLS_DIR / "examples" / "full_pipeline_example.py"
 _PAIRS_PATH = SKILLS_DIR / "examples" / "pairs_trading_example.py"
+_COSTS_PATH = SKILLS_DIR / "examples" / "trading_costs_robustness_example.py"
 
 
 def _import_module(name, path):
@@ -235,6 +236,47 @@ def test_pairs_trading_example_writes_report_to_directory():
 
 
 # ---------------------------------------------------------------------------
+# trading_costs_robustness_example.py
+# ---------------------------------------------------------------------------
+
+
+def test_trading_costs_robustness_example_imports():
+    module = _import_module("trading_costs_robustness_example", _COSTS_PATH)
+    assert hasattr(module, "main")
+    assert callable(module.main)
+
+
+def test_trading_costs_robustness_example_runs():
+    result = subprocess.run(
+        [sys.executable, str(_COSTS_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"trading_costs_robustness_example exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "TRADING COSTS SENSITIVITY ANALYSIS COMPLETE" in result.stdout
+
+
+def test_trading_costs_robustness_example_shows_cost_sensitivity():
+    """Higher costs reduce net performance in the strategy cost sweep."""
+    result = subprocess.run(
+        [sys.executable, str(_COSTS_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"trading_costs_robustness_example exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    # Cost sweep must be printed and show degradation
+    assert "STRATEGY COST SENSITIVITY SWEEP" in result.stdout
+    assert "Sharpe" in result.stdout
+    assert "0 bps" in result.stdout
+    # The key findings must state cost degradation
+    assert "Strategy transaction costs" in result.stdout
+
+
+# ---------------------------------------------------------------------------
 # Test registry
 # ---------------------------------------------------------------------------
 
@@ -250,6 +292,9 @@ TEST_REGISTRY = [
     ("test_pairs_trading_example_runs", test_pairs_trading_example_runs),
     ("test_pairs_trading_example_emits_realistic_prices", test_pairs_trading_example_emits_realistic_prices),
     ("test_pairs_trading_example_writes_report_to_directory", test_pairs_trading_example_writes_report_to_directory),
+    ("test_trading_costs_robustness_example_imports", test_trading_costs_robustness_example_imports),
+    ("test_trading_costs_robustness_example_runs", test_trading_costs_robustness_example_runs),
+    ("test_trading_costs_robustness_example_shows_cost_sensitivity", test_trading_costs_robustness_example_shows_cost_sensitivity),
 ]
 
 
