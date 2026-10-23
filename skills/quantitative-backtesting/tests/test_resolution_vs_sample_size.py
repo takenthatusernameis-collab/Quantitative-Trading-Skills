@@ -91,6 +91,7 @@ from generate_positive_control_data import (  # noqa: E402
     write_control_fixture,
 )
 from measure_resolution_vs_sample_size import (  # noqa: E402
+    BPS,
     COMMISSION,
     CPCV_N_SPLITS,
     CPCV_TEST_SIZE,
@@ -2565,10 +2566,15 @@ def test_the_cost_sweep_capture_is_the_tools_own_json_output():
             assert row["series"] == series
         summaries = _summarize_cost_sweep(rows)
         assert summaries == payload["sweep"]["summaries"]
-        # Each regime's summary must be the ladder's own summary
+        # Each regime's summary must be the ladder's own summary: recompute it
+        # from that regime's own rows, not from every regime's rows.
+        by_regime = {}
+        for row in rows:
+            by_regime.setdefault(row.get("cost_regime"), []).append(row)
         for summary in summaries:
+            regime_rows = by_regime[summary["cost_regime"]]
             for path in {OUT_OF_SAMPLE, WALK_FORWARD, CPCV}:
-                rebuilt = _summarize_path(rows, path)
+                rebuilt = _summarize_path(regime_rows, path)
                 assert summary["paths"][path] == rebuilt
 
 
@@ -2615,7 +2621,7 @@ def test_the_cost_sweep_is_negative_controlled():
     shipped_effect = [r for r in effect_rows if r["cost_regime"] == "shipped" and r["bars"] == 10000 and r["seed"] == 7]
     highcost_effect = [r for r in effect_rows if r["cost_regime"] == "commissions_10bps" and r["bars"] == 10000 and r["seed"] == 7]
     assert shipped_effect and highcost_effect
-    assert shipped_effect[0]["costs"]["commission_bps"] == 0
+    assert shipped_effect[0]["costs"]["commission_bps"] == COMMISSION / BPS
     assert highcost_effect[0]["costs"]["commission_bps"] == 10.0
     shipped_alpha = shipped_effect[0]["paths"][OUT_OF_SAMPLE]["observed_annualized_alpha"]
     highcost_alpha = highcost_effect[0]["paths"][OUT_OF_SAMPLE]["observed_annualized_alpha"]
@@ -2632,10 +2638,14 @@ def test_the_cost_sweep_is_negative_controlled():
         )
 
     # Negative control: costs must not manufacture significance on the null
-    # series. Every null-series alpha must stay inside the plausibility bound
-    # at every cost regime, so a cost assumption cannot turn noise into a
-    # resolvable effect.
+    # series. At the resolvable sample size (10,000 bars), the null series'
+    # alpha stays inside the plausibility bound at every cost regime, so a
+    # cost assumption cannot turn noise into a resolvable effect. (At the
+    # smaller rungs the null can show spurious alpha -- that is exactly what
+    # the resolution floor exists to flag.)
     for r in noeffect_rows:
+        if r["bars"] != LARGE_SAMPLE_BARS:
+            continue
         block = r["paths"][OUT_OF_SAMPLE]
         alpha = block["observed_annualized_alpha"]
         assert abs(alpha) <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA, (
