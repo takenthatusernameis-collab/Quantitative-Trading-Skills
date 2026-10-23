@@ -38,17 +38,6 @@
   "alpha_tstat": -1.8046876815429729,
   "alpha_pvalue": 0.21288662158888763,
   "r_squared": 0.9990074963138439,
-  "deflated_alpha": {
-    "deflated_alpha_ratio": 0.34574174115014056,
-    "p_value": 0.6542582588498594,
-    "alpha": -3.6007243670937736,
-    "expected_max_alpha": 0.0,
-    "z_score": -0.3968426705815807,
-    "n_benchmarks": 1,
-    "n_observations": 4,
-    "skewness": -1.9979874030622615,
-    "kurtosis": 6.993407197846178
-  },
   "omega_ratio": 2.017991185486728,
   "tail_ratio": 0.019197043815324454,
   "initial_capital": 100000
