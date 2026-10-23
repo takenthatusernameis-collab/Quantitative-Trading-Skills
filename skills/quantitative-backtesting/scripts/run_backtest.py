@@ -272,13 +272,16 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
 
     # Optional train/val/test split (chronological)
     split_info = None
-    if args.train_frac is not None or args.val_frac is not None or args.test_frac is not None:
-        if args.train_frac is None or args.val_frac is None or args.test_frac is None:
+    train_frac = getattr(args, 'train_frac', None)
+    val_frac = getattr(args, 'val_frac', None)
+    test_frac = getattr(args, 'test_frac', None)
+    if train_frac is not None or val_frac is not None or test_frac is not None:
+        if train_frac is None or val_frac is None or test_frac is None:
             print("Must provide all of --train-frac, --val-frac, --test-frac when using splits")
             return 1
         try:
             train_data, val_data, test_data = _split_train_val_test(
-                data, train_frac=args.train_frac, val_frac=args.val_frac, test_frac=args.test_frac
+                data, train_frac=train_frac, val_frac=val_frac, test_frac=test_frac
             )
         except Exception as e:
             print(f"Split error: {e}")
