@@ -1,12 +1,27 @@
-# Handoff — cost sweep capture produced
+# Handoff — legacy results artifacts retired (2026-10-23)
 
-## Verified this session
-- Ran `measure_resolution_vs_sample_size.py --sizes 2500,5000,10000 --cost-regimes shipped,... --series both --json` for both no_effect and effect series.
-- Committed capture: `results/resolution_floor/cost_sweep_2500_5000_10000.json` (148753 bytes), valid JSON with sweeps.no_effect and sweeps.effect.
-- Trimmed fixture present: `skills/quantitative-backtesting/tests/fixtures/cost_sweep_2500_5000_10000.json` (matches the capture).
-- Cost-sweep pins added and registered in TEST_REGISTRY (negative-controlled): capture-own-JSON, trimmed-copy-of-capture, negative-controlled, documented checks.
-- Documentation: cost sweep referenced in `references/validation_methods.md` and `SKILL.md` (`test_the_cost_sweep_is_documented` passes).
+## What changed
+- Added `results/README.md` documenting that the committed legacy artifacts
+  (`metrics.json`, `tear_sheet_summary.json`, `monte_carlo_results.json`, plots,
+  `report.txt`) depend on `splits_test_data.csv`, which is absent from the repo and
+  all git history. They are retained as historical reference only and must not be
+  treated as reproducible evidence.
+- `results/resolution_floor/*.json` cost sweeps are unaffected.
 
-## Remaining
-- Cost sweep: none — all three items are complete and green.
-- Full suite `skills/quantitative-backtesting/tests/test_resolution_vs_sample_size.py`: 77/77 pass (was 75/77; two cost-sweep tests fixed).
+## What was actually verified
+- Searched all git revisions (`git rev-list --all`); `splits_test_data.csv` never
+  committed.
+- Filesystem search found no copy.
+- No test references `results/metrics.json`, so documenting retirement does not
+  break the suite.
+
+## What remains unresolved
+- The input data itself is unrecoverable; regeneration requires restoring it
+  (209 bytes, 5 trading days from 2020-01-01, SPY with `splits` column).
+
+## One precise next task
+Implement a small, reproducible worked example in
+`skills/quantitative-backtesting/examples/` that regenerates a metrics artifact from
+a committed tiny CSV fixture, so the project has at least one end-to-end
+reproducible backtest. Use the existing `data_loader`/`run_backtest.py` path;
+add a test pinning that the example reproduces byte-for-byte.
