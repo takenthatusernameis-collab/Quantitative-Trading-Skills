@@ -50,13 +50,13 @@ def generate_correlated_pair(
     if cointegrated:
         # Common stochastic trend
         common_trend = np.cumsum(np.random.randn(n_days) * 0.001 + 0.0002)
-        # Asset 1
+        # Asset 1 (log-price anchored near 100 so the dollar price is realistic)
         noise1 = np.random.randn(n_days) * 0.008
-        log_p1 = 100 + common_trend * 1.0 + noise1
+        log_p1 = np.log(100.0) + common_trend * 1.0 + noise1
         # Asset 2 with different beta to common trend
         beta = 1.2
         noise2 = np.random.randn(n_days) * 0.006
-        log_p2 = 95 + common_trend * beta + noise2 * (1 - correlation)
+        log_p2 = np.log(95.0) + common_trend * beta + noise2 * (1 - correlation)
 
         p1 = np.exp(log_p1)
         p2 = np.exp(log_p2)
@@ -64,8 +64,8 @@ def generate_correlated_pair(
         # Independent random walks
         returns1 = np.random.randn(n_days) * 0.01
         returns2 = np.random.randn(n_days) * 0.01
-        p1 = 100 * np.exp(np.cumsum(returns1))
-        p2 = 100 * np.exp(np.cumsum(returns2))
+        p1 = 100.0 * np.exp(np.cumsum(returns1))
+        p2 = 100.0 * np.exp(np.cumsum(returns2))
 
     # Generate OHLCV
     def make_ohlcv(prices):
@@ -183,10 +183,9 @@ def main():
     with open(output_dir / "metrics.json", 'w') as f:
         json.dump(metrics, f, indent=2)
 
-    # Generate report
-    report_path = output_dir / "report.txt"
-    generate_report({**results, "metrics": metrics}, str(report_path))
-    print(f"6. Report saved to: {report_path}")
+    # Generate report (generate_report writes report.txt into the directory)
+    generate_report(metrics, output_dir, symbol="PAIR", strategy_name="zscore_mean_reversion")
+    print(f"6. Report saved to: {output_dir / 'report.txt'}")
 
     # Generate tear sheet if possible
     try:

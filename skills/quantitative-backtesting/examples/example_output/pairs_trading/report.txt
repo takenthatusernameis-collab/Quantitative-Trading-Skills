@@ -1,0 +1,39 @@
+============================================================
+BACKTEST PERFORMANCE REPORT
+============================================================
+Symbol: PAIR
+Strategy: zscore_mean_reversion
+
+--- Return Metrics ---
+Total Return:          24.05%
+Annualized Return:     7.46%
+Annualized Volatility: 2.72%
+
+--- Risk-Adjusted Returns ---
+Sharpe Ratio:          1.92
+Sortino Ratio:         25.80
+Calmar Ratio:          19.59
+
+--- Risk Metrics ---
+Max Drawdown:          -0.38%
+Avg Drawdown:          -0.03%
+VaR (95%):             -0.00%
+CVaR (95%):            -0.00%
+Skewness:              6.13
+Kurtosis:              39.70
+
+--- Trade-Level Analytics ---
+Total Trades:          23
+Winning Trades:        12
+Losing Trades:         11
+Win Rate:              52.17%
+Avg Win:               0.26%
+Avg Loss:              0.46%
+Profit Factor:         0.64
+Expectancy:            -0.0836
+
+--- End-of-Sample Closes ---
+Trades Closed at End:      0
+% of Trades Closed at End: 0.00%
+
+============================================================

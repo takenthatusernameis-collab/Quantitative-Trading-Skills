@@ -40,6 +40,22 @@
 <tr><td>VaR (95%)</td><td class='metric '>-0.00%</td></tr>
 <tr><td>CVaR (95%)</td><td class='metric '>-0.00%</td></tr>
 </table>
+<h2>Panel Book Diagnostic</h2>
+<table><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Gross Book (mean sum|w|)</td><td class='metric'>0.04</td></tr>
+<tr><td>Net Exposure (book)</td><td class='metric'>0.00</td></tr>
+<tr><td>Net Exposure (framework)</td><td class='metric'>0.01</td></tr>
+<tr><td>Gross Turnover (book)</td><td class='metric'>0.06</td></tr>
+<tr><td>Turnover Charged by Model</td><td class='metric'>0.06</td></tr>
+<tr><td>Turnover Actually Charged</td><td class='metric'>0.06</td></tr>
+<tr><td>Cost Basis</td><td class='metric'>net-exposure</td></tr>
+<tr><td>Periods With a Book</td><td class='metric'>29/755</td></tr>
+<tr><td>Return Gap (framework - book, bps/period)</td><td class='metric'>-0.21</td></tr>
+<tr><td>Return Gap (cumulative, pre-cost)</td><td class='metric'>-2.00%</td></tr>
+<tr><td>Book Total Return (pre-cost)</td><td class='metric'>27.77%</td></tr>
+<tr><td>Reported Total Return (net of costs)</td><td class='metric'>24.05%</td></tr>
+</table>
+<p><em>Measurement only: the panel path prices a portfolio as net exposure x mean asset return and charges the costs on the net exposure, so a long/short book cannot be represented by that scalar. The reported P&amp;L is unchanged by this diagnostic.</em></p>
 <h2>Panel Pricing</h2>
 <table><tr><th>Metric</th><th>Value</th></tr>
 <tr><td>Panel Pricing Mode</td><td class='metric'>net-exposure</td></tr>
@@ -48,13 +64,13 @@
 <h2>Trade Analytics</h2>
 <table><tr><th>Metric</th><th>Value</th></tr>
 <tr><td>Total Trades</td><td class='metric'>23.00</td></tr>
-<tr><td>Winning Trades</td><td class='metric'>11.00</td></tr>
-<tr><td>Losing Trades</td><td class='metric'>12.00</td></tr>
-<tr><td>Win Rate</td><td class='metric'>47.83%</td></tr>
-<tr><td>Avg Win</td><td class='metric'>0.50%</td></tr>
-<tr><td>Avg Loss</td><td class='metric'>0.79%</td></tr>
-<tr><td>Profit Factor</td><td class='metric'>0.59</td></tr>
-<tr><td>Expectancy</td><td class='metric'>-24048656145622909749732080207528137326592.0000</td></tr>
+<tr><td>Winning Trades</td><td class='metric'>12.00</td></tr>
+<tr><td>Losing Trades</td><td class='metric'>11.00</td></tr>
+<tr><td>Win Rate</td><td class='metric'>52.17%</td></tr>
+<tr><td>Avg Win</td><td class='metric'>0.26%</td></tr>
+<tr><td>Avg Loss</td><td class='metric'>0.46%</td></tr>
+<tr><td>Profit Factor</td><td class='metric'>0.64</td></tr>
+<tr><td>Expectancy</td><td class='metric'>-0.0836</td></tr>
 <tr><td>Trades Closed at End</td><td class='metric'>0.00</td></tr>
 <tr><td>Pct Trades Closed at End</td><td class='metric'>0.00%</td></tr>
 </table>

@@ -26,6 +26,7 @@ SKILLS_DIR = Path(__file__).resolve().parent.parent
 _DEFLATED_PATH = SKILLS_DIR / "examples" / "deflated_alpha_example.py"
 _MULTIPLE_PATH = SKILLS_DIR / "examples" / "multiple_benchmarks_example.py"
 _FULL_PIPELINE_PATH = SKILLS_DIR / "examples" / "full_pipeline_example.py"
+_PAIRS_PATH = SKILLS_DIR / "examples" / "pairs_trading_example.py"
 
 
 def _import_module(name, path):
@@ -163,6 +164,77 @@ def test_full_pipeline_example_surfaces_single_benchmark_significance():
 
 
 # ---------------------------------------------------------------------------
+# pairs_trading_example.py
+# ---------------------------------------------------------------------------
+
+def test_pairs_trading_example_imports():
+    module = _import_module("pairs_trading_example", _PAIRS_PATH)
+    assert hasattr(module, "main")
+    assert callable(module.main)
+
+
+def test_pairs_trading_example_runs():
+    result = subprocess.run(
+        [sys.executable, str(_PAIRS_PATH)],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == 0, (
+        f"pairs_trading_example exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-3000:]}\nstderr:\n{result.stderr[-3000:]}"
+    )
+    assert "Pairs trading example complete!" in result.stdout
+
+
+def test_pairs_trading_example_emits_realistic_prices():
+    """The synthetic pair must be priced in real dollar ranges, not ~1e43.
+
+    Regression guard for a defect where the log-price was anchored at 100
+    (a raw log level) and then exponentiated, producing prices of ~1e43
+    dollars -- a correlated pair that was technically valid but priced in a
+    universe the no bankroll could trade. The log-price must be anchored at
+    log(100) so exp() yields a realistic price near $100.
+    """
+    result = subprocess.run(
+        [sys.executable, str(_PAIRS_PATH)],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == 0, (
+        f"pairs_trading_example exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-3000:]}\nstderr:\n{result.stderr[-3000:]}"
+    )
+    # The banner prints each asset's price range as "$min - $max".
+    import re
+    ranges = re.findall(r"price range \$(.*) - \$(.*)", result.stdout)
+    assert len(ranges) >= 2, "asset price ranges not printed"
+    for low, high in ranges:
+        lo = float(low.replace(",", ""))
+        hi = float(high.replace(",", ""))
+        assert 1.0 <= lo <= 1e6, f"implausible low price: {lo}"
+        assert 1.0 <= hi <= 1e6, f"implausible high price: {hi}"
+
+
+def test_pairs_trading_example_writes_report_to_directory():
+    """generate_report writes report.txt into the output directory.
+
+    Regression guard for passing a file path (and the wrong dict shape) to
+    generate_report, which expects a directory and a metrics dict and therefore
+    created a nested report.txt/report.txt.
+    """
+    result = subprocess.run(
+        [sys.executable, str(_PAIRS_PATH)],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == 0, (
+        f"pairs_trading_example exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-3000:]}\nstderr:\n{result.stderr[-3000:]}"
+    )
+    report = _PAIRS_PATH.parent / "example_output" / "pairs_trading" / "report.txt"
+    assert report.is_file(), f"report.txt not written to {report}"
+    # The nested path defect would have left a report.txt *directory* instead.
+    assert not report.is_dir(), "report.txt is a directory (nested path defect)"
+
+
+# ---------------------------------------------------------------------------
 # Test registry
 # ---------------------------------------------------------------------------
 
@@ -174,6 +246,10 @@ TEST_REGISTRY = [
     ("test_full_pipeline_example_imports", test_full_pipeline_example_imports),
     ("test_full_pipeline_example_runs", test_full_pipeline_example_runs),
     ("test_full_pipeline_example_surfaces_single_benchmark_significance", test_full_pipeline_example_surfaces_single_benchmark_significance),
+    ("test_pairs_trading_example_imports", test_pairs_trading_example_imports),
+    ("test_pairs_trading_example_runs", test_pairs_trading_example_runs),
+    ("test_pairs_trading_example_emits_realistic_prices", test_pairs_trading_example_emits_realistic_prices),
+    ("test_pairs_trading_example_writes_report_to_directory", test_pairs_trading_example_writes_report_to_directory),
 ]
 
 
