@@ -1768,7 +1768,9 @@ def _annualization_factor(index: pd.Index) -> float:
     if not isinstance(index, pd.DatetimeIndex):
         return 252  # Default trading days
     try:
-        freq = pd.infer_freq(index)
+        with pd.option_context('future.infer_freq_returns_offset', False):
+            _inferred = pd.infer_freq(index)
+        freq = getattr(_inferred, 'freqstr', _inferred)
         if freq is None:
             return 252
         # Normalize to the lowercase base alias (pandas 3.x returns e.g.

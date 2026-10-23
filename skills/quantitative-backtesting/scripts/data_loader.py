@@ -366,7 +366,9 @@ def validate_data(df: pd.DataFrame, strict: bool = False, provenance: Optional[D
     # Check for gaps in trading days (warn only)
     if isinstance(df.index, pd.DatetimeIndex):
         try:
-            freq = pd.infer_freq(df.index)
+            with pd.option_context('future.infer_freq_returns_offset', False):
+                _inferred = pd.infer_freq(df.index)
+            freq = getattr(_inferred, 'freqstr', _inferred)
         except ValueError:
             freq = None  # too few dates to infer; not a validation failure
         if freq and freq not in ["B", "D", "W"]:
