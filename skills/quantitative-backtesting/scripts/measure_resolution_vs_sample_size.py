@@ -459,24 +459,31 @@ def _resolved_costs(costs: Optional[Dict[str, Any]]) -> Dict[str, float]:
             "borrow_cost": 0.0,
             "funding_cost": 0.0,
         }
-        out = {}
-        for field in COST_FIELDS:
-            if field in costs:
-                out[field] = float(costs[field])
-                continue
-            # Fall back to the basis-point mirror / shipped defaults so a
-            # regime that only carries bps (e.g. a test fixture) still resolves.
-            if field == "commission":
-                out[field] = float(costs.get("commission_bps", 0.0)) * BPS
-            elif field == "slippage":
-                out[field] = float(costs.get("slippage_bps", 0.0)) * BPS
-            elif field == "impact_coefficient":
-                out[field] = float(costs.get("impact", 0.0))
-            elif field == "borrow_cost":
-                out[field] = float(costs.get("borrow_bps", 0.0)) * BPS
-            elif field == "funding_cost":
-                out[field] = float(costs.get("funding_bps", 0.0)) * BPS
-        return out
+    out = {}
+    for field in COST_FIELDS:
+        if field in costs:
+            out[field] = float(costs[field])
+            continue
+        # Fall back to the basis-point mirror / shipped defaults so a
+        # regime that only carries bps (e.g. a test fixture) still resolves.
+        if field == "commission":
+            out[field] = float(costs.get("commission_bps", 0.0)) * BPS
+        elif field == "slippage":
+            out[field] = float(costs.get("slippage_bps", 0.0)) * BPS
+        elif field == "impact_coefficient":
+            out[field] = float(costs.get("impact", costs.get("impact_coefficient", 0.0)))
+        elif field == "borrow_cost":
+            out[field] = float(costs.get("borrow_bps", costs.get("borrow_cost", 0.0))) * BPS if "borrow_bps" in costs and "borrow_cost" not in costs else float(costs.get("borrow_cost", float(costs.get("borrow_bps", 0.0)) * BPS))
+        elif field == "funding_cost":
+            if "funding_cost" in costs:
+                out[field] = float(costs["funding_cost"])
+            elif "funding_bps" in costs:
+                out[field] = float(costs["funding_bps"]) * BPS
+            else:
+                out[field] = 0.0
+        else:
+            out[field] = 0.0
+    return out
 
 
 def _cost_payload(regime: Dict[str, Any]) -> Dict[str, Any]:
