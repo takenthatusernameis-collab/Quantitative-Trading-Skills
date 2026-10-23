@@ -2,39 +2,39 @@
 BACKTEST PERFORMANCE REPORT
 ============================================================
 Symbol: SPY
-Strategy: sma_crossover
+Strategy: rsi_mean_reversion
 
 --- Return Metrics ---
-Total Return:          -5.06%
-Annualized Return:     -12.15%
-Annualized Volatility: 15.26%
+Total Return:          3.08%
+Annualized Return:     7.85%
+Annualized Volatility: 15.38%
 
 --- Risk-Adjusted Returns ---
-Sharpe Ratio:          -0.90
-Sortino Ratio:         -1.19
-Calmar Ratio:          1.20
+Sharpe Ratio:          0.44
+Sortino Ratio:         0.65
+Calmar Ratio:          1.02
 
 --- Risk Metrics ---
-Max Drawdown:          -10.14%
-Avg Drawdown:          -5.47%
-VaR (95%):             -2.17%
-CVaR (95%):            -2.54%
-Skewness:              -0.15
-Kurtosis:              3.53
+Max Drawdown:          -7.66%
+Avg Drawdown:          -3.74%
+VaR (95%):             -1.68%
+CVaR (95%):            -2.19%
+Skewness:              0.18
+Kurtosis:              2.44
 
 --- Trade-Level Analytics ---
-Total Trades:          2
-Winning Trades:        0
+Total Trades:          4
+Winning Trades:        2
 Losing Trades:         2
-Win Rate:              0.00%
-Avg Win:               0.00%
-Avg Loss:              4.67%
-Profit Factor:         0.00
-Expectancy:            -5.6320
+Win Rate:              50.00%
+Avg Win:               4.93%
+Avg Loss:              0.26%
+Profit Factor:         19.33
+Expectancy:            2.6839
 
 --- End-of-Sample Closes ---
-Trades Closed at End:      1
-% of Trades Closed at End: 50.00%
+Trades Closed at End:      0
+% of Trades Closed at End: 0.00%
 
 --- Benchmark Comparison ---
 Benchmark Total Return:      8.09%
@@ -42,11 +42,11 @@ Benchmark Annualized Return: 21.41%
 Benchmark Return Type:       price
 Benchmark Commission:        0.0002
 Benchmark Slippage:          0.0001
-Correlation:                 -0.06
-Alpha:                       -10.63%
-Beta:                        -0.06
-Alpha t-stat:                -0.43817937822027164
-Alpha p-value:               0.6622108773159597
-R-squared:                   0.003638658999769784
+Correlation:                 0.05
+Alpha:                       7.71%
+Beta:                        0.05
+Alpha t-stat:                0.3149925188423963
+Alpha p-value:               0.7534302910088453
+R-squared:                   0.0027349584395994775
 
 ============================================================

@@ -100,7 +100,9 @@ def parse_args():
     parser.add_argument("--test-frac", type=float, default=None, help="Fraction of data for testing (for train/val/test split). Requires --train-frac and --val-frac.")
     parser.add_argument("--run-split", type=str, choices=["train", "val", "test"], default=None, help="When using train/val/test split, run backtest on this split only.")
     parser.add_argument("--fill-rates", type=float, nargs="+", default=None, help="List of fill rates to sweep (overrides --fill-rate).")
+    parser.add_argument("--fill-rate", type=float, default=1.0, help="Execution fill rate applied to the target position on every bar (1.0 = full fill, identical to no fill modeling).")
     parser.add_argument("--latencies", type=int, nargs="+", default=None, help="List of execution latencies (in periods) to sweep (overrides --latency). Delays position execution by each latency after signal generation.")
+    parser.add_argument("--latency", type=int, default=0, help="Execution latency in periods; delays position execution by this many periods after signal generation.")
     parser.add_argument("--adjust-splits", action="store_true", help="Adjust prices for stock splits using the splits column if present.")
     parser.add_argument(
         "--panel-pricing",
