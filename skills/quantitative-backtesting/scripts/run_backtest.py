@@ -173,6 +173,57 @@ def _handle_point_in_time_results(pit_result: Dict[str, Any], strict: bool) -> b
     return False
 
 
+def _rewrite_provenance_timestamp(prov: Any) -> None:
+    """Rewrite one provenance dict's ``load_timestamp`` to its source file's mtime.
+
+    ``DataProvenance.load_timestamp`` is recorded at load time as
+    ``datetime.now(UTC)`` -- wall-clock time, which differs on every run. It
+    leaks into every artifact downstream (the tear sheet HTML, the JSON
+    summary, the persisted ``data_provenance.json``), so two runs of the same
+    backtest on the same input produced different artifacts even though every
+    number in them was identical. Rewriting it to the input file's mtime makes
+    the timestamp a property of the input, not of the run.
+
+    Mutates ``prov`` in place. No-op when ``prov`` is not a provenance dict
+    (no ``source_path``/``load_timestamp`` pair).
+    """
+    from datetime import datetime, UTC
+
+    if not isinstance(prov, dict):
+        return
+    sp = prov.get("source_path") or prov.get("source")
+    if not sp or "load_timestamp" not in prov:
+        return
+    try:
+        prov["load_timestamp"] = datetime.fromtimestamp(
+            Path(sp).stat().st_mtime, UTC
+        ).isoformat().replace("+00:00", "Z")
+    except Exception:
+        pass
+
+
+def _sanitize_provenance_timestamps(results: Dict[str, Any]) -> None:
+    """Rewrite every ``load_timestamp`` in ``results`` to the source file's mtime.
+
+    Covers the single-symbol provenance dict, the per-symbol panel dict of
+    provenance dicts, and the benchmark provenance list. Called once, right
+    after the backtest runs and before anything downstream renders or
+    persists it, so the tear sheet HTML, the JSON summary and the persisted
+    ``data_provenance.json`` all carry the same sanitized timestamp.
+    """
+    prov = results.get("data_provenance")
+    if isinstance(prov, dict):
+        # Single-symbol: {field: value}. Multi-symbol panel:
+        # {symbol: {field: value}}.
+        if all(isinstance(v, dict) for v in prov.values()) and prov:
+            for _sym, p in prov.items():
+                _rewrite_provenance_timestamp(p)
+        else:
+            _rewrite_provenance_timestamp(prov)
+    for bp in results.get("benchmark_provenance") or []:
+        _rewrite_provenance_timestamp(bp.to_dict() if hasattr(bp, "to_dict") else bp)
+
+
 def _print_survivorship_report(survivorship: Dict[str, Any]) -> None:
     """Print a survivorship-bias detection report to the log."""
     print("Survivorship bias detection:")
@@ -1173,6 +1224,13 @@ def main():
             results["benchmark_provenance"] = benchmark_provenance
     except Exception:
         pass
+
+    # Rewrite the load_timestamp (wall-clock time at load) to the input
+    # file's mtime BEFORE anything downstream renders or persists it.
+    # The tear sheet HTML, the JSON summary and the persisted
+    # data_provenance.json all carry this timestamp, so sanitizing here is
+    # the single point that makes the whole artifact set reproducible.
+    _sanitize_provenance_timestamps(results)
 
     # Surface point-in-time validation results in the logs and
     # abort in strict mode before investing more in the run.

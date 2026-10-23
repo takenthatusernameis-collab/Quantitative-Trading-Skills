@@ -1305,11 +1305,15 @@ def generate_tear_sheet(
 
     # Also write a JSON summary
     summary_path = output_dir / "tear_sheet_summary.json"
+    # Plot paths are stored relative to the output directory, not absolute:
+    # an absolute path embeds the caller's working directory, so two runs of
+    # the same backtest from different directories produced different
+    # tear_sheet_summary.json even though every number in them was identical.
     summary = {
         "symbol": symbol,
         "strategy": strategy_name,
         "metrics": {k: v for k, v in metrics.items() if isinstance(v, (str, int, float, bool, type(None)))},
-        "plot_files": [str(p) for p in plot_files],
+        "plot_files": [p.name for p in plot_files],
     }
     # The Deflated Sharpe Ratio is a dict, so it is filtered out of
     # the scalar-only `metrics` field above; surface it explicitly.
