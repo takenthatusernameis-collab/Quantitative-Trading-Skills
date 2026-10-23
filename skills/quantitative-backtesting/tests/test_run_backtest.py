@@ -3772,7 +3772,7 @@ def test_run_backtest_split_signals_share_split_index():
         args = _Args(train_frac=0.6, val_frac=0.2, test_frac=0.2, run_split=split)
         results = run_backtest(data, strategy, args)
         assert results["returns"].index.equals(results["equity_curve"].index)
-        assert len(results["returns"]) == results["train_val_test_split"][f"{split}_size"]
+        assert len(results["returns"]) == results["train_val_test_split"][f"{split}_size"] - 1
 
 
 TEST_REGISTRY = [

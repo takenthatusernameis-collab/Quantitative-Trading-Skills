@@ -6,8 +6,8 @@ Strategy: sma_crossover
 
 --- Return Metrics ---
 Total Return:          -10.72%
-Annualized Return:     -5.52%
-Annualized Volatility: 15.89%
+Annualized Return:     -5.51%
+Annualized Volatility: 15.87%
 
 --- Risk-Adjusted Returns ---
 Sharpe Ratio:          -0.40
@@ -20,7 +20,7 @@ Avg Drawdown:          -10.57%
 VaR (95%):             -1.84%
 CVaR (95%):            -2.56%
 Skewness:              -0.16
-Kurtosis:              2.67
+Kurtosis:              2.68
 
 --- Trade-Level Analytics ---
 Total Trades:          8
