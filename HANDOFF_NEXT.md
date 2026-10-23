@@ -1,17 +1,19 @@
-# Handoff — mean_reversion_hypothesis example coverage (2026-10-23)
+# Handoff — example coverage for zscore and real_data_pipeline (2026-10-23)
 
 ## What changed
-- Added executable coverage for `skills/quantitative-backtesting/examples/mean_reversion_hypothesis.py` in `skills/quantitative-backtesting/tests/test_examples_coverage.py` (import smoke, run exit 0, hypothesis/costs/falsification/OOS assertions, point-in-time split validation). Added `_MEAN_REVERSION_PATH` and registered 4 new tests.
+- Added `_ZSCORE_MR_PATH` and `_REAL_DATA_PIPELINE_PATH` and executable coverage for `skills/quantitative-backtesting/examples/zscore_mean_reversion_hypothesis.py` (import + run exit 0 + hypothesis/costs/falsification/OOS + METHODOLOGY CONTROLS with train/val/test and Point-in-time validation).
+- Added executable coverage for `skills/quantitative-backtesting/examples/real_data_pipeline_example.py` (import with required callables + end-to-end run asserting PIPELINE COMPLETE - SUMMARY).
+- Registered all new tests in `TEST_REGISTRY`.
 
 ## What was actually verified
-- `cd skills/quantitative-backtesting && python -m pytest tests/test_examples_coverage.py -v` → 22 passed.
+- `cd skills/quantitative-backtesting && python -m pytest tests/test_examples_coverage.py -v` → 32 passed.
 
 ## What remains unresolved
-- Remaining examples without dedicated coverage: `rsi_mean_reversion_hypothesis.py`, `zscore_mean_reversion_hypothesis.py` (hypothesis examples), and `real_data_pipeline_example.py`.
-- `real_data_pipeline_example.py` exercises real data path/persistence; `rsi_*` and `zscore_*` follow the same falsifiable hypothesis pattern as the others.
+- All examples in `skills/quantitative-backtesting/examples/` now have executable coverage in either `tests/test_examples_coverage.py` or `tests/test_walk_forward.py` (real_data_pipeline covered in both). No obvious untested example surfaced.
+- If desired, consider tightening assertions for the new zscore/real_data tests to check specific methodology keywords (e.g., "book" pricing) mirroring the existing regression guards.
 
 ## Approaches already tried
-- Followed existing coverage pattern for `simple_momentum_hypothesis.py` (subprocess run with timeouts, asserts on banners/keywords and methodology controls). Worked.
+- Mirrored existing coverage pattern (subprocess runs with timeouts, banner/keyword assertions) — consistent and passing.
 
 ## One precise next task
-Add executable coverage for `skills/quantitative-backtesting/examples/rsi_mean_reversion_hypothesis.py` in `tests/test_examples_coverage.py`: mirror the mean_reversion/simple_momentum coverage (import + run exit 0 + assert hypothesis/RSI/bps/falsification/OOS/Sharpe + METHODOLOGY CONTROLS with train/val/test and Point-in-time validation). Relevant files: `skills/quantitative-backtesting/examples/rsi_mean_reversion_hypothesis.py`, `skills/quantitative-backtesting/tests/test_examples_coverage.py`.
+Review and potentially strengthen regression guards in the quant skill: e.g. add a test ensuring `zscore_mean_reversion_hypothesis` surfaces "book" panel pricing when using pairs fixtures (as documented), or add coverage for `real_data_pipeline_example`'s deflated alpha/MCC outputs. Relevant files: `skills/quantitative-backtesting/examples/zscore_mean_reversion_hypothesis.py`, `skills/quantitative-backtesting/tests/test_examples_coverage.py`.

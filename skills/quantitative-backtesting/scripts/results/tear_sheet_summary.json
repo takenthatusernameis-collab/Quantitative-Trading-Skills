@@ -133,7 +133,7 @@
   },
   "benchmark_provenance": {
     "source_path": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/sample_benchmark.csv",
-    "load_timestamp": "2026-10-23T21:55:31.526685Z",
+    "load_timestamp": "2026-10-23T22:07:16.367337Z",
     "file_format": ".csv",
     "file_size_bytes": 46928,
     "symbol_filter": null,

@@ -30,6 +30,9 @@ _PAIRS_PATH = SKILLS_DIR / "examples" / "pairs_trading_example.py"
 _COSTS_PATH = SKILLS_DIR / "examples" / "trading_costs_robustness_example.py"
 _SIMPLE_MOMENTUM_PATH = SKILLS_DIR / "examples" / "simple_momentum_hypothesis.py"
 _MEAN_REVERSION_PATH = SKILLS_DIR / "examples" / "mean_reversion_hypothesis.py"
+_RSI_MR_PATH = SKILLS_DIR / "examples" / "rsi_mean_reversion_hypothesis.py"
+_ZSCORE_MR_PATH = SKILLS_DIR / "examples" / "zscore_mean_reversion_hypothesis.py"
+_REAL_DATA_PIPELINE_PATH = SKILLS_DIR / "examples" / "real_data_pipeline_example.py"
 
 
 def _import_module(name, path):
@@ -402,6 +405,7 @@ def test_mean_reversion_hypothesis_uses_point_in_time_split():
 
 
 _RSI_MR_PATH = SKILLS_DIR / "examples" / "rsi_mean_reversion_hypothesis.py"
+_ZSCORE_MR_PATH = SKILLS_DIR / "examples" / "zscore_mean_reversion_hypothesis.py"
 
 
 def test_rsi_mean_reversion_hypothesis_imports():
@@ -458,6 +462,102 @@ def test_rsi_mean_reversion_hypothesis_uses_point_in_time_split():
     assert "Point-in-time validation" in result.stdout
 
 
+# ---------------------------------------------------------------------------
+# zscore_mean_reversion_hypothesis.py
+# ---------------------------------------------------------------------------
+
+
+def test_zscore_mean_reversion_hypothesis_imports():
+    """zscore_mean_reversion_hypothesis must be importable as a module."""
+    module = _import_module("zscore_mean_reversion_hypothesis", _ZSCORE_MR_PATH)
+    assert hasattr(module, "run_hypothesis_test")
+
+
+def test_zscore_mean_reversion_hypothesis_runs():
+    """zscore_mean_reversion_hypothesis must run end-to-end and exit 0."""
+    result = subprocess.run(
+        [sys.executable, str(_ZSCORE_MR_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"zscore_mean_reversion_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "FALSIFIABLE HYPOTHESIS TEST" in result.stdout
+
+
+def test_zscore_mean_reversion_hypothesis_emits_hypothesis_and_costs():
+    """zscore_mean_reversion_hypothesis reports hypothesis, costs, and falsification criteria."""
+    result = subprocess.run(
+        [sys.executable, str(_ZSCORE_MR_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"zscore_mean_reversion_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    # Must state the hypothesis and trading costs
+    assert "Z-Score" in result.stdout
+    assert "bps" in result.stdout
+    assert "FALSIFICATION CRITERIA" in result.stdout
+    # Must report out-of-sample performance
+    assert "OUT-OF-SAMPLE PERFORMANCE" in result.stdout
+    assert "Sharpe Ratio" in result.stdout
+
+
+def test_zscore_mean_reversion_hypothesis_uses_point_in_time_split():
+    """zscore_mean_reversion_hypothesis uses chronological train/val/test and point-in-time validation."""
+    result = subprocess.run(
+        [sys.executable, str(_ZSCORE_MR_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"zscore_mean_reversion_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    # Must show methodology controls
+    assert "METHODOLOGY CONTROLS" in result.stdout
+    assert "train/val/test" in result.stdout
+    assert "Point-in-time validation" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# real_data_pipeline_example.py
+# ---------------------------------------------------------------------------
+
+
+def test_real_data_pipeline_example_imports():
+    """real_data_pipeline_example must import cleanly and expose key callables."""
+    module = _import_module("real_data_pipeline_example", _REAL_DATA_PIPELINE_PATH)
+    for name in (
+        "main",
+        "generate_synthetic_universe",
+        "run_pit_validation",
+        "run_survivorship_detection",
+        "run_cpcv_validation",
+        "run_cli_cpcv_validation",
+        "run_cli_monte_carlo",
+        "demonstrate_deflated_alpha_directly",
+    ):
+        assert hasattr(module, name), f"example module missing callable: {name}"
+        assert callable(getattr(module, name)), f"{name} should be callable"
+
+
+def test_real_data_pipeline_example_runs():
+    """real_data_pipeline_example must run end-to-end and exit 0."""
+    result = subprocess.run(
+        [sys.executable, str(_REAL_DATA_PIPELINE_PATH)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert result.returncode == 0, (
+        f"real_data_pipeline_example exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "PIPELINE COMPLETE - SUMMARY" in result.stdout
+
+
 
 # ---------------------------------------------------------------------------
 # Test registry
@@ -490,6 +590,12 @@ TEST_REGISTRY = [
     ("test_rsi_mean_reversion_hypothesis_runs", test_rsi_mean_reversion_hypothesis_runs),
     ("test_rsi_mean_reversion_hypothesis_emits_hypothesis_and_costs", test_rsi_mean_reversion_hypothesis_emits_hypothesis_and_costs),
     ("test_rsi_mean_reversion_hypothesis_uses_point_in_time_split", test_rsi_mean_reversion_hypothesis_uses_point_in_time_split),
+    ("test_zscore_mean_reversion_hypothesis_imports", test_zscore_mean_reversion_hypothesis_imports),
+    ("test_zscore_mean_reversion_hypothesis_runs", test_zscore_mean_reversion_hypothesis_runs),
+    ("test_zscore_mean_reversion_hypothesis_emits_hypothesis_and_costs", test_zscore_mean_reversion_hypothesis_emits_hypothesis_and_costs),
+    ("test_zscore_mean_reversion_hypothesis_uses_point_in_time_split", test_zscore_mean_reversion_hypothesis_uses_point_in_time_split),
+    ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
+    ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
 ]
 
 
