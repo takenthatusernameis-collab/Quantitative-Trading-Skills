@@ -1,26 +1,14 @@
-# Handoff — real_data_pipeline deflated-alpha regression guard (2026-10-23)
+# Handoff — hypothesis verdict regression guards complete (2026-10-23)
 
 ## What changed
-- Added `test_real_data_pipeline_example_emits_deflated_alpha_outputs` to `skills/quantitative-backtesting/tests/test_examples_coverage.py` and registered it in `TEST_REGISTRY`.
-- The guard runs `examples/real_data_pipeline_example.py` (exit 0) and asserts:
-  - >= 4 "Deflated Alpha Ratio:" lines (stages 4 API CPCV, 5 CLI CPCV, 6 CLI Monte Carlo, 7 direct), each within [0, 1].
-  - >= 4 "DAR p-value:" lines, each within [0, 1].
-  - "N benchmarks: 2" x4 and "Expected max alpha" present.
-  - Summary block repeats "CPCV Deflated Alpha Ratio:" and "Direct DAR:".
+- No code change this session; verified the four hypothesis-example verdict guards (`test_*_emits_falsification_verdict`) already present in `tests/test_examples_coverage.py` pass, along with the full examples-coverage suite (37 passed) and the quant skill test suite.
 
 ## What was actually verified
-- `cd skills/quantitative-backtesting && python -m pytest tests/test_examples_coverage.py -q` → 33 passed (was 32).
-- Full quant skill suite: `python -m pytest tests/ -q` → 771 passed, 0 failures (only pre-existing non-failing UserWarnings about symmetric-quantile CrossSectionalMomentum).
-- Confirmed deterministic example output (seed=42): DAR values 0.4380/0.4380/0.5255/0.3973, p-values 0.5620/0.5620/0.4745/0.6027, N benchmarks 2.
+- `cd skills/quantitative-backtesting && python -m pytest tests/test_examples_coverage.py -q` → 37 passed in 27.16s.
+- All 24 test files pass individually (slowest: test_walk_forward 100s, test_cpcv 40s).
 
 ## What remains unresolved
-- No remaining untested example surface: every example in `skills/quantitative-backtesting/examples/` now has executable coverage.
-- The four hypothesis examples (`simple_momentum_hypothesis`, `mean_reversion_hypothesis`, `rsi_mean_reversion_hypothesis`, `zscore_mean_reversion_hypothesis`) assert banners/costs/splits but not their falsification-criteria verdicts — a methodologically high-value gap per the mission's "testable financial hypotheses and explicit falsification criteria" priority.
-
-## Approaches already tried
-- Byte-stability / example-output reproducibility (pairs_trading) — complete, no action needed.
-- examples coverage for all examples — complete (33 passing).
-- real_data_pipeline deflated-alpha/MCC guard — complete (this session).
+- No remaining untested example surface and all hypothesis examples now assert falsification criteria + verdict. Potential next: add a real-data (non-synthetic) provenance/look-ahead check or walk-forward robustness guard; or improve a methodological defect in code. Suggest inspecting `scripts/walk_forward.py` for any known issue.
 
 ## One precise next task
-Extend regression guards on the four hypothesis examples to assert their falsification-criteria/verdict outputs (not just banners/costs/splits), mirroring the deflated-alpha guard just added. Relevant files: `skills/quantitative-backtesting/examples/{simple_momentum_hypothesis,mean_reversion_hypothesis,rsi_mean_reversion_hypothesis,zscore_mean_reversion_hypothesis}.py` and `skills/quantitative-backtesting/tests/test_examples_coverage.py`. First run each example to capture its verdict lines, then add bounded [0,1]/keyword assertions and register them. Constraint: do not assert profitability/robustness — only that the verdict and criteria are emitted and numerically sane.
+Inspect `skills/quantitative-backtesting/scripts/walk_forward.py` against `references/validation_methods.md` for chronological split correctness and run its tests; fix any demonstrable defect with smallest change and add a regression test. Constraint: do not weaken validation.
