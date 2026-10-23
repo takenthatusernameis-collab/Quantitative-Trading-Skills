@@ -174,6 +174,20 @@ Run with:
 python3 skills/quantitative-backtesting/examples/falsifiable_hypothesis_example.py
 ```
 
+### `reproducible_backtest_example.py`
+
+Regenerates a metrics artifact from a committed tiny CSV fixture (`sample_ohlcv.csv`)
+using the `data_loader` / `run_backtest.py` path. Runs with `--validate-point-in-time`
+and `--point-in-time-strict` so the run fails if point-in-time validation does not
+pass. The resulting `metrics.json` is byte-identical across runs.
+
+Run with:
+```bash
+python3 skills/quantitative-backtesting/examples/reproducible_backtest_example.py
+```
+
+Outputs to `example_reproducible_output/metrics.json`.
+
 ### `real_data_workflow.md`
 
 Comprehensive guide for working with real market data including:

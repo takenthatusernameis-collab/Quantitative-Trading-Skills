@@ -87,5 +87,11 @@
     "checksum": "9a66ca5364695907",
     "total_return_type": "price",
     "name": null
-  }
+  },
+  "point_in_time_validation": {
+    "passed": true,
+    "violations": [],
+    "warnings": []
+  },
+  "bias_controls_engaged": true
 }

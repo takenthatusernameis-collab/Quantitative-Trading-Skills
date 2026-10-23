@@ -23,8 +23,19 @@ def main() -> int:
         "--strategy", "sma_crossover",
         "--symbol", "SPY",
         "--output", str(OUTPUT),
+        "--validate-point-in-time",
+        "--point-in-time-strict",
     ]
-    return subprocess.run(cmd).returncode
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        return result.returncode
+    import json
+    summary = json.loads((OUTPUT / "tear_sheet_summary.json").read_text())
+    pit = summary.get("point_in_time_validation")
+    if not pit or not pit.get("passed", False):
+        print("point-in-time validation did not pass", file=sys.stderr)
+        return 1
+    return 0
 
 if __name__ == "__main__":
     raise SystemExit(main())
