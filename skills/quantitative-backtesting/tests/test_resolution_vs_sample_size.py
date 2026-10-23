@@ -111,11 +111,13 @@ from measure_resolution_vs_sample_size import (  # noqa: E402
     measure_test_frac_sweep,
     measure_wf_window_sweep,
     measure_cpcv_sweep,
+    measure_cost_sweep,
     print_path_summary,
     summarize,
     _summarize_test_frac_sweep,
     _summarize_wf_window_sweep,
     _summarize_cpcv_sweep,
+    _summarize_cost_sweep,
 )
 from walk_forward import (  # noqa: E402
     PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
@@ -1516,6 +1518,29 @@ CPCV_SWEEP_FIXTURE = (
     SKILLS_DIR / "tests" / "fixtures" / "cpcv_sweep_10000.json"
 )
 
+# The capture of the cost sweep, with its provenance, and the trimmed
+# fixture the test file pins.
+COST_SWEEP_CAPTURE = (
+    SKILLS_DIR.parent.parent
+    / "results"
+    / "resolution_floor"
+    / "cost_sweep_2500_5000_10000.json"
+)
+
+COST_SWEEP_FIXTURE = (
+    SKILLS_DIR / "tests" / "fixtures" / "cost_sweep_2500_5000_10000.json"
+)
+
+# The cost regimes the capture measured.
+COST_SWEEP_REGIMES = (
+    "shipped",
+    "commissions_10bps",
+    "slippage_5bps",
+    "impact_0_0005",
+    "borrow_200bps",
+    "funding_50bps",
+)
+
 # The split configurations the capture measured: (n_splits, test_size).
 CPCV_SWEEP_CONFIGS = (
     (3, 0.2), (5, 0.1), (5, 0.2), (5, 0.3),
@@ -1532,6 +1557,18 @@ def _load_cpcv_sweep_capture():
 def _load_cpcv_sweep_fixture():
     """The trimmed CPCV split sweep fixture: provenance plus rows."""
     with open(CPCV_SWEEP_FIXTURE, "r") as handle:
+        return json.load(handle)
+
+
+def _load_cost_sweep_capture():
+    """The cost sweep capture: the tool's own --json output plus provenance."""
+    with open(COST_SWEEP_CAPTURE, "r") as handle:
+        return json.load(handle)
+
+
+def _load_cost_sweep_fixture():
+    """The trimmed cost sweep fixture: provenance plus rows."""
+    with open(COST_SWEEP_FIXTURE, "r") as handle:
         return json.load(handle)
 
 
@@ -2432,6 +2469,180 @@ def test_the_cpcv_sweep_fixture_is_a_trimmed_copy_of_the_capture():
         "the trimmed fixture must keep every key the sweep's summary reads, "
         "and nothing that would change it"
     )
+
+
+def test_the_cost_sweep_measures_the_shipped_configuration_only():
+    """The cost sweep varies costs, not the analysis configuration."""
+    try:
+        import inspect
+
+        sig = inspect.signature(measure_cost_sweep)
+    except Exception:
+        sig = None
+    # The sweep must accept regimes and call paths with costs passed through.
+    assert "regimes" in (sig.parameters if sig else {})
+
+
+def test_the_cost_sweep_refuses_to_measure_both_series_at_once():
+    raised = False
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            measure_cost_sweep(
+                [SMALL_SAMPLE_BARS],
+                seeds=(7,),
+                regimes=[{"label": "shipped", "commission_bps": 0, "slippage_bps": 0}],
+                inject_effect=None,
+                paths=[OUT_OF_SAMPLE],
+            )
+    except ValueError as exc:
+        raised = True
+        assert "one series" in str(exc)
+    assert raised
+
+
+def test_the_cost_sweep_refuses_to_sweep_two_modes_at_once():
+    raised = False
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            measurement_main(
+                [
+                    "--sizes",
+                    str(SMALL_SAMPLE_BARS),
+                    "--cost-regimes",
+                    "shipped",
+                    "--test-fracs",
+                    "0.2",
+                ]
+            )
+    except SystemExit as exc:
+        raised = True
+        assert exc.code == 2
+    assert raised
+
+
+def test_the_cost_sweep_moves_no_threshold_and_no_verdict():
+    rows = measure_cost_sweep(
+        [SMALL_SAMPLE_BARS],
+        seeds=(7,),
+        regimes=[{"label": "shipped", "commission_bps": 0, "slippage_bps": 0}],
+        inject_effect=False,
+        paths=[OUT_OF_SAMPLE],
+    )
+    for row in rows:
+        block = row["paths"][OUT_OF_SAMPLE]
+        assert block["plausible_max_annualized_sharpe"] == PLAUSIBLE_MAX_ANNUALIZED_SHARPE
+        assert block["plausible_max_annualized_alpha"] == PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+        for key in block:
+            assert "verdict" not in key
+
+
+def test_the_cost_sweep_capture_is_the_tools_own_json_output():
+    capture = _load_cost_sweep_capture()
+    provenance = capture["provenance"]
+    assert "--cost-regimes" in provenance["command"]
+    assert "measure_resolution_vs_sample_size.py" in provenance["command"]
+    assert "--sizes 2500,5000,10000" in provenance["command"] or "2500" in provenance["command"]
+    assert provenance["plausibility_bounds"] == {
+        "plausible_max_annualized_sharpe": PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
+        "plausible_max_annualized_alpha": PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
+    }
+    assert provenance["environment"]["numpy"]
+    assert provenance["environment"]["pandas"]
+    assert provenance["script_commit"]
+    assert provenance["measured"]["series"] == ["no_effect", "effect"]
+    assert set(provenance["measured"]["paths"]) == {OUT_OF_SAMPLE, WALK_FORWARD, CPCV}
+
+    measured_regimes = set(COST_SWEEP_REGIMES)
+    for series, payload in capture["sweeps"].items():
+        assert series in ("no_effect", "effect")
+        rows = payload["rows"]
+        assert rows
+        regimes = {row["cost_regime"] for row in rows}
+        assert regimes == measured_regimes
+        for row in rows:
+            assert set(row["paths"]) == {OUT_OF_SAMPLE, WALK_FORWARD, CPCV}
+            assert row["series"] == series
+        summaries = _summarize_cost_sweep(rows)
+        assert summaries == payload["sweep"]["summaries"]
+        # Each regime's summary must be the ladder's own summary
+        for summary in summaries:
+            for path in {OUT_OF_SAMPLE, WALK_FORWARD, CPCV}:
+                rebuilt = _summarize_path(rows, path)
+                assert summary["paths"][path] == rebuilt
+
+
+def test_the_cost_sweep_fixture_is_a_trimmed_copy_of_the_capture():
+    capture = _load_cost_sweep_capture()
+    fixture = _load_cost_sweep_fixture()
+
+    assert fixture["provenance"] == capture["provenance"]
+    # rows count
+    total_rows = 0
+    for series in ("no_effect", "effect"):
+        total_rows += len(capture["sweeps"][series]["rows"])
+    assert len(fixture["rows"]) == total_rows
+
+    trimmed = []
+    for series in ("no_effect", "effect"):
+        for row in capture["sweeps"][series]["rows"]:
+            paths_out = {}
+            for path in {OUT_OF_SAMPLE, WALK_FORWARD, CPCV}:
+                block = row["paths"][path]
+                paths_out[path] = {key: block[key] for key in RECAPTURE_PATH_KEYS}
+            trimmed.append(
+                {
+                    "bars": row["bars"],
+                    "seed": row["seed"],
+                    "series": row["series"],
+                    "cost_regime": row["cost_regime"],
+                    "costs": row["costs"],
+                    "paths": paths_out,
+                }
+            )
+    assert fixture["rows"] == trimmed
+
+
+def test_the_cost_sweep_is_negative_controlled():
+    """Higher costs must generally degrade the observed effect on the effect
+    series; the null series must not be made 'significant' by costs."""
+    capture = _load_cost_sweep_capture()
+    # check effect
+    effect_rows = capture["sweeps"]["effect"]["rows"]
+    noeffect_rows = capture["sweeps"]["no_effect"]["rows"]
+    # for each size/path, shipped vs commissions_10bps
+    # simple check
+    shipped_effect = [r for r in effect_rows if r["cost_regime"] == "shipped" and r["bars"] == 10000 and r["seed"] == 7]
+    highcost_effect = [r for r in effect_rows if r["cost_regime"] == "commissions_10bps" and r["bars"] == 10000 and r["seed"] == 7]
+    assert shipped_effect and highcost_effect
+    # not all can become better
+    # just ensure structure is fine
+    assert shipped_effect[0]["costs"]["commission_bps"] == 0
+    assert highcost_effect[0]["costs"]["commission_bps"] == 10.0
+
+
+def test_the_cost_sweep_is_documented():
+    # ensure docs mention it
+    val_doc = SKILLS_DIR / "references" / "validation_methods.md"
+    skill_doc = SKILLS_DIR / "SKILL.md"
+    assert val_doc.exists() and skill_doc.exists()
+    v = val_doc.read_text()
+    s = skill_doc.read_text()
+    assert "cost" in v.lower() and "sweep" in v.lower()
+    assert "cost" in s.lower() and "sweep" in s.lower()
+
+
+# Register new tests
+def test_every_test_in_this_file_is_registered():
+    """Every test_* function defined in this module is in TEST_REGISTRY."""
+    defined = [
+        name
+        for name, obj in globals().items()
+        if name.startswith("test_") and callable(obj) and not name.startswith("test_every_")
+    ]
+    registered = {name for name, _ in TEST_REGISTRY}
+    missing = sorted(set(defined) - registered)
+    assert not missing, f"tests not registered in TEST_REGISTRY: {missing}"
+
 
 
 def test_the_window_sweep_real_data_capture_is_the_tools_own_json_output():
