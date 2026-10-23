@@ -561,7 +561,48 @@ def test_real_data_pipeline_example_runs():
     assert "PIPELINE COMPLETE - SUMMARY" in result.stdout
 
 
+def test_real_data_pipeline_example_emits_deflated_alpha_outputs():
+    """real_data_pipeline_example must surface its deflated alpha / MCC outputs.
 
+    Regression guard for the example's multiple-testing correction surface:
+    stages 4-7 each print a Deflated Alpha Ratio, DAR p-value, expected max
+    alpha and benchmark count, and the summary repeats them. Assert every
+    DAR and p-value stays within [0, 1] so a silent machinery failure (e.g.
+    a dropped correction or a NaN) cannot masquerade as a complete run.
+    """
+    result = subprocess.run(
+        [sys.executable, str(_REAL_DATA_PIPELINE_PATH)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert result.returncode == 0, (
+        f"real_data_pipeline_example exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    # Stages 4 (API CPCV), 5 (CLI CPCV), 6 (CLI Monte Carlo) and 7 (direct)
+    # each print a Deflated Alpha Ratio line.
+    dar_lines = re.findall(r"Deflated Alpha Ratio:\s*([0-9.]+)", result.stdout)
+    assert len(dar_lines) >= 4, (
+        f"expected at least 4 Deflated Alpha Ratio lines, got {len(dar_lines)}"
+    )
+    for value in dar_lines:
+        assert 0.0 <= float(value) <= 1.0, f"DAR out of range: {value}"
+    pvalue_lines = re.findall(r"DAR p-value:\s*([0-9.]+)", result.stdout)
+    assert len(pvalue_lines) >= 4, (
+        f"expected at least 4 DAR p-value lines, got {len(pvalue_lines)}"
+    )
+    for value in pvalue_lines:
+        assert 0.0 <= float(value) <= 1.0, f"p-value out of range: {value}"
+    assert result.stdout.count("N benchmarks: 2") >= 4
+    assert "Expected max alpha" in result.stdout
+    # The summary block repeats the headline figures.
+    assert "CPCV Deflated Alpha Ratio:" in result.stdout
+    assert "Direct DAR:" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Test registry
 # ---------------------------------------------------------------------------
 # Test registry
 # ---------------------------------------------------------------------------
@@ -599,6 +640,7 @@ TEST_REGISTRY = [
     ("test_zscore_mean_reversion_hypothesis_uses_point_in_time_split", test_zscore_mean_reversion_hypothesis_uses_point_in_time_split),
     ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
     ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
+    ("test_real_data_pipeline_example_emits_deflated_alpha_outputs", test_real_data_pipeline_example_emits_deflated_alpha_outputs),
 ]
 
 
