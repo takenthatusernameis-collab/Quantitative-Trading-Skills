@@ -62,7 +62,8 @@ class _Args:
                  validate_point_in_time=False, point_in_time_strict=False,
                  multi_symbol=False, benchmark=None, risk_free_rate=None,
                  fill_rate=1.0, latency=0, panel_pricing="net-exposure",
-                 impact_aggregation="panel"):
+                 impact_aggregation="panel",
+                 train_frac=None, val_frac=None, test_frac=None, run_split=None):
         self.commission = commission
         self.slippage = slippage
         self.initial_capital = initial_capital
@@ -82,6 +83,10 @@ class _Args:
         self.latency = latency
         self.panel_pricing = panel_pricing
         self.impact_aggregation = impact_aggregation
+        self.train_frac = train_frac
+        self.val_frac = val_frac
+        self.test_frac = test_frac
+        self.run_split = run_split
 
 
 def test_signals_active_detects_flat_and_active_series():
@@ -3660,6 +3665,105 @@ def test_cli_data_provenance_reproducible_across_runs():
         assert a == b, "data_provenance.json not reproducible across runs"
 
 
+def test_run_backtest_split_runs_each_split_without_index_error():
+    """A chronological train/val/test split must run on every split.
+
+    The signals were previously generated from the full frame before the
+    split, so on a non-train split `positions` was on the full index while
+    `price`/`raw_returns` were on the split's -- an out-of-bounds positional
+    read in the trade ledger. Generating signals from the split data itself
+    makes every downstream series share one index.
+    """
+    data = _make_data(periods=252)
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+
+    for split in ("train", "val", "test"):
+        args = _Args(train_frac=0.6, val_frac=0.2, test_frac=0.2, run_split=split)
+        results = run_backtest(data, strategy, args)
+        assert "equity_curve" in results, f"{split}: no equity curve"
+        assert len(results["returns"]) > 0, f"{split}: empty returns"
+        assert results["equity_curve"].std() > 0, f"{split}: flat equity"
+        assert "train_val_test_split" in results, f"{split}: split info missing"
+        assert results["train_val_test_split"]["train_size"] == 151
+        assert results["train_val_test_split"]["val_size"] == 50
+        assert results["train_val_test_split"]["test_size"] == 51
+        assert results["train_val_test_split"]["separation_check"]["disjoint"] is True
+        assert results["train_val_test_split"]["separation_check"]["chronological"] is True
+
+
+def test_run_backtest_split_surfaces_split_metadata_in_tear_sheet_summary():
+    """The split the run was executed on is surfaced in the JSON summary and
+    the HTML tear sheet, with the executable separation invariant, so a split
+    result is never quoted without saying which split it is and whether the
+    three splits were pairwise disjoint and ordered."""
+    from reporting import generate_tear_sheet
+
+    data = _make_data(periods=252)
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    args = _Args(train_frac=0.6, val_frac=0.2, test_frac=0.2, run_split="test")
+    results = run_backtest(data, strategy, args)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        metrics = calculate_metrics(results)
+        generate_tear_sheet(results, metrics, tmpdir, symbol="TEST", strategy_name="SMA Crossover")
+
+        with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+            summary = json.load(f)
+        split = summary.get("train_val_test_split")
+        assert isinstance(split, dict), "split metadata missing from summary"
+        assert split["train_frac"] == 0.6
+        assert split["val_frac"] == 0.2
+        assert split["test_frac"] == 0.2
+        assert split["separation_check"]["disjoint"] is True
+
+        with open(os.path.join(tmpdir, "tear_sheet.html")) as f:
+            html = f.read()
+        assert "train_val_test_split / test_start" in html
+        assert "train_val_test_split / separation_check / chronological" in html
+
+
+def test_run_backtest_split_is_reproducible_across_runs():
+    """Two runs of the same split backtest produce byte-identical artifacts."""
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path)
+        out1 = os.path.join(tmpdir, "out1")
+        out2 = os.path.join(tmpdir, "out2")
+        argv1 = ["run_backtest", "--data", csv_path, "--strategy", "sma_crossover",
+                 "--params", '{"fast_period": 10, "slow_period": 30}',
+                 "--train-frac", "0.6", "--val-frac", "0.2", "--test-frac", "0.2",
+                 "--run-split", "test", "--output", out1]
+        with patch.object(sys, "argv", argv1), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            assert run_backtest_main() == 0
+        argv2 = ["run_backtest", "--data", csv_path, "--strategy", "sma_crossover",
+                 "--params", '{"fast_period": 10, "slow_period": 30}',
+                 "--train-frac", "0.6", "--val-frac", "0.2", "--test-frac", "0.2",
+                 "--run-split", "test", "--output", out2]
+        with patch.object(sys, "argv", argv2), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            assert run_backtest_main() == 0
+        for fname in ("metrics.json", "tear_sheet_summary.json", "report.txt"):
+            with open(os.path.join(out1, fname), "rb") as f:
+                a = f.read()
+            with open(os.path.join(out2, fname), "rb") as f:
+                b = f.read()
+            assert a == b, f"{fname} not reproducible across split runs"
+
+
+def test_run_backtest_split_signals_share_split_index():
+    """Signals are generated from the split data, so the signal index equals
+    the backtested data index on every split (the precondition that kept the
+    trade ledger's positional indexing in bounds)."""
+    data = _make_data(periods=252)
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    for split in ("train", "val", "test"):
+        args = _Args(train_frac=0.6, val_frac=0.2, test_frac=0.2, run_split=split)
+        results = run_backtest(data, strategy, args)
+        assert results["returns"].index.equals(results["equity_curve"].index)
+        assert len(results["returns"]) == results["train_val_test_split"][f"{split}_size"]
+
+
 TEST_REGISTRY = [
     ("test_signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
     ("test_run_backtest_flat_strategy_raises", test_run_backtest_flat_strategy_raises),
@@ -3765,6 +3869,10 @@ TEST_REGISTRY = [
     ("test_notional_weighted_charges_the_notional_weighted_measurement", test_notional_weighted_charges_the_notional_weighted_measurement),
     ("test_notional_weighted_capacity_is_the_dw2_inverse", test_notional_weighted_capacity_is_the_dw2_inverse),
     ("test_default_impact_aggregation_is_panel", test_default_impact_aggregation_is_panel),
+    ("test_run_backtest_split_runs_each_split_without_index_error", test_run_backtest_split_runs_each_split_without_index_error),
+    ("test_run_backtest_split_surfaces_split_metadata_in_tear_sheet_summary", test_run_backtest_split_surfaces_split_metadata_in_tear_sheet_summary),
+    ("test_run_backtest_split_is_reproducible_across_runs", test_run_backtest_split_is_reproducible_across_runs),
+    ("test_run_backtest_split_signals_share_split_index", test_run_backtest_split_signals_share_split_index),
 ]
 
 if __name__ == "__main__":

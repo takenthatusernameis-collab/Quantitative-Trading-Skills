@@ -268,9 +268,13 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
         return from t-1 to t (no shift), matching the strategy's
         next-period-open trading convention.
     """
-    signals = strategy.generate_signals(data)
-
-    # Optional train/val/test split (chronological)
+    # Optional train/val/test split (chronological). The signals are generated
+    # from the split data below, so every downstream series (the point-in-time
+    # screen, the market model, the positions and the trade ledger) shares the
+    # split's index. Generating signals from the full frame before the split
+    # left `positions` on the full index while `price`/`raw_returns` were on
+    # the split's, which made the trade ledger's positional indexing go
+    # out of bounds on any non-train split.
     split_info = None
     train_frac = getattr(args, 'train_frac', None)
     val_frac = getattr(args, 'val_frac', None)
@@ -309,6 +313,15 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
         elif run_split == "test":
             data = test_data
         print(f"Using {run_split} split: {len(data)} rows ({split_info[f'{run_split}_start']} to {split_info[f'{run_split}_end']})")
+
+    # Generate signals from the data that will actually be backtested. For a
+    # split run this is the selected split (train/val/test), so the signals,
+    # the point-in-time screen, the market model, the positions and the trade
+    # ledger all share one index. (Signals were previously generated from the
+    # full frame before the split, which put `positions` on the full index
+    # while `price`/`raw_returns` were on the split's -- an out-of-bounds
+    # positional read in the trade ledger on any non-train split.)
+    signals = strategy.generate_signals(data)
 
     # Optional point-in-time validation (look-ahead bias screening).
     # Recorded in the results so the check is reproducible downstream.

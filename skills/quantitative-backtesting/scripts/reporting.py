@@ -916,6 +916,32 @@ def generate_tear_sheet(
                 f"<td class='metric'>{_fmt_prov(bool(bias_flag))}</td></tr>"
             )
 
+        # The chronological train/validation/test split the run was executed
+        # on, with the executable separation invariant, so a split result is
+        # never quoted without saying which split it is and whether the three
+        # splits were pairwise disjoint and ordered.
+        _split = results.get("train_val_test_split")
+        if isinstance(_split, dict):
+            for field in [
+                "train_start", "train_end", "val_start", "val_end",
+                "test_start", "test_end", "train_size", "val_size",
+                "test_size", "train_frac", "val_frac", "test_frac",
+            ]:
+                if field in _split:
+                    html_parts.append(
+                        f"<tr><td>train_val_test_split / {field}</td>"
+                        f"<td class='metric'>{_fmt_prov(_split[field])}</td></tr>"
+                    )
+            _sep = _split.get("separation_check")
+            if isinstance(_sep, dict):
+                for field in ["disjoint", "chronological", "train_val_overlap",
+                              "val_test_overlap", "train_test_overlap"]:
+                    if field in _sep:
+                        html_parts.append(
+                            f"<tr><td>train_val_test_split / separation_check / {field}</td>"
+                            f"<td class='metric'>{_fmt_prov(_sep[field])}</td></tr>"
+                        )
+
         html_parts.append("</table>")
 
     # Survivorship-bias detection artifact (multi-symbol panels). Threaded
@@ -1347,6 +1373,14 @@ def generate_tear_sheet(
         _panel_pricing = (results.get("config") or {}).get("panel_pricing_effective")
     if _panel_pricing is not None:
         summary["panel_pricing"] = _panel_pricing
+
+    # Surface the chronological train/validation/test split the run was
+    # executed on, including the executable separation invariant
+    # (`separation_check`), so a split result can never be read without
+    # knowing which split it is and whether the splits were disjoint.
+    _split = results.get("train_val_test_split")
+    if isinstance(_split, dict):
+        summary["train_val_test_split"] = _json_safe(_split)
 
     # Surface analysis results in the JSON summary (JSON-safe extraction only).
     if analysis:
