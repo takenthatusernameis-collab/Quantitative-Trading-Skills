@@ -55,6 +55,8 @@ from walk_forward import (
     _print_deflated_alpha,
     _print_test_resolution,
     estimate_capacity,
+    _split_train_val_test,
+    _verify_split_separation,
 )
 
 
@@ -93,8 +95,10 @@ def parse_args():
     parser.add_argument("--benchmark-slippage", type=float, default=None, help="Slippage per trade for benchmark (as decimal). Defaults to strategy slippage if not specified (applies to all benchmarks).")
     parser.add_argument("--benchmark-expense-ratio", type=float, default=None, help="Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%). Defaults to 0 (applies to all benchmarks).")
     parser.add_argument("--benchmark-cost-is-periodic", action="store_true", help="If set, apply benchmark trading costs (commission+slippage) as periodic deductions each period instead of as a round-trip cost on total return (applies to all benchmarks).")
-    parser.add_argument("--latency", type=int, default=0, help="Execution latency in periods (0 = no delay, 1 = one period delay). Delays position execution by latency periods after signal generation.")
-    parser.add_argument("--fill-rate", type=float, default=1.0, help="Position-scale limit (0 < r <= 1): the achieved position is fill_rate times the target position on every bar, so all position-change-based costs scale proportionally. It is a position-size (leverage) lever, not a partial-fill execution model. Default 1.0 (full fill, backward compatible).")
+    parser.add_argument("--train-frac", type=float, default=None, help="Fraction of data for training (for train/val/test split). Requires --val-frac and --test-frac.")
+    parser.add_argument("--val-frac", type=float, default=None, help="Fraction of data for validation (for train/val/test split). Requires --train-frac and --test-frac.")
+    parser.add_argument("--test-frac", type=float, default=None, help="Fraction of data for testing (for train/val/test split). Requires --train-frac and --val-frac.")
+    parser.add_argument("--run-split", type=str, choices=["train", "val", "test"], default=None, help="When using train/val/test split, run backtest on this split only.")
     parser.add_argument("--fill-rates", type=float, nargs="+", default=None, help="List of fill rates to sweep (overrides --fill-rate).")
     parser.add_argument("--latencies", type=int, nargs="+", default=None, help="List of execution latencies (in periods) to sweep (overrides --latency). Delays position execution by each latency after signal generation.")
     parser.add_argument("--adjust-splits", action="store_true", help="Adjust prices for stock splits using the splits column if present.")
@@ -265,6 +269,43 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
         next-period-open trading convention.
     """
     signals = strategy.generate_signals(data)
+
+    # Optional train/val/test split (chronological)
+    split_info = None
+    if args.train_frac is not None or args.val_frac is not None or args.test_frac is not None:
+        if args.train_frac is None or args.val_frac is None or args.test_frac is None:
+            print("Must provide all of --train-frac, --val-frac, --test-frac when using splits")
+            return 1
+        try:
+            train_data, val_data, test_data = _split_train_val_test(
+                data, train_frac=args.train_frac, val_frac=args.val_frac, test_frac=args.test_frac
+            )
+        except Exception as e:
+            print(f"Split error: {e}")
+            return 1
+        split_info = {
+            "train_start": str(train_data.index[0]) if hasattr(train_data.index[0], "strftime") else str(train_data.index[0]),
+            "train_end": str(train_data.index[-1]) if hasattr(train_data.index[-1], "strftime") else str(train_data.index[-1]),
+            "val_start": str(val_data.index[0]) if hasattr(val_data.index[0], "strftime") else str(val_data.index[0]),
+            "val_end": str(val_data.index[-1]) if hasattr(val_data.index[-1], "strftime") else str(val_data.index[-1]),
+            "test_start": str(test_data.index[0]) if hasattr(test_data.index[0], "strftime") else str(test_data.index[0]),
+            "test_end": str(test_data.index[-1]) if hasattr(test_data.index[-1], "strftime") else str(test_data.index[-1]),
+            "train_size": len(train_data),
+            "val_size": len(val_data),
+            "test_size": len(test_data),
+            "train_frac": args.train_frac,
+            "val_frac": args.val_frac,
+            "test_frac": args.test_frac,
+        }
+        split_info["separation_check"] = _verify_split_separation(train_data, val_data, test_data)
+        run_split = getattr(args, "run_split", None) or "test"
+        if run_split == "train":
+            data = train_data
+        elif run_split == "val":
+            data = val_data
+        elif run_split == "test":
+            data = test_data
+        print(f"Using {run_split} split: {len(data)} rows ({split_info[f'{run_split}_start']} to {split_info[f'{run_split}_end']})")
 
     # Optional point-in-time validation (look-ahead bias screening).
     # Recorded in the results so the check is reproducible downstream.
@@ -696,6 +737,8 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     # Optional point-in-time validation outcome.
     if pit_result is not None:
         results["point_in_time_validation"] = pit_result
+    if split_info is not None:
+        results["train_val_test_split"] = split_info
 
     # Optional survivorship-bias report artifact (multi-symbol panels).
     if survivorship is not None:
