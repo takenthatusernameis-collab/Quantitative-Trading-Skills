@@ -396,6 +396,68 @@ def test_mean_reversion_hypothesis_uses_point_in_time_split():
     assert "Point-in-time validation" in result.stdout
 
 
+# ---------------------------------------------------------------------------
+# rsi_mean_reversion_hypothesis.py
+# ---------------------------------------------------------------------------
+
+
+_RSI_MR_PATH = SKILLS_DIR / "examples" / "rsi_mean_reversion_hypothesis.py"
+
+
+def test_rsi_mean_reversion_hypothesis_imports():
+    """rsi_mean_reversion_hypothesis must be importable as a module."""
+    module = _import_module("rsi_mean_reversion_hypothesis", _RSI_MR_PATH)
+    assert hasattr(module, "run_hypothesis_test")
+
+
+def test_rsi_mean_reversion_hypothesis_runs():
+    """rsi_mean_reversion_hypothesis must run end-to-end and exit 0."""
+    result = subprocess.run(
+        [sys.executable, str(_RSI_MR_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"rsi_mean_reversion_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "FALSIFIABLE HYPOTHESIS TEST" in result.stdout
+
+
+def test_rsi_mean_reversion_hypothesis_emits_hypothesis_and_costs():
+    """rsi_mean_reversion_hypothesis reports hypothesis, costs, and falsification criteria."""
+    result = subprocess.run(
+        [sys.executable, str(_RSI_MR_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"rsi_mean_reversion_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    # Must state the hypothesis and trading costs
+    assert "RSI mean-reversion" in result.stdout
+    assert "bps" in result.stdout
+    assert "FALSIFICATION CRITERIA" in result.stdout
+    # Must report out-of-sample performance
+    assert "OUT-OF-SAMPLE PERFORMANCE" in result.stdout
+    assert "Sharpe Ratio" in result.stdout
+
+
+def test_rsi_mean_reversion_hypothesis_uses_point_in_time_split():
+    """rsi_mean_reversion_hypothesis uses chronological train/val/test and point-in-time validation."""
+    result = subprocess.run(
+        [sys.executable, str(_RSI_MR_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"rsi_mean_reversion_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    # Must show methodology controls
+    assert "METHODOLOGY CONTROLS" in result.stdout
+    assert "train/val/test" in result.stdout
+    assert "Point-in-time validation" in result.stdout
+
+
 
 # ---------------------------------------------------------------------------
 # Test registry
@@ -424,6 +486,10 @@ TEST_REGISTRY = [
     ("test_mean_reversion_hypothesis_runs", test_mean_reversion_hypothesis_runs),
     ("test_mean_reversion_hypothesis_emits_hypothesis_and_costs", test_mean_reversion_hypothesis_emits_hypothesis_and_costs),
     ("test_mean_reversion_hypothesis_uses_point_in_time_split", test_mean_reversion_hypothesis_uses_point_in_time_split),
+    ("test_rsi_mean_reversion_hypothesis_imports", test_rsi_mean_reversion_hypothesis_imports),
+    ("test_rsi_mean_reversion_hypothesis_runs", test_rsi_mean_reversion_hypothesis_runs),
+    ("test_rsi_mean_reversion_hypothesis_emits_hypothesis_and_costs", test_rsi_mean_reversion_hypothesis_emits_hypothesis_and_costs),
+    ("test_rsi_mean_reversion_hypothesis_uses_point_in_time_split", test_rsi_mean_reversion_hypothesis_uses_point_in_time_split),
 ]
 
 
