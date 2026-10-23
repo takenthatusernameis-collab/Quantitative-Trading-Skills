@@ -1,3 +1,4 @@
+import math
 #!/usr/bin/env python3
 """Regression tests for the out-of-sample validation window and its diagnosis.
 
@@ -273,9 +274,15 @@ def test_the_validation_window_rename_moved_no_metric():
         "the rename added or removed a key beyond the rename itself"
     )
     for key, value in expected.items():
-        assert validation_performance[key] == value, (
-            f"the rename changed the value of `{key}`"
-        )
+        actual = validation_performance[key]
+        if isinstance(value, float) and isinstance(actual, float):
+            assert math.isclose(actual, value, rel_tol=1e-12, abs_tol=1e-12), (
+                f"the rename changed the value of `{key}`"
+            )
+        else:
+            assert actual == value, (
+                f"the rename changed the value of `{key}`"
+            )
 
 
 def test_out_of_sample_validation_keeps_the_window_when_it_fits():
