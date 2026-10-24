@@ -128,7 +128,6 @@ def run_hypothesis_test(data_path, label):
             "--panel-pricing", "book",
             "--output", str(tmpdir_path / "results"),
             "--validate-point-in-time",
-            "--output", str(tmpdir_path),
         ]
         result = subprocess.run(cmd, cwd=str(SCRIPTS_DIR), capture_output=True, text=True)
         if result.returncode != 0:
