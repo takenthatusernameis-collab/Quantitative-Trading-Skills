@@ -268,11 +268,18 @@ def _test_resolution(summary, test_returns, benchmark_frame, primary_bench):
     return resolution
 
 
-def run_hypothesis_test(data_path, symbol="SPY"):
+def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage=SLIPPAGE):
     """Run the pre-registered falsifiable hypothesis test.
 
-    Returns a dict with the observed metrics, per-criterion pass/fail, and the
-    overall verdict ("SUPPORTED" / "NOT SUPPORTED" / "ERROR").
+    Returns a dict with the observed metrics, per-criterion pass/fail, the
+    overall verdict ("SUPPORTED" / "NOT SUPPORTED" / "ERROR"), and a
+    ``methodology`` block recording the cost settings and the validation path
+    actually engaged (validation method, selection criterion, walk-forward
+    window, benchmark count). The costs default to the example's advertised
+    2bps commission + 1bps slippage per trade; passing ``commission=0`` and
+    ``slippage=0`` runs the same machinery cost-free, which is what lets a
+    caller verify that the advertised costs are actually applied rather than
+    merely stated.
 
     The benchmark set is resolved from BENCHMARK_FILES relative to this
     example's assets directory (the same directory as `data_path`), so the
@@ -294,8 +301,8 @@ def run_hypothesis_test(data_path, symbol="SPY"):
     print("  point-in-time validation, walk-forward parameter selection on training")
     print("  data only, Deflated Sharpe multiple-testing correction, Deflated Alpha")
     print("  Ratio benchmark-selection correction, benchmark alpha vs buy-and-hold,")
-    print(f"  all figures net of {COMMISSION*1e4:.0f}bps commission +")
-    print(f"  {SLIPPAGE*1e4:.0f}bps slippage per trade.")
+    print(f"  all figures net of {commission*1e4:.0f}bps commission +")
+    print(f"  {slippage*1e4:.0f}bps slippage per trade.")
     print("-" * 80)
 
     # --- Load data (point-in-time validation runs inside out_of_sample_validation) ---
@@ -333,12 +340,12 @@ def run_hypothesis_test(data_path, symbol="SPY"):
         walk_forward_test_months=2,
         walk_forward_step_months=2,
         initial_capital=100000,
-        commission=COMMISSION,
-        slippage=SLIPPAGE,
+        commission=commission,
+        slippage=slippage,
         benchmark=benchmarks,
         total_return_benchmark=False,
-        benchmark_commission=COMMISSION,
-        benchmark_slippage=SLIPPAGE,
+        benchmark_commission=commission,
+        benchmark_slippage=slippage,
         benchmark_expense_ratio=0.0,
         benchmark_cost_is_periodic=False,
         apply_deflation=True,
@@ -565,6 +572,19 @@ def run_hypothesis_test(data_path, symbol="SPY"):
         "separation_check": sep,
         "bias_controls_engaged": bool(summary.get("bias_controls_engaged")),
         "pit_passed": bool(pit.get("passed")) if pit else None,
+        "methodology": {
+            "commission": float(commission),
+            "slippage": float(slippage),
+            "validation_method": summary.get("validation_method"),
+            "selection_criterion": summary.get("selection_criterion"),
+            "walk_forward_window": summary.get("walk_forward_window"),
+            "multiple_benchmarks": bool(summary.get("multiple_benchmarks")),
+            "n_benchmarks_loaded": len(benchmarks),
+            "param_grid": {k: list(v) for k, v in PARAM_GRID.items()},
+            "train_frac": 0.6,
+            "val_frac": 0.2,
+            "test_frac": 0.2,
+        },
     }
 
 

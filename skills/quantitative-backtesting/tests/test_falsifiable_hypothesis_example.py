@@ -85,6 +85,7 @@ def _sample_paths():
 # result is immutable and the same for every test, so it is computed once and
 # shared (each test only reads it).
 _RESULT = None
+_COST_RESULTS = {}
 
 
 def _result():
@@ -93,6 +94,26 @@ def _result():
         data_path, _ = _sample_paths()
         _RESULT = run_hypothesis_test(data_path)
     return _RESULT
+
+
+def _cost_result(data_path, commission, slippage):
+    """Run the example's machinery at a caller-supplied cost setting.
+
+    Each (commission, slippage) pair is computed once and shared by the tests
+    that read it. The example resolves its benchmark set from the data file's
+    directory, so the shipped fixtures are used unchanged.
+    """
+    key = (float(commission), float(slippage))
+    if key in _COST_RESULTS:
+        return _COST_RESULTS[key]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        result = run_hypothesis_test(
+            data_path, commission=commission, slippage=slippage
+        )
+    result["_console"] = buffer.getvalue()
+    _COST_RESULTS[key] = result
+    return result
 
 
 def test_falsifiable_hypothesis_example_runs_end_to_end():
@@ -528,6 +549,86 @@ def test_the_control_fixture_is_labelled_as_synthetic_and_carries_no_security():
     assert CONTROL_DRIFT > 0
 
 
+def test_the_example_records_its_methodology_block():
+    """The result carries a methodology block naming the costs, the
+    validation path, the selection criterion and the benchmark set actually
+    engaged, so the advertised controls are auditable from the return value
+    rather than only from the printed banner."""
+    result = _result()
+    method = result["methodology"]
+
+    for key in (
+        "commission", "slippage", "validation_method", "selection_criterion",
+        "walk_forward_window", "multiple_benchmarks", "n_benchmarks_loaded",
+        "param_grid", "train_frac", "val_frac", "test_frac",
+    ):
+        assert key in method, f"methodology block missing {key}"
+
+    # The example's advertised costs are recorded verbatim.
+    assert method["commission"] == 0.0002
+    assert method["slippage"] == 0.0001
+    # The pre-registered validation path is the walk-forward one.
+    assert method["validation_method"] == "walk_forward"
+    assert method["selection_criterion"] == "best_avg_sharpe"
+    # The walk-forward window actually ran (3 periods on 504 bars).
+    assert method["walk_forward_window"]["effective_periods"] == 3
+    # The multiple-benchmark Deflated Alpha path is engaged.
+    assert method["multiple_benchmarks"] is True
+    assert method["n_benchmarks_loaded"] == 2
+    # The split fractions are the pre-registered 0.6/0.2/0.2.
+    assert (method["train_frac"], method["val_frac"], method["test_frac"]) == (0.6, 0.2, 0.2)
+    # The parameter grid is the pre-registered one.
+    assert method["param_grid"] == {
+        "fast_period": [5, 10, 15, 20],
+        "slow_period": [20, 30, 40, 50],
+    }
+
+
+def test_the_advertised_costs_are_actually_applied():
+    """The 2bps commission + 1bps slippage are not merely stated: running the
+    identical machinery at zero cost must produce a *higher* net Sharpe and a
+    higher net total return. A cost path that silently no-ops would fail this.
+
+    The data is synthetic and seed-fixed, so the relationship is deterministic
+    and the test is a regression guard against a silent break in the cost
+    model -- the same shape of guard as the pairs-trading cost sweep.
+    """
+    data_path, _ = _sample_paths()
+    with_costs = _cost_result(data_path, commission=0.0002, slippage=0.0001)
+    without_costs = _cost_result(data_path, commission=0.0, slippage=0.0)
+
+    assert with_costs["methodology"]["commission"] == 0.0002
+    assert without_costs["methodology"]["commission"] == 0.0
+
+    sharpe_cost = with_costs["observed"]["oos_sharpe"]
+    sharpe_nocost = without_costs["observed"]["oos_sharpe"]
+    assert sharpe_nocost > sharpe_cost, (
+        "zero-cost run must beat the costed run on net Sharpe: "
+        f"{sharpe_nocost} vs {sharpe_cost}"
+    )
+
+    return_cost = with_costs["observed"]["oos_total_return"]
+    return_nocost = without_costs["observed"]["oos_total_return"]
+    assert return_nocost > return_cost, (
+        "zero-cost run must beat the costed run on net total return: "
+        f"{return_nocost} vs {return_cost}"
+    )
+
+
+def test_the_selection_criterion_is_oos_aware():
+    """The selection criterion is the pre-registered 'best_avg_sharpe' --
+    the parameter set with the best AVERAGE OUT-OF-SAMPLE test Sharpe across
+    the walk-forward periods where it was chosen -- not the best in-sample
+    training Sharpe. Selecting on in-sample fit would pick the combo that
+    overfit its training window, which is the selection bias this framework
+    exists to avoid."""
+    result = _result()
+    assert result["methodology"]["selection_criterion"] == "best_avg_sharpe"
+    # The recorded average test Sharpe of the selected params is a real
+    # number, so the selection actually read OOS scores.
+    assert result["observed"]["selected_params_avg_test_sharpe"] is not None
+
+
 def main() -> int:
     tests = TEST_REGISTRY
     failures = 0
@@ -558,6 +659,9 @@ TEST_REGISTRY = [
     ("test_the_control_pair_differs_only_by_the_injected_effect", test_the_control_pair_differs_only_by_the_injected_effect),
     ("test_the_control_verdict_is_not_a_property_of_one_seed", test_the_control_verdict_is_not_a_property_of_one_seed),
     ("test_the_control_fixture_is_labelled_as_synthetic_and_carries_no_security", test_the_control_fixture_is_labelled_as_synthetic_and_carries_no_security),
+    ("test_the_example_records_its_methodology_block", test_the_example_records_its_methodology_block),
+    ("test_the_advertised_costs_are_actually_applied", test_the_advertised_costs_are_actually_applied),
+    ("test_the_selection_criterion_is_oos_aware", test_the_selection_criterion_is_oos_aware),
 ]
 
 
