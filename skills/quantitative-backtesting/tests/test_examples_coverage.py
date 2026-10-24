@@ -279,6 +279,22 @@ def test_trading_costs_robustness_example_shows_cost_sensitivity():
     assert "0 bps" in result.stdout
     # The key findings must state cost degradation
     assert "Strategy transaction costs" in result.stdout
+    # Numerical cost-sensitivity guard: higher per-trade costs must reduce net
+    # Sharpe and total return in the strategy cost-sweep impact block.  The
+    # data is synthetic (seed=42), so this relationship is deterministic and the
+    # test is a regression guard against a silent break in the cost model.
+    m = re.search(r"Sharpe:\s*([-0-9.]+)\s*→\s*([-0-9.]+)", result.stdout)
+    assert m, "strategy cost-impact Sharpe line missing"
+    sharpe_start, sharpe_end = float(m.group(1)), float(m.group(2))
+    assert sharpe_end < sharpe_start, (
+        f"higher cost did not reduce Sharpe: {sharpe_start} → {sharpe_end}"
+    )
+    m = re.search(r"Return:\s*([-0-9.]+)%\s*→\s*([-0-9.]+)%", result.stdout)
+    assert m, "strategy cost-impact Return line missing"
+    ret_start, ret_end = float(m.group(1)), float(m.group(2))
+    assert ret_end < ret_start, (
+        f"higher cost did not reduce return: {ret_start}% → {ret_end}%"
+    )
 
 
 # ---------------------------------------------------------------------------
