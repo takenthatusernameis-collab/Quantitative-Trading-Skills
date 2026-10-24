@@ -333,6 +333,72 @@ class TestTearSheet(unittest.TestCase):
             self.assertEqual(summary["symbol"], "SPY")
             self.assertEqual(summary["strategy"], "SMA")
 
+    def test_generate_tear_sheet_surfaces_end_of_sample_closes(self):
+        """The tear sheet renders the end-of-sample close rows in the Trade
+        Analytics table and surfaces them in the JSON summary.
+
+        Regression: ``calculate_metrics`` flags a trade ``closed_at_end`` when
+        its exit was forced by the end of the sample rather than by a signal,
+        and the tear sheet's Trade Analytics table carries those rows -- but no
+        test previously exercised that path, so a silent drop of the rows in the
+        HTML (or of the keys in the summary) would go unnoticed. The report.txt
+        path already covers this; this closes the tear-sheet gap.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            metrics = {
+                "total_return": 0.1,
+                "total_trades": 4,
+                "winning_trades": 2,
+                "losing_trades": 2,
+                "win_rate": 0.5,
+                "trades_closed_at_end": 1,
+                "pct_trades_closed_at_end": 0.25,
+            }
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir, symbol="SPY", strategy_name="Mom"
+            )
+            with open(html_path) as f:
+                html = f.read()
+
+            self.assertIn("Trade Analytics", html)
+            self.assertIn("Trades Closed at End", html)
+            self.assertIn("% of Trades Closed at End", html)
+
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("trades_closed_at_end", summary["metrics"])
+            self.assertEqual(summary["metrics"]["trades_closed_at_end"], 1)
+            self.assertAlmostEqual(
+                summary["metrics"]["pct_trades_closed_at_end"], 0.25
+            )
+
+    def test_generate_tear_sheet_omits_end_of_sample_when_absent(self):
+        """Without ``trades_closed_at_end`` the rows are omitted from the HTML
+        and the keys are absent from the JSON summary (backward compatible)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            metrics = {
+                "total_return": 0.1,
+                "total_trades": 4,
+                "winning_trades": 2,
+                "losing_trades": 2,
+                "win_rate": 0.5,
+            }
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir, symbol="SPY", strategy_name="Mom"
+            )
+            with open(html_path) as f:
+                html = f.read()
+
+            self.assertNotIn("Trades Closed at End", html)
+            self.assertNotIn("% of Trades Closed at End", html)
+
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertNotIn("trades_closed_at_end", summary["metrics"])
+            self.assertNotIn("pct_trades_closed_at_end", summary["metrics"])
+
     def test_generate_tear_sheet_surfaces_deflated_sharpe(self):
         """The tear sheet renders the DSR and surfaces it in the JSON summary."""
         with tempfile.TemporaryDirectory() as tmpdir:
