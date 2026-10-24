@@ -602,7 +602,7 @@ def generate_tear_sheet(
             ("Profit Factor", "profit_factor", fmt_num),
             ("Expectancy", "expectancy", lambda v: f"{v:.4f}" if isinstance(v, (int, float)) else str(v)),
             ("Trades Closed at End", "trades_closed_at_end", fmt_num),
-            ("Pct Trades Closed at End", "pct_trades_closed_at_end", fmt_pct),
+            ("% of Trades Closed at End", "pct_trades_closed_at_end", fmt_pct),
         ]
         for label, key, fmt in trade_metrics:
             if key in metrics:
