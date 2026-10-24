@@ -84,6 +84,7 @@ def run_hypothesis_test(data_path, benchmark_path=None):
             "--val-frac", "0.2",
             "--test-frac", "0.2",
             "--run-split", "test",
+            "--output", str(tmpdir_path / "results"),
             "--validate-point-in-time",
         ]
         if benchmark_path.exists():
@@ -98,6 +99,7 @@ def run_hypothesis_test(data_path, benchmark_path=None):
         # Look for metrics
         metrics = {}
         candidates = [
+            tmpdir_path / "results" / "metrics.json",
             scripts_dir / "results" / "metrics.json",
             Path("results") / "metrics.json",
         ]

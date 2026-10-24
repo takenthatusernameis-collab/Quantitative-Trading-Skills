@@ -126,6 +126,7 @@ def run_hypothesis_test(data_path, label):
             "--test-frac", "0.2",
             "--run-split", "test",
             "--panel-pricing", "book",
+            "--output", str(tmpdir_path / "results"),
             "--validate-point-in-time",
             "--output", str(tmpdir_path),
         ]
@@ -137,8 +138,8 @@ def run_hypothesis_test(data_path, label):
 
         metrics = {}
         summary = {}
-        metrics_path = tmpdir_path / "metrics.json"
-        summary_path = tmpdir_path / "tear_sheet_summary.json"
+        metrics_path = tmpdir_path / "results" / "metrics.json"
+        summary_path = tmpdir_path / "results" / "tear_sheet_summary.json"
         if metrics_path.exists() and metrics_path.is_file():
             with open(metrics_path) as f:
                 metrics = json.load(f)

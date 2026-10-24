@@ -751,5 +751,19 @@ def main() -> int:
     return 1 if failures else 0
 
 
+
+def test_scripts_results_untouched_after_examples():
+    import subprocess
+    repo_root = SKILLS_DIR.parent.parent
+    result = subprocess.run(
+        ["git", "status", "--porcelain", "skills/quantitative-backtesting/scripts/results/"],
+        cwd=str(repo_root), capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == "", (
+        "tracked scripts/results/ artifacts were mutated by the test suite:\n"
+        + result.stdout
+    )
+
 if __name__ == "__main__":
     sys.exit(main())
