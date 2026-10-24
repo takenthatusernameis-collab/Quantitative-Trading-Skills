@@ -219,13 +219,25 @@ def test_pairs_trading_example_emits_realistic_prices():
         assert 1.0 <= hi <= 1e6, f"implausible high price: {hi}"
 
 
-def test_pairs_trading_example_writes_report_to_directory():
-    """generate_report writes report.txt into the output directory.
+def test_pairs_trading_example_emits_walk_forward_out_of_sample():
+    """pairs_trading_example reports walk-forward/out-of-sample validation and cost sensitivity."""
+    result = subprocess.run(
+        [sys.executable, str(_PAIRS_PATH)],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == 0, (
+        f"pairs_trading_example exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    out = result.stdout
+    assert "Walk-forward" in out and "out-of-sample" in out
+    assert "Train/Val/Test" in out
+    assert "chronological" in out
+    assert "Cost sensitivity" in out
 
-    Regression guard for passing a file path (and the wrong dict shape) to
-    generate_report, which expects a directory and a metrics dict and therefore
-    created a nested report.txt/report.txt.
-    """
+
+def test_pairs_trading_example_writes_report_to_directory():
+    """generate_report writes report.txt into the output directory."""
     result = subprocess.run(
         [sys.executable, str(_PAIRS_PATH)],
         capture_output=True, text=True, timeout=300,
@@ -236,7 +248,6 @@ def test_pairs_trading_example_writes_report_to_directory():
     )
     report = _PAIRS_PATH.parent / "example_output" / "pairs_trading" / "report.txt"
     assert report.is_file(), f"report.txt not written to {report}"
-    # The nested path defect would have left a report.txt *directory* instead.
     assert not report.is_dir(), "report.txt is a directory (nested path defect)"
 
 
@@ -721,6 +732,7 @@ TEST_REGISTRY = [
     ("test_pairs_trading_example_imports", test_pairs_trading_example_imports),
     ("test_pairs_trading_example_runs", test_pairs_trading_example_runs),
     ("test_pairs_trading_example_emits_realistic_prices", test_pairs_trading_example_emits_realistic_prices),
+    ("test_pairs_trading_example_emits_walk_forward_out_of_sample", test_pairs_trading_example_emits_walk_forward_out_of_sample),
     ("test_pairs_trading_example_writes_report_to_directory", test_pairs_trading_example_writes_report_to_directory),
     ("test_trading_costs_robustness_example_imports", test_trading_costs_robustness_example_imports),
     ("test_trading_costs_robustness_example_runs", test_trading_costs_robustness_example_runs),

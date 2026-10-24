@@ -11,11 +11,13 @@ Key concepts:
 - Rolling z-score for entry/exit signals
 - Pairs trading mechanics (long spread / short spread)
 - Transaction costs and slippage
+- Walk-forward / out-of-sample validation (chronological split)
 - Performance attribution for market-neutral strategies
 """
 
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -186,6 +188,78 @@ def main():
     # Generate report (generate_report writes report.txt into the directory)
     generate_report(metrics, output_dir, symbol="PAIR", strategy_name="zscore_mean_reversion")
     print(f"6. Report saved to: {output_dir / 'report.txt'}")
+
+    # Walk-forward / out-of-sample validation (chronological split)
+    print()
+    print("6b. Walk-forward / out-of-sample validation (chronological)")
+    print("-" * 80)
+    n = len(df1)
+    train_end = int(n * 0.6)
+    val_end = int(n * 0.8)
+    df1_train = df1.iloc[:train_end]
+    df1_val = df1.iloc[train_end:val_end]
+    df1_test = df1.iloc[val_end:]
+    df2_train = df2.iloc[:train_end]
+    df2_val = df2.iloc[train_end:val_end]
+    df2_test = df2.iloc[val_end:]
+    pair_data_oos = {"ASSET_A": df1_test, "ASSET_B": df2_test}
+    results_oos = run_backtest(
+        data=pair_data_oos,
+        strategy=strategy,
+        args=type('Args', (), {
+            'strategy': strategy.name,
+            'symbol': 'ASSET_A',
+            'commission': 0.0002,
+            'slippage': 0.0001,
+            'impact_coefficient': 0.0,
+            'borrow_cost': 0.0,
+            'funding_cost': 0.0,
+            'fill_rate': 1.0,
+            'latency': 0,
+            'initial_capital': 100000,
+            'risk_free_rate': None,
+            'n_trials': None,
+            'multi_symbol': False,
+            'validate_point_in_time': False,
+            'point_in_time_strict': False,
+            'panel_pricing': 'net-exposure',
+            'impact_aggregation': 'panel',
+            'adv_window': 20,
+        })(),
+    )
+    metrics_oos = calculate_metrics(results_oos)
+    print(f"   Train/Val/Test: {len(df1_train)}/{len(df1_val)}/{len(df1_test)} (chronological)")
+    print(f"   Out-of-sample (test) Total Return: {metrics_oos.get('total_return', 0):.2%}")
+    print(f"   Out-of-sample (test) Sharpe Ratio: {metrics_oos.get('sharpe_ratio', 0):.3f}")
+    print(f"   Out-of-sample (test) Max Drawdown: {metrics_oos.get('max_drawdown', 0):.2%}")
+    # Cost sensitivity
+    results_oos_high = run_backtest(
+        data=pair_data_oos,
+        strategy=strategy,
+        args=type('Args', (), {
+            'strategy': strategy.name,
+            'symbol': 'ASSET_A',
+            'commission': 0.0005,
+            'slippage': 0.0003,
+            'impact_coefficient': 0.0,
+            'borrow_cost': 0.0,
+            'funding_cost': 0.0,
+            'fill_rate': 1.0,
+            'latency': 0,
+            'initial_capital': 100000,
+            'risk_free_rate': None,
+            'n_trials': None,
+            'multi_symbol': False,
+            'validate_point_in_time': False,
+            'point_in_time_strict': False,
+            'panel_pricing': 'net-exposure',
+            'impact_aggregation': 'panel',
+            'adv_window': 20,
+        })(),
+    )
+    metrics_oos_high = calculate_metrics(results_oos_high)
+    print(f"   Cost sensitivity (8 bps): OOS Total Return: {metrics_oos_high.get('total_return', 0):.2%}, Sharpe: {metrics_oos_high.get('sharpe_ratio', 0):.3f}")
+    print()
 
     # Generate tear sheet if possible
     try:
