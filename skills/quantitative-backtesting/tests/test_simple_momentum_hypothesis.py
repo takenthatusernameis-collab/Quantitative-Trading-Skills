@@ -69,8 +69,55 @@ def test_hypothesis_example_runs_successfully():
     assert "SUPPORTED" in result.stdout or "NOT SUPPORTED" in result.stdout
 
 
+def _metrics_for(commission, slippage):
+    data_path = ASSETS_DIR / "sample_ohlcv.csv"
+    bench_path = ASSETS_DIR / "sample_benchmark.csv"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cmd = [
+            sys.executable,
+            str(SCRIPTS_DIR / "run_backtest.py"),
+            "--data", str(data_path),
+            "--strategy", "sma_crossover",
+            "--symbol", "SPY",
+            "--params", '{"fast_period": 10, "slow_period": 30}',
+            "--commission", str(commission),
+            "--slippage", str(slippage),
+            "--train-frac", "0.6",
+            "--val-frac", "0.2",
+            "--test-frac", "0.2",
+            "--run-split", "test",
+            "--benchmark", str(bench_path),
+            "--validate-point-in-time",
+            "--output", str(Path(tmpdir) / "outdir"),
+        ]
+        result = subprocess.run(cmd, cwd=str(SCRIPTS_DIR), capture_output=True, text=True)
+        assert result.returncode == 0, f"Failed: {result.stderr}\n{result.stdout}"
+        # find metrics
+        candidates = [Path(tmpdir) / "outdir" / "metrics.json", SCRIPTS_DIR / "results" / "metrics.json", Path("results") / "metrics.json"]
+        # also glob
+        for c in candidates:
+            if c.exists():
+                return json.loads(c.read_text())
+        for c in Path(tmpdir).rglob("*.json"):
+            return json.loads(c.read_text())
+        raise RuntimeError("metrics not found")
+
+
+def test_simple_momentum_costs_are_actually_applied():
+    """Zero-cost run must beat costed run on net Sharpe and total return."""
+    with_costs = _metrics_for(0.0002, 0.0001)
+    without_costs = _metrics_for(0.0, 0.0)
+    assert without_costs["sharpe_ratio"] > with_costs["sharpe_ratio"], (
+        f"{without_costs['sharpe_ratio']} vs {with_costs['sharpe_ratio']}"
+    )
+    assert without_costs["total_return"] > with_costs["total_return"], (
+        f"{without_costs['total_return']} vs {with_costs['total_return']}"
+    )
+
+
 if __name__ == "__main__":
     test_simple_momentum_hypothesis_example_exists()
     test_run_backtest_with_splits_produces_auditable_results()
     test_hypothesis_example_runs_successfully()
+    test_simple_momentum_costs_are_actually_applied()
     print("All tests passed")
