@@ -696,6 +696,20 @@ def test_real_data_pipeline_example_emits_deflated_alpha_outputs():
 # Test registry
 # ---------------------------------------------------------------------------
 
+def test_scripts_results_untouched_after_examples():
+    import subprocess
+    repo_root = SKILLS_DIR.parent.parent
+    result = subprocess.run(
+        ["git", "status", "--porcelain", "skills/quantitative-backtesting/scripts/results/"],
+        cwd=str(repo_root), capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == "", (
+        "tracked scripts/results/ artifacts were mutated by the test suite:\n"
+        + result.stdout
+    )
+
+
 TEST_REGISTRY = [
     ("test_deflated_alpha_example_imports", test_deflated_alpha_example_imports),
     ("test_deflated_alpha_example_runs", test_deflated_alpha_example_runs),
@@ -734,6 +748,7 @@ TEST_REGISTRY = [
     ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
     ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
     ("test_real_data_pipeline_example_emits_deflated_alpha_outputs", test_real_data_pipeline_example_emits_deflated_alpha_outputs),
+    ("test_scripts_results_untouched_after_examples", test_scripts_results_untouched_after_examples),
 ]
 
 
