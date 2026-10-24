@@ -1,22 +1,23 @@
-# Handoff — next task: re-run the slow framework suite (2026-10-24)
+# Handoff — slow framework suite re-run complete (2026-10-24)
 
 ## What changed
-- Falsifiable hypothesis example's advertised controls (2bps/1bps costs, walk-forward path, `best_avg_sharpe` selection, N=2 benchmarks) are now recorded in the returned dict's `methodology` block and pinned by three new regression tests. See `HANDOFF.md` for full detail.
+- None (verification only). The previous handoff's change (falsifiable hypothesis example methodology block + tests) was already applied and not modified this session.
 
 ## What was actually verified
-- `tests/test_falsifiable_hypothesis_example.py` → 17 passed.
-- `tests/test_examples_coverage.py` → 39 passed.
-- Example standalone exit 0; positive control still `SUPPORTED`.
+- `skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py` → 17 passed
+- `skills/quantitative-backtesting/tests/test_examples_coverage.py` → 39 passed (via earlier context; not re-run this session)
+- `skills/quantitative-backtesting/tests/test_walk_forward.py` → 183 passed (233.27s)
+- `skills/quantitative-backtesting/tests/test_cpcv.py` → 29 passed (95.47s)
+- `skills/quantitative-backtesting/tests/test_performance.py` → 33 passed (0.45s)
+- `skills/quantitative-backtesting/tests/test_resolution_vs_sample_size.py` → 77 passed (646.09s)
+- `skills/quantitative-backtesting/tests/test_out_of_sample_window.py` → 11 passed (2.31s)
+- Total: 333 slow/framework tests passed, no regressions observed.
 
 ## What remains unresolved
-- The slow framework suite was not re-run to completion this session (each file exceeds the 2-minute per-command budget). They were not modified by this change.
+- None related to the requested verification. The tests mentioned in the previous handoff all pass.
+
+## Approaches already tried
+- Ran with PYTHONPATH set for the skill's scripts; deps (numpy/pandas/matplotlib/pytest) installed in user env.
 
 ## One precise next task
-- Re-run the slow framework suite to confirm no regression from the falsifiable-example signature change:
-  `skills/quantitative-backtesting/tests/test_walk_forward.py`,
-  `tests/test_cpcv.py`, `tests/test_performance.py`,
-  `tests/test_resolution_vs_sample_size.py`,
-  `tests/test_out_of_sample_window.py`.
-  If any fail, triage against this change (only `falsifiable_hypothesis_example.py` and its test file were touched).
-
-(End of file - total 15 lines)
+- No immediate blocker. If continuing quant research, pick one bounded task from the skill (e.g. improve robustness of the falsifiable hypothesis example's walk-forward selection or extend resolution reporting) with concrete verification. Inspect relevant files under `skills/quantitative-backtesting/` and only change what directly supports a falsifiable quant question.
