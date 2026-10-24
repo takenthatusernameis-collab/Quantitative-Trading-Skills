@@ -561,6 +561,44 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
         print("  criteria; it is reported here unchanged.")
         print("=" * 80)
 
+    # Held-out window resolution curve (measurement, not a correction).
+    # Varies test_frac with train_frac = 0.8 - test_frac, val_frac = 0.2,
+    # at a fixed sample size on the synthetic control fixture. The trade-off:
+    # a larger held-out window gives more observations for the test (better
+    # resolution) but shortens training, raising the deflation floor SR*.
+    # Measures one series at a time (both null and effect) to answer different
+    # questions; does not change criterion outcomes or the verdict.
+    try:
+        import sys
+        scripts_dir_local = Path(__file__).resolve().parent.parent / "scripts"
+        if str(scripts_dir_local) not in sys.path:
+            sys.path.insert(0, str(scripts_dir_local))
+        from measure_resolution_vs_sample_size import (
+            measure_test_frac_sweep,
+            _summarize_test_frac_sweep,
+            print_test_frac_sweep,
+        )
+        from generate_positive_control_data import CONTROL_PERIODS, CONTROL_STRATEGY_SEED
+        print("\n7. HELD-OUT WINDOW RESOLUTION CURVE (measurement, does not change verdict)")
+        print("  Trade-off: larger test_frac improves test power but shrinks training -> raises SR*/alpha* floors")
+        sweeps_to_measure = [("no_effect", False), ("effect", True)]
+        for label, inject_effect in sweeps_to_measure:
+            try:
+                rows = measure_test_frac_sweep(
+                    CONTROL_PERIODS,
+                    seeds=[CONTROL_STRATEGY_SEED],
+                    test_fracs=[0.1, 0.15, 0.2, 0.25, 0.3],
+                    val_frac=0.2,
+                    inject_effect=inject_effect,
+                )
+                stats, first_all, first_any, first_all_alpha, first_any_alpha = _summarize_test_frac_sweep(rows)
+                print(f"\n  Series: {label}")
+                print_test_frac_sweep(stats, first_all, first_any, first_all_alpha, first_any_alpha)
+            except Exception as e:
+                print(f"  (sweep unavailable for {label}: {e})")
+    except Exception as e:
+        print(f"\n  (held-out window resolution curve unavailable: {e})")
+
     return {
         "hypothesis": HYPOTHESIS,
         "verdict": verdict,
