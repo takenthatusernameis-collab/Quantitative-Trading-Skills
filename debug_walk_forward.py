@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-SKILLS_DIR = Path(__file__).resolve().parent.parent
+SKILLS_DIR = Path(__file__).resolve().parent / "skills" / "quantitative-backtesting"
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
 from walk_forward import (  # noqa: E402
@@ -66,8 +66,8 @@ def _make_benchmark_data(periods: int = 100, seed: int = 99) -> pd.DataFrame:
 def debug_walk_forward():
     """Debug walk_forward_analysis directly."""
     # Create test data
-    data = _make_ohlcv_data(periods=100, seed=42)
-    benchmark = _make_benchmark_data(periods=100, seed=99)
+    data = _make_ohlcv_data(periods=300, seed=42)
+    benchmark = _make_benchmark_data(periods=300, seed=99)
 
     print(f"Data shape: {data.shape}")
     print(f"Benchmark shape: {benchmark.shape}")

@@ -11,7 +11,7 @@ import traceback
 from pathlib import Path
 
 # Add the scripts directory to the path
-SKILLS_DIR = Path(__file__).resolve().parent.parent
+SKILLS_DIR = Path(__file__).resolve().parent / "skills" / "quantitative-backtesting"
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
 import numpy as np
