@@ -1,15 +1,15 @@
-# Handoff — scripts/results mutation regression verified (2026-10-24)
+# Handoff — reproducible backtest example verified (2026-10-24)
 
 ## What changed
-- No code change. Verified `test_scripts_results_untouched_after_examples` exists and passes, and the full `test_examples_coverage.py` suite (38 tests) leaves `skills/quantitative-backtesting/scripts/results/` clean (`git status --porcelain` empty).
+- No code change. Verified `test_reproducible_backtest_example.py` (15 tests) and `test_examples_coverage.py` (39 tests) all pass.
 
 ## What was actually verified
-- `tests/test_examples_coverage.py` → 38 passed.
-- `git status --porcelain` empty after run.
-- Searched examples for direct writes to `scripts/results/`: none; hypothesis examples redirect to temp dirs; real_data_pipeline uses tmpdir. No culprit writes to tracked results dir.
+- `tests/test_reproducible_backtest_example.py` → 15 passed.
+- `tests/test_examples_coverage.py` → 39 passed.
+- `git status --porcelain` clean.
 
 ## What remains unresolved
-- None identified. If future suites mutate results, inspect `test_walk_forward.py` and any new example that writes to a default `results/` dir.
+- `reproducible_backtest_example.py` is reproducibility-focused (no walk-forward/cost sensitivity surface); adding such assertions there is out of scope.
 
 ## One precise next task
-- Pick next methodological gap: add out-of-sample/walk-forward coverage or cost-sensitivity assertions to remaining untested examples. Ensure any new example writes outputs to a temp dir.
+- Add walk-forward/out-of-sample or cost-sensitivity assertions to `falsifiable_hypothesis_example.py` test suite if not already covered; inspect its output for "Walk-forward" / "Cost sensitivity" banners first.
