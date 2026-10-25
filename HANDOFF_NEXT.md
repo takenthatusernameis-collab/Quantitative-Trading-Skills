@@ -1,18 +1,16 @@
-# Handoff — slow framework suite re-run (2026-10-25)
+# Handoff — resolution suite run (2026-10-25)
 
 ## What changed
-- Re-ran slow framework suite per prior handoff.
-- `test_walk_forward.py`: 183 passed (132s).
-- `test_cpcv.py`: 29 passed (38s).
-- `test_resolution_vs_sample_size.py`: still running (>10 min, progress dots only); killed to avoid unbounded session. Prior handoff recorded 77 passing; not re-verified this session.
+- Re-ran resolution suite; process stayed running >10 min with no captured output (buffered); stopped to avoid unbounded session. Prior handoff recorded 77 passing (not re-verified).
+- walk_forward (183 passed) and cpcv (29 passed) verified in prior session.
 
 ## What was actually verified
-- walk_forward and cpcv suites pass with installed deps (numpy/pandas/matplotlib/pytest added locally, not to repo).
-- Dependencies installed into user site-packages only; no repo changes.
+- test_run_backtest.py: 108 passed.
+- test_performance.py: 33 passed.
+- Multiple hypothesis/strategy tests spot-checked and passing.
 
 ## What remains unresolved
-- test_resolution_vs_sample_size.py full run not completed; rerun with longer budget if needed.
-- No code changes made this session.
+- test_resolution_vs_sample_size.py full run not completed; needs longer budget (~15-20 min) or per-test isolation.
 
 ## One precise next task
-- Complete the resolution suite run (allow ~15 min), then pick one bounded quant research task (e.g. cost-sensitivity sweep in simple_momentum_hypothesis.py) with concrete verification.
+- Run test_resolution_vs_sample_size.py with per-test timeout/isolation to identify any failing test, then proceed to a bounded quant research task (cost-sensitivity sweep in simple_momentum_hypothesis.py) with concrete verification.
