@@ -1,19 +1,15 @@
-# Handoff — per-path resolution in falsifiable example (2026-10-25)
+# Handoff — per-path resolution assertions added (2026-10-25)
 
 ## What changed
-- `_test_resolution` already carries `resolution["paths"]` with per-path
-  `minimum_detectable_sharpe`/`minimum_detectable_alpha` (and supporting counts)
-  for out_of_sample, walk_forward, and cpcv. Verified example exits 0 and
-  test_falsifiable_hypothesis_example.py passes (17/17 per prior record).
+- Added additive assertions to `test_the_example_reports_the_test_resolution`
+  in `skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py`
+  that `res["paths"]` contains `out_of_sample`, `walk_forward`, and `cpcv`,
+  each with `minimum_detectable_sharpe` and `minimum_detectable_alpha`.
 
-## What remains unresolved
-- The resolution-block test only asserts top-level out-of-sample keys; no
-  assertion yet that `resolution["paths"]` carries all three paths' MDA/MDS.
+## What was actually verified
+- Focused test passes: 1/1 in 37.7s.
 
 ## One precise next task
-- Add additive assertions to `test_the_example_reports_the_test_resolution`
-  that `res["paths"]` contains out_of_sample/walk_forward/cpcv each with
-  `minimum_detectable_sharpe` and `minimum_detectable_alpha`. Run focused test.
-
-## Constraints
-- Smallest reversible change; do not redesign orchestration.
+- Re-run the slow framework suite (test_walk_forward.py, test_cpcv.py,
+  test_resolution_vs_sample_size.py) to confirm no regression, then pick one
+  bounded quant research task.

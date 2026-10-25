@@ -256,6 +256,15 @@ def test_the_example_reports_the_test_resolution():
     }
     assert result["criteria_beyond_resolution"] == res["criteria_beyond_resolution"]
 
+    paths = res["paths"]
+    assert isinstance(paths, dict)
+    for path_key in ("out_of_sample", "walk_forward", "cpcv"):
+        assert path_key in paths, f"resolution paths missing {path_key}"
+        block = paths[path_key]
+        assert isinstance(block, dict)
+        assert "minimum_detectable_sharpe" in block
+        assert "minimum_detectable_alpha" in block
+
 
 def test_the_resolution_does_not_change_the_verdict():
     """The resolution analysis is a measurement: it changes no criterion
