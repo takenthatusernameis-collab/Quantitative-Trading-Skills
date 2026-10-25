@@ -37,16 +37,26 @@ see `HANDOFF.md`. All five root scripts run end-to-end.
   `performance.py` already supports `--benchmark SPY QQQ IWM` with Deflated
   Alpha; see `IMPLEMENTATION_SUMMARY.md`).
 
-## One precise next task
-Extend the falsifiable example's resolution reporting: add a held-out-window
-`minimum_detectable_alpha`-vs-sample-size curve to
+## One precise next task (this session — DONE)
+Extended section 8 of
 `skills/quantitative-backtesting/examples/falsifiable_hypothesis_example.py`
-(pin the example's "how much data do I need" guidance to its own
-configuration rather than the pooled-OOS paths in
-`test_resolution_vs_sample_size.py`), following the pattern of
-`measure_resolution_vs_sample_size.py` and `scripts/walk_forward.py`
-`minimum_detectable_alpha`. Verify by running the example standalone (exit 0)
-and `test_falsifiable_hypothesis_example.py` (17 passed baseline).
+to report `minimum_detectable_alpha`-vs-sample-size for all three validation
+paths (out_of_sample, walk_forward, cpcv), pinned to the example's own
+0.6/0.2/0.2 split and cost settings, instead of only the held-out window.
+Added `PATH_WALK_FORWARD`/`PATH_CPCV` imports from
+`scripts/measure_resolution_vs_sample_size.py`. Verified: example standalone
+exit 0 (section 8 prints all three paths);
+`test_falsifiable_hypothesis_example.py` → 17 passed, exit 0; diff scoped to
+one file (42 insertions, 32 deletions).
+
+## One precise next task (next session)
+Extend the example's section 6 resolution block (and the returned `resolution`
+dict) to carry per-path `minimum_detectable_alpha`/`minimum_detectable_sharpe`
+for out_of_sample, walk_forward, and cpcv — additive to the existing
+out-of-sample block — so the structured result, not just console section 8,
+reflects each validation path's data requirement. Verify: example exits 0 and
+`test_falsifiable_hypothesis_example.py` still 17/17 (the resolution-block test
+asserts the out-of-sample keys; adding per-path keys is additive).
 
 ## Constraints
 - Smallest reversible change; do not redesign orchestration or weaken
