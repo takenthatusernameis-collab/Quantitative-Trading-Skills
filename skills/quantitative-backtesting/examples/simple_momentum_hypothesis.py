@@ -7,9 +7,17 @@ positive out-of-sample risk-adjusted returns (Sharpe > 0) net of 3 bps
 round-trip trading costs on the held-out test set.
 
 FALSIFICATION CRITERIA:
-1. Out-of-sample Sharpe ratio (net of costs) > 0
-2. Out-of-sample total return > 0 (net of costs)
-"""
+    1. Out-of-sample Sharpe ratio (net of costs) > 0
+    2. Out-of-sample total return > 0 (net of costs)
+
+    The benchmark set is resolved to the strategy universe (sample_ohlcv.csv)
+    plus the alternative benchmark (sample_benchmark.csv). Testing against
+    multiple benchmarks is itself a multiple-testing problem, so the
+    Deflated Alpha Ratio corrects the benchmark alpha for the number of
+    benchmarks tested; it is only emitted by the framework when n_benchmarks
+    >= 2, which is why both benchmarks are passed rather than a single
+    duplicate path.
+    """
 
 import argparse
 import json
@@ -62,12 +70,54 @@ def _fmt_num(v, nd=4):
         return "N/A"
 
 
-def run_hypothesis_test(data_path, benchmark_path=None):
-    scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+def _resolve_benchmarks(data_path, benchmark_path=None):
+    """Return the ordered, de-duplicated list of benchmark CSV paths.
+
+    The Deflated Alpha Ratio only exists when the strategy is tested against
+    MULTIPLE benchmarks (n_benchmarks >= 2): testing against a single
+    benchmark is not a multiple-testing problem, so the framework suppresses
+    the correction rather than inventing one. The prior version of this script
+    resolved both its primary and fallback benchmark to the same
+    sample_benchmark.csv, so exactly one unique path survived.
+    """
     data_path = Path(data_path)
     if benchmark_path is None:
         benchmark_path = data_path.parent / "sample_benchmark.csv"
     benchmark_path = Path(benchmark_path)
+
+    candidates = [data_path, benchmark_path]
+    seen, result = set(), []
+    for cand in candidates:
+        key = str(cand.resolve())
+        if cand.exists() and key not in seen:
+            seen.add(key)
+            result.append(cand)
+    return result
+
+
+def _extract_benchmark_metrics(metrics):
+    """Pull the primary-benchmark alpha / total return out of a metrics dict.
+
+    With multiple benchmarks the framework keys metrics per benchmark
+    (benchmark_0_alpha, benchmark_1_...) and leaves the aggregate
+    benchmark_total_return / alpha fields as None. Prefer benchmark_0 (the
+    strategy's own universe, listed first) and fall back to the aggregate
+    fields for single-benchmark runs.
+    """
+    alpha = metrics.get("benchmark_0_alpha")
+    if alpha is None:
+        alpha = metrics.get("alpha")
+    bench_return = metrics.get("benchmark_0_benchmark_total_return")
+    if bench_return is None:
+        bench_return = metrics.get("benchmark_total_return")
+    return alpha, bench_return
+
+
+def run_hypothesis_test(data_path, benchmark_path=None):
+    scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+    data_path = Path(data_path)
+    bench_paths = _resolve_benchmarks(data_path, benchmark_path)
+    benchmark_path = bench_paths[0] if bench_paths else None
 
     print("=" * 80)
     print("FALSIFIABLE HYPOTHESIS TEST (using run_backtest.py)")
@@ -75,7 +125,7 @@ def run_hypothesis_test(data_path, benchmark_path=None):
     print(f"Hypothesis: {HYPOTHESIS}")
     print(f"Trading costs: {COMMISSION*10000:.0f} bps commission + {SLIPPAGE*10000:.0f} bps slippage")
     print(f"Data: {data_path}")
-    print(f"Benchmark: {benchmark_path if benchmark_path.exists() else 'None'}")
+    print(f"Benchmarks ({len(bench_paths)}): {[str(p) for p in bench_paths]}")
     print("Split: train/val/test = 0.6/0.2/0.2 (test split only)")
     print("=" * 80)
 
@@ -98,8 +148,8 @@ def run_hypothesis_test(data_path, benchmark_path=None):
             "--output", str(tmpdir_path / "results"),
             "--validate-point-in-time",
         ]
-        if benchmark_path.exists():
-            cmd.extend(["--benchmark", str(benchmark_path)])
+        if bench_paths:
+            cmd.extend(["--benchmark"] + [str(p) for p in bench_paths])
         
         result = subprocess.run(cmd, cwd=str(scripts_dir), capture_output=True, text=True)
         if result.returncode != 0:
@@ -136,9 +186,10 @@ def run_hypothesis_test(data_path, benchmark_path=None):
     print(f"  Annualized Return: {_fmt_pct(metrics.get('annualized_return'))}")
     print(f"  Sharpe Ratio: {_fmt_num(metrics.get('sharpe_ratio'))}")
     print(f"  Max Drawdown: {_fmt_pct(metrics.get('max_drawdown'))}")
-    if metrics.get('benchmark_total_return') is not None:
-        print(f"  Benchmark Total Return: {_fmt_pct(metrics.get('benchmark_total_return'))}")
-        print(f"  Alpha: {_fmt_pct(metrics.get('alpha'))}")
+    alpha, bench_return = _extract_benchmark_metrics(metrics)
+    if bench_return is not None:
+        print(f"  Benchmark Total Return (primary): {_fmt_pct(bench_return)}")
+        print(f"  Alpha (primary benchmark): {_fmt_pct(alpha)}")
 
     print("\n3. FALSIFICATION CRITERIA")
     criterion_results = []
@@ -171,8 +222,8 @@ def run_hypothesis_test(data_path, benchmark_path=None):
         "metrics": {
             "sharpe_ratio": sharpe,
             "total_return": ret,
-            "benchmark_total_return": metrics.get('benchmark_total_return'),
-            "alpha": metrics.get('alpha'),
+            "benchmark_total_return": bench_return,
+            "alpha": alpha,
         },
     }
 
@@ -180,6 +231,7 @@ def run_hypothesis_test(data_path, benchmark_path=None):
 def _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdir_path):
     """Run run_backtest.py at the given cost settings and return parsed metrics."""
     scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+    bench_paths = _resolve_benchmarks(data_path, benchmark_path)
     cmd = [
         sys.executable,
         str(scripts_dir / "run_backtest.py"),
@@ -196,8 +248,8 @@ def _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdi
         "--output", str(tmpdir_path / "results"),
         "--validate-point-in-time",
     ]
-    if benchmark_path.exists():
-        cmd.extend(["--benchmark", str(benchmark_path)])
+    if bench_paths:
+        cmd.extend(["--benchmark"] + [str(p) for p in bench_paths])
 
     result = subprocess.run(cmd, cwd=str(scripts_dir), capture_output=True, text=True)
     if result.returncode != 0:
@@ -244,20 +296,21 @@ def run_cost_sweep(data_path, benchmark_path=None):
             metrics = _run_backtest_metrics(
                 data_path, benchmark_path, commission, slippage, tmpdir_path
             )
+            alpha, bench_return = _extract_benchmark_metrics(metrics)
             rows.append({
                 "label": label,
                 "commission": commission,
                 "slippage": slippage,
                 "sharpe_ratio": metrics.get("sharpe_ratio"),
                 "total_return": metrics.get("total_return"),
-                "benchmark_total_return": metrics.get("benchmark_total_return"),
-                "alpha": metrics.get("alpha"),
+                "benchmark_total_return": bench_return,
+                "alpha": alpha,
             })
             print(
                 f"  {label:<34} "
                 f"Sharpe={_fmt_num(metrics.get('sharpe_ratio'))}  "
                 f"Return={_fmt_pct(metrics.get('total_return'))}  "
-                f"Alpha={_fmt_pct(metrics.get('alpha'))}"
+                f"Alpha={_fmt_pct(alpha)}"
             )
 
     # Regression guard: the frictionless run must beat the costed run on both
