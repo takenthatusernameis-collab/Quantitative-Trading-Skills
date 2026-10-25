@@ -596,6 +596,22 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
     except Exception:
         alpha_bound_plaus = None
     print(f"    max plausible annualized alpha:  {_fmt_pct(alpha_bound_plaus)}")
+    # Per-path resolution (additive) — structured result and console block
+    try:
+        paths_res = resolution.get("paths") or {}
+        if paths_res:
+            print("  Per-path minimum detectable effect (data requirement by validation path):")
+            for p in ("out_of_sample", "walk_forward", "cpcv"):
+                blk = paths_res.get(p) if isinstance(paths_res, dict) else None
+                if not isinstance(blk, dict):
+                    continue
+                mds = blk.get("minimum_detectable_sharpe")
+                mda = blk.get("minimum_detectable_alpha")
+                print(f"    - {p}: min detectable Sharpe {_fmt_num(mds)}, "
+                      f"min detectable alpha {_fmt_pct(mda)} "
+                      f"(T_test={blk.get('n_test_observations')}, trials={blk.get('n_parameter_trials')}, N={blk.get('n_benchmarks')})")
+    except Exception:
+        pass
     if beyond:
         print("  Beyond the sample's resolution (a failure here is not evidence")
         print("  against the hypothesis):")
