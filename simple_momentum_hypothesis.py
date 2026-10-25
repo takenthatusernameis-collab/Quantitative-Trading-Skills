@@ -10,6 +10,8 @@ FALSIFICATION CRITERIA:
     1. Out-of-sample Sharpe ratio (net of costs) > 0
     2. Out-of-sample total return > 0 (net of costs)
     3. Deflated Alpha Ratio > 0.5 (multiple-benchmark deflated alpha)
+    4. Strategy capacity (notional) > initial capital at the advertised
+       market-impact level.
 
     Criterion 3 is a benchmark-side data-mining control: the strategy is tested
     against MULTIPLE benchmarks, which is itself a multiple-testing problem, so
@@ -18,6 +20,16 @@ FALSIFICATION CRITERIA:
     script resolves the benchmark set to the strategy universe plus the
     alternative benchmark so the criterion is always live rather than a
     permanently-silent no-op.
+
+    Criterion 4 is an execution-side capacity control. The framework estimates
+    the notional size at which market impact reaches an acceptable bound
+    (capacity = max_impact * ADV / impact_coefficient); this criterion requires
+    that estimate to exceed the capital actually deployed, i.e. the strategy is
+    not capacity-constrained at the tested scale. The estimate is None when
+    market impact is disabled (impact_coefficient = 0), so the criterion is only
+    live when the capacity sweep produces a finite reading -- an impact model
+    that silently no-ops would report capacity=None forever and the criterion
+    would be a permanently-silent no-op dressed as an execution control.
 
 If any fails -> NOT SUPPORTED.
 """
@@ -39,9 +51,21 @@ CRITERIA = [
     ("oos_sharpe_gt_zero", "oos_sharpe > 0 (net of costs)"),
     ("oos_total_return_positive", "oos_total_return > 0 (net of costs)"),
     ("deflated_alpha_ratio_gt_threshold", "deflated_alpha_ratio > 0.5 (multiple-benchmark deflated alpha)"),
+    ("capacity_gt_initial_capital", "strategy capacity (notional) > initial capital at advertised impact level"),
 ]
 
 DEFLATED_ALPHA_THRESHOLD = 0.5
+CAPACITY_INITIAL_CAPITAL = 100_000.0
+# Market-impact coefficient exercised by the capacity sweep. The advertised
+# setting is the hypothesis's operating assumption; the zero-impact setting is
+# the upper bound where capacity is unmeasurable (None). Comparing the two is a
+# regression guard that the capacity estimate is actually produced by the
+# impact path: an impact model that silently no-ops reports capacity=None at
+# every setting and the criterion would be a permanently-silent no-op.
+CAPACITY_SWEEP_SETTINGS = [
+    ("impact disabled (capacity unmeasurable)", 0.0),
+    ("advertised (impact_coefficient=0.1)", 0.1),
+]
 
 COMMISSION = 0.0002
 SLIPPAGE = 0.0001
@@ -106,7 +130,7 @@ def _resolve_benchmarks(data_path, benchmark_path=None):
     return result
 
 
-def run_hypothesis_test(data_path, benchmark_path=None):
+def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1):
     scripts_dir = Path(__file__).resolve().parent / "skills" / "quantitative-backtesting" / "scripts"
     data_path = Path(data_path)
     bench_paths = _resolve_benchmarks(data_path, benchmark_path)
@@ -117,6 +141,8 @@ def run_hypothesis_test(data_path, benchmark_path=None):
     print("=" * 80)
     print(f"Hypothesis: {HYPOTHESIS}")
     print(f"Trading costs: {COMMISSION*10000:.0f} bps commission + {SLIPPAGE*10000:.0f} bps slippage")
+    print(f"Market impact: impact_coefficient={impact_coefficient} "
+          f"(capacity sweep advertised setting)")
     print(f"Data: {data_path}")
     print(f"Benchmarks ({len(bench_paths)}): {[str(p) for p in bench_paths]}")
     print("Split: train/val/test = 0.6/0.2/0.2 (test split only)")
@@ -140,6 +166,7 @@ def run_hypothesis_test(data_path, benchmark_path=None):
             "--run-split", "test",
             "--output", str(out_path),
             "--validate-point-in-time",
+            "--impact-coefficient", str(impact_coefficient),
         ]
         if bench_paths:
             cmd.extend(["--benchmark"] + [str(p) for p in bench_paths])
@@ -186,6 +213,13 @@ def run_hypothesis_test(data_path, benchmark_path=None):
     da = metrics.get('deflated_alpha')
     if isinstance(da, dict):
         print(f"  Deflated Alpha Ratio: {_fmt_num(da.get('deflated_alpha_ratio'))} (p={_fmt_num(da.get('p_value'))}, N={da.get('n_benchmarks')})")
+    capacity = metrics.get('capacity')
+    if capacity is not None:
+        print(f"  Strategy Capacity (notional, impact_coefficient={impact_coefficient}): "
+              f"${capacity:,.0f} vs initial capital ${CAPACITY_INITIAL_CAPITAL:,.0f}")
+    else:
+        print(f"  Strategy Capacity (notional): N/A "
+              f"(impact_coefficient={impact_coefficient} produced no estimate)")
 
     print("\n3. FALSIFICATION CRITERIA")
     criterion_results = []
@@ -208,6 +242,12 @@ def run_hypothesis_test(data_path, benchmark_path=None):
     passes.append(ok3)
     criterion_results.append({"name": CRITERIA[2][0], "description": CRITERIA[2][1], "passed": bool(ok3)})
     print(f"  [{'PASS' if ok3 else 'FAIL'}] {CRITERIA[2][0]}: {CRITERIA[2][1]} (ratio={_fmt_num(da_ratio)})")
+    capacity = metrics.get('capacity')
+    ok4 = capacity is not None and float(capacity) > CAPACITY_INITIAL_CAPITAL
+    passes.append(ok4)
+    criterion_results.append({"name": CRITERIA[3][0], "description": CRITERIA[3][1], "passed": bool(ok4)})
+    print(f"  [{'PASS' if ok4 else 'FAIL'}] {CRITERIA[3][0]}: {CRITERIA[3][1]} "
+          f"(capacity={_fmt_num(capacity)})")
 
     all_pass = all(passes)
     verdict = "SUPPORTED" if all_pass else "NOT SUPPORTED"
@@ -229,12 +269,13 @@ def run_hypothesis_test(data_path, benchmark_path=None):
             "benchmark_total_return": bench_return,
             "alpha": alpha,
             "deflated_alpha": metrics.get('deflated_alpha'),
+            "capacity": capacity,
         },
     }
 
 
-def _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdir_path):
-    """Run run_backtest.py at the given cost settings and return parsed metrics."""
+def _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdir_path, impact_coefficient=0.1):
+    """Run run_backtest.py at the given cost/impact settings and return parsed metrics."""
     scripts_dir = Path(__file__).resolve().parent / "skills" / "quantitative-backtesting" / "scripts"
     bench_paths = _resolve_benchmarks(data_path, benchmark_path)
     cmd = [
@@ -252,6 +293,7 @@ def _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdi
         "--run-split", "test",
         "--output", str(tmpdir_path / "results"),
         "--validate-point-in-time",
+        "--impact-coefficient", str(impact_coefficient),
     ]
     if bench_paths:
         cmd.extend(["--benchmark"] + [str(p) for p in bench_paths])
@@ -318,7 +360,8 @@ def run_cost_sweep(data_path, benchmark_path=None):
         tmpdir_path = Path(tmpdir)
         for label, commission, slippage in COST_SWEEP_SETTINGS:
             metrics = _run_backtest_metrics(
-                data_path, benchmark_path, commission, slippage, tmpdir_path
+                data_path, benchmark_path, commission, slippage, tmpdir_path,
+                impact_coefficient=CAPACITY_SWEEP_SETTINGS[-1][1],
             )
             alpha, bench_return = _extract_benchmark_metrics(metrics)
             rows.append({
@@ -372,10 +415,91 @@ def run_cost_sweep(data_path, benchmark_path=None):
     return rows
 
 
+def run_capacity_sweep(data_path, benchmark_path=None):
+    """Compare the advertised impact level against the impact-disabled upper bound.
+
+    This is a regression guard, not a research conclusion: the framework's
+    capacity estimate is None when impact_coefficient is 0 (the impact path is
+    disabled), so the two settings produce one finite reading and one None. If
+    the impact path silently no-ops, the advertised setting also reports
+    capacity=None and this sweep fails. A capacity estimate that is missing or
+    that does not move with the impact coefficient is the failure mode this
+    check exists to catch.
+    """
+    data_path = Path(data_path)
+    if benchmark_path is None:
+        benchmark_path = data_path.parent / "sample_benchmark.csv"
+    benchmark_path = Path(benchmark_path)
+
+    print("\n" + "=" * 80)
+    print("CAPACITY SWEEP: advertised impact level vs impact-disabled upper bound")
+    print("=" * 80)
+
+    rows = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        for label, impact_coefficient in CAPACITY_SWEEP_SETTINGS:
+            metrics = _run_backtest_metrics(
+                data_path, benchmark_path, COMMISSION, SLIPPAGE, tmpdir_path,
+                impact_coefficient=impact_coefficient,
+            )
+            capacity = metrics.get("capacity")
+            rows.append({
+                "label": label,
+                "impact_coefficient": impact_coefficient,
+                "capacity": capacity,
+                "sharpe_ratio": metrics.get("sharpe_ratio"),
+                "total_return": metrics.get("total_return"),
+            })
+            cap_str = "N/A (impact disabled)" if capacity is None else f"${capacity:,.0f}"
+            print(
+                f"  {label:<38} capacity={cap_str}  "
+                f"Sharpe={_fmt_num(metrics.get('sharpe_ratio'))}  "
+                f"Return={_fmt_pct(metrics.get('total_return'))}"
+            )
+
+    # Regression guard: the advertised setting must produce a finite capacity
+    # estimate, and the impact-disabled setting must not. An impact model that
+    # silently no-ops reports capacity=None at every setting.
+    disabled = rows[0]
+    advertised = rows[-1]
+    assert disabled["impact_coefficient"] == 0.0 and advertised["impact_coefficient"] == CAPACITY_SWEEP_SETTINGS[-1][1], (
+        "capacity sweep rows are not the impact-disabled / advertised pair"
+    )
+    assert disabled["capacity"] is None, (
+        "impact-disabled setting must report capacity=None, got "
+        f"{disabled['capacity']}"
+    )
+    assert advertised["capacity"] is not None, (
+        "advertised impact setting must produce a finite capacity estimate"
+    )
+    assert float(advertised["capacity"]) > 0, (
+        "capacity estimate must be positive: "
+        f"{advertised['capacity']}"
+    )
+    assert float(advertised["capacity"]) > CAPACITY_INITIAL_CAPITAL, (
+        "capacity estimate must exceed the capital actually deployed: "
+        f"{advertised['capacity']} vs {CAPACITY_INITIAL_CAPITAL}"
+    )
+
+    print()
+    print(
+        f"  Capacity path verified live: impact_coefficient "
+        f"{advertised['impact_coefficient']} produces a finite estimate of "
+        f"${advertised['capacity']:,.0f}, exceeding the deployed capital of "
+        f"${CAPACITY_INITIAL_CAPITAL:,.0f}; impact_coefficient 0 reports no "
+        f"estimate (impact path disabled)."
+    )
+    print("=" * 80)
+
+    return rows
+
+
 def main():
     data_path = Path(__file__).resolve().parent / "skills" / "quantitative-backtesting" / "assets" / "example_data" / "sample_ohlcv.csv"
     result = run_hypothesis_test(data_path)
     run_cost_sweep(data_path)
+    run_capacity_sweep(data_path)
     return 0
 
 
