@@ -29,7 +29,10 @@ HYPOTHESIS = (
 CRITERIA = [
     ("oos_sharpe_gt_zero", "oos_sharpe > 0 (net of costs)"),
     ("oos_total_return_positive", "oos_total_return > 0 (net of costs)"),
+    ("deflated_alpha_ratio_gt_threshold", "deflated_alpha_ratio > 0.5 (multiple-benchmark deflated alpha)"),
 ]
+
+DEFLATED_ALPHA_THRESHOLD = 0.5
 
 COMMISSION = 0.0002
 SLIPPAGE = 0.0001
@@ -163,6 +166,14 @@ def run_hypothesis_test(data_path, benchmark_path=None):
     passes.append(ok2)
     criterion_results.append({"name": CRITERIA[1][0], "description": CRITERIA[1][1], "passed": bool(ok2)})
     print(f"  [{'PASS' if ok2 else 'FAIL'}] {CRITERIA[1][0]}: {CRITERIA[1][1]}")
+    da = metrics.get('deflated_alpha')
+    da_ratio = None
+    if isinstance(da, dict):
+        da_ratio = da.get('deflated_alpha_ratio')
+    ok3 = da_ratio is not None and float(da_ratio) > DEFLATED_ALPHA_THRESHOLD
+    passes.append(ok3)
+    criterion_results.append({"name": CRITERIA[2][0], "description": CRITERIA[2][1], "passed": bool(ok3)})
+    print(f"  [{'PASS' if ok3 else 'FAIL'}] {CRITERIA[2][0]}: {CRITERIA[2][1]} (ratio={_fmt_num(da_ratio)})")
 
     all_pass = all(passes)
     verdict = "SUPPORTED" if all_pass else "NOT SUPPORTED"
