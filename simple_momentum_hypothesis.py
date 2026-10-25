@@ -99,8 +99,14 @@ def run_hypothesis_test(data_path, benchmark_path=None):
             "--output", str(out_path),
             "--validate-point-in-time",
         ]
+        bench_paths = []
         if benchmark_path.exists():
-            cmd.extend(["--benchmark", str(benchmark_path)])
+            bench_paths.append(str(benchmark_path))
+        alt = data_path.parent / "sample_benchmark.csv"
+        if alt.exists() and str(alt) not in bench_paths:
+            bench_paths.append(str(alt))
+        if bench_paths:
+            cmd.extend(["--benchmark"] + bench_paths)
 
         result = subprocess.run(cmd, cwd=str(scripts_dir), capture_output=True, text=True)
         if result.returncode != 0:
@@ -140,6 +146,9 @@ def run_hypothesis_test(data_path, benchmark_path=None):
     if metrics.get('benchmark_total_return') is not None:
         print(f"  Benchmark Total Return: {_fmt_pct(metrics.get('benchmark_total_return'))}")
         print(f"  Alpha: {_fmt_pct(metrics.get('alpha'))}")
+    da = metrics.get('deflated_alpha')
+    if isinstance(da, dict):
+        print(f"  Deflated Alpha Ratio: {_fmt_num(da.get('deflated_alpha_ratio'))} (p={_fmt_num(da.get('p_value'))}, N={da.get('n_benchmarks')})")
 
     print("\n3. FALSIFICATION CRITERIA")
     criterion_results = []
@@ -197,8 +206,14 @@ def _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdi
         "--output", str(tmpdir_path / "results"),
         "--validate-point-in-time",
     ]
+    bench_paths = []
     if benchmark_path.exists():
-        cmd.extend(["--benchmark", str(benchmark_path)])
+        bench_paths.append(str(benchmark_path))
+    alt = data_path.parent / "sample_benchmark.csv"
+    if alt.exists() and str(alt) not in bench_paths:
+        bench_paths.append(str(alt))
+    if bench_paths:
+        cmd.extend(["--benchmark"] + bench_paths)
 
     result = subprocess.run(cmd, cwd=str(scripts_dir), capture_output=True, text=True)
     if result.returncode != 0:
