@@ -1,16 +1,15 @@
-# Handoff — resolution suite run (2026-10-25)
+# Handoff — resolution suite + cost sweep (2026-10-25)
 
 ## What changed
-- Re-ran resolution suite; process stayed running >10 min with no captured output (buffered); stopped to avoid unbounded session. Prior handoff recorded 77 passing (not re-verified).
-- walk_forward (183 passed) and cpcv (29 passed) verified in prior session.
+- Ran cost sweep in simple_momentum_hypothesis.py; verified advertised costs reduce net performance (Sharpe -0.8883 -> -0.9042).
+- Ran resolution test subsets (cost_sweep, ladder/driver); all passing.
 
 ## What was actually verified
-- test_run_backtest.py: 108 passed.
-- test_performance.py: 33 passed.
-- Multiple hypothesis/strategy tests spot-checked and passing.
+- simple_momentum_hypothesis.py runs end-to-end; verdict NOT SUPPORTED.
+- Cost path live-verified.
 
 ## What remains unresolved
-- test_resolution_vs_sample_size.py full run not completed; needs longer budget (~15-20 min) or per-test isolation.
+- Full test_resolution_vs_sample_size.py not completed in one run (long runtime); subsets pass.
 
 ## One precise next task
-- Run test_resolution_vs_sample_size.py with per-test timeout/isolation to identify any failing test, then proceed to a bounded quant research task (cost-sensitivity sweep in simple_momentum_hypothesis.py) with concrete verification.
+- Run remaining resolution tests in per-test isolation to confirm all 77 pass, then extend cost-sensitivity sweep to multiple commission/slippage levels in simple_momentum_hypothesis.py with verification.
