@@ -34,6 +34,16 @@ CRITERIA = [
 COMMISSION = 0.0002
 SLIPPAGE = 0.0001
 
+# Cost settings exercised by the cost sweep. The advertised setting is the
+# hypothesis's operating assumption; the zero-cost setting is the frictionless
+# upper bound. Comparing the two is a regression guard that the advertised
+# costs are actually applied by the cost path -- a cost model that silently
+# no-ops would produce identical numbers at both settings and fail the sweep.
+COST_SWEEP_SETTINGS = [
+    ("frictionless (0 bps)", 0.0, 0.0),
+    ("advertised (2bp comm + 1bp slip)", COMMISSION, SLIPPAGE),
+]
+
 
 def _fmt_pct(v):
     if v is None:
@@ -168,9 +178,128 @@ def run_hypothesis_test(data_path, benchmark_path=None):
     }
 
 
+def _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdir_path):
+    """Run run_backtest.py at the given cost settings and return parsed metrics."""
+    scripts_dir = Path(__file__).resolve().parent / "skills" / "quantitative-backtesting" / "scripts"
+    cmd = [
+        sys.executable,
+        str(scripts_dir / "run_backtest.py"),
+        "--data", str(data_path),
+        "--strategy", "sma_crossover",
+        "--symbol", "SPY",
+        "--params", '{"fast_period": 10, "slow_period": 30}',
+        "--commission", str(commission),
+        "--slippage", str(slippage),
+        "--train-frac", "0.6",
+        "--val-frac", "0.2",
+        "--test-frac", "0.2",
+        "--run-split", "test",
+        "--output", str(tmpdir_path / "results"),
+        "--validate-point-in-time",
+    ]
+    if benchmark_path.exists():
+        cmd.extend(["--benchmark", str(benchmark_path)])
+
+    result = subprocess.run(cmd, cwd=str(scripts_dir), capture_output=True, text=True)
+    if result.returncode != 0:
+        print("STDOUT:", result.stdout[-800:])
+        print("STDERR:", result.stderr[-800:])
+        raise RuntimeError(f"run_backtest failed with code {result.returncode}")
+
+    metrics = {}
+    candidates = [
+        tmpdir_path / "results" / "metrics.json",
+        scripts_dir / "results" / "metrics.json",
+        Path("results") / "metrics.json",
+    ]
+    for cand in candidates:
+        if cand.exists() and cand.is_file():
+            with open(cand) as f:
+                metrics = json.load(f)
+            break
+    return metrics
+
+
+def run_cost_sweep(data_path, benchmark_path=None):
+    """Compare the hypothesis at its advertised cost setting against the
+    frictionless (zero-cost) upper bound.
+
+    This is a regression guard, not a research conclusion: if the advertised
+    costs are not actually applied by the cost path, the two settings produce
+    identical Sharpe and total return, and the sweep fails. A cost model that
+    silently no-ops is the failure mode this check exists to catch.
+    """
+    data_path = Path(data_path)
+    if benchmark_path is None:
+        benchmark_path = data_path.parent / "sample_benchmark.csv"
+    benchmark_path = Path(benchmark_path)
+
+    print("\n" + "=" * 80)
+    print("COST SWEEP: advertised costs vs frictionless upper bound")
+    print("=" * 80)
+
+    rows = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        for label, commission, slippage in COST_SWEEP_SETTINGS:
+            metrics = _run_backtest_metrics(
+                data_path, benchmark_path, commission, slippage, tmpdir_path
+            )
+            rows.append({
+                "label": label,
+                "commission": commission,
+                "slippage": slippage,
+                "sharpe_ratio": metrics.get("sharpe_ratio"),
+                "total_return": metrics.get("total_return"),
+                "benchmark_total_return": metrics.get("benchmark_total_return"),
+                "alpha": metrics.get("alpha"),
+            })
+            print(
+                f"  {label:<34} "
+                f"Sharpe={_fmt_num(metrics.get('sharpe_ratio'))}  "
+                f"Return={_fmt_pct(metrics.get('total_return'))}  "
+                f"Alpha={_fmt_pct(metrics.get('alpha'))}"
+            )
+
+    # Regression guard: the frictionless run must beat the costed run on both
+    # Sharpe and total return. If costs are not applied, the two rows are
+    # identical and this assertion fails.
+    frictionless = rows[0]
+    costed = rows[-1]
+    assert frictionless["commission"] == 0.0 and costed["commission"] == COMMISSION, (
+        "cost sweep rows are not the frictionless / advertised pair"
+    )
+    assert frictionless["sharpe_ratio"] is not None and costed["sharpe_ratio"] is not None
+    assert frictionless["sharpe_ratio"] > costed["sharpe_ratio"], (
+        "frictionless Sharpe must exceed the costed Sharpe: "
+        f"{frictionless['sharpe_ratio']} vs {costed['sharpe_ratio']}"
+    )
+    assert frictionless["total_return"] is not None and costed["total_return"] is not None
+    assert frictionless["total_return"] > costed["total_return"], (
+        "frictionless total return must exceed the costed total return: "
+        f"{frictionless['total_return']} vs {costed['total_return']}"
+    )
+
+    delta_sharpe = costed["sharpe_ratio"] - frictionless["sharpe_ratio"]
+    delta_return = costed["total_return"] - frictionless["total_return"]
+    print()
+    print(
+        f"  Cost impact (0 bps -> {COMMISSION*10000:.0f}bp + {SLIPPAGE*10000:.0f}bp): "
+        f"Sharpe {frictionless['sharpe_ratio']:.4f} -> {costed['sharpe_ratio']:.4f} "
+        f"(Delta {delta_sharpe:+.4f}); "
+        f"Return {frictionless['total_return']:.2%} -> {costed['total_return']:.2%} "
+        f"(Delta {delta_return:+.2%})"
+    )
+    print("  Cost path verified live: the advertised costs reduce net performance.")
+    print("=" * 80)
+
+    return rows
+
+
 def main():
     data_path = Path(__file__).resolve().parent / "skills" / "quantitative-backtesting" / "assets" / "example_data" / "sample_ohlcv.csv"
     result = run_hypothesis_test(data_path)
+    run_cost_sweep(data_path)
     return 0
 
 
