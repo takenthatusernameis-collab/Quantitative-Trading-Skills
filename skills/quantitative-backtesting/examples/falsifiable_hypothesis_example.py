@@ -515,7 +515,11 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
           f"(observed {_fmt_pct(bench_alpha)})")
     print(f"  Plausibility bounds (stated assumptions, not results):")
     print(f"    max plausible annualized Sharpe: {_fmt_num(PLAUSIBLE_MAX_ANNUALIZED_SHARPE)}")
-    print(f"    max plausible annualized alpha:  {_fmt_pct(PLAUSIBLE_MAX_ANNUALIZED_ALPHA)}")
+    try:
+        alpha_bound_plaus = PLAUSIBLE_MAX_ANNUALIZED_ALPHA
+    except Exception:
+        alpha_bound_plaus = None
+    print(f"    max plausible annualized alpha:  {_fmt_pct(alpha_bound_plaus)}")
     if beyond:
         print("  Beyond the sample's resolution (a failure here is not evidence")
         print("  against the hypothesis):")
@@ -577,6 +581,10 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
             measure_test_frac_sweep,
             _summarize_test_frac_sweep,
             print_test_frac_sweep,
+            measure_synthetic,
+            PATH_OUT_OF_SAMPLE,
+            PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
+            _path_block,
         )
         from generate_positive_control_data import CONTROL_PERIODS, CONTROL_STRATEGY_SEED
         print("\n7. HELD-OUT WINDOW RESOLUTION CURVE (measurement, does not change verdict)")
@@ -596,6 +604,40 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
                 print_test_frac_sweep(stats, first_all, first_any, first_all_alpha, first_any_alpha)
             except Exception as e:
                 print(f"  (sweep unavailable for {label}: {e})")
+
+        # Held-out-window minimum_detectable_alpha vs sample-size curve
+        # (pinned to this example's configuration). Measures only the
+        # out-of-sample/held-out path (not pooled walk-forward/CPCV) on the
+        # synthetic control fixture so the guidance answers "how much data do I
+        # need for the held-out test window?" for the criteria as configured here.
+        print("\n8. HELD-OUT WINDOW: minimum_detectable_alpha vs sample size (pinned to example config)")
+        print("  Path: out-of-sample (held-out test window) | split 0.6/0.2/0.2 | "
+              f"plausible alpha bound {_fmt_pct(PLAUSIBLE_MAX_ANNUALIZED_ALPHA)}")
+        print(f"  {'bars':>8} {'T_test':>8} {'min_mda_ann':>14} {'alpha*':>12} "
+              f"{'obs_alpha_ann':>16} {'within_bound':>14}")
+        print("  " + "-" * 80)
+        alpha_curve_sizes = [500, 1000, 2500, 5000, 10000]
+        for n_bars in alpha_curve_sizes:
+            try:
+                mrow = measure_synthetic(
+                    n_bars,
+                    seed=CONTROL_STRATEGY_SEED,
+                    inject_effect=True,
+                    paths=[PATH_OUT_OF_SAMPLE],
+                )
+                block = _path_block(mrow, PATH_OUT_OF_SAMPLE)
+                mda = block.get("min_detectable_alpha") if isinstance(block, dict) else mrow.get("min_detectable_alpha")
+                astar = block.get("expected_max_alpha") if isinstance(block, dict) else mrow.get("expected_max_alpha")
+                obs_a = block.get("observed_annualized_alpha") if isinstance(block, dict) else mrow.get("observed_annualized_alpha")
+                ttest = block.get("n_test_observations") if isinstance(block, dict) else mrow.get("n_test_observations")
+                within = (mda is not None and mda <= PLAUSIBLE_MAX_ANNUALIZED_ALPHA)
+                print(f"  {n_bars:>8} {str(ttest or '-'):>8} {_fmt_pct(mda):>14} "
+                      f"{_fmt_pct(astar):>12} {_fmt_pct(obs_a):>16} {str(within):>14}")
+            except Exception as e:
+                print(f"  {n_bars:>8} {'-':>8} {'ERR':>14} {'-':>12} {'-':>16} {'-':>14}  ({e})")
+        print("  Note: min_detectable_alpha is the smallest annualized alpha the held-out "
+              "test window could confirm at p<0.10; values above the plausibility bound "
+              "are beyond the sample's resolution (measurement only, verdict unchanged).")
     except Exception as e:
         print(f"\n  (held-out window resolution curve unavailable: {e})")
 
