@@ -183,6 +183,7 @@ def run_hypothesis_test(data_path, benchmark_path=None):
             "total_return": ret,
             "benchmark_total_return": metrics.get('benchmark_total_return'),
             "alpha": metrics.get('alpha'),
+            "deflated_alpha": metrics.get('deflated_alpha'),
         },
     }
 
