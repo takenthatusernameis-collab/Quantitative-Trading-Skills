@@ -186,7 +186,7 @@ def _alpha_regression_df(test_returns, benchmark_frame):
     return n - 2
 
 
-def _test_resolution(summary, test_returns, benchmark_frame, primary_bench):
+def _test_resolution(summary, test_returns, benchmark_frame, primary_bench, data_path=None, benchmarks=None):
     """Minimum detectable effect of each statistical criterion.
 
     A significance test on a small sample can only fail: with T observations
@@ -210,6 +210,7 @@ def _test_resolution(summary, test_returns, benchmark_frame, primary_bench):
         "criteria_beyond_resolution": [],
         "plausible_max_annualized_sharpe": PLAUSIBLE_MAX_ANNUALIZED_SHARPE,
         "plausible_max_annualized_alpha": PLAUSIBLE_MAX_ANNUALIZED_ALPHA,
+        "paths": {},
     }
 
     deflated_sharpe = summary.get("deflated_sharpe")
@@ -264,6 +265,81 @@ def _test_resolution(summary, test_returns, benchmark_frame, primary_bench):
                     resolution["criteria_beyond_resolution"].append(
                         "benchmark_alpha_pvalue_lt_0.05"
                     )
+
+    # Per-path resolution (additive) - measure on the same sample/config
+    try:
+        import sys
+        scripts_dir_local = Path(__file__).resolve().parent.parent / "scripts"
+        if str(scripts_dir_local) not in sys.path:
+            sys.path.insert(0, str(scripts_dir_local))
+        from measure_resolution_vs_sample_size import (
+            _run_validation,
+            _run_walk_forward,
+            _run_cpcv,
+            _measure_path,
+            PATH_OUT_OF_SAMPLE,
+            PATH_WALK_FORWARD,
+            PATH_CPCV,
+        )
+        from data_loader import load_data
+
+        # Use provided data/benchmarks if available
+        bench_list = benchmarks if benchmarks is not None else ([benchmark_frame] if benchmark_frame is not None else [])
+        if bench_list and data_path is not None:
+            try:
+                data = load_data(str(data_path))
+            except Exception:
+                data = None
+        else:
+            data = None
+
+        if data is not None and bench_list:
+            cost = {"commission": COMMISSION, "slippage": SLIPPAGE}
+            # out of sample (current run path) - use existing
+            try:
+                resolution["paths"][PATH_OUT_OF_SAMPLE] = {
+                    "minimum_detectable_sharpe": resolution.get("min_detectable_sharpe"),
+                    "minimum_detectable_alpha": resolution.get("min_detectable_alpha"),
+                    "n_test_observations": resolution.get("n_test_observations"),
+                    "n_parameter_trials": resolution.get("n_parameter_trials"),
+                    "n_benchmarks": resolution.get("n_benchmarks"),
+                }
+            except Exception:
+                pass
+            # walk forward
+            try:
+                wf_results = _run_walk_forward(data, bench_list, costs=cost)
+                wf_summary = wf_results.get("summary", {})
+                wf_block = _measure_path(PATH_WALK_FORWARD, wf_summary, wf_results.get("oos_returns"), n_windows=len(wf_results.get("periods") or []))
+                resolution["paths"][PATH_WALK_FORWARD] = {
+                    "minimum_detectable_sharpe": wf_block.get("min_detectable_sharpe"),
+                    "minimum_detectable_alpha": wf_block.get("min_detectable_alpha"),
+                    "n_test_observations": wf_block.get("n_test_observations"),
+                    "n_parameter_trials": wf_block.get("n_parameter_trials"),
+                    "n_benchmarks": wf_block.get("n_benchmarks"),
+                    "expected_max_sharpe": wf_block.get("expected_max_sharpe"),
+                    "expected_max_alpha": wf_block.get("expected_max_alpha"),
+                }
+            except Exception:
+                pass
+            # cpcv
+            try:
+                cpcv_results = _run_cpcv(data, bench_list, costs=cost)
+                cpcv_summary = cpcv_results.get("summary", {})
+                cpcv_block = _measure_path(PATH_CPCV, cpcv_summary, cpcv_results.get("oos_returns"), n_windows=len(cpcv_results.get("folds") or []))
+                resolution["paths"][PATH_CPCV] = {
+                    "minimum_detectable_sharpe": cpcv_block.get("min_detectable_sharpe"),
+                    "minimum_detectable_alpha": cpcv_block.get("min_detectable_alpha"),
+                    "n_test_observations": cpcv_block.get("n_test_observations"),
+                    "n_parameter_trials": cpcv_block.get("n_parameter_trials"),
+                    "n_benchmarks": cpcv_block.get("n_benchmarks"),
+                    "expected_max_sharpe": cpcv_block.get("expected_max_sharpe"),
+                    "expected_max_alpha": cpcv_block.get("expected_max_alpha"),
+                }
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     return resolution
 
@@ -496,7 +572,7 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
     # can be read correctly (a criterion the sample cannot resolve is not
     # evidence against the hypothesis).
     resolution = _test_resolution(
-        summary, test_perf.get("test_returns"), benchmarks[0], primary_bench
+        summary, test_perf.get("test_returns"), benchmarks[0], primary_bench, data_path=data_path, benchmarks=benchmarks
     )
     beyond = resolution["criteria_beyond_resolution"]
 
