@@ -27,6 +27,29 @@ CRITERIA = [
 COMMISSION = 0.0002
 SLIPPAGE = 0.0001
 
+# Cost settings exercised by the cost sweep. The advertised setting is the
+# hypothesis's operating assumption; the zero-cost setting is the frictionless
+# upper bound. Comparing the two is a regression guard that the advertised
+# costs are actually applied by the cost path -- a cost model that silently
+# no-ops would produce identical numbers at both settings and fail the sweep.
+COST_SWEEP_SETTINGS = [
+    ("frictionless (0 bps)", 0.0, 0.0),
+    ("advertised (2bp comm + 1bp slip)", COMMISSION, SLIPPAGE),
+]
+
+# Commission / slippage levels exercised by the cost-sensitivity sweep, in
+# ascending order, spanning realistic retail-to-institutional round-trip
+# costs (1 bps = 0.0001). The advertised setting is the middle rung. The
+# sweep asserts the honest directional claim -- higher per-trade costs reduce
+# net out-of-sample performance -- rather than merely comparing two points.
+COST_SWEEP_LEVELS = [
+    (0.0, 0.0),
+    (0.0001, 0.0),
+    (COMMISSION, SLIPPAGE),
+    (0.0005, 0.00025),
+    (0.0010, 0.0005),
+]
+
 
 def _fmt_pct(v):
     if v is None:
@@ -113,7 +136,6 @@ def run_hypothesis_test(data_path, benchmark_path=None):
         print("  train/val/test")
     pit = metrics.get("point_in_time_validation", {})
     print(f"  Point-in-time validation: {pit.get('passed')}")
-    print("  Point-in-time validation")
     print(f"  Run split: test only (held-out)")
     print(f"  Commission: {COMMISSION}, Slippage: {SLIPPAGE}")
 
@@ -149,11 +171,18 @@ def run_hypothesis_test(data_path, benchmark_path=None):
     print("  NOT SUPPORTED = at least one criterion failed (hypothesis falsified)")
     print("=" * 80)
 
+    # Cost sweep (regression guard, not a research conclusion): compare the
+    # hypothesis at its advertised cost setting against the frictionless upper
+    # bound. A cost model that silently no-ops produces identical numbers at
+    # both settings and fails here.
+    cost_rows = run_cost_sweep(data_path, benchmark_path)
+
     return {
         "hypothesis": HYPOTHESIS,
         "verdict": verdict,
         "all_pass": all_pass,
         "criteria": criterion_results,
+        "cost_sweep": cost_rows,
         "metrics": {
             "sharpe_ratio": sharpe,
             "total_return": ret,
