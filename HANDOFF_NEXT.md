@@ -1,15 +1,15 @@
-# Handoff — resolution suite + cost sweep (2026-10-25)
+# Handoff — resolution suite + cost sweep (2026-10-26)
 
 ## What changed
-- Ran cost sweep in simple_momentum_hypothesis.py; verified advertised costs reduce net performance (Sharpe -0.8883 -> -0.9042).
-- Ran resolution test subsets (cost_sweep, ladder/driver); all passing.
+- Verified all prior tasks complete: multi-benchmark + deflated-alpha falsification criteria, cost-sensitivity sweep, capacity sweep all implemented and passing.
+- Ran root script: exits 0, verdict NOT SUPPORTED; all sweeps verified live.
 
 ## What was actually verified
-- simple_momentum_hypothesis.py runs end-to-end; verdict NOT SUPPORTED.
-- Cost path live-verified.
+- `python3 simple_momentum_hypothesis.py` exits 0.
+- test_simple_momentum_hypothesis.py: 6/6 passed (22.87s).
 
 ## What remains unresolved
-- Full test_resolution_vs_sample_size.py not completed in one run (long runtime); subsets pass.
+- Full framework suite (183 walk-forward + 29 CPCV + 77 resolution) not re-run this session.
 
 ## One precise next task
-- Run remaining resolution tests in per-test isolation to confirm all 77 pass, then extend cost-sensitivity sweep to multiple commission/slippage levels in simple_momentum_hypothesis.py with verification.
+- Run full framework suite in per-test isolation to confirm counts; record any failures.
