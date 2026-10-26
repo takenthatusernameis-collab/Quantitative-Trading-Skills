@@ -51,7 +51,7 @@ This skill provides a comprehensive framework for systematic trading strategy de
 - Parameter sensitivity analysis
 - Overfitting detection (combinatorially purged cross-validation)
 - Multiple-testing correction via the Deflated Sharpe Ratio (Bailey & López de Prado)
-- Test resolution (minimum detectable effect): how large an effect the held-out sample could have detected at all (reported by the walk-forward, CPCV and out-of-sample paths as `summary["test_resolution"]`, by the primary backtest entry point as `metrics["test_resolution"]`, and printed next to the Deflated Sharpe line)
+- Test resolution (minimum detectable effect): how large an effect the held-out sample could have detected at all (reported by the walk-forward, CPCV and out-of-sample paths as `summary["test_resolution"]`, by the primary backtest entry point as `metrics["test_resolution"]`, and printed next to the Deflated Sharpe line). Also includes Deflated Alpha (multiple-benchmark correction), plausibility bounds, conditioning on realized volatility, and flags for unmeasurable/unresolvable floors.
 
 ### 6. Reporting
 - Automated tear sheet generation
@@ -350,7 +350,7 @@ Risk Metrics:
 - Account for transaction costs from the beginning - they significantly impact net returns
 - Test parameter stability across different market regimes
 - Beware of look-ahead bias: ensure signals only use data available at decision time
-- Correct for multiple testing: a grid search over many parameter combinations inflates in-sample Sharpe; compute the Deflated Sharpe Ratio before trusting a Sharpe estimate. Use `--deflate` for walk-forward/optimization/CPCV, or pass `--n-trials` to `run_backtest.py` or the `monte-carlo` subcommand to deflate a single backtest's final Sharpe by the number of development trials (the `monte-carlo` path also uses the optimization record's trial Sharpes for the cross-sectional estimator)
+- Correct for multiple testing: a grid search over many parameter combinations inflates in-sample Sharpe; compute the Deflated Sharpe Ratio before trusting a Sharpe estimate. Use `--deflate` for walk-forward/optimization/CPCV, or pass `--n-trials` to `run_backtest.py` or the `monte-carlo` subcommand to deflate a single backtest's final Sharpe by the number of development trials (the `monte-carlo` path also uses the optimization record's trial Sharpes for the cross-sectional estimator). When testing against a benchmark universe (multiple benchmarks), use the Deflated Alpha Ratio to correct for benchmark selection bias; the framework reports both Deflated Sharpe and Deflated Alpha alongside `test_resolution` (minimum detectable effect) for walk-forward, CPCV, and out-of-sample paths.
 - **DSR methodology**: the Deflated Sharpe Ratio's formula, its degenerate (zero-variance) contract, its trial-counting basis per analysis path, and the cross-path parity invariant (the reported DSR p-value must not depend on which analysis path reported it) are documented in `references/validation_methods.md` under "Deflated Sharpe Ratio (Multiple-Testing Correction)" and "DSR Parity Invariant (Cross-Path Consistency)". The parity invariant and the degenerate contract are also executable-guarded in `tests/test_walk_forward.py`; a regression that breaks either fails those tests even while the artifact still looks well-formed.
 - **Empty summaries are explicit, not silent**: when a walk-forward or CPCV run
   never takes a position in any period/fold, `summary["total_oos_return"]` is
