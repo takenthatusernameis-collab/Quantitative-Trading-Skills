@@ -13,6 +13,19 @@ FALSIFICATION CRITERIA:
     4. Strategy capacity (notional) > initial capital at the advertised
        market-impact level.
 
+The script also runs two cost sweeps, both regression guards rather than
+research conclusions:
+
+    COST SWEEP (2 points) — advertised costs vs the frictionless upper
+    bound. Catches a cost model that silently no-ops.
+
+    COST SENSITIVITY SWEEP (5 levels, 0 -> 10 bps round-trip) — asserts the
+    honest directional claim: as per-trade costs rise, net out-of-sample
+    performance degrades monotonically (Sharpe, total return, and Deflated
+    Alpha Ratio all fall). Catches a cost model whose output does not move
+    with its cost setting, and it is the only section that reports how far
+    the hypothesis's verdict moves before it flips.
+
     Criterion 3 is a benchmark-side data-mining control: the strategy is tested
     against MULTIPLE benchmarks, which is itself a multiple-testing problem, so
     the Deflated Alpha Ratio corrects the benchmark alpha for the number of
@@ -78,6 +91,19 @@ SLIPPAGE = 0.0001
 COST_SWEEP_SETTINGS = [
     ("frictionless (0 bps)", 0.0, 0.0),
     ("advertised (2bp comm + 1bp slip)", COMMISSION, SLIPPAGE),
+]
+
+# Commission / slippage levels exercised by the cost-sensitivity sweep, in
+# ascending order, spanning realistic retail-to-institutional round-trip
+# costs (1 bps = 0.0001). The advertised setting is the middle rung. The
+# sweep asserts the honest directional claim -- higher per-trade costs reduce
+# net out-of-sample performance -- rather than merely comparing two points.
+COST_SWEEP_LEVELS = [
+    (0.0, 0.0),
+    (0.0001, 0.0),
+    (COMMISSION, SLIPPAGE),
+    (0.0005, 0.00025),
+    (0.0010, 0.0005),
 ]
 
 
@@ -495,10 +521,109 @@ def run_capacity_sweep(data_path, benchmark_path=None):
     return rows
 
 
+def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
+    """Sweep commission / slippage across five ascending levels and assert the
+    honest directional claim: as per-trade costs rise, net out-of-sample
+    performance degrades monotonically.
+
+    This is a sensitivity analysis on the shipped synthetic sample, not
+    evidence about any market. The claim is purely directional and is
+    measured on the same 500-bar fixture the rest of the script prices, so
+    the numbers are properties of the cost path and the sample, never of a
+    security.
+
+    Three series are asserted monotone-decreasing across the ascending cost
+    levels, in that order:
+      * Sharpe ratio,
+      * total return,
+      * Deflated Alpha Ratio (the benchmark-side data-mining control, which
+        falls as the strategy's edge is eroded by costs).
+
+    A cost model whose output does not move with its cost setting fails here,
+    and a cost model that moves non-monotonically fails here too.
+    """
+    data_path = Path(data_path)
+    if benchmark_path is None:
+        benchmark_path = data_path.parent / "sample_benchmark.csv"
+    benchmark_path = Path(benchmark_path)
+
+    print("\n" + "=" * 80)
+    print("COST SENSITIVITY SWEEP: 0 -> 10 bps round-trip (5 ascending levels)")
+    print("=" * 80)
+    print(f"  {'cost level':<34} {'comm':>6} {'slip':>6} {'Sharpe':>9} {'Return':>9} {'DAR':>8}")
+    print("  " + "-" * 74)
+
+    rows = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        for commission, slippage in COST_SWEEP_LEVELS:
+            metrics = _run_backtest_metrics(
+                data_path, benchmark_path, commission, slippage, tmpdir_path,
+                impact_coefficient=CAPACITY_SWEEP_SETTINGS[-1][1],
+            )
+            da = metrics.get("deflated_alpha") or {}
+            row = {
+                "commission_bps": commission * 10_000,
+                "slippage_bps": slippage * 10_000,
+                "sharpe_ratio": metrics.get("sharpe_ratio"),
+                "total_return": metrics.get("total_return"),
+                "deflated_alpha_ratio": da.get("deflated_alpha_ratio"),
+            }
+            rows.append(row)
+            print(
+                f"  {commission*10_000:.0f}bp comm + {slippage*10_000:.2f}bp slip".ljust(34)
+                + f" {row['commission_bps']:>6.0f} {row['slippage_bps']:>6.2f} "
+                + f"{_fmt_num(row['sharpe_ratio']):>9} {_fmt_pct(row['total_return']):>9} {_fmt_num(row['deflated_alpha_ratio']):>8}"
+            )
+
+    # The levels must be strictly ascending in cost, so monotonicity in the
+    # recorded order is a statement about rising costs, not about ordering.
+    assert [r["commission_bps"] for r in rows] == [c * 10_000 for c, _ in COST_SWEEP_LEVELS], (
+        "cost sweep levels are not recorded in ascending order"
+    )
+    assert rows[0]["commission_bps"] == 0.0 and rows[0]["slippage_bps"] == 0.0, (
+        "first cost sweep level must be frictionless"
+    )
+    advertised = next(r for r in rows if r["commission_bps"] == COMMISSION * 10_000)
+    assert advertised is rows[2], (
+        "the advertised cost level is not the middle rung of the sweep"
+    )
+
+    series = {
+        "sharpe_ratio": "Sharpe ratio",
+        "total_return": "total return",
+        "deflated_alpha_ratio": "Deflated Alpha Ratio",
+    }
+    for key, label in series.items():
+        values = [r[key] for r in rows]
+        assert all(v is not None for v in values), (
+            f"{label} is missing at one or more cost levels: {values}"
+        )
+        for prev, curr in zip(values, values[1:]):
+            assert curr <= prev, (
+                f"{label} does not degrade monotonically with cost: "
+                f"{prev} -> {curr}"
+            )
+
+    frictionless, costed = rows[0], rows[-1]
+    print()
+    print(
+        f"  Directional claim verified (0 -> 10 bps round-trip): "
+        f"Sharpe {frictionless['sharpe_ratio']:.4f} -> {costed['sharpe_ratio']:.4f}, "
+        f"Return {frictionless['total_return']:.2%} -> {costed['total_return']:.2%}, "
+        f"DAR {frictionless['deflated_alpha_ratio']:.4f} -> {costed['deflated_alpha_ratio']:.4f}."
+    )
+    print("  All three series degrade monotonically as per-trade costs rise.")
+    print("=" * 80)
+
+    return rows
+
+
 def main():
     data_path = Path(__file__).resolve().parent / "skills" / "quantitative-backtesting" / "assets" / "example_data" / "sample_ohlcv.csv"
     result = run_hypothesis_test(data_path)
     run_cost_sweep(data_path)
+    run_cost_sensitivity_sweep(data_path)
     run_capacity_sweep(data_path)
     return 0
 

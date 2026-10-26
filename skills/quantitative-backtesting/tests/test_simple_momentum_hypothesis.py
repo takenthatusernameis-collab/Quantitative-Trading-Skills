@@ -69,6 +69,90 @@ def test_hypothesis_example_runs_successfully():
     assert "SUPPORTED" in result.stdout or "NOT SUPPORTED" in result.stdout
 
 
+def test_root_hypothesis_script_runs_and_reports_cost_sensitivity_sweep():
+    """The repo-root simple_momentum_hypothesis.py runs end-to-end and its
+    cost-sensitivity sweep banner is present in the output.
+
+    The root script is the actively maintained copy of this example (it
+    carries the Deflated Alpha Ratio and capacity criteria plus the cost
+    sweeps); the examples/ copy is a thinner sibling. This test pins the root
+    script's contract: it must run, print a verdict, and exercise the
+    multi-level cost sweep that the single-point cost sweep does not.
+    """
+    root_script = SKILLS_DIR.parent.parent / "simple_momentum_hypothesis.py"
+    assert root_script.exists(), f"Missing {root_script}"
+    cmd = [sys.executable, str(root_script)]
+    result = subprocess.run(cmd, cwd=str(SKILLS_DIR.parent.parent), capture_output=True, text=True)
+    assert result.returncode == 0, f"Failed: {result.stderr}\n{result.stdout}"
+    assert "VERDICT" in result.stdout
+    assert "COST SENSITIVITY SWEEP" in result.stdout
+    assert "degrade monotonically" in result.stdout
+
+
+def test_root_cost_sensitivity_sweep_is_monotone():
+    """Importing the root script's sweep and asserting monotonic degradation.
+
+    Runs the sweep directly (not via subprocess) so the returned rows are
+    usable as assertions, and asserts the honest directional claim the sweep
+    exists to pin: as per-trade costs rise across the five ascending levels,
+    Sharpe ratio, total return, and Deflated Alpha Ratio all fall.
+    """
+    root_dir = SKILLS_DIR.parent.parent
+    sys.path.insert(0, str(root_dir))
+    try:
+        # Load by path, not by name: the examples/ directory is also on
+        # sys.path and contains a sibling simple_momentum_hypothesis.py, so a
+        # bare import would pick up the thinner examples/ copy instead of the
+        # root script under test.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "root_simple_momentum_hypothesis", root_dir / "simple_momentum_hypothesis.py"
+        )
+        assert spec is not None and spec.loader is not None
+        smh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(smh)
+    finally:
+        sys.path.pop(0)
+
+    data_path = ASSETS_DIR / "sample_ohlcv.csv"
+    rows = smh.run_cost_sensitivity_sweep(data_path)
+
+    assert len(rows) == len(smh.COST_SWEEP_LEVELS), (
+        f"expected {len(smh.COST_SWEEP_LEVELS)} cost levels, got {len(rows)}"
+    )
+    # Levels recorded in ascending cost order.
+    assert [r["commission_bps"] for r in rows] == [
+        c * 10_000 for c, _ in smh.COST_SWEEP_LEVELS
+    ], "cost sweep levels are not recorded in ascending order"
+    assert rows[0]["commission_bps"] == 0.0 and rows[0]["slippage_bps"] == 0.0, (
+        "first cost sweep level must be frictionless"
+    )
+
+    series = {
+        "sharpe_ratio": "Sharpe ratio",
+        "total_return": "total return",
+        "deflated_alpha_ratio": "Deflated Alpha Ratio",
+    }
+    for key, label in series.items():
+        values = [r[key] for r in rows]
+        assert all(v is not None for v in values), (
+            f"{label} is missing at one or more cost levels: {values}"
+        )
+        for prev, curr in zip(values, values[1:]):
+            assert curr <= prev, (
+                f"{label} does not degrade monotonically with cost: "
+                f"{prev} -> {curr}"
+            )
+
+    # The advertised setting is the middle rung and must be present.
+    advertised = next(
+        r for r in rows if r["commission_bps"] == smh.COMMISSION * 10_000
+    )
+    assert advertised is rows[2], (
+        "the advertised cost level is not the middle rung of the sweep"
+    )
+
+
 def _metrics_for(commission, slippage):
     data_path = ASSETS_DIR / "sample_ohlcv.csv"
     bench_path = ASSETS_DIR / "sample_benchmark.csv"
@@ -120,4 +204,6 @@ if __name__ == "__main__":
     test_run_backtest_with_splits_produces_auditable_results()
     test_hypothesis_example_runs_successfully()
     test_simple_momentum_costs_are_actually_applied()
+    test_root_hypothesis_script_runs_and_reports_cost_sensitivity_sweep()
+    test_root_cost_sensitivity_sweep_is_monotone()
     print("All tests passed")
