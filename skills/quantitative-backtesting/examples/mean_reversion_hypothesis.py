@@ -192,6 +192,127 @@ def run_hypothesis_test(data_path, benchmark_path=None):
     }
 
 
+def _resolve_benchmarks(data_path, benchmark_path=None):
+    data_path = Path(data_path)
+    if benchmark_path is None:
+        benchmark_path = data_path.parent / "sample_benchmark.csv"
+    benchmark_path = Path(benchmark_path)
+    candidates = [data_path, benchmark_path]
+    seen, result = set(), []
+    for cand in candidates:
+        key = str(cand.resolve())
+        if cand.exists() and key not in seen:
+            seen.add(key)
+            result.append(cand)
+    return result
+
+
+def _extract_benchmark_metrics(metrics):
+    alpha = metrics.get("benchmark_0_alpha")
+    if alpha is None:
+        alpha = metrics.get("alpha")
+    bench_return = metrics.get("benchmark_0_benchmark_total_return")
+    if bench_return is None:
+        bench_return = metrics.get("benchmark_total_return")
+    return alpha, bench_return
+
+
+def _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdir_path):
+    scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+    bench_paths = _resolve_benchmarks(data_path, benchmark_path)
+    cmd = [
+        sys.executable,
+        str(scripts_dir / "run_backtest.py"),
+        "--data", str(data_path),
+        "--strategy", "bollinger_bands",
+        "--symbol", "SPY",
+        "--params", '{"period": 20, "std_dev": 2.0}',
+        "--commission", str(commission),
+        "--slippage", str(slippage),
+        "--train-frac", "0.6",
+        "--val-frac", "0.2",
+        "--test-frac", "0.2",
+        "--run-split", "test",
+        "--output", str(tmpdir_path / "results"),
+        "--validate-point-in-time",
+    ]
+    if bench_paths:
+        cmd.extend(["--benchmark"] + [str(p) for p in bench_paths])
+
+    result = subprocess.run(cmd, cwd=str(scripts_dir), capture_output=True, text=True)
+    if result.returncode != 0:
+        print("STDOUT:", result.stdout[-800:])
+        print("STDERR:", result.stderr[-800:])
+        raise RuntimeError(f"run_backtest failed with code {result.returncode}")
+
+    metrics = {}
+    candidates = [
+        tmpdir_path / "results" / "metrics.json",
+        scripts_dir / "results" / "metrics.json",
+        Path("results") / "metrics.json",
+    ]
+    for cand in candidates:
+        if cand.exists() and cand.is_file():
+            with open(cand) as f:
+                metrics = json.load(f)
+            break
+    return metrics
+
+
+def run_cost_sweep(data_path, benchmark_path=None):
+    data_path = Path(data_path)
+    if benchmark_path is None:
+        benchmark_path = data_path.parent / "sample_benchmark.csv"
+    benchmark_path = Path(benchmark_path)
+
+    print("\n" + "=" * 80)
+    print("COST SWEEP: advertised costs vs frictionless upper bound")
+    print("=" * 80)
+
+    rows = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        for label, commission, slippage in COST_SWEEP_SETTINGS:
+            metrics = _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdir_path)
+            alpha, bench_return = _extract_benchmark_metrics(metrics)
+            rows.append({
+                "label": label,
+                "commission": commission,
+                "slippage": slippage,
+                "sharpe_ratio": metrics.get("sharpe_ratio"),
+                "total_return": metrics.get("total_return"),
+                "benchmark_total_return": bench_return,
+                "alpha": alpha,
+            })
+            print(
+                f"  {label:<34} "
+                f"Sharpe={_fmt_num(metrics.get('sharpe_ratio'))}  "
+                f"Return={_fmt_pct(metrics.get('total_return'))}  "
+                f"Alpha={_fmt_pct(alpha)}"
+            )
+
+    frictionless = rows[0]
+    costed = rows[-1]
+    assert frictionless["commission"] == 0.0 and costed["commission"] == COMMISSION, (
+        "cost sweep rows are not the frictionless / advertised pair"
+    )
+    assert frictionless["sharpe_ratio"] is not None and costed["sharpe_ratio"] is not None
+    assert frictionless["sharpe_ratio"] > costed["sharpe_ratio"], (
+        "frictionless Sharpe must exceed the costed Sharpe: "
+        f"{frictionless['sharpe_ratio']} vs {costed['sharpe_ratio']}"
+    )
+    assert frictionless["total_return"] is not None and costed["total_return"] is not None
+    assert frictionless["total_return"] > costed["total_return"], (
+        "frictionless total return must exceed the costed total return: "
+        f"{frictionless['total_return']} vs {costed['total_return']}"
+    )
+
+    print("  Cost path verified live: the advertised costs reduce net performance.")
+    print("=" * 80)
+
+    return rows
+
+
 def main():
     data_path = Path(__file__).resolve().parent.parent / "assets" / "example_data" / "sample_ohlcv.csv"
     result = run_hypothesis_test(data_path)
