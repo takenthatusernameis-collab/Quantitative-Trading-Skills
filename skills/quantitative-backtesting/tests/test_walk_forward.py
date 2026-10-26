@@ -7591,6 +7591,61 @@ def test_cpcv_reports_the_book_capacity_per_fold():
     assert folds_with_capacity > 0
 
 
+def test_walk_forward_reports_notional_weighted_capacity_in_book_mode():
+    """Walk-forward reports notional-weighted capacity under the dw^2 rule."""
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=11)
+    factory = lambda params: build_strategy(
+        "cross_sectional_momentum", json.dumps(params)
+    )
+    param_grid = {"lookback": [20], "top_quantile": [0.2], "bottom_quantile": [0.2]}
+    impact_coefficient, max_impact, adv_window = 0.5, 0.0005, 20
+
+    res = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=8,
+        test_months=3,
+        step_months=3,
+        impact_coefficient=impact_coefficient,
+        max_impact=max_impact,
+        adv_window=adv_window,
+        panel_pricing="book",
+    )
+    summary = res["summary"]
+    assert summary["capacity_book"] is not None
+    assert summary["capacity_notional_weighted"] is not None
+    # Notional-weighted capacity is the dw^2 inverse; for small fractional
+    # trades it is typically <= the |dw| rule capacity.
+    assert summary["capacity_notional_weighted"] < summary["capacity_book"] * 2.0
+    assert summary["capacity_notional_weighted_trend"] is not None
+    for p in res["periods"]:
+        if p.get("capacity_book") is not None:
+            assert p.get("capacity_notional_weighted") is not None
+            assert p.get("capacity_notional_weighted_trend") is not None
+
+
+def test_cpcv_reports_notional_weighted_capacity():
+    """CPCV reports notional-weighted capacity in book mode."""
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=11)
+    factory = lambda params: build_strategy(
+        "cross_sectional_momentum", json.dumps(params)
+    )
+    param_grid = {"lookback": [20], "top_quantile": [0.2], "bottom_quantile": [0.2]}
+    res = cpcv_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+        impact_coefficient=0.5,
+        panel_pricing="book",
+    )
+    assert res["summary"]["capacity_notional_weighted"] is not None
+    assert res["summary"]["capacity_notional_weighted_trend"] is not None
+    assert res["summary"]["capacity_book"] is not None
+
+
 def test_walk_forward_reports_the_impact_participation_per_window_and_summary():
     """The walk-forward path reports the impact participation measurement.
 
