@@ -17,6 +17,7 @@ SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
 from performance import _annualization_factor, calculate_metrics, _benchmark_stats, generate_report  # noqa: E402
+from walk_forward import deflated_alpha_ratio  # noqa: E402
 
 
 def _make_returns(periods: int = 10, seed: int = 42) -> pd.Series:
@@ -677,6 +678,18 @@ def test_main_registers_every_module_level_test():
 # (rather than a local inside main()) so structural checks like
 # ``test_main_registers_every_module_level_test`` can introspect it
 # without executing the suite.
+def test_deflated_alpha_ratio_constant_returns_degenerate():
+    """Constant (degenerate) returns yield DAR 0.0 without crashing."""
+    dates = pd.date_range("2020-01-01", periods=50, freq="B")
+    returns = pd.Series(0.0, index=dates)
+    bench = pd.Series(0.0, index=dates)
+    out = deflated_alpha_ratio(alpha=0.0, returns=returns, benchmark_returns=bench, n_benchmarks=3)
+    assert out["deflated_alpha_ratio"] == 0.0
+    assert out["p_value"] == 1.0
+    assert out["z_score"] is None
+    assert out["expected_max_alpha"] == 0.0
+
+
 TEST_REGISTRY = [
     ("calculate_metrics_empty_returns_returns_error", test_calculate_metrics_empty_returns_returns_error),
     ("total_return_matches_compound_returns", test_total_return_matches_compound_returns),
@@ -711,6 +724,7 @@ TEST_REGISTRY = [
     ("generate_report_omits_per_benchmark_section_without_benchmarks", test_generate_report_omits_per_benchmark_section_without_benchmarks),
     ("annualization_factor_parity_across_modules", test_annualization_factor_parity_across_modules),
     ("main_registers_every_module_level_test", test_main_registers_every_module_level_test),
+    ("deflated_alpha_ratio_constant_returns_degenerate", test_deflated_alpha_ratio_constant_returns_degenerate),
 ]
 
 
