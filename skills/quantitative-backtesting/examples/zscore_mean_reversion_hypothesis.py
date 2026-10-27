@@ -50,6 +50,19 @@ PARAMS = (
     '"spread_method": "log_ratio", "hedge_ratio": 1.0, "hedge_lookback": 30}'
 )
 
+# Commission / slippage levels exercised by the cost-sensitivity sweep, in
+# ascending order, spanning realistic retail-to-institutional round-trip
+# costs (1 bps = 0.0001). The advertised setting is the middle rung. The
+# sweep asserts the honest directional claim -- higher per-trade costs reduce
+# net out-of-sample performance -- rather than merely comparing two points.
+COST_SWEEP_LEVELS = [
+    (0.0, 0.0),
+    (0.0001, 0.0),
+    (COMMISSION, SLIPPAGE),
+    (0.0005, 0.00025),
+    (0.0010, 0.0005),
+]
+
 HYPOTHESIS = (
     "A Z-Score mean-reversion (pairs) strategy on a cointegrated two-asset "
     "pair produces positive out-of-sample risk-adjusted returns (Sharpe > 0) "
@@ -188,17 +201,159 @@ def run_hypothesis_test(data_path, label):
     print("  NOT SUPPORTED = at least one criterion failed (hypothesis falsified)")
     print("=" * 80)
 
+    # Cost sweep (regression guard, not a research conclusion): report the
+    # verdict at each ascending cost level and assert the honest directional
+    # claim -- higher per-trade costs never improve net performance. Run only
+    # on the cointegrated pair fixture so the sweep is pinned to a single
+    # data series (the no-effect pair is a control, not a sweep target).
+    cost_rows = run_cost_sweep(data_path) if label.startswith("cointegrated") else []
+
     return {
         "label": label,
         "hypothesis": HYPOTHESIS,
         "verdict": verdict,
         "all_pass": all_pass,
         "criteria": criterion_results,
+        "cost_sweep": cost_rows,
         "metrics": {
             "sharpe_ratio": sharpe,
             "total_return": ret,
         },
     }
+
+
+def _run_backtest_metrics(data_path, commission, slippage, tmpdir_path):
+    """Run run_backtest.py once at the given cost setting and return metrics.
+
+    Uses the same CLI invocation as run_hypothesis_test (multi-symbol panel,
+    book pricing, chronological train/val/test split, point-in-time
+    validation) but with the caller-specified commission / slippage. Returns
+    the parsed metrics.json, or {} if no metrics file was written.
+    """
+    cmd = [
+        sys.executable,
+        str(SCRIPTS_DIR / "run_backtest.py"),
+        "--data", str(data_path),
+        "--strategy", "zscore_mean_reversion",
+        "--multi-symbol",
+        "--params", PARAMS,
+        "--commission", str(commission),
+        "--slippage", str(slippage),
+        "--train-frac", "0.6",
+        "--val-frac", "0.2",
+        "--test-frac", "0.2",
+        "--run-split", "test",
+        "--panel-pricing", "book",
+        "--output", str(tmpdir_path / "results"),
+        "--validate-point-in-time",
+    ]
+    result = subprocess.run(cmd, cwd=str(SCRIPTS_DIR), capture_output=True, text=True)
+    if result.returncode != 0:
+        print("STDOUT:", result.stdout[-800:])
+        print("STDERR:", result.stderr[-800:])
+        raise RuntimeError(f"run_backtest failed with code {result.returncode}")
+
+    metrics = {}
+    metrics_path = tmpdir_path / "results" / "metrics.json"
+    if metrics_path.exists() and metrics_path.is_file():
+        with open(metrics_path) as f:
+            metrics = json.load(f)
+    return metrics
+
+
+def run_cost_sweep(data_path):
+    """Sweep commission / slippage across ascending levels and report an
+    explicit falsification verdict at each level.
+
+    Reports how the verdict changes as transaction costs rise, with the
+    failing criteria shown per level. This is a sensitivity analysis on the
+    shipped sample, not evidence about any market. The claim is purely
+    directional: higher per-trade costs must never improve net performance.
+    """
+    data_path = Path(data_path)
+
+    print("\n" + "=" * 80)
+    print("COST SENSITIVITY SWEEP: ascending costs (falsifiable criteria)")
+    print("=" * 80)
+    print(f"  {'cost level':<36} {'comm':>6} {'slip':>6} {'Sharpe':>9} {'Return':>9} {'verdict':>12}")
+    print("  " + "-" * 90)
+
+    rows = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        for commission, slippage in COST_SWEEP_LEVELS:
+            metrics = _run_backtest_metrics(data_path, commission, slippage, tmpdir_path)
+            sharpe = metrics.get("sharpe_ratio")
+            ret = metrics.get("total_return")
+            ok1 = sharpe is not None and float(sharpe) > 0
+            ok2 = ret is not None and float(ret) > 0
+            passes = {"oos_sharpe_gt_zero": bool(ok1), "oos_total_return_positive": bool(ok2)}
+            failed = [name for name, ok in passes.items() if not ok]
+            verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+            rows.append({
+                "commission": commission,
+                "slippage": slippage,
+                "commission_bps": commission * 10_000,
+                "slippage_bps": slippage * 10_000,
+                "sharpe_ratio": sharpe,
+                "total_return": ret,
+                "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+                "verdict": verdict,
+                "all_pass": all(passes.values()),
+            })
+            print(
+                f"  {commission*10_000:.0f}bp comm + {slippage*10_000:.2f}bp slip".ljust(36)
+                + f" {commission*10_000:>6.0f} {slippage*10_000:>6.2f} "
+                + f"{_fmt_num(sharpe):>9} {_fmt_pct(ret):>9} {verdict[:12]:>12}"
+            )
+
+    assert [r["commission_bps"] for r in rows] == [c * 10_000 for c, _ in COST_SWEEP_LEVELS], (
+        "cost sweep levels not recorded in ascending order"
+    )
+    assert rows[0]["commission_bps"] == 0.0 and rows[0]["slippage_bps"] == 0.0, (
+        "first cost sweep level must be frictionless"
+    )
+    advertised = next(r for r in rows if r["commission_bps"] == COMMISSION * 10_000)
+    assert advertised is rows[2], (
+        "the advertised cost level is not the middle rung of the sweep"
+    )
+
+    # Monotonic degradation where values are finite: higher costs never improve
+    # net Sharpe or net total return.
+    for key, label in (("sharpe_ratio", "Sharpe ratio"), ("total_return", "total return")):
+        values = [r[key] for r in rows]
+        for prev, curr in zip(values, values[1:]):
+            if prev is not None and curr is not None:
+                assert curr <= prev + 1e-12, (
+                    f"{label} does not degrade monotonically with cost: "
+                    f"{prev} -> {curr}"
+                )
+
+    frictionless = rows[0]
+    costed = rows[-1]
+    print()
+    if frictionless["sharpe_ratio"] is not None and costed["sharpe_ratio"] is not None:
+        print(
+            f"  Directional claim: Sharpe {frictionless['sharpe_ratio']:.4f} -> {costed['sharpe_ratio']:.4f}, "
+            f"Return {_fmt_pct(frictionless['total_return'])} -> {_fmt_pct(costed['total_return'])}."
+        )
+
+    # Report how verdict changes with costs and which criteria fail at each level.
+    print("\n  VERDICT BY COST LEVEL (with failing criteria):")
+    for i, r in enumerate(rows):
+        failed = [c["name"] for c in r["criteria"] if not c["passed"]]
+        failed_str = ", ".join(failed) if failed else "none"
+        print(f"    [{i}] {r['commission_bps']:.0f}bp+{r['slippage_bps']:.2f}bp -> {r['verdict']}: failing={failed_str}")
+    verdicts = [r["verdict"] for r in rows]
+    if len(set(verdicts)) > 1:
+        print(f"  VERDICT CHANGES across cost sweep: {verdicts[0]} -> ... -> {verdicts[-1]} (sensitivity demonstrated)")
+    else:
+        print(f"  VERDICT STABLE across cost sweep: {verdicts[0]} (pre-registered criteria applied at each level)")
+
+    print("  Costs sweep completed with directional sensitivity observed.")
+    print("=" * 80)
+
+    return rows
 
 
 def main():

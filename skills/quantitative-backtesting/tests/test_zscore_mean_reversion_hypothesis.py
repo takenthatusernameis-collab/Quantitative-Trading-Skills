@@ -26,6 +26,7 @@ No third-party test framework is required; uses only the standard library,
 numpy and pandas.
 """
 
+import contextlib
 import io
 import subprocess
 import sys
@@ -42,8 +43,11 @@ sys.path.insert(0, str(SKILLS_DIR / "examples"))
 
 from zscore_mean_reversion_hypothesis import (  # noqa: E402
     ASSETS_DIR,
+    COMMISSION,
+    COST_SWEEP_LEVELS,
     CRITERIA,
     HYPOTHESIS,
+    run_cost_sweep,
     run_hypothesis_test,
 )
 from generate_synthetic_pair import (  # noqa: E402
@@ -236,6 +240,70 @@ def test_verdict_is_conjunction_of_criteria():
     assert effect["verdict"] == ("SUPPORTED" if effect["all_pass"] else "NOT SUPPORTED")
 
 
+def test_zscore_cost_sensitivity_sweep():
+    """The cost-sensitivity sweep runs across all ascending cost levels and
+    the honest directional claim holds: higher per-trade costs never improve
+    net out-of-sample Sharpe or total return on the cointegrated pair.
+
+    This pins a core methodological control: sensitivity to transaction costs
+    must be measured and reported, not merely stated. The sweep is a
+    sensitivity analysis on the shipped sample, not evidence about any market;
+    the claim is purely directional."""
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        rows = run_cost_sweep(COINTEGRATED)
+
+    assert len(rows) == len(COST_SWEEP_LEVELS), (
+        f"expected {len(COST_SWEEP_LEVELS)} cost levels, got {len(rows)}"
+    )
+    assert [r["commission_bps"] for r in rows] == [
+        c * 10_000 for c, _ in COST_SWEEP_LEVELS
+    ], "cost sweep levels are not recorded in ascending order"
+    assert rows[0]["commission_bps"] == 0.0 and rows[0]["slippage_bps"] == 0.0, (
+        "first cost sweep level must be frictionless"
+    )
+
+    series = {
+        "sharpe_ratio": "Sharpe ratio",
+        "total_return": "total return",
+    }
+    for key, label in series.items():
+        values = [r[key] for r in rows]
+        assert all(v is not None and np.isfinite(v) for v in values), (
+            f"{label} is missing or non-finite at one or more cost levels: {values}"
+        )
+        for prev, curr in zip(values, values[1:]):
+            assert curr <= prev + 1e-12, (
+                f"{label} does not degrade monotonically with cost: "
+                f"{prev} -> {curr}"
+            )
+
+    # The advertised cost level is the middle rung of the five levels.
+    advertised = next(
+        r for r in rows if r["commission_bps"] == COMMISSION * 10_000
+    )
+    assert advertised is rows[2], (
+        "the advertised cost level is not the middle rung of the sweep"
+    )
+
+    # The sweep must report a per-level verdict with explicit failing criteria.
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert "criteria" in r and len(r["criteria"]) == 2
+        for c in r["criteria"]:
+            assert c["passed"] in (True, False)
+            assert c["name"] in {"oos_sharpe_gt_zero", "oos_total_return_positive"}
+
+
+def test_run_hypothesis_test_returns_cost_sweep_on_cointegrated_pair():
+    """run_hypothesis_test on the cointegrated pair must surface the cost sweep
+    rows so callers can inspect sensitivity without re-running the sweep."""
+    effect = run_hypothesis_test(COINTEGRATED, "cointegrated pair")
+    assert "cost_sweep" in effect
+    assert isinstance(effect["cost_sweep"], list)
+    assert len(effect["cost_sweep"]) == len(COST_SWEEP_LEVELS)
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -255,6 +323,10 @@ TEST_REGISTRY = [
      test_machinery_supported_on_cointegrated_not_on_no_effect),
     ("test_verdict_is_conjunction_of_criteria",
      test_verdict_is_conjunction_of_criteria),
+    ("test_zscore_cost_sensitivity_sweep",
+     test_zscore_cost_sensitivity_sweep),
+    ("test_run_hypothesis_test_returns_cost_sweep_on_cointegrated_pair",
+     test_run_hypothesis_test_returns_cost_sweep_on_cointegrated_pair),
 ]
 
 
