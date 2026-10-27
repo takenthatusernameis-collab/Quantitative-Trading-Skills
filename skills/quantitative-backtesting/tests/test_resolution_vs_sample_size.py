@@ -4372,3 +4372,27 @@ TEST_REGISTRY = [
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_deflated_alpha_degenerate_single_benchmark_has_zero_floor():
+    """Edge case: a single benchmark (n=1) cannot price a selection bonus.
+
+    With N=1 there is no multiple-testing selection to deflate, so the
+    cross-sectional floor collapses to zero and the function must not crash
+    or produce a NaN. Alpha is then effectively un-deflated.
+    """
+    import numpy as np
+    import pandas as pd
+    from walk_forward import deflated_alpha_ratio
+
+    returns = pd.Series([0.01, -0.005, 0.02, -0.01, 0.015, 0.008] * 20)
+    result = deflated_alpha_ratio(
+        alpha=0.05,
+        returns=returns,
+        benchmark_returns=returns,
+        n_benchmarks=1,
+        trial_alphas=[0.05],
+    )
+    assert result["n_benchmarks"] == 1
+    assert result["expected_max_alpha"] == 0.0
+    assert np.isfinite(result["deflated_alpha_ratio"])
