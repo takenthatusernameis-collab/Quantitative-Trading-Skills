@@ -32,6 +32,61 @@ CRITERIA = [
 COMMISSION = 0.0002
 SLIPPAGE = 0.0001
 
+# Commission / slippage levels exercised by the cost-sensitivity sweep, in
+# ascending order, spanning realistic retail-to-institutional round-trip
+# costs (1 bps = 0.0001). The advertised setting is the middle rung. The
+# sweep asserts the honest directional claim -- higher per-trade costs reduce
+# net out-of-sample performance -- rather than merely comparing two points.
+COST_SWEEP_LEVELS = [
+    (0.0, 0.0),
+    (0.0001, 0.0),
+    (COMMISSION, SLIPPAGE),
+    (0.0005, 0.00025),
+    (0.0010, 0.0005),
+]
+
+
+def _resolve_benchmarks(data_path, benchmark_path=None):
+    """Return the ordered, de-duplicated list of benchmark CSV paths.
+
+    The Deflated Alpha Ratio only exists when the strategy is tested against
+    MULTIPLE benchmarks (n_benchmarks >= 2): testing against a single
+    benchmark is not a multiple-testing problem, so the framework suppresses
+    the correction rather than inventing one. Both the strategy universe and
+    the alternative benchmark are passed so the correction is engaged.
+    """
+    data_path = Path(data_path)
+    if benchmark_path is None:
+        benchmark_path = data_path.parent / "sample_benchmark.csv"
+    benchmark_path = Path(benchmark_path)
+
+    candidates = [data_path, benchmark_path]
+    seen, result = set(), []
+    for cand in candidates:
+        key = str(cand.resolve())
+        if cand.exists() and key not in seen:
+            seen.add(key)
+            result.append(cand)
+    return result
+
+
+def _extract_benchmark_metrics(metrics):
+    """Pull the primary-benchmark alpha / total return out of a metrics dict.
+
+    With multiple benchmarks the framework keys metrics per benchmark
+    (benchmark_0_alpha, benchmark_1_...) and leaves the aggregate
+    benchmark_total_return / alpha fields as None. Prefer benchmark_0 (the
+    strategy's own universe, listed first) and fall back to the aggregate
+    fields for single-benchmark runs.
+    """
+    alpha = metrics.get("benchmark_0_alpha")
+    if alpha is None:
+        alpha = metrics.get("alpha")
+    bench_return = metrics.get("benchmark_0_benchmark_total_return")
+    if bench_return is None:
+        bench_return = metrics.get("benchmark_total_return")
+    return alpha, bench_return
+
 
 def _fmt_pct(v):
     if v is None:
