@@ -1,44 +1,31 @@
-# Handoff — session 2026-10-27: strategy cost-model unit tests added
+# Handoff — session 2026-10-27: book-pricing cost-model coverage added
 
 ## What changed
-- Added `skills/quantitative-backtesting/tests/test_strategy_cost_model.py` (10 tests, new file; no source modified).
-  The suite unit-tests `walk_forward._calculate_strategy_returns` (scripts/walk_forward.py:2487) — the execution-cost engine
-  (commission, slippage, market impact, borrow cost on short exposure, funding cost on leverage beyond 1x, fill-rate scaling)
-  that underpins every cost-sweep and sensitivity analysis in the worked examples. Prior to this, `test_performance.py` covered
-  benchmark/metrics math but the strategy-side cost model had zero unit coverage; a silent regression there would corrupt every
-  net-of-cost figure reported by `trading_costs_robustness_example.py`, `simple_momentum_hypothesis.py`, and the walk-forward /
-  CPCV / out-of-sample cost sweeps.
-  Coverage:
-    * borrow cost reduces short returns; no effect on long or flat (borrow is short-exposure only)
-    * funding cost reduces 2x leveraged returns; no effect at/gross <= 1x (funding is excess-leverage only)
-    * commission + slippage reduce returns with turnover; constant position pays no per-bar trading cost
-    * market impact is live (impact_coefficient=5.0 strictly reduces return vs disabled) and monotone-decreasing in coefficient
-    * fill_rate=0.5 halves positions elementwise (decided convention: position-scale lever, not partial-fill model)
-    * deterministic on identical inputs
+- `skills/quantitative-backtesting/tests/test_strategy_cost_model.py` — added a "Book pricing" section with 6 new deterministic tests (215 insertions, 1 docstring edit; no source modified). The suite now covers the `panel_pricing="book"` + `book_weights` path of `walk_forward._calculate_strategy_returns` (scripts/walk_forward.py:2603-2646), where borrow/funding/impact are charged on the book (gross turnover, short legs, gross exposure, per-asset impact) rather than on scalar net exposure:
+  * `test_book_pricing_matches_book_pnl_minus_independently_computed_costs` — book-priced net return equals `sum_i w_i r_i` (lagged held book) minus independently computed book cost components from utils.py (`held_book_weights`/`book_cost_components`/`book_market_impact_cost`/`book_return_from_held`), atol 1e-12.
+  * `test_book_pricing_charges_gross_turnover_on_rotation_in_place` — a market-neutral book swapping legs every bar (gross turnover 2.0/bar, flat net exposure) is charged per-bar turnover under book pricing; net-exposure convention cannot see it (>0.05 return gap).
+  * `test_book_borrow_cost_charges_short_legs` — borrow cost reduces returns only when the book has a short leg (long-only book unchanged).
+  * `test_book_funding_cost_charges_gross_exposure_beyond_1x` — funding cost reduces a 2x-gross book (excess 1x charged); a 1x-gross book is unchanged.
+  * `test_book_market_impact_live_and_monotone` — impact_coefficient > 0 strictly reduces book return; monotone-decreasing in the coefficient.
+  * `test_book_pricing_deterministic_given_identical_inputs` — bitwise-identical outputs on identical inputs.
+- All 6 registered in TEST_REGISTRY and run by the file's `main()` convention.
 
 ## What was actually verified (evidence)
-- `skills/quantitative-backtesting/tests/test_strategy_cost_model.py` → **10 passed, 0 failed** (direct runner and `python3 -m pytest`, 0.26s).
-- `skills/quantitative-backtesting/tests/test_performance.py` → **34 passed, 0 failed** (no regression; neighbor suite).
-- Working tree contains only the new untracked test file; no source or tracked artifact modified. Did not commit (not explicitly asked).
+- `test_strategy_cost_model.py` → **16 passed, 0 failed** (direct `python3` runner and `python3 -m pytest`, 0.35s).
+- `test_performance.py` → **34 passed, 0 failed** (no neighbor regression).
+- Slow framework suites re-run this session, all green:
+  * `test_walk_forward.py` → **185 passed**
+  * `test_cpcv.py` → **29 passed**
+  * `test_resolution_vs_sample_size.py` → **78 passed**
+- Working tree contains only the modified test file (untracked: none). Did not commit (not explicitly asked).
 
 ## What remains unresolved
-- Nothing from this session's task. The cost model is now unit-tested; the worked examples that depend on it
-  (`trading_costs_robustness_example.py`, `simple_momentum_hypothesis.py`) already pass their existing coverage tests
-  (test_examples_coverage.py: 39 passed; test_simple_momentum_hypothesis.py: 6 passed; test_falsifiable_hypothesis_example.py: 17 passed).
-- Slow framework suites previously confirmed green: test_walk_forward.py 185/0, test_cpcv.py 29/0,
-  test_resolution_vs_sample_size.py 78/0.
+- Nothing from this session's task. Both cost bases (net-exposure default, book) of the strategy-side cost model now have unit coverage.
 
 ## Approaches already tried / failed
-- HANDOFF_NEXT.md's two suggested next tasks (cost-sensitivity monotonicity test; walk-forward/CPCV resolution curves in
-  falsifiable_hypothesis_example.py) were already implemented and verified in prior sessions — both green. This session
-  therefore selected a genuinely new bounded task: unit coverage for the untested strategy-side cost model.
+- None new; the prior session's two suggested next tasks (cost-sensitivity monotonicity; walk-forward/CPCV resolution curves) were already implemented and green. This session closed the remaining HANDOFF_NEXT.md item (book-pricing path coverage) and the HANDOFF.md pending item (full slow-suite re-runs).
 
 ## One precise next task
-- Extend `test_strategy_cost_model.py` (or add a sibling) to cover the book-pricing path (`panel_pricing="book"` with
-  `book_weights`), since borrow/funding/impact are charged on the book there (gross turnover, short legs, gross exposure,
-  per-asset impact) rather than on scalar net exposure — a distinct cost basis from the net-exposure default exercised here.
-  Constraint: keep it bounded and deterministic (synthetic seed-fixed data, no walk-forward run); mirror the existing
-  TEST_REGISTRY/main() convention. Evidence: `held_book_weights`/`book_cost_components`/`book_market_impact_cost` in
-  scripts/utils.py and scripts/walk_forward.py.
+- Add a cost-sensitivity sweep to `simple_momentum_hypothesis.py` (root level, already repaired; it wraps `run_backtest.py` CLI via subprocess): sweep commission x impact_coefficient over a small grid on the shipped sample and assert the falsification verdict (`NOT SUPPORTED`, OOS Sharpe −0.90 on sample) holds across the grid — i.e. the hypothesis is robustly falsified net of plausible trading costs, not an artifact of one cost setting. Constraints: bounded, deterministic, no new dependencies, run the script end-to-end (exit 0) and record the grid results in the next handoff. Relevant file: `simple_momentum_hypothesis.py`; CLI cost args are defined in `skills/quantitative-backtesting/scripts/run_backtest.py`.
 
 (End of file)
