@@ -7859,6 +7859,32 @@ TEST_REGISTRY.append(
 )
 
 
+
+
+
+def test_calculate_strategy_returns_book_mode_none_book_weights_falls_back():
+    """When panel_pricing='book' but book_weights is None, the cost model
+    falls back to the net-exposure path and still produces finite returns."""
+    from walk_forward import _calculate_strategy_returns
+
+    panel = _make_multiasset_panel(periods=300, n_assets=3, seed=9)
+    dates = panel.index
+    signals = pd.Series(1.0, index=dates)
+    rets = _calculate_strategy_returns(
+        panel, signals, commission=0.001, slippage=0.001,
+        borrow_cost=0.01, funding_cost=0.005, impact_coefficient=0.0,
+        panel_pricing="book", book_weights=None, fill_rate=1.0,
+    )
+    assert len(rets) == len(dates) - 2
+    assert rets.notna().any()
+    assert np.isfinite(rets.dropna()).all()
+
+TEST_REGISTRY.append(
+    ("test_calculate_strategy_returns_book_mode_none_book_weights_falls_back",
+     test_calculate_strategy_returns_book_mode_none_book_weights_falls_back)
+)
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(main())
