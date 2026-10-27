@@ -550,8 +550,8 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
     print("\n" + "=" * 80)
     print("COST SENSITIVITY SWEEP: 0 -> 10 bps round-trip (5 ascending levels)")
     print("=" * 80)
-    print(f"  {'cost level':<34} {'comm':>6} {'slip':>6} {'Sharpe':>9} {'Return':>9} {'DAR':>8}")
-    print("  " + "-" * 74)
+    print(f"  {'cost level':<34} {'comm':>6} {'slip':>6} {'Sharpe':>9} {'Return':>9} {'DAR':>8} {'verdict':>12}")
+    print("  " + "-" * 88)
 
     rows = []
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -562,18 +562,23 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
                 impact_coefficient=CAPACITY_SWEEP_SETTINGS[-1][1],
             )
             da = metrics.get("deflated_alpha") or {}
+            # Try to get verdict from metrics if present
+            verdict = metrics.get("verdict") or metrics.get("hypothesis_verdict")
+            criteria = metrics.get("criteria") or []
             row = {
                 "commission_bps": commission * 10_000,
                 "slippage_bps": slippage * 10_000,
                 "sharpe_ratio": metrics.get("sharpe_ratio"),
                 "total_return": metrics.get("total_return"),
                 "deflated_alpha_ratio": da.get("deflated_alpha_ratio"),
+                "verdict": verdict,
+                "criteria": criteria,
             }
             rows.append(row)
             print(
                 f"  {commission*10_000:.0f}bp comm + {slippage*10_000:.2f}bp slip".ljust(34)
                 + f" {row['commission_bps']:>6.0f} {row['slippage_bps']:>6.2f} "
-                + f"{_fmt_num(row['sharpe_ratio']):>9} {_fmt_pct(row['total_return']):>9} {_fmt_num(row['deflated_alpha_ratio']):>8}"
+                + f"{_fmt_num(row['sharpe_ratio']):>9} {_fmt_pct(row['total_return']):>9} {_fmt_num(row['deflated_alpha_ratio']):>8} {str(row['verdict'])[:12]:>12}"
             )
 
     # The levels must be strictly ascending in cost, so monotonicity in the
@@ -610,10 +615,29 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
     print(
         f"  Directional claim verified (0 -> 10 bps round-trip): "
         f"Sharpe {frictionless['sharpe_ratio']:.4f} -> {costed['sharpe_ratio']:.4f}, "
-        f"Return {frictionless['total_return']:.2%} -> {costed['total_return']:.2%}, "
-        f"DAR {frictionless['deflated_alpha_ratio']:.4f} -> {costed['deflated_alpha_ratio']:.4f}."
+        f"Return {_fmt_pct(frictionless['total_return'])} -> {_fmt_pct(costed['total_return'])}, "
+        f"DAR {_fmt_num(frictionless['deflated_alpha_ratio'])} -> {_fmt_num(costed['deflated_alpha_ratio'])}."
     )
-    print("  All three series degrade monotonically as per-trade costs rise.")
+    print("  All metrics degrade monotonically as costs rise (asserted).")
+
+    # Report how verdict changes with costs and which criteria fail
+    print("\n  VERDICT BY COST LEVEL (with failing criteria):")
+    for i, r in enumerate(rows):
+        crits = r.get("criteria") or []
+        failed = [c["name"] for c in crits if isinstance(c, dict) and not c.get("passed")]
+        if failed:
+            failed_str = ", ".join(failed)
+        else:
+            failed_str = "none"
+        print(f"    [{i}] {r['commission_bps']:.0f}bp+{r['slippage_bps']:.2f}bp -> {str(r.get('verdict'))[:12]}: failing={failed_str}")
+    verdicts = [r.get("verdict") for r in rows if r.get("verdict") and not str(r.get("verdict")).startswith("ERR")]
+    if verdicts and len(set(verdicts)) > 1:
+        print(f"  VERDICT CHANGES across cost sweep: {verdicts[0]} -> ... -> {verdicts[-1]} (sensitivity demonstrated)")
+    else:
+        print(f"  VERDICT STABLE across cost sweep: {verdicts[0] if verdicts else 'N/A'} (pre-registered criteria applied at each level)")
+
+    print("=" * 80)
+    print("  COST SENSITIVITY SWEEP COMPLETE: verdicts/failing criteria reported per level above.")
     print("=" * 80)
 
     return rows

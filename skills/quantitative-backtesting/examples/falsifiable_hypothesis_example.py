@@ -788,8 +788,9 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
     directional claim: as per-trade costs rise, net out-of-sample performance
     degrades monotonically across key metrics.
 
-    This is a sensitivity analysis on the shipped sample, not evidence about
-    any market. The claim is purely directional.
+    Reports how the verdict changes as transaction costs rise, with explicit
+    falsification criteria. This is a sensitivity analysis on the shipped
+    sample, not evidence about any market. The claim is purely directional.
     """
     data_path = Path(data_path)
     if benchmark_path is None:
@@ -820,6 +821,8 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
                     "total_return": obs.get("oos_total_return"),
                     "deflated_alpha_ratio": da,
                     "verdict": result.get("verdict"),
+                    "criteria": result.get("criteria", []),
+                    "all_pass": result.get("all_pass"),
                 }
                 rows.append(row)
             except Exception as e:
@@ -830,6 +833,8 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
                     "total_return": None,
                     "deflated_alpha_ratio": None,
                     "verdict": f"ERR:{e}",
+                    "criteria": [],
+                    "all_pass": False,
                 }
                 rows.append(row)
         # Print outside redirect
@@ -876,6 +881,23 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
             f"Return {_fmt_pct(frictionless['total_return'])} -> {_fmt_pct(costed['total_return'])}, "
             f"DAR {_fmt_num(frictionless['deflated_alpha_ratio'])} -> {_fmt_num(costed['deflated_alpha_ratio'])}."
         )
+
+    # Report how verdict changes with costs and which criteria fail
+    print("\n  VERDICT BY COST LEVEL (with failing criteria):")
+    for i, r in enumerate(rows):
+        crits = r.get("criteria") or []
+        failed = [c["name"] for c in crits if isinstance(c, dict) and not c.get("passed")]
+        if failed:
+            failed_str = ", ".join(failed)
+        else:
+            failed_str = "none"
+        print(f"    [{i}] {r['commission_bps']:.0f}bp+{r['slippage_bps']:.2f}bp -> {r['verdict']}: failing={failed_str}")
+    verdicts = [r.get("verdict") for r in rows if r.get("verdict") and not str(r.get("verdict")).startswith("ERR")]
+    if verdicts and len(set(verdicts)) > 1:
+        print(f"  VERDICT CHANGES across cost sweep: {verdicts[0]} -> ... -> {verdicts[-1]} (sensitivity demonstrated)")
+    else:
+        print(f"  VERDICT STABLE across cost sweep: {verdicts[0] if verdicts else 'N/A'} (pre-registered criteria applied at each level)")
+
     print("  Costs sweep completed with directional sensitivity observed.")
     print("=" * 80)
 
