@@ -7962,6 +7962,34 @@ TEST_REGISTRY.append(
 )
 
 
+def test_book_cost_components_all_nan_returns_none():
+    """An all-NaN held book has no usable positions, so book_cost_components
+    must return None rather than propagating NaNs into cost series."""
+    from walk_forward import book_cost_components
+
+    dates = pd.date_range("2020-01-01", periods=5, freq="B")
+    held = pd.DataFrame({"A": [np.nan] * 5, "B": [np.nan] * 5}, index=dates)
+    assert book_cost_components(held) is None
+
+
+def test_book_cost_components_empty_returns_none():
+    """An empty held book must return None."""
+    from walk_forward import book_cost_components
+
+    held = pd.DataFrame()
+    assert book_cost_components(held) is None
+
+
+TEST_REGISTRY.append(
+    ("test_book_cost_components_all_nan_returns_none",
+     test_book_cost_components_all_nan_returns_none)
+)
+TEST_REGISTRY.append(
+    ("test_book_cost_components_empty_returns_none",
+     test_book_cost_components_empty_returns_none)
+)
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(main())
