@@ -7928,6 +7928,40 @@ TEST_REGISTRY.append(
 )
 
 
+def test_calculate_strategy_returns_book_mode_nan_warmup_book_weights_finite():
+    """When book_weights contains NaN during the execution warmup, the book
+    cost path must not propagate those NaNs into the return series: the
+    warmup bars are already dropped, and the remaining returns stay finite."""
+    from walk_forward import _calculate_strategy_returns
+
+    rng = np.random.default_rng(7)
+    periods = 120
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    close = 100 * np.exp(np.cumsum(rng.normal(0, 0.01, periods)))
+    data = pd.DataFrame({
+        "open": close, "high": close * 1.01, "low": close * 0.99,
+        "close": close, "volume": np.full(periods, 1_000_000),
+    }, index=dates)
+    book = pd.DataFrame({"A": np.ones(periods)}, index=dates)
+    book.iloc[:5] = np.nan  # warmup NaNs in the book
+    signals = pd.Series(1.0, index=dates)
+
+    rets = _calculate_strategy_returns(
+        data, signals, commission=0.001, slippage=0.001,
+        borrow_cost=0.01, funding_cost=0.005, impact_coefficient=0.1,
+        panel_pricing="book", book_weights=book, fill_rate=1.0,
+    )
+    assert len(rets) == len(dates) - 2
+    assert rets.notna().any()
+    assert np.isfinite(rets.dropna()).all(), "NaN warmup in book must not poison returns"
+
+
+TEST_REGISTRY.append(
+    ("test_calculate_strategy_returns_book_mode_nan_warmup_book_weights_finite",
+     test_calculate_strategy_returns_book_mode_nan_warmup_book_weights_finite)
+)
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(main())
