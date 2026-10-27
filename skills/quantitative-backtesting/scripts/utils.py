@@ -508,6 +508,12 @@ def book_cost_components(
     """
     if held_book is None or not isinstance(held_book, pd.DataFrame) or held_book.empty:
         return None
+    # If the book has no usable (non-NaN) positions at all, treat as no usable book
+    try:
+        if held_book.notna().sum().sum() == 0:
+            return None
+    except Exception:
+        pass
 
     turnover = book_gross_turnover(held_book)
     transaction = turnover * (commission + slippage)
