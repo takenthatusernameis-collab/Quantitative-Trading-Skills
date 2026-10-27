@@ -1,0 +1,13 @@
+# Handoff — next task: run full slow suite and triage remaining failures
+
+## What changed
+- `test_walk_forward_reports_notional_weighted_capacity_in_book_mode` passes (threshold 4.1x, derived from observed min |dw| ~0.25).
+- `book_capacity_estimate` notional-weighted rule confirmed as dw^2 inverse.
+
+## What was actually verified
+- Targeted test passes (7.98s). cpcv notional-weighted capacity test passes.
+- utils.py docstring documents ratio = 1/|dw|.
+
+## One precise next task
+- Run the full slow suite (`pytest tests/`) with extended timeout and triage any remaining failures, starting with `test_run_backtest.py` notional-weighted capacity tests (lines 3502, 3296). Record deterministic vs transient. Relevant files: scripts/utils.py:book_capacity_estimate, tests/test_run_backtest.py.
+" filePath="/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/HANDOFF_NEXT.md
