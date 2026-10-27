@@ -61,7 +61,13 @@ SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 sys.path.insert(0, str(SKILLS_DIR / "examples"))
 
-from falsifiable_hypothesis_example import run_hypothesis_test  # noqa: E402
+from falsifiable_hypothesis_example import (  # noqa: E402
+    COMMISSION,
+    COST_SWEEP_LEVELS,
+    SLIPPAGE,
+    run_cost_sensitivity_sweep,
+    run_hypothesis_test,
+)
 from generate_positive_control_data import (  # noqa: E402
     CONTROL_BENCHMARK_SEED,
     CONTROL_DRIFT,
@@ -624,6 +630,56 @@ def test_the_advertised_costs_are_actually_applied():
     )
 
 
+def test_falsifiable_hypothesis_cost_sensitivity_sweep():
+    """The cost-sensitivity sweep runs across all ascending cost levels and
+    the honest directional claim holds: higher per-trade costs never improve
+    net out-of-sample Sharpe, total return, or Deflated Alpha Ratio.
+
+    This pins a core methodological control: sensitivity to transaction costs
+    must be measured and reported, not merely stated. The sweep is a
+    sensitivity analysis on the shipped sample, not evidence about any market;
+    the claim is purely directional."""
+    data_path, _ = _sample_paths()
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        rows = run_cost_sensitivity_sweep(data_path)
+
+    assert len(rows) == len(COST_SWEEP_LEVELS), (
+        f"expected {len(COST_SWEEP_LEVELS)} cost levels, got {len(rows)}"
+    )
+    # Levels recorded in ascending cost order.
+    assert [r["commission_bps"] for r in rows] == [
+        c * 10_000 for c, _ in COST_SWEEP_LEVELS
+    ], "cost sweep levels are not recorded in ascending order"
+    assert rows[0]["commission_bps"] == 0.0 and rows[0]["slippage_bps"] == 0.0, (
+        "first cost sweep level must be frictionless"
+    )
+
+    series = {
+        "sharpe_ratio": "Sharpe ratio",
+        "total_return": "total return",
+        "deflated_alpha_ratio": "Deflated Alpha Ratio",
+    }
+    for key, label in series.items():
+        values = [r[key] for r in rows]
+        assert all(v is not None and np.isfinite(v) for v in values), (
+            f"{label} is missing or non-finite at one or more cost levels: {values}"
+        )
+        for prev, curr in zip(values, values[1:]):
+            assert curr <= prev + 1e-12, (
+                f"{label} does not degrade monotonically with cost: "
+                f"{prev} -> {curr}"
+            )
+
+    # The advertised setting is the middle rung (index 2) of the five levels.
+    advertised = next(
+        r for r in rows if r["commission_bps"] == COMMISSION * 10_000
+    )
+    assert advertised is rows[2], (
+        "the advertised cost level is not the middle rung of the sweep"
+    )
+
+
 def test_the_selection_criterion_is_oos_aware():
     """The selection criterion is the pre-registered 'best_avg_sharpe' --
     the parameter set with the best AVERAGE OUT-OF-SAMPLE test Sharpe across
@@ -670,6 +726,7 @@ TEST_REGISTRY = [
     ("test_the_control_fixture_is_labelled_as_synthetic_and_carries_no_security", test_the_control_fixture_is_labelled_as_synthetic_and_carries_no_security),
     ("test_the_example_records_its_methodology_block", test_the_example_records_its_methodology_block),
     ("test_the_advertised_costs_are_actually_applied", test_the_advertised_costs_are_actually_applied),
+    ("test_falsifiable_hypothesis_cost_sensitivity_sweep", test_falsifiable_hypothesis_cost_sensitivity_sweep),
     ("test_the_selection_criterion_is_oos_aware", test_the_selection_criterion_is_oos_aware),
 ]
 
