@@ -7782,6 +7782,14 @@ TEST_REGISTRY.append(
     ("test_walk_forward_impact_participation_is_absent_when_impact_is_disabled",
      test_walk_forward_impact_participation_is_absent_when_impact_is_disabled)
 )
+TEST_REGISTRY.append(
+    ("test_walk_forward_reports_notional_weighted_capacity_in_book_mode",
+     test_walk_forward_reports_notional_weighted_capacity_in_book_mode)
+)
+TEST_REGISTRY.append(
+    ("test_cpcv_reports_notional_weighted_capacity",
+     test_cpcv_reports_notional_weighted_capacity)
+)
 
 
 if __name__ == "__main__":
