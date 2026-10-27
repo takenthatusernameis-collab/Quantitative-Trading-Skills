@@ -627,6 +627,20 @@ def test_adjust_for_splits_volume_scaled():
     assert adjusted["volume"].iloc[3] == 1300.0
 
 
+
+def test_adjust_for_splits_two_for_one_divides_pre_split_prices():
+    """Regression: 2-for-1 split divides pre-split prices by ratio."""
+    dates = pd.date_range("2020-01-01", periods=4, freq="B")
+    splits = pd.Series([1.0, 2.0, 1.0, 1.0], index=dates)
+    close = pd.Series([200.0, 100.0, 100.5, 101.0], index=dates)
+    df = pd.DataFrame({"close": close, "splits": splits}, index=dates)
+    adjusted = adjust_for_splits(df)
+    # Pre-split prices divided by ratio 2.0
+    assert np.allclose(adjusted["close"].iloc[0], 100.0)
+    assert adjusted["close"].iloc[1] == 100.0  # split date already at post-split level
+    assert adjusted["close"].iloc[2] == 100.5
+
+
 def test_main_registers_every_module_level_test():
     import inspect
 
@@ -657,6 +671,12 @@ def test_main_registers_every_module_level_test():
     )
 
 
+
+
+
+
+
+
 # Module-level registry of (label, callable) pairs.
 TEST_REGISTRY = [
     ("test_load_data_unsupported_format_raises", test_load_data_unsupported_format_raises),
@@ -681,9 +701,6 @@ TEST_REGISTRY = [
     ("test_compute_benchmark_total_return_with_dividends", test_compute_benchmark_total_return_with_dividends),
     ("test_compute_benchmark_total_return_with_adj_close", test_compute_benchmark_total_return_with_adj_close),
     ("test_compute_benchmark_total_return_fallback_price_only", test_compute_benchmark_total_return_fallback_price_only),
-    ("test_compute_benchmark_total_return_dividends", test_compute_benchmark_total_return_dividends),
-    ("test_compute_benchmark_total_return_adj_close", test_compute_benchmark_total_return_adj_close),
-    ("test_compute_benchmark_total_return_price_only", test_compute_benchmark_total_return_price_only),
     ("test_detect_benchmark_total_return_type", test_detect_benchmark_total_return_type),
     ("test_provenance_includes_total_return_type", test_provenance_includes_total_return_type),
     ("test_load_multi_symbol_provenance_includes_total_return_type", test_load_multi_symbol_provenance_includes_total_return_type),
@@ -693,31 +710,9 @@ TEST_REGISTRY = [
     ("test_adjust_for_splits_no_actual_splits_is_identity", test_adjust_for_splits_no_actual_splits_is_identity),
     ("test_adjust_for_splits_multiple_splits_accumulate", test_adjust_for_splits_multiple_splits_accumulate),
     ("test_adjust_for_splits_volume_scaled", test_adjust_for_splits_volume_scaled),
+    ("test_adjust_for_splits_two_for_one_divides_pre_split_prices", test_adjust_for_splits_two_for_one_divides_pre_split_prices),
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
-
-
-
-def test_compute_benchmark_total_return_dividends():
-    df = pd.DataFrame({
-        "close": [100.0, 101.0, 102.0],
-        "dividends": [0.0, 1.0, 0.0],
-    })
-    r = _compute_benchmark_total_return(df)
-    assert np.isclose(r.iloc[1], (101.0/100.0 - 1.0) + 1.0/100.0)
-    assert np.isclose(r.iloc[2], 102.0/101.0 - 1.0)
-
-
-def test_compute_benchmark_total_return_adj_close():
-    df = pd.DataFrame({"close": [100.0, 101.0], "adj_close": [99.0, 100.5]})
-    r = _compute_benchmark_total_return(df)
-    assert np.isclose(r.iloc[1], 100.5/99.0 - 1.0)
-
-
-def test_compute_benchmark_total_return_price_only():
-    df = pd.DataFrame({"close": [100.0, 105.0]})
-    r = _compute_benchmark_total_return(df)
-    assert np.isclose(r.iloc[1], 0.05)
 
 def main() -> int:
     tests = TEST_REGISTRY
@@ -730,6 +725,7 @@ def main() -> int:
         except Exception:
             failures += 1
             print(f"FAIL  {name}")
+            import traceback
             traceback.print_exc()
 
     print(f"\n{len(tests) - failures}/{len(tests)} tests passed")
@@ -737,4 +733,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    import sys
     sys.exit(main())
