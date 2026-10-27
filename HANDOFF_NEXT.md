@@ -1,30 +1,44 @@
-# Handoff — next task: verification complete; select a new bounded quant task
+# Handoff — session 2026-10-27: strategy cost-model unit tests added
 
 ## What changed
-- Nothing in source. This session ran only verification (no code changes).
-- Reverted timestamp-only artifacts in `skills/quantitative-backtesting/examples/example_reproducible_output/` (regenerated `load_timestamp` by test runs) so the working tree stays clean.
+- Added `skills/quantitative-backtesting/tests/test_strategy_cost_model.py` (10 tests, new file; no source modified).
+  The suite unit-tests `walk_forward._calculate_strategy_returns` (scripts/walk_forward.py:2487) — the execution-cost engine
+  (commission, slippage, market impact, borrow cost on short exposure, funding cost on leverage beyond 1x, fill-rate scaling)
+  that underpins every cost-sweep and sensitivity analysis in the worked examples. Prior to this, `test_performance.py` covered
+  benchmark/metrics math but the strategy-side cost model had zero unit coverage; a silent regression there would corrupt every
+  net-of-cost figure reported by `trading_costs_robustness_example.py`, `simple_momentum_hypothesis.py`, and the walk-forward /
+  CPCV / out-of-sample cost sweeps.
+  Coverage:
+    * borrow cost reduces short returns; no effect on long or flat (borrow is short-exposure only)
+    * funding cost reduces 2x leveraged returns; no effect at/gross <= 1x (funding is excess-leverage only)
+    * commission + slippage reduce returns with turnover; constant position pays no per-bar trading cost
+    * market impact is live (impact_coefficient=5.0 strictly reduces return vs disabled) and monotone-decreasing in coefficient
+    * fill_rate=0.5 halves positions elementwise (decided convention: position-scale lever, not partial-fill model)
+    * deterministic on identical inputs
 
 ## What was actually verified (evidence)
-Re-ran the slow framework suite after the prior session's test addition:
-- `skills/quantitative-backtesting/tests/test_resolution_vs_sample_size.py` → **78 passed, 0 failed** (536s). File was modified in the prior session (added `test_a_single_benchmark_makes_the_alpha_criterion_not_applicable`); no regression.
-- `skills/quantitative-backtesting/tests/test_walk_forward.py` → **185 passed, 0 failed** (223s).
-- `skills/quantitative-backtesting/tests/test_cpcv.py` → **29 passed, 0 failed** (62s).
-- `git status` clean; no uncommitted changes. Did not commit (not explicitly asked).
+- `skills/quantitative-backtesting/tests/test_strategy_cost_model.py` → **10 passed, 0 failed** (direct runner and `python3 -m pytest`, 0.26s).
+- `skills/quantitative-backtesting/tests/test_performance.py` → **34 passed, 0 failed** (no regression; neighbor suite).
+- Working tree contains only the new untracked test file; no source or tracked artifact modified. Did not commit (not explicitly asked).
 
 ## What remains unresolved
-- Nothing from the assigned verification task. All three slow suites are green.
+- Nothing from this session's task. The cost model is now unit-tested; the worked examples that depend on it
+  (`trading_costs_robustness_example.py`, `simple_momentum_hypothesis.py`) already pass their existing coverage tests
+  (test_examples_coverage.py: 39 passed; test_simple_momentum_hypothesis.py: 6 passed; test_falsifiable_hypothesis_example.py: 17 passed).
+- Slow framework suites previously confirmed green: test_walk_forward.py 185/0, test_cpcv.py 29/0,
+  test_resolution_vs_sample_size.py 78/0.
 
 ## Approaches already tried / failed
-- None this session. Prior session rejected a test weakening (`* 2.0 → * 4.1` in test_walk_forward.py) and replaced it with an evidence-derived two-sided bound; that work is complete.
+- HANDOFF_NEXT.md's two suggested next tasks (cost-sensitivity monotonicity test; walk-forward/CPCV resolution curves in
+  falsifiable_hypothesis_example.py) were already implemented and verified in prior sessions — both green. This session
+  therefore selected a genuinely new bounded task: unit coverage for the untested strategy-side cost model.
 
 ## One precise next task
-- Select one bounded quant research task from `skills/quantitative-backtesting/` per the mission's high-value filter ("Will this materially improve our ability to form, test, falsify, reproduce, or compare quantitative financial trading methodologies?"), implement it, verify it, and record pass/fail counts in the next handoff.
-- Concrete option (bounded, verifiable, ties to an actual file): extend `simple_momentum_hypothesis.py`'s cost-sensitivity sweep with a regression assertion that the verdict flips from `NOT SUPPORTED` → `SUPPORTED` (or vice versa) across the swept cost levels is NOT required — instead, add a test in `tests/test_simple_momentum_hypothesis.py` that the script's `run_cost_sensitivity_sweep` produces monotone-decreasing Sharpe/return/DAR across `COST_SWEEP_LEVELS` and exits 0, mirroring the existing 3 tests. Constraint: the script shells out to `run_backtest.py` on the shipped 504-bar sample, so the test must tolerate runtime (~1–2 min) and not assert profitability (the verdict is `NOT SUPPORTED` on this sample — a valid falsification).
-- Alternative: extend `falsifiable_hypothesis_example.py`'s resolution reporting to also print the walk-forward and CPCV resolution curves beside the out-of-sample one (already measured by `measure_resolution_vs_sample_size.py`).
+- Extend `test_strategy_cost_model.py` (or add a sibling) to cover the book-pricing path (`panel_pricing="book"` with
+  `book_weights`), since borrow/funding/impact are charged on the book there (gross turnover, short legs, gross exposure,
+  per-asset impact) rather than on scalar net exposure — a distinct cost basis from the net-exposure default exercised here.
+  Constraint: keep it bounded and deterministic (synthetic seed-fixed data, no walk-forward run); mirror the existing
+  TEST_REGISTRY/main() convention. Evidence: `held_book_weights`/`book_cost_components`/`book_market_impact_cost` in
+  scripts/utils.py and scripts/walk_forward.py.
 
-## Relevant files
-- `skills/quantitative-backtesting/tests/test_resolution_vs_sample_size.py` (verified: 78 passed)
-- `skills/quantitative-backtesting/tests/test_walk_forward.py` (verified: 185 passed)
-- `skills/quantitative-backtesting/tests/test_cpcv.py` (verified: 29 passed)
-- `skills/quantitative-backtesting/tests/test_simple_momentum_hypothesis.py` (existing 3 tests; candidate location for a new sweep test)
-- `simple_momentum_hypothesis.py` (root-level script, exit 0, verdict NOT SUPPORTED)
+(End of file)
