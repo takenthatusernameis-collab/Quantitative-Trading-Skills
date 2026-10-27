@@ -13,6 +13,15 @@ SCRIPTS_DIR = SKILLS_DIR / "scripts"
 EXAMPLES_DIR = SKILLS_DIR / "examples"
 ASSETS_DIR = SKILLS_DIR / "assets" / "example_data"
 
+sys.path.insert(0, str(EXAMPLES_DIR))
+
+import numpy as np  # noqa: E402
+from mean_reversion_hypothesis import (  # noqa: E402
+    COMMISSION,
+    COST_SWEEP_LEVELS,
+    run_cost_sweep,
+)
+
 
 def test_mean_reversion_hypothesis_example_exists():
     example_path = EXAMPLES_DIR / "mean_reversion_hypothesis.py"
@@ -56,8 +65,52 @@ def test_hypothesis_example_runs_successfully():
     assert "SUPPORTED" in result.stdout or "NOT SUPPORTED" in result.stdout
 
 
+def test_mean_reversion_cost_sensitivity_sweep():
+    """The cost-sensitivity sweep runs across all ascending levels and pins
+    the honest directional claim: higher per-trade costs never improve net
+    out-of-sample Sharpe or total return. The advertised setting is the
+    middle rung of the sweep."""
+    data_path = ASSETS_DIR / "sample_ohlcv.csv"
+    import io, contextlib
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        rows = run_cost_sweep(data_path)
+
+    assert len(rows) == len(COST_SWEEP_LEVELS), (
+        f"expected {len(COST_SWEEP_LEVELS)} cost levels, got {len(rows)}"
+    )
+    # Levels recorded in ascending cost order.
+    assert [r["commission_bps"] for r in rows] == [c * 10_000 for c, _ in COST_SWEEP_LEVELS], (
+        "cost sweep levels are not recorded in ascending order"
+    )
+    assert rows[0]["commission_bps"] == 0.0 and rows[0]["slippage_bps"] == 0.0, (
+        "first cost sweep level must be frictionless"
+    )
+    # The advertised setting is the middle rung.
+    advertised = next(r for r in rows if r["commission_bps"] == COMMISSION * 10_000)
+    assert advertised is rows[2], (
+        "the advertised cost level is not the middle rung of the sweep"
+    )
+    # Each row carries an explicit per-level verdict with failing criteria.
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert isinstance(r["criteria"], list) and len(r["criteria"]) == 2
+        assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
+    # Monotonic degradation: higher costs never improve net Sharpe or return.
+    for key in ("sharpe_ratio", "total_return"):
+        values = [r[key] for r in rows]
+        assert all(v is not None and np.isfinite(v) for v in values), (
+            f"{key} is missing or non-finite at one or more cost levels: {values}"
+        )
+        for prev, curr in zip(values, values[1:]):
+            assert curr <= prev + 1e-12, (
+                f"{key} does not degrade monotonically with cost: {prev} -> {curr}"
+            )
+
+
 if __name__ == "__main__":
     test_mean_reversion_hypothesis_example_exists()
     test_run_backtest_bollinger_produces_results()
     test_hypothesis_example_runs_successfully()
+    test_mean_reversion_cost_sensitivity_sweep()
     print("All tests passed")
