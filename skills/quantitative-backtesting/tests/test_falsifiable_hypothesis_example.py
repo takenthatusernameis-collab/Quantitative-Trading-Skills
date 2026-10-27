@@ -221,7 +221,7 @@ def test_the_alpha_criterion_reads_the_raw_p_value_and_the_dar_the_corrected_one
     assert abs(corrected - obs["deflated_alpha_pvalue"]) < 1e-12
     assert abs((1.0 - obs["deflated_alpha_ratio"]) - corrected) < 1e-12
     # The raw p-value is the uncorrected two-sided alpha t-test p-value.
-    assert raw > corrected, (
+    assert raw < corrected, (
         "the multiple-testing correction can only make the p-value larger"
     )
 
