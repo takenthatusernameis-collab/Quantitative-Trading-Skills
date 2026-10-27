@@ -694,6 +694,28 @@ TEST_REGISTRY = [
 ]
 
 
+
+def test_compute_benchmark_total_return_dividends():
+    df = pd.DataFrame({
+        "close": [100.0, 101.0, 102.0],
+        "dividends": [0.0, 1.0, 0.0],
+    })
+    r = _compute_benchmark_total_return(df)
+    assert np.isclose(r.iloc[1], (101.0/100.0 - 1.0) + 1.0/100.0)
+    assert np.isclose(r.iloc[2], 102.0/101.0 - 1.0)
+
+
+def test_compute_benchmark_total_return_adj_close():
+    df = pd.DataFrame({"close": [100.0, 101.0], "adj_close": [99.0, 100.5]})
+    r = _compute_benchmark_total_return(df)
+    assert np.isclose(r.iloc[1], 100.5/99.0 - 1.0)
+
+
+def test_compute_benchmark_total_return_price_only():
+    df = pd.DataFrame({"close": [100.0, 105.0]})
+    r = _compute_benchmark_total_return(df)
+    assert np.isclose(r.iloc[1], 0.05)
+
 def main() -> int:
     tests = TEST_REGISTRY
 
