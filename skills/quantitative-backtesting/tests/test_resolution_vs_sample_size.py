@@ -4288,6 +4288,30 @@ def main() -> int:
     return 1 if failures else 0
 
 
+def test_deflated_alpha_degenerate_single_benchmark_has_zero_floor():
+    """Edge case: a single benchmark (n=1) cannot price a selection bonus.
+
+    With N=1 there is no multiple-testing selection to deflate, so the
+    cross-sectional floor collapses to zero and the function must not crash
+    or produce a NaN. Alpha is then effectively un-deflated.
+    """
+    import numpy as np
+    import pandas as pd
+    from walk_forward import deflated_alpha_ratio
+
+    returns = pd.Series([0.01, -0.005, 0.02, -0.01, 0.015, 0.008] * 20)
+    result = deflated_alpha_ratio(
+        alpha=0.05,
+        returns=returns,
+        benchmark_returns=returns,
+        n_benchmarks=1,
+        trial_alphas=[0.05],
+    )
+    assert result["n_benchmarks"] == 1
+    assert result["expected_max_alpha"] == 0.0
+    assert np.isfinite(result["deflated_alpha_ratio"])
+
+
 TEST_REGISTRY = [
     ("test_the_resolution_improves_with_the_sample_size", test_the_resolution_improves_with_the_sample_size),
     ("test_the_crossing_is_not_a_property_of_one_random_draw", test_the_crossing_is_not_a_property_of_one_random_draw),
@@ -4367,32 +4391,9 @@ TEST_REGISTRY = [
     ("test_the_real_history_ladder_reports_what_it_measured", test_the_real_history_ladder_reports_what_it_measured),
     ("test_the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars", test_the_walk_forward_alpha_floor_is_under_the_bound_at_25000_bars),
     ("test_the_default_ladder_brackets_the_measured_alpha_crossing", test_the_default_ladder_brackets_the_measured_alpha_crossing),
+    ("test_deflated_alpha_degenerate_single_benchmark_has_zero_floor", test_deflated_alpha_degenerate_single_benchmark_has_zero_floor),
 ]
 
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
-def test_deflated_alpha_degenerate_single_benchmark_has_zero_floor():
-    """Edge case: a single benchmark (n=1) cannot price a selection bonus.
-
-    With N=1 there is no multiple-testing selection to deflate, so the
-    cross-sectional floor collapses to zero and the function must not crash
-    or produce a NaN. Alpha is then effectively un-deflated.
-    """
-    import numpy as np
-    import pandas as pd
-    from walk_forward import deflated_alpha_ratio
-
-    returns = pd.Series([0.01, -0.005, 0.02, -0.01, 0.015, 0.008] * 20)
-    result = deflated_alpha_ratio(
-        alpha=0.05,
-        returns=returns,
-        benchmark_returns=returns,
-        n_benchmarks=1,
-        trial_alphas=[0.05],
-    )
-    assert result["n_benchmarks"] == 1
-    assert result["expected_max_alpha"] == 0.0
-    assert np.isfinite(result["deflated_alpha_ratio"])
