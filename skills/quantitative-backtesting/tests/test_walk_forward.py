@@ -7800,6 +7800,65 @@ TEST_REGISTRY.append(
 )
 
 
+def test_calculate_strategy_returns_book_mode_fill_rate_scales_borrow_and_turnover():
+    """In book pricing mode, fill_rate scales the held book and thus scales
+    book-mode costs: short-leg borrow and gross-turnover transaction costs.
+
+    With a constant market-neutral book (short leg present) and borrow_cost>0,
+    halving fill_rate must halve the borrow drag. With turnover (rotating
+    book), halving fill_rate must halve the position-change-based costs charged
+    on the book's gross turnover.
+    """
+    from walk_forward import _calculate_strategy_returns
+
+    # Borrow cost scaling with short leg
+    panel = _make_multiasset_panel(periods=900, n_assets=3, seed=7)
+    dates = panel.index
+    symbols = [f"S{i}" for i in range(3)]
+    neutral = pd.DataFrame(0.0, index=dates, columns=symbols)
+    neutral.iloc[:, 0] = 0.5
+    neutral.iloc[:, 1] = -0.5
+    signals = pd.Series(1.0, index=dates)
+    full_b = _calculate_strategy_returns(
+        panel, signals, commission=0.0, slippage=0.0,
+        borrow_cost=0.03, funding_cost=0.0, impact_coefficient=0.0,
+        panel_pricing="book", book_weights=neutral, fill_rate=1.0,
+    )
+    half_b = _calculate_strategy_returns(
+        panel, signals, commission=0.0, slippage=0.0,
+        borrow_cost=0.03, funding_cost=0.0, impact_coefficient=0.0,
+        panel_pricing="book", book_weights=neutral, fill_rate=0.5,
+    )
+    assert abs(half_b.sum() - 0.5 * full_b.sum()) < 1e-9
+    assert half_b.sum() > full_b.sum()
+
+    # Turnover scaling with rotating book
+    rot = pd.DataFrame(0.0, index=dates, columns=symbols)
+    long_sym, short_sym = symbols[0], symbols[1]
+    rot.loc[dates[::2], long_sym] = 0.5
+    rot.loc[dates[::2], short_sym] = -0.5
+    rot.loc[dates[1::2], long_sym] = -0.5
+    rot.loc[dates[1::2], short_sym] = 0.5
+    full_t = _calculate_strategy_returns(
+        panel, signals, commission=0.001, slippage=0.001,
+        borrow_cost=0.0, funding_cost=0.0, impact_coefficient=0.0,
+        panel_pricing="book", book_weights=rot, fill_rate=1.0,
+    )
+    half_t = _calculate_strategy_returns(
+        panel, signals, commission=0.001, slippage=0.001,
+        borrow_cost=0.0, funding_cost=0.0, impact_coefficient=0.0,
+        panel_pricing="book", book_weights=rot, fill_rate=0.5,
+    )
+    # Costs scale with turnover
+    assert (1 + half_t).prod() - 1 > (1 + full_t).prod() - 1
+
+
+TEST_REGISTRY.append(
+    ("test_calculate_strategy_returns_book_mode_fill_rate_scales_borrow_and_turnover",
+     test_calculate_strategy_returns_book_mode_fill_rate_scales_borrow_and_turnover)
+)
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(main())
