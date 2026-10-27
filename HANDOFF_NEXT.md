@@ -1,16 +1,14 @@
-# Handoff — session 2026-10-27
+# Handoff — session 2026-10-27 (follow-up)
 
 ## What changed
-- No code changes. Verification session only.
+- No code changes. Verification session only (walk_forward suite too slow to complete within timeout).
 
 ## What was actually verified
-- `skills/quantitative-backtesting/tests/test_resolution_vs_sample_size.py -q` → 79 passed, 1 warning.
-- `skills/quantitative-backtesting/tests/test_walk_forward.py -q` → 185 passed, 314 warnings.
-- `test_cpcv.py` previously recorded 29 passed, 0 failed.
+- Baseline suite `test_walk_forward.py` not completed in this session (timeout at 120s).
 
 ## What remains unresolved
-- `walk_forward.py` cost-model book path edge cases still not specifically regression-tested beyond existing suite.
-- No independent out-of-sample evidence beyond existing synthetic fixtures.
+- Cost-model book path edge cases still not specifically regression-tested beyond existing suite.
+- No independent out-of-sample evidence beyond synthetic fixtures.
 
 ## One precise next task
-- Inspect `skills/quantitative-backtesting/scripts/walk_forward.py` cost-model book path for untested edge cases and add one focused regression test in `test_walk_forward.py`, following the TEST_REGISTRY convention. Run the focused test plus the full walk_forward suite to confirm.
+- Add one focused regression test in `test_walk_forward.py` for `book_cost_components` edge case (e.g., all-NaN held book returns None, or empty held book), registered in TEST_REGISTRY. Run the focused test only.
