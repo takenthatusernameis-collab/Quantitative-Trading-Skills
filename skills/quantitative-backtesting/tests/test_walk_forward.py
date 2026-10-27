@@ -7615,11 +7615,17 @@ def test_walk_forward_reports_notional_weighted_capacity_in_book_mode():
     summary = res["summary"]
     assert summary["capacity_book"] is not None
     assert summary["capacity_notional_weighted"] is not None
-    # Notional-weighted capacity is the dw^2 inverse; for small fractional
-    # trades it is typically <= the |dw| rule capacity.
-    # Notional-weighted capacity = panel / |dw|; for this fixture the
-    # smallest observed |dw| is ~0.25, so the ratio is bounded by ~4.0x.
-    assert summary["capacity_notional_weighted"] < summary["capacity_book"] * 4.1
+    # Notional-weighted capacity = panel / |dw| (ratio = 1/|dw_binding|), so
+    # for fractional trades the dw^2 rule reports a larger capacity than the
+    # |dw| rule. The ratio is pinned by the fixture's trade size, not an
+    # arbitrary constant: this fixture rebalances exactly 1/n_assets per
+    # asset per period, so |dw_binding| = 0.25 and the ratio is n_assets = 4.
+    # Bound it to the observed trade size with a tolerance so a change in
+    # trade size fails the test instead of being silently accepted.
+    n_assets = 4
+    ratio = summary["capacity_notional_weighted"] / summary["capacity_book"]
+    expected_ratio = n_assets  # 1 / (1 / n_assets)
+    assert abs(ratio - expected_ratio) < expected_ratio * 0.05
     assert summary["capacity_notional_weighted_trend"] is not None
     for p in res["periods"]:
         if p.get("capacity_book") is not None:
