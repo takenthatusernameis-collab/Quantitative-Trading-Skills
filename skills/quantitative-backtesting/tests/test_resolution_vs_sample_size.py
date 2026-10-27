@@ -3438,6 +3438,79 @@ def test_a_placeholder_sharpe_floor_is_not_read_as_a_measurement():
     assert "insufficient_returns" in output
 
 
+def test_a_single_benchmark_makes_the_alpha_criterion_not_applicable():
+    """With one benchmark there is no multiple-testing problem, so criterion 5 does not apply.
+
+    The Deflated Alpha test corrects for selection bias across N benchmarks.
+    With N = 1 there is nothing to correct: the ``len(benchmark) > 1`` guard at
+    walk_forward.py:942 skips the cross-benchmark correction entirely, so
+    ``deflated_alpha`` is absent and ``alpha_status`` is ``"not_applicable"``.
+    The resolution block reports this instead of pricing a degenerate floor
+    (alpha* = std(benchmark alphas) * sqrt(2 ln 1) = 0 is not a measurement).
+
+    This is distinct from "not_resolvable" (the criterion exists but the draw
+    cannot price it) and from "resolvable" (the criterion was priced). A
+    reader must not confuse "the criterion does not exist" with "the criterion
+    could not be evaluated".
+    """
+    bars = SMALL_SAMPLE_BARS
+    seed = 7
+    tmpdir, data, benchmarks = _control_fixture(bars, seed, False)
+    try:
+        strategy_factory = _make_strategy_factory("sma_crossover")
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            results = out_of_sample_validation(
+                data=data,
+                strategy_factory=strategy_factory,
+                param_grid=PARAM_GRID,
+                train_frac=TRAIN_FRAC,
+                val_frac=VAL_FRAC,
+                test_frac=TEST_FRAC,
+                validation_method="walk_forward",
+                walk_forward_train_months=WF_TRAIN_MONTHS,
+                walk_forward_test_months=WF_TEST_MONTHS,
+                walk_forward_step_months=WF_STEP_MONTHS,
+                initial_capital=INITIAL_CAPITAL,
+                commission=COMMISSION,
+                slippage=SLIPPAGE,
+                benchmark=[benchmarks[0]],
+                total_return_benchmark=False,
+                benchmark_commission=COMMISSION,
+                benchmark_slippage=SLIPPAGE,
+                benchmark_expense_ratio=0.0,
+                benchmark_cost_is_periodic=False,
+                apply_deflation=True,
+                selection_criterion=SELECTION_CRITERION,
+                validate_pit=True,
+            )
+    finally:
+        tmpdir.cleanup()
+    summary = results.get("summary", {})
+    assert summary.get("deflated_alpha") is None, (
+        "deflated_alpha must be absent with a single benchmark"
+    )
+    resolution = summary.get("test_resolution")
+    assert isinstance(resolution, dict), (
+        "the framework must attach a test_resolution block to its summary"
+    )
+    assert resolution["alpha_status"] == "not_applicable", (
+        f"alpha_status must be 'not_applicable' with one benchmark, got "
+        f"{resolution.get('alpha_status')!r}"
+    )
+    assert resolution["alpha_reason"] is None, (
+        "not_applicable carries no reason: the criterion does not exist, it "
+        f"was not refused, got {resolution.get('alpha_reason')!r}"
+    )
+    assert resolution["min_detectable_alpha"] is None, (
+        "no minimum confirmable alpha when the criterion does not apply"
+    )
+    assert resolution["alpha_beyond_plausible_bound"] is False
+    assert resolution["n_benchmarks"] is None, (
+        "n_benchmarks is not reported when deflated_alpha is absent"
+    )
+
+
 def test_every_test_in_this_file_is_registered():
     """A pin that is not registered is not a pin.
 
@@ -4282,6 +4355,7 @@ TEST_REGISTRY = [
     ("test_an_unpriceable_sharpe_floor_is_reported_as_unmeasurable", test_an_unpriceable_sharpe_floor_is_reported_as_unmeasurable),
     ("test_a_measured_sharpe_floor_is_still_reported", test_a_measured_sharpe_floor_is_still_reported),
     ("test_a_placeholder_sharpe_floor_is_not_read_as_a_measurement", test_a_placeholder_sharpe_floor_is_not_read_as_a_measurement),
+    ("test_a_single_benchmark_makes_the_alpha_criterion_not_applicable", test_a_single_benchmark_makes_the_alpha_criterion_not_applicable),
     ("test_every_test_in_this_file_is_registered", test_every_test_in_this_file_is_registered),
     ("test_the_floor_conclusion_is_scoped_to_the_measured_range", test_the_floor_conclusion_is_scoped_to_the_measured_range),
     ("test_the_summary_reports_the_floor_when_it_stops_blocking_the_path", test_the_summary_reports_the_floor_when_it_stops_blocking_the_path),
