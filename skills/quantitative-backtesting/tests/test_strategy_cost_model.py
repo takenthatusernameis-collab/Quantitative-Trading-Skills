@@ -432,25 +432,57 @@ def test_book_pricing_deterministic_given_identical_inputs():
 # ---------------------------------------------------------------------------
 
 def test_market_impact_reduces_returns_market_neutral_pairs_portfolio():
-    """Market impact must reduce returns vs zero for a market-neutral pairs
-    portfolio (dict/panel data).  Regression guard for the
-    position_notional scaling bug where impact was scaled by raw price
-    (~$100) instead of portfolio equity (~$100k), making the impact a
-    silent no-op at coefficient 5.0."""
-    panel = _make_panel(periods=PERIODS, seed=SEED, n_assets=3)
+    """Market impact must reduce returns vs zero for a dict-panel portfolio.
+    Regression guard for the position_notional scaling bug where impact was
+    scaled by raw price (~$100) instead of portfolio equity (~$100k), making
+    the impact a silent no-op at coefficient 5.0.
+
+    The dict-panel path of `market_impact_cost` divides the portfolio notional
+    across ``n_assets`` and measures each constituent against its own ADV, so
+    this is the panel branch (``is_panel=True``), distinct from the single-asset
+    guard `test_market_impact_is_live`.  A signal that flips long/short every
+    bar has full turnover, so the per-asset impact machinery is actually
+    exercised; a constant-zero position (the earlier version of this test,
+    ``sig_a - sig_b`` with both equal to 1.0) trades nothing and can never
+    show impact, which is why it failed.
+    """
+    panel = _make_panel(periods=PERIODS, seed=SEED, n_assets=2)
     dates = panel[next(iter(panel))].index
-    symbols = list(panel.keys())
-    # Market-neutral pairs: long one asset, short another, 2x gross exposure
-    sig_a = pd.Series(1.0, index=dates)
-    sig_b = pd.Series(1.0, index=dates)
-    positions = (sig_a - sig_b) * 2  # market neutral, 2x gross exposure
-    data_mn = {sym: panel[sym] for sym in symbols[:2]}
+    # Flipping long/short every bar: full turnover on a 2-asset dict panel,
+    # so the per-asset ADV impact path is exercised every bar.
+    positions = pd.Series([1.0 if i % 2 == 0 else -1.0 for i in range(PERIODS)],
+                          index=dates)
+    data_mn = {sym: panel[sym] for sym in panel.keys()}
 
     off = _total_return(data_mn, positions, impact_coefficient=0.0)
     on = _total_return(data_mn, positions, impact_coefficient=5.0)
     assert on < off, (
-        f"market impact (coeff=5.0) must reduce returns on market-neutral pairs portfolio: "
-        f"impact=5.0 -> {on:.4%} vs off -> {off:.4%}"
+        f"market impact (coeff=5.0) must reduce returns on the dict-panel "
+        f"portfolio: impact=5.0 -> {on:.4%} vs off -> {off:.4%}"
+    )
+
+
+def test_dict_panel_constant_position_pays_no_per_bar_impact_after_entry():
+    """A constant non-zero position on a dict panel trades only once (at
+    entry), so per-bar market impact after the entry bar must be zero even at
+    a large coefficient -- the per-asset ADV division must not manufacture
+    spurious impact from a static position."""
+    panel = _make_panel(periods=PERIODS, seed=SEED + 3, n_assets=2)
+    dates = panel[next(iter(panel))].index
+    positions = pd.Series(1.0, index=dates)
+    data_mn = {sym: panel[sym] for sym in panel.keys()}
+
+    rets = _calculate_strategy_returns(
+        data_mn, positions, commission=0.0, slippage=0.0,
+        impact_coefficient=5.0,
+    )
+    # No commission/slippage/borrow/funding and no turnover, so the net
+    # return must equal the raw panel return (positions * raw_returns) on
+    # every bar after the execution warmup -- impact must be a no-op.
+    market = build_market_model(data_mn)
+    expected = (positions * market["raw_returns"]).reindex(rets.index)
+    assert np.allclose(rets.values, expected.values, atol=1e-12), (
+        "constant dict-panel position must not incur per-bar market impact"
     )
 
 
@@ -481,6 +513,8 @@ TEST_REGISTRY = [
      test_book_pricing_deterministic_given_identical_inputs),
     ("test_market_impact_reduces_returns_market_neutral_pairs_portfolio",
      test_market_impact_reduces_returns_market_neutral_pairs_portfolio),
+    ("test_dict_panel_constant_position_pays_no_per_bar_impact_after_entry",
+     test_dict_panel_constant_position_pays_no_per_bar_impact_after_entry),
 ]
 
 
