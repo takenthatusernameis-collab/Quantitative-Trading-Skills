@@ -7885,6 +7885,49 @@ TEST_REGISTRY.append(
 )
 
 
+def test_calculate_strategy_returns_book_mode_charges_market_impact():
+    """In book pricing mode with impact_coefficient>0, market impact is charged
+    on the book's turnover/weights (per-asset impact model). Impact must scale
+    with fill_rate and reduce returns relative to impact_coefficient==0."""
+    from walk_forward import _calculate_strategy_returns
+
+    panel = _make_multiasset_panel(periods=900, n_assets=4, seed=13)
+    dates = panel.index
+    symbols = [f"S{i}" for i in range(4)]
+    # Rotating long/short book to create turnover
+    rot = pd.DataFrame(0.0, index=dates, columns=symbols)
+    rot.loc[dates[::2], symbols[0]] = 0.5
+    rot.loc[dates[::2], symbols[1]] = -0.5
+    rot.loc[dates[1::2], symbols[0]] = -0.5
+    rot.loc[dates[1::2], symbols[1]] = 0.5
+    signals = pd.Series(1.0, index=dates)
+    rets_free = _calculate_strategy_returns(
+        panel, signals, commission=0.0, slippage=0.0,
+        borrow_cost=0.0, funding_cost=0.0, impact_coefficient=0.0,
+        panel_pricing="book", book_weights=rot, fill_rate=1.0,
+    )
+    rets_imp = _calculate_strategy_returns(
+        panel, signals, commission=0.0, slippage=0.0,
+        borrow_cost=0.0, funding_cost=0.0, impact_coefficient=0.5,
+        panel_pricing="book", book_weights=rot, fill_rate=1.0,
+    )
+    # Impact reduces total return
+    assert float((1 + rets_imp).prod() - 1) < float((1 + rets_free).prod() - 1)
+    # Impact scales with fill_rate (smaller book -> smaller impact)
+    rets_imp_half = _calculate_strategy_returns(
+        panel, signals, commission=0.0, slippage=0.0,
+        borrow_cost=0.0, funding_cost=0.0, impact_coefficient=0.5,
+        panel_pricing="book", book_weights=rot, fill_rate=0.5,
+    )
+    # Drag smaller at half fill
+    assert float((1 + rets_imp_half).prod() - 1) > float((1 + rets_imp).prod() - 1)
+
+TEST_REGISTRY.append(
+    ("test_calculate_strategy_returns_book_mode_charges_market_impact",
+     test_calculate_strategy_returns_book_mode_charges_market_impact)
+)
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(main())
