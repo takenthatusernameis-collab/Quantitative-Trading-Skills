@@ -428,6 +428,33 @@ def test_book_pricing_deterministic_given_identical_inputs():
 
 
 # ---------------------------------------------------------------------------
+# Market-neutral pairs (net-exposure / dict panel) with market impact
+# ---------------------------------------------------------------------------
+
+def test_market_impact_reduces_returns_market_neutral_pairs_portfolio():
+    """Market impact must reduce returns vs zero for a market-neutral pairs
+    portfolio (dict/panel data).  Regression guard for the
+    position_notional scaling bug where impact was scaled by raw price
+    (~$100) instead of portfolio equity (~$100k), making the impact a
+    silent no-op at coefficient 5.0."""
+    panel = _make_panel(periods=PERIODS, seed=SEED, n_assets=3)
+    dates = panel[next(iter(panel))].index
+    symbols = list(panel.keys())
+    # Market-neutral pairs: long one asset, short another, 2x gross exposure
+    sig_a = pd.Series(1.0, index=dates)
+    sig_b = pd.Series(1.0, index=dates)
+    positions = (sig_a - sig_b) * 2  # market neutral, 2x gross exposure
+    data_mn = {sym: panel[sym] for sym in symbols[:2]}
+
+    off = _total_return(data_mn, positions, impact_coefficient=0.0)
+    on = _total_return(data_mn, positions, impact_coefficient=5.0)
+    assert on < off, (
+        f"market impact (coeff=5.0) must reduce returns on market-neutral pairs portfolio: "
+        f"impact=5.0 -> {on:.4%} vs off -> {off:.4%}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -452,6 +479,8 @@ TEST_REGISTRY = [
     ("test_book_market_impact_live_and_monotone", test_book_market_impact_live_and_monotone),
     ("test_book_pricing_deterministic_given_identical_inputs",
      test_book_pricing_deterministic_given_identical_inputs),
+    ("test_market_impact_reduces_returns_market_neutral_pairs_portfolio",
+     test_market_impact_reduces_returns_market_neutral_pairs_portfolio),
 ]
 
 
