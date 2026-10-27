@@ -1,14 +1,16 @@
-# Handoff — session 2026-10-27: cost-sensitivity sweep verified
+# Handoff — session 2026-10-27
 
 ## What changed
-- `simple_momentum_hypothesis.py` already contained the cost-sensitivity sweep (COST_SWEEP_LEVELS, 5 ascending levels) plus monotonicity assertion; verified it runs end-to-end and asserts verdict NOT SUPPORTED across 0–10 bps round-trip.
+- No code changes. Verification session only.
 
 ## What was actually verified
-- `python3 simple_momentum_hypothesis.py` → exit 0, verdict NOT SUPPORTED; cost-sensitivity sweep shows Sharpe -0.8890 → -0.9689, Return -4.98% → -5.40%, DAR 0.3349 → 0.3174, all monotonically decreasing.
-- `test_simple_momentum_hypothesis.py` → 6 passed.
+- `skills/quantitative-backtesting/tests/test_resolution_vs_sample_size.py -q` → 79 passed, 1 warning.
+- `skills/quantitative-backtesting/tests/test_walk_forward.py -q` → 185 passed, 314 warnings.
+- `test_cpcv.py` previously recorded 29 passed, 0 failed.
 
 ## What remains unresolved
-- Slow framework suite (`test_walk_forward.py`, `test_cpcv.py`, `test_resolution_vs_sample_size.py`) not re-run this session.
+- `walk_forward.py` cost-model book path edge cases still not specifically regression-tested beyond existing suite.
+- No independent out-of-sample evidence beyond existing synthetic fixtures.
 
 ## One precise next task
-- Re-run the slow framework suite to confirm no regression; if green, inspect `skills/quantitative-backtesting/scripts/walk_forward.py` cost-model book path for any remaining untested edge case and add a focused regression test.
+- Inspect `skills/quantitative-backtesting/scripts/walk_forward.py` cost-model book path for untested edge cases and add one focused regression test in `test_walk_forward.py`, following the TEST_REGISTRY convention. Run the focused test plus the full walk_forward suite to confirm.
