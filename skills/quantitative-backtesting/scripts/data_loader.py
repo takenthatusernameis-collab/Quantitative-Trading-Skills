@@ -752,16 +752,18 @@ def resample_data(df: pd.DataFrame, freq: str) -> pd.DataFrame:
 
 
 def fetch_ohlcv_yahoo(symbol: str, start: str, end: str, max_retries: int = 3,
-                     backoff_base: float = 2.0, timeout: int = 20) -> pd.DataFrame:
+                     backoff_base: float = 2.0, timeout: int = 20,
+                     base_url: str = "https://query1.finance.yahoo.com/v8/finance/chart") -> pd.DataFrame:
     """Bounded fetch of daily OHLCV from Yahoo Finance chart API.
 
     Honors HTTP 429 (reads Retry-After when present), retries with exponential
     backoff, and never retries blindly. Raises RuntimeError on failure so callers
     can record the limitation. Returns a DataFrame with date index and OHLCV columns.
+
+    ``base_url`` is injectable for offline testing against a local HTTP server;
+    it defaults to the public Yahoo chart endpoint and is otherwise unused.
     """
     import time, json, urllib.request, urllib.error
-    url = ("https://query1.finance.yahoo.com/v8/finance/chart/%s"
-           "?period1=%d&period2=%d&interval=1d&events=div,splits")
     # convert dates
     import calendar
     def _ts(d):
@@ -769,7 +771,8 @@ def fetch_ohlcv_yahoo(symbol: str, start: str, end: str, max_retries: int = 3,
         dt = _dt.datetime.strptime(d, "%Y-%m-%d").replace(tzinfo=__import__("datetime").timezone.utc)
         return int(dt.timestamp())
     p1, p2 = _ts(start), _ts(end)
-    full = url % (symbol, p1, p2)
+    full = ("%s/%s?period1=%d&period2=%d&interval=1d&events=div,splits"
+            % (base_url, symbol, p1, p2))
     last_err = None
     for attempt in range(max_retries):
         try:

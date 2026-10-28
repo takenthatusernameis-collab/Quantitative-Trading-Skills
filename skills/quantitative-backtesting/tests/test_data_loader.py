@@ -686,6 +686,154 @@ def test_fetch_ohlcv_yahoo_returns_ohlcv_schema_when_network_available():
     )
 
 
+# ---------------------------------------------------------------------------
+# Deterministic, offline regression guards for fetch_ohlcv_yahoo's rate-limit
+# handling. A local http.server stands in for Yahoo so the 429 / Retry-After
+# / exponential-backoff / retry-exhaustion logic has coverage that does NOT
+# depend on the live network (the live test above still skips on 429).
+# ---------------------------------------------------------------------------
+
+import http.server  # noqa: E402
+import json  # noqa: E402
+import socketserver  # noqa: E402
+import threading  # noqa: E402
+
+
+def _yahoo_chart_payload() -> dict:
+    """A minimal valid Yahoo chart-API response body (2 daily bars)."""
+    return {
+        "chart": {
+            "result": [{
+                # 2023-01-01 and 2023-01-02 UTC
+                "timestamp": [1672531200, 1672617600],
+                "indicators": {
+                    "quote": [{
+                        "open": [100.0, 101.0],
+                        "high": [102.0, 103.0],
+                        "low": [99.0, 100.5],
+                        "close": [101.0, 102.0],
+                        "volume": [1000, 2000],
+                    }]
+                },
+            }]
+        }
+    }
+
+
+class _RateLimitHandler(http.server.BaseHTTPRequestHandler):
+    """Local stand-in for the Yahoo chart endpoint.
+
+    Class-level ``mode`` selects behaviour:
+      * ``"retry_once"``  -> HTTP 429 + ``Retry-After: 0`` on the first
+        request, then a valid 200 JSON payload on the next.
+      * ``"always_429"`` -> HTTP 429 + ``Retry-After: 0`` on every request.
+    """
+
+    attempts = 0
+    mode = "retry_once"
+
+    def log_message(self, *args, **kwargs):  # silence the default stderr log
+        pass
+
+    def do_GET(self):
+        _RateLimitHandler.attempts += 1
+        if _RateLimitHandler.mode == "always_429":
+            self.send_response(429)
+            self.send_header("Retry-After", "0")
+            self.end_headers()
+            return
+        if _RateLimitHandler.attempts == 1:
+            self.send_response(429)
+            self.send_header("Retry-After", "0")
+            self.end_headers()
+            return
+        body = json.dumps(_yahoo_chart_payload()).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def _start_local_server():
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _RateLimitHandler)
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    return httpd, port
+
+
+def _stop_local_server(httpd):
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def test_fetch_ohlcv_yahoo_retries_on_429_and_succeeds():
+    """A transient HTTP 429 carrying ``Retry-After`` must trigger exactly one
+    retry and then return a well-formed, date-sorted OHLCV frame.
+
+    Offline and deterministic: a local server returns 429 once, then the
+    valid chart payload. With ``backoff_base=0`` and ``Retry-After: 0`` there
+    is no real sleep, so the test is fast.
+    """
+    from data_loader import fetch_ohlcv_yahoo
+
+    httpd, port = _start_local_server()
+    try:
+        _RateLimitHandler.attempts = 0
+        _RateLimitHandler.mode = "retry_once"
+        df = fetch_ohlcv_yahoo(
+            "AAPL", "2023-01-01", "2023-01-31",
+            max_retries=3, backoff_base=0.0, timeout=5,
+            base_url=f"http://127.0.0.1:{port}",
+        )
+        assert _RateLimitHandler.attempts == 2, (
+            f"expected exactly 2 requests (one retry after 429), "
+            f"got {_RateLimitHandler.attempts}"
+        )
+        assert list(df.columns) == ["date", "open", "high", "low", "close", "volume"], (
+            f"unexpected columns: {list(df.columns)}"
+        )
+        assert len(df) == 2
+        assert pd.api.types.is_datetime64_any_dtype(df["date"])
+        assert df["date"].is_monotonic_increasing
+        assert df["close"].tolist() == [101.0, 102.0]
+    finally:
+        _stop_local_server(httpd)
+
+
+def test_fetch_ohlcv_yahoo_raises_runtimeerror_after_429_exhaustion():
+    """When every request returns 429 up to ``max_retries``, the client must
+    raise ``RuntimeError`` after exactly ``max_retries`` attempts -- never
+    retrying blindly and never hanging.
+
+    Offline and deterministic.
+    """
+    from data_loader import fetch_ohlcv_yahoo
+
+    httpd, port = _start_local_server()
+    try:
+        _RateLimitHandler.attempts = 0
+        _RateLimitHandler.mode = "always_429"
+        raised = False
+        try:
+            fetch_ohlcv_yahoo(
+                "AAPL", "2023-01-01", "2023-01-31",
+                max_retries=2, backoff_base=0.0, timeout=5,
+                base_url=f"http://127.0.0.1:{port}",
+            )
+        except RuntimeError as e:
+            raised = True
+            assert "fetch failed" in str(e), f"unexpected message: {e}"
+        assert raised, "expected RuntimeError after 429 exhaustion"
+        assert _RateLimitHandler.attempts == 2, (
+            f"expected exactly max_retries (2) requests, got "
+            f"{_RateLimitHandler.attempts}"
+        )
+    finally:
+        _stop_local_server(httpd)
+
+
 def test_main_registers_every_module_level_test():
     import inspect
 
@@ -757,6 +905,8 @@ TEST_REGISTRY = [
     ("test_adjust_for_splits_volume_scaled", test_adjust_for_splits_volume_scaled),
     ("test_adjust_for_splits_two_for_one_divides_pre_split_prices", test_adjust_for_splits_two_for_one_divides_pre_split_prices),
     ("test_fetch_ohlcv_yahoo_returns_ohlcv_schema_when_network_available", test_fetch_ohlcv_yahoo_returns_ohlcv_schema_when_network_available),
+    ("test_fetch_ohlcv_yahoo_retries_on_429_and_succeeds", test_fetch_ohlcv_yahoo_retries_on_429_and_succeeds),
+    ("test_fetch_ohlcv_yahoo_raises_runtimeerror_after_429_exhaustion", test_fetch_ohlcv_yahoo_raises_runtimeerror_after_429_exhaustion),
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 
