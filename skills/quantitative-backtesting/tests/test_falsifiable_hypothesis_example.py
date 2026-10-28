@@ -1204,6 +1204,21 @@ def test_real_market_cost_sensitivity_sweep_aapl_msft():
         assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
         assert len(r["criteria"]) == 5
 
+    # Extend machinery separation audit to AAPL vs MSFT pair and verify split
+    # separation audit holds (held-out test set never used in selection).
+    from falsifiable_hypothesis_example import run_hypothesis_test
+
+    buffer2 = io.StringIO()
+    with contextlib.redirect_stdout(buffer2):
+        result = run_hypothesis_test(data_path, commission=COMMISSION, slippage=SLIPPAGE)
+    sep = result.get("separation_check") or result.get("train_val_test_split", {}).get("separation_check", {})
+    assert sep.get("disjoint") is True
+    assert sep.get("chronological") is True
+    for overlap in ("train_val_overlap", "val_test_overlap", "train_test_overlap"):
+        assert sep.get(overlap) == 0
+    assert result.get("pit_passed") is True
+    assert result.get("bias_controls_engaged") is True
+
 
 def test_real_market_cost_sensitivity_sweep_aapl():
     """Transaction-cost sensitivity on committed real market data (AAPL).
