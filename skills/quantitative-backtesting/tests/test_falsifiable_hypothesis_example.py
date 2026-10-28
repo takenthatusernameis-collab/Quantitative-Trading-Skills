@@ -1040,10 +1040,10 @@ def test_real_market_cost_sensitivity_sweep():
 
 
 def test_real_market_cost_sensitivity_sweep_msft():
-    """Transaction-cost sensitivity on committed real market data (MSFT).
+    """Transaction-cost sensitivity on committed real market data (MSFT vs GOOGL).
 
     Runs the example's cost-sensitivity sweep on real market data
-    (MSFT strategy vs committed benchmarks in real_market_data/) across
+    (MSFT strategy vs the committed GOOGL benchmark) across
     ascending commission/slippage levels and asserts the honest directional
     claim: as per-trade costs rise, net out-of-sample Sharpe, total return
     and Deflated Alpha Ratio never improve.
@@ -1056,11 +1056,19 @@ def test_real_market_cost_sensitivity_sweep_msft():
         / "real_market_data"
         / "MSFT.csv"
     )
+    benchmark_path = (
+        SKILLS_DIR
+        / "assets"
+        / "example_data"
+        / "real_market_data"
+        / "GOOGL.csv"
+    )
     assert data_path.exists(), "real market data fixture missing"
+    assert benchmark_path.exists(), "benchmark fixture missing"
 
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
-        rows = run_cost_sensitivity_sweep(data_path)
+        rows = run_cost_sensitivity_sweep(data_path, benchmark_path=benchmark_path)
 
     assert len(rows) == len(COST_SWEEP_LEVELS), (
         f"expected {len(COST_SWEEP_LEVELS)} cost levels, got {len(rows)}"
