@@ -80,6 +80,18 @@ CAPACITY_SWEEP_SETTINGS = [
     ("advertised (impact_coefficient=0.1)", 0.1),
 ]
 
+# Market-impact coefficients exercised by the capacity sensitivity sweep, in
+# ascending order. Capacity scales inversely with the impact coefficient
+# (capacity = max_impact * ADV_notional / impact_coefficient), so as the
+# market-impact assumption rises the strategy's tradable capacity must fall.
+# Sweeping several levels -- rather than a single advertised point plus the
+# impact-disabled None -- guards the capacity path against being a silent
+# no-op and reports how far the estimate moves before it breaches the deployed
+# capital. Kept separate from CAPACITY_SWEEP_SETTINGS so the two-point
+# regression guard (impact disabled vs advertised) and the cost sweeps that
+# reuse its final level are not disturbed.
+CAPACITY_SENSITIVITY_LEVELS = [0.0, 0.05, 0.1, 0.2]
+
 COMMISSION = 0.0002
 SLIPPAGE = 0.0001
 
@@ -521,6 +533,92 @@ def run_capacity_sweep(data_path, benchmark_path=None):
     return rows
 
 
+def run_capacity_sensitivity_sweep(data_path, benchmark_path=None):
+    """Sweep market impact coefficient across ascending levels and assert the
+    honest directional claim: as market impact rises, estimated strategy
+    capacity falls.
+
+    Capacity = max_impact * ADV_notional / impact_coefficient, so it scales
+    inversely with impact_coefficient. This is a sensitivity analysis on the
+    shipped synthetic sample, not evidence about any market; the claim is
+    purely directional and guards the capacity path against a silent no-op
+    (an impact model whose estimate does not move with impact_coefficient).
+    """
+    data_path = Path(data_path)
+    if benchmark_path is None:
+        benchmark_path = data_path.parent / "sample_benchmark.csv"
+    benchmark_path = Path(benchmark_path)
+
+    print("\n" + "=" * 80)
+    print("CAPACITY SENSITIVITY SWEEP: rising market impact, falling capacity")
+    print("=" * 80)
+    print(f"  {'impact coeff':>14} {'capacity (notional)':>26} {'vs capital':>12}")
+    print("  " + "-" * 60)
+
+    rows = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        for impact_coefficient in CAPACITY_SENSITIVITY_LEVELS:
+            metrics = _run_backtest_metrics(
+                data_path, benchmark_path, COMMISSION, SLIPPAGE, tmpdir_path,
+                impact_coefficient=impact_coefficient,
+            )
+            capacity = metrics.get("capacity")
+            rows.append({
+                "impact_coefficient": impact_coefficient,
+                "capacity": capacity,
+                "sharpe_ratio": metrics.get("sharpe_ratio"),
+                "total_return": metrics.get("total_return"),
+            })
+            cap_str = "None (impact disabled)" if capacity is None else f"${capacity:,.0f}"
+            vs_cap = "N/A" if capacity is None else (
+                "above" if float(capacity) > CAPACITY_INITIAL_CAPITAL else "below")
+            print(
+                f"  {impact_coefficient:>14} {cap_str:>26} {vs_cap:>12}"
+            )
+
+    # Levels recorded in ascending order; impact disabled first.
+    assert [r["impact_coefficient"] for r in rows] == list(CAPACITY_SENSITIVITY_LEVELS), (
+        "capacity sensitivity levels are not recorded in ascending order"
+    )
+    assert rows[0]["impact_coefficient"] == 0.0, (
+        "first capacity sensitivity level must be impact disabled"
+    )
+    assert rows[0]["capacity"] is None, (
+        "impact-disabled setting must report capacity=None, got "
+        f"{rows[0]['capacity']}"
+    )
+
+    finite = [r for r in rows if r["capacity"] is not None]
+    assert len(finite) >= 2, (
+        "capacity sensitivity sweep must produce at least two finite readings"
+    )
+    for r in finite:
+        assert float(r["capacity"]) > 0, (
+            "capacity estimate must be positive: " f"{r['capacity']}"
+        )
+    # Capacity must fall monotonically as impact_coefficient rises.
+    for prev, curr in zip(finite, finite[1:]):
+        assert curr["capacity"] < prev["capacity"], (
+            "capacity does not fall as market impact rises: "
+            f"impact {prev['impact_coefficient']} -> {prev['capacity']:,.0f}, "
+            f"impact {curr['impact_coefficient']} -> {curr['capacity']:,.0f}"
+        )
+
+    print()
+    first = finite[0]
+    last = finite[-1]
+    print(
+        f"  Capacity falls with market impact: ${first['capacity']:,.0f} at "
+        f"impact_coefficient={first['impact_coefficient']} -> "
+        f"${last['capacity']:,.0f} at impact_coefficient={last['impact_coefficient']}."
+    )
+    print("  Capacity path verified live: the estimate moves with impact_coefficient.")
+    print("=" * 80)
+
+    return rows
+
+
 def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
     """Sweep commission / slippage across five ascending levels and assert the
     honest directional claim: as per-trade costs rise, net out-of-sample
@@ -649,6 +747,7 @@ def main():
     run_cost_sweep(data_path)
     run_cost_sensitivity_sweep(data_path)
     run_capacity_sweep(data_path)
+    run_capacity_sensitivity_sweep(data_path)
     return 0
 
 

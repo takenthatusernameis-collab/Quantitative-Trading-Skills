@@ -153,6 +153,54 @@ def test_root_cost_sensitivity_sweep_is_monotone():
     )
 
 
+def test_root_capacity_sensitivity_sweep_falls_with_impact():
+    """The root script's capacity sensitivity sweep: estimated capacity falls
+    as market impact coefficient rises (capacity ~ 1/impact_coefficient), and
+    impact disabled reports capacity=None. Guards the capacity path against a
+    silent no-op and reports how far the estimate moves with impact assumptions."""
+    root_dir = SKILLS_DIR.parent.parent
+    sys.path.insert(0, str(root_dir))
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "root_simple_momentum_hypothesis_cap", root_dir / "simple_momentum_hypothesis.py"
+        )
+        assert spec is not None and spec.loader is not None
+        smh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(smh)
+    finally:
+        sys.path.pop(0)
+
+    data_path = ASSETS_DIR / "sample_ohlcv.csv"
+    rows = smh.run_capacity_sensitivity_sweep(data_path)
+
+    assert len(rows) == len(smh.CAPACITY_SENSITIVITY_LEVELS)
+    assert [r["impact_coefficient"] for r in rows] == list(smh.CAPACITY_SENSITIVITY_LEVELS), (
+        "capacity sensitivity levels are not recorded in ascending order"
+    )
+    assert rows[0]["impact_coefficient"] == 0.0 and rows[0]["capacity"] is None, (
+        "impact-disabled level must report capacity=None"
+    )
+    finite = [r for r in rows if r["capacity"] is not None]
+    assert len(finite) >= 2, (
+        "capacity sensitivity sweep must produce at least two finite readings"
+    )
+    for r in finite:
+        assert float(r["capacity"]) > 0, (
+            "capacity estimate must be positive: " f"{r['capacity']}"
+        )
+    for prev, curr in zip(finite, finite[1:]):
+        assert curr["capacity"] < prev["capacity"], (
+            "capacity does not fall as market impact rises: "
+            f"impact {prev['impact_coefficient']} -> {prev['capacity']:,.0f}, "
+            f"impact {curr['impact_coefficient']} -> {curr['capacity']:,.0f}"
+        )
+    # The advertised capacity-sweep impact level must be among the measured levels.
+    assert any(
+        r["impact_coefficient"] == smh.CAPACITY_SWEEP_SETTINGS[-1][1] for r in finite
+    ), "advertised impact level missing from capacity sensitivity sweep"
+
+
 def _metrics_for(commission, slippage):
     data_path = ASSETS_DIR / "sample_ohlcv.csv"
     bench_path = ASSETS_DIR / "sample_benchmark.csv"
@@ -206,4 +254,5 @@ if __name__ == "__main__":
     test_simple_momentum_costs_are_actually_applied()
     test_root_hypothesis_script_runs_and_reports_cost_sensitivity_sweep()
     test_root_cost_sensitivity_sweep_is_monotone()
+    test_root_capacity_sensitivity_sweep_falls_with_impact()
     print("All tests passed")
