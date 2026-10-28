@@ -1,14 +1,13 @@
-# Handoff — MSFT vs GOOGL cost-sensitivity sweep verified
+# Handoff — AAPL vs MSFT cost-sensitivity sweep verified
 
 ## What changed
-- `test_real_market_cost_sensitivity_sweep_msft` already present and verified PASS (90s).
+- Added `test_real_market_cost_sensitivity_sweep_aapl_msft` (AAPL strategy vs MSFT benchmark) to test_falsifiable_hypothesis_example.py and registered it.
 
 ## What was actually verified
-- MSFT strategy vs GOOGL benchmark cost sweep: PASS.
-- Directional cost degradation holds; verdicts determinate.
+- Test passes (78s): directional cost degradation holds; verdicts determinate; 5 criteria each level.
 
 ## What remains unresolved
 - None blocking.
 
 ## One precise next task
-- Extend to a third symbol pair or longer window; verify split separation audit holds.
+- Extend machinery separation audit to AAPL vs MSFT pair or longer window; verify split separation audit holds.
