@@ -750,6 +750,65 @@ def resample_data(df: pd.DataFrame, freq: str) -> pd.DataFrame:
     return df.resample(freq).apply(ohlc_dict).dropna(subset=["open", "close"])
 
 
+
+def fetch_ohlcv_yahoo(symbol: str, start: str, end: str, max_retries: int = 3,
+                     backoff_base: float = 2.0, timeout: int = 20) -> pd.DataFrame:
+    """Bounded fetch of daily OHLCV from Yahoo Finance chart API.
+
+    Honors HTTP 429 (reads Retry-After when present), retries with exponential
+    backoff, and never retries blindly. Raises RuntimeError on failure so callers
+    can record the limitation. Returns a DataFrame with date index and OHLCV columns.
+    """
+    import time, json, urllib.request, urllib.error
+    url = ("https://query1.finance.yahoo.com/v8/finance/chart/%s"
+           "?period1=%d&period2=%d&interval=1d&events=div,splits")
+    # convert dates
+    import calendar
+    def _ts(d):
+        import datetime as _dt
+        dt = _dt.datetime.strptime(d, "%Y-%m-%d").replace(tzinfo=__import__("datetime").timezone.utc)
+        return int(dt.timestamp())
+    p1, p2 = _ts(start), _ts(end)
+    full = url % (symbol, p1, p2)
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            req = urllib.request.Request(full, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            result = payload["chart"]["result"][0]
+            ts = result["timestamp"]
+            q = result["indicators"]["quote"][0]
+            df = pd.DataFrame({
+                "date": pd.to_datetime(ts, unit="s", utc=True).tz_convert(None).normalize(),
+                "open": q["open"],
+                "high": q["high"],
+                "low": q["low"],
+                "close": q["close"],
+                "volume": q["volume"],
+            })
+            df = df.dropna(subset=["close"]).sort_values("date").reset_index(drop=True)
+            if "adjclose" in result["indicators"]:
+                df["adj_close"] = result["indicators"]["adjclose"][0]["adjclose"]
+            return df
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code == 429:
+                retry_after = e.headers.get("Retry-After")
+                wait = float(retry_after) if (retry_after and retry_after.isdigit()) else backoff_base ** (attempt + 1)
+                if attempt < max_retries - 1:
+                    time.sleep(min(wait, 30))
+                    continue
+            break
+        except Exception as e:
+            last_err = e
+            if attempt < max_retries - 1:
+                time.sleep(backoff_base ** attempt)
+                continue
+            break
+    raise RuntimeError(f"fetch failed for {symbol}: {last_err}")
+
+
 if __name__ == "__main__":
     # Quick test
     import tempfile
