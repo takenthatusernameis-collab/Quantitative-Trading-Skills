@@ -694,6 +694,109 @@ def test_the_selection_criterion_is_oos_aware():
     assert result["observed"]["selected_params_avg_test_sharpe"] is not None
 
 
+def test_falsifiable_machinery_on_independent_out_of_sample_fixture():
+    """The falsifiable machinery produces a determinate, explicitly
+    criteria-evaluated verdict on an independent synthetic fixture that was
+    not used to develop the example (a distinct seed/DGP from the shipped
+    sample).
+
+    This is independent out-of-sample evidence beyond the primary synthetic
+    fixture: the held-out test set is disjoint from train/val and never used
+    in parameter selection. The verdict itself (SUPPORTED / NOT SUPPORTED) is
+    not asserted -- both are valid scientific outcomes -- only that the
+    machinery runs, evaluates every pre-registered criterion, reports the
+    test resolution, and audits the split separation on independent data.
+
+    Labelled synthetic: a machinery check, not evidence about any market.
+    Independent real-market out-of-sample evidence remains blocked (the data
+    loader reads local files only and there is no real-data fetch), so it is
+    left as the next agent's item.
+    """
+    import contextlib
+    import io
+    import tempfile
+    from pathlib import Path
+
+    from generate_sample_data import generate_single_asset_data
+
+    # Independent fixture: distinct seed/DGP from the shipped sample.
+    strategy_df = generate_single_asset_data(periods=504, seed=2024)
+    # Independent buy-and-hold benchmark (a different seed).
+    bench_df = generate_single_asset_data(periods=504, seed=777)
+
+    with tempfile.TemporaryDirectory(prefix="independent_oos_") as tmpdir:
+        tmpdir = Path(tmpdir)
+        data_path = tmpdir / "sample_ohlcv.csv"
+        bench_path = tmpdir / "sample_benchmark.csv"
+        strategy_df.to_csv(data_path, index=False)
+        bench_df.to_csv(bench_path, index=False)
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            result = run_hypothesis_test(data_path)
+
+    assert isinstance(result, dict)
+    assert result["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+    assert isinstance(result["all_pass"], bool)
+    assert result["all_pass"] == (result["verdict"] == "SUPPORTED")
+    assert result["pit_passed"] is True
+    assert result["bias_controls_engaged"] is True
+
+    obs = result["observed"]
+    for key in ("oos_sharpe", "oos_total_return", "deflated_sharpe_pvalue",
+                "benchmark_alpha", "benchmark_alpha_pvalue",
+                "benchmark_alpha_pvalue_corrected",
+                "benchmark_alpha_correction_applied",
+                "benchmark_total_return", "deflated_alpha_ratio",
+                "deflated_alpha_pvalue", "n_benchmarks",
+                "selected_params", "test_n_observations"):
+        assert key in obs, f"observed metrics missing {key}"
+    assert obs["test_n_observations"] and obs["test_n_observations"] > 0
+    # The strategy is tested against a set of benchmarks (N >= 2), so the
+    # Deflated Alpha Ratio data-mining control is engaged on independent data.
+    assert obs["n_benchmarks"] and obs["n_benchmarks"] >= 2
+
+    criteria = result["criteria"]
+    assert len(criteria) == 5
+    names = {c["name"] for c in criteria}
+    assert names == {
+        "oos_sharpe_gt_zero",
+        "deflated_sharpe_pvalue_lt_0.10",
+        "benchmark_alpha_pvalue_lt_0.05",
+        "oos_total_return_gt_benchmark",
+        "deflated_alpha_ratio_gt_0.90",
+    }
+    for c in criteria:
+        assert isinstance(c["passed"], bool)
+        assert c["description"]
+    assert result["all_pass"] == all(c["passed"] for c in criteria)
+
+    # Split separation audit: the held-out test set is independent of
+    # train/val and never used in selection.
+    sep = result["separation_check"]
+    assert sep.get("disjoint") is True
+    assert sep.get("chronological") is True
+    for overlap in ("train_val_overlap", "val_test_overlap", "train_test_overlap"):
+        assert sep.get(overlap) == 0
+    assert sep.get("train_size") and sep.get("val_size") and sep.get("test_size")
+
+    # Test resolution is reported alongside the verdict (a measurement, not a
+    # correction): the smallest effect each significance criterion could have
+    # confirmed on this independent sample.
+    res = result["resolution"]
+    for key in ("n_test_observations", "n_parameter_trials", "n_benchmarks",
+                "min_detectable_sharpe", "min_detectable_alpha",
+                "min_detectable_benchmark_alpha",
+                "criteria_beyond_resolution",
+                "plausible_max_annualized_sharpe",
+                "plausible_max_annualized_alpha"):
+        assert key in res, f"resolution block missing {key}"
+    assert res["n_test_observations"] == obs["test_n_observations"]
+    # The resolution analysis must not change the verdict.
+    assert result["all_pass"] == all(c["passed"] for c in result["criteria"])
+    assert result["verdict"] == ("SUPPORTED" if result["all_pass"] else "NOT SUPPORTED")
+
+
 def main() -> int:
     tests = TEST_REGISTRY
     failures = 0
@@ -728,6 +831,7 @@ TEST_REGISTRY = [
     ("test_the_advertised_costs_are_actually_applied", test_the_advertised_costs_are_actually_applied),
     ("test_falsifiable_hypothesis_cost_sensitivity_sweep", test_falsifiable_hypothesis_cost_sensitivity_sweep),
     ("test_the_selection_criterion_is_oos_aware", test_the_selection_criterion_is_oos_aware),
+    ("test_falsifiable_machinery_on_independent_out_of_sample_fixture", test_falsifiable_machinery_on_independent_out_of_sample_fixture),
 ]
 
 
