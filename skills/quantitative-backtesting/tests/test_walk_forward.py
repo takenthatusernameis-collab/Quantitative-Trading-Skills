@@ -4833,6 +4833,27 @@ def test_verify_split_separation_train_test_overlap_raises():
     assert raised, "expected ValueError for train/test overlap"
 
 
+def test_verify_split_separation_non_chronological_disjoint_raises():
+    """Disjoint but non-chronological splits (e.g. validation before train)
+    must raise ValueError in strict mode; non-strict reports diagnostics."""
+    idx = pd.date_range("2020-01-01", periods=30, freq="B")
+    # validation comes before train with no overlap
+    train = _make_indexed_df(idx[10:15])
+    val = _make_indexed_df(idx[:5])
+    test = _make_indexed_df(idx[20:25])
+    raised = False
+    try:
+        _verify_split_separation(train, val, test, strict=True)
+    except ValueError as e:
+        raised = True
+        msg = str(e).lower()
+        assert "chronological" in msg or "order" in msg
+    assert raised, "expected ValueError for non-chronological disjoint split"
+    res = _verify_split_separation(train, val, test, strict=False)
+    assert res["disjoint"] is True
+    assert res["chronological"] is False
+
+
 def test_verify_split_separation_non_strict_returns_diagnostic():
     """Non-strict mode returns the diagnostic dict without raising on overlap."""
     train = _make_indexed_df(pd.date_range("2020-01-01", periods=10, freq="B"))
@@ -6351,6 +6372,7 @@ TEST_REGISTRY.extend([
     ("test_estimate_capacity_scales_inversely_with_impact_coefficient", test_estimate_capacity_scales_inversely_with_impact_coefficient),
     ("test_estimate_capacity_scales_directly_with_max_impact", test_estimate_capacity_scales_directly_with_max_impact),
     ("test_estimate_capacity_missing_volume_not_estimable", test_estimate_capacity_missing_volume_not_estimable),
+    ("test_verify_split_separation_non_chronological_disjoint_raises", test_verify_split_separation_non_chronological_disjoint_raises),
 ])
 
 def test_walk_forward_analysis_surfaces_capacity_in_summary():
