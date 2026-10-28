@@ -447,10 +447,24 @@ def test_verify_split_separation_rejects_overlap_and_non_chronological():
     try:
         _verify_split_separation(train2, val2, test2, strict=True)
         raise AssertionError("expected ValueError on non-chronological split")
-    except ValueError:
-        pass
+    except ValueError as e:
+        msg = str(e)
+        assert "chronological" in msg.lower() or "order" in msg.lower()
     res2 = _verify_split_separation(train2, val2, test2, strict=False)
     assert res2["chronological"] is False
+    # Train/test overlap (direct, non-adjacent pairs must also be disjoint)
+    train3 = pd.DataFrame({"close": range(10)}, index=idx[:10])
+    val3 = pd.DataFrame({"close": range(5)}, index=idx[15:20])
+    test3 = pd.DataFrame({"close": range(10)}, index=idx[8:18])
+    try:
+        _verify_split_separation(train3, val3, test3, strict=True)
+        raise AssertionError("expected ValueError on train/test overlap")
+    except ValueError as e:
+        msg = str(e)
+        assert "train/test" in msg.lower() or "overlap" in msg.lower()
+    res3 = _verify_split_separation(train3, val3, test3, strict=False)
+    assert res3["disjoint"] is False
+    assert res3["train_test_overlap"] > 0
     # Clean split passes both modes
     a = pd.DataFrame({"close": range(5)}, index=idx[:5])
     b = pd.DataFrame({"close": range(5)}, index=idx[5:10])
