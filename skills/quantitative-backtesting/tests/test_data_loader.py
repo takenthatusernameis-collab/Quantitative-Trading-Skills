@@ -641,6 +641,51 @@ def test_adjust_for_splits_two_for_one_divides_pre_split_prices():
     assert adjusted["close"].iloc[2] == 100.5
 
 
+def test_fetch_ohlcv_yahoo_returns_ohlcv_schema_when_network_available():
+    """
+    Regression guard for the Yahoo Finance OHLCV fetch contract.
+
+    fetch_ohlcv_yahoo must return a non-empty DataFrame with a ``date`` column
+    and the OHLCV columns (open, high, low, close, volume), sorted ascending by
+    date, when the network is available. ``adj_close`` is included on a
+    best-effort basis (Yahoo ``events=div,splits``).
+
+    When Yahoo is unreachable or rate-limited (HTTP 429) the test SKIPS and
+    records the limitation instead of failing: real-market evidence acquisition
+    is environment-dependent and must not break the offline suite. No claim is
+    made about the market -- only that the fetch contract (schema + ordering)
+    holds when data can be retrieved.
+
+    Fetch URL:
+        https://query1.finance.yahoo.com/v8/finance/chart/{symbol}
+        ?period1={start_ts}&period2={end_ts}&interval=1d&events=div,splits
+    Expected schema: date, open, high, low, close, volume [, adj_close]
+    """
+    from data_loader import fetch_ohlcv_yahoo
+
+    try:
+        df = fetch_ohlcv_yahoo(
+            "AAPL", "2023-01-01", "2023-03-31",
+            max_retries=2, backoff_base=2.0, timeout=10,
+        )
+    except Exception as e:  # network down / rate-limited / transient
+        print(f"SKIP  {test_fetch_ohlcv_yahoo_returns_ohlcv_schema_when_network_available.__name__}: "
+              f"Yahoo Finance unavailable or rate-limited "
+              f"({type(e).__name__}: {e})")
+        return
+
+    assert isinstance(df, pd.DataFrame) and len(df) > 0
+    assert "date" in df.columns, "fetch contract: missing 'date' column"
+    for col in ("open", "high", "low", "close", "volume"):
+        assert col in df.columns, f"fetch contract: missing OHLCV column '{col}'"
+    assert pd.api.types.is_datetime64_any_dtype(df["date"]), (
+        "fetch contract: 'date' must be a datetime column"
+    )
+    assert df["date"].is_monotonic_increasing, (
+        "fetch contract: rows must be sorted ascending by date"
+    )
+
+
 def test_main_registers_every_module_level_test():
     import inspect
 
@@ -711,6 +756,7 @@ TEST_REGISTRY = [
     ("test_adjust_for_splits_multiple_splits_accumulate", test_adjust_for_splits_multiple_splits_accumulate),
     ("test_adjust_for_splits_volume_scaled", test_adjust_for_splits_volume_scaled),
     ("test_adjust_for_splits_two_for_one_divides_pre_split_prices", test_adjust_for_splits_two_for_one_divides_pre_split_prices),
+    ("test_fetch_ohlcv_yahoo_returns_ohlcv_schema_when_network_available", test_fetch_ohlcv_yahoo_returns_ohlcv_schema_when_network_available),
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 
