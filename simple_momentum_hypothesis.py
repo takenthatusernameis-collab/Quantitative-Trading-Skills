@@ -280,6 +280,38 @@ def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1):
     passes.append(ok3)
     criterion_results.append({"name": CRITERIA[2][0], "description": CRITERIA[2][1], "passed": bool(ok3)})
     print(f"  [{'PASS' if ok3 else 'FAIL'}] {CRITERIA[2][0]}: {CRITERIA[2][1]} (ratio={_fmt_num(da_ratio)})")
+
+    # Test resolution beside the Deflated Alpha Ratio criterion: the smallest
+    # annualized alpha the test could have confirmed at the sample size
+    # actually available (run_backtest.py attaches metrics["test_resolution"]
+    # to every multi-benchmark run), and whether that threshold sits beyond the
+    # stated plausibility bound. A measurement, not a correction -- it changes
+    # no criterion outcome and no verdict. A FAIL verdict on a criterion the
+    # sample cannot resolve is a statement about the sample size, not about
+    # the strategy.
+    test_resolution = metrics.get("test_resolution") or {}
+    if test_resolution:
+        alpha_status = test_resolution.get("alpha_status")
+        min_detectable_alpha = test_resolution.get("min_detectable_alpha")
+        alpha_beyond = bool(test_resolution.get("alpha_beyond_plausible_bound"))
+        n_obs = test_resolution.get("n_test_observations")
+        n_bench = test_resolution.get("n_benchmarks")
+        if alpha_status == "resolvable":
+            print(
+                f"  Test resolution (criterion 3): min detectable annualized alpha "
+                f"{_fmt_num(min_detectable_alpha)} at {n_obs} test observation(s), "
+                f"{n_bench} benchmark(s); beyond plausibility bound: {alpha_beyond}."
+            )
+            if alpha_beyond:
+                print(
+                    f"  The criterion's outcome measures the sample size, not "
+                    f"the strategy: {test_resolution.get('message')}"
+                )
+        else:
+            print(
+                f"  Test resolution (criterion 3): not resolvable "
+                f"({test_resolution.get('alpha_reason') or test_resolution.get('message')})"
+            )
     capacity = metrics.get('capacity')
     ok4 = capacity is not None and float(capacity) > CAPACITY_INITIAL_CAPITAL
     passes.append(ok4)
@@ -308,6 +340,7 @@ def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1):
             "alpha": alpha,
             "deflated_alpha": metrics.get('deflated_alpha'),
             "capacity": capacity,
+            "test_resolution": test_resolution,
         },
     }
 
