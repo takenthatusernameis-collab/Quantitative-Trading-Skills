@@ -160,17 +160,30 @@ def test_validate_point_in_time_clean():
 
 
 def test_validate_point_in_time_detects_lookahead():
-    """High correlation between signal changes and next-period returns suggests look-ahead."""
+    """A signal built from next-period information must be flagged as look-ahead.
+
+    Positive control for the definitive look-ahead check: the next-period
+    correlation between signal changes and price changes. A signal derived
+    from close[t+1] (information unavailable at time t) must produce a
+    violation and fail validation. The negative controls -- same-bar /
+    close[t]-based signals must pass -- are covered by
+    test_validate_point_in_time_does_not_flag_close_based_signals_as_lookahead
+    and test_validate_point_in_time_accepts_legitimate_close_based_signals.
+    """
     np.random.seed(42)
     dates = pd.date_range("2020-01-01", periods=50, freq="B")
     close = 100 * np.exp(np.cumsum(np.random.normal(0.0005, 0.01, 50)))
     df = pd.DataFrame({"close": close}, index=dates)
-    # Create a signal that strongly uses future info by looking ahead
+    # Signal uses next-period close: information unavailable at time t.
     df["signal"] = (df["close"].shift(-1) > df["close"]).astype(int)
     res = validate_point_in_time(df, signal_column="signal")
-    # We expect either warning/violation depending on detection logic
-    assert "violations" in res
-    assert "passed" in res
+    assert res["passed"] is False, (
+        f"next-period signal must fail PIT validation, "
+        f"got violations={res['violations']}"
+    )
+    assert any("next-period returns" in v for v in res["violations"]), (
+        f"expected a next-period look-ahead violation, got {res['violations']}"
+    )
 
 
 def test_validate_point_in_time_does_not_flag_close_based_signals_as_lookahead():
