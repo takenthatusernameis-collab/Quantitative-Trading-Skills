@@ -47,6 +47,7 @@ from walk_forward import (  # noqa: E402
     _make_strategy_factory,
     _resolve_walk_forward_window,
     _walk_forward_window_periods,
+    _verify_split_separation,
     out_of_sample_validation,
 )
 
@@ -418,6 +419,48 @@ def test_out_of_sample_cli_reports_the_cause_and_writes_the_diagnosis():
 
 
 # ---------------------------------------------------------------------------
+# Split separation positive control
+# ---------------------------------------------------------------------------
+
+def test_verify_split_separation_rejects_overlap_and_non_chronological():
+    """Positive control: an overlapping / non-chronological split must be
+    rejected (strict raises ValueError), mirroring the PIT look-ahead positive
+    control. Non-strict mode reports the violation without raising."""
+    idx = pd.date_range("2020-01-01", periods=30, freq="B")
+    # Overlapping train/val: share the boundary timestamp.
+    train = pd.DataFrame({"close": range(11)}, index=idx[:11])
+    val = pd.DataFrame({"close": range(11)}, index=idx[10:21])
+    test = pd.DataFrame({"close": range(10)}, index=idx[20:])
+    # strict -> raises
+    try:
+        _verify_split_separation(train, val, test, strict=True)
+        raise AssertionError("expected ValueError on overlapping split")
+    except ValueError:
+        pass
+    res = _verify_split_separation(train, val, test, strict=False)
+    assert res["disjoint"] is False
+    assert res["train_val_overlap"] > 0
+    # Non-chronological: val before train
+    train2 = pd.DataFrame({"close": range(5)}, index=idx[10:15])
+    val2 = pd.DataFrame({"close": range(5)}, index=idx[:5])
+    test2 = pd.DataFrame({"close": range(5)}, index=idx[20:25])
+    try:
+        _verify_split_separation(train2, val2, test2, strict=True)
+        raise AssertionError("expected ValueError on non-chronological split")
+    except ValueError:
+        pass
+    res2 = _verify_split_separation(train2, val2, test2, strict=False)
+    assert res2["chronological"] is False
+    # Clean split passes both modes
+    a = pd.DataFrame({"close": range(5)}, index=idx[:5])
+    b = pd.DataFrame({"close": range(5)}, index=idx[5:10])
+    c = pd.DataFrame({"close": range(5)}, index=idx[10:15])
+    r = _verify_split_separation(a, b, c, strict=True)
+    assert r["disjoint"] is True and r["chronological"] is True
+
+
+
+# ---------------------------------------------------------------------------
 # Test registry
 # ---------------------------------------------------------------------------
 
@@ -444,6 +487,8 @@ TEST_REGISTRY = [
      test_out_of_sample_cli_completes_on_the_shipped_sample),
     ("test_out_of_sample_cli_reports_the_cause_and_writes_the_diagnosis",
      test_out_of_sample_cli_reports_the_cause_and_writes_the_diagnosis),
+    ("test_verify_split_separation_rejects_overlap_and_non_chronological",
+     test_verify_split_separation_rejects_overlap_and_non_chronological),
 ]
 
 
