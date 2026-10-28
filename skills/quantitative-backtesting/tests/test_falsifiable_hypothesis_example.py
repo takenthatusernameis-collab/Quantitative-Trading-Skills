@@ -988,6 +988,60 @@ def test_real_market_cost_sensitivity_sweep():
         assert len(r["criteria"]) == 5
 
 
+def test_real_market_cost_sensitivity_sweep_msft():
+    """Transaction-cost sensitivity on committed real market data (MSFT).
+
+    Runs the example's cost-sensitivity sweep on real market data
+    (MSFT strategy vs committed benchmarks in real_market_data/) across
+    ascending commission/slippage levels and asserts the honest directional
+    claim: as per-trade costs rise, net out-of-sample Sharpe, total return
+    and Deflated Alpha Ratio never improve.
+    Offline: uses only committed fixtures, no network.
+    """
+    data_path = (
+        SKILLS_DIR
+        / "assets"
+        / "example_data"
+        / "real_market_data"
+        / "MSFT.csv"
+    )
+    assert data_path.exists(), "real market data fixture missing"
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        rows = run_cost_sensitivity_sweep(data_path)
+
+    assert len(rows) == len(COST_SWEEP_LEVELS), (
+        f"expected {len(COST_SWEEP_LEVELS)} cost levels, got {len(rows)}"
+    )
+    assert [r["commission_bps"] for r in rows] == [
+        c * 10_000 for c, _ in COST_SWEEP_LEVELS
+    ], "cost sweep levels are not recorded in ascending order"
+    assert rows[0]["commission_bps"] == 0.0 and rows[0]["slippage_bps"] == 0.0, (
+        "first cost sweep level must be frictionless"
+    )
+
+    series = {
+        "sharpe_ratio": "Sharpe ratio",
+        "total_return": "total return",
+        "deflated_alpha_ratio": "Deflated Alpha Ratio",
+    }
+    for key, label in series.items():
+        values = [r[key] for r in rows]
+        assert all(v is not None and np.isfinite(v) for v in values), (
+            f"{label} is missing or non-finite at one or more cost levels: {values}"
+        )
+        for prev, curr in zip(values, values[1:]):
+            assert curr <= prev + 1e-12, (
+                f"{label} does not degrade monotonically with cost on real "
+                f"market data: {prev} -> {curr}"
+            )
+
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert len(r["criteria"]) == 5
+
+
 def main() -> int:
     tests = TEST_REGISTRY
     failures = 0
@@ -1026,6 +1080,7 @@ TEST_REGISTRY = [
     ("test_falsifiable_machinery_on_independent_real_market_data", test_falsifiable_machinery_on_independent_real_market_data),
     ("test_falsifiable_machinery_on_googl_real_market_data", test_falsifiable_machinery_on_googl_real_market_data),
     ("test_real_market_cost_sensitivity_sweep", test_real_market_cost_sensitivity_sweep),
+    ("test_real_market_cost_sensitivity_sweep_msft", test_real_market_cost_sensitivity_sweep_msft),
 ]
 
 
