@@ -1885,6 +1885,24 @@ def deflated_alpha_ratio(
     if n_benchmarks < 1:
         raise ValueError("n_benchmarks must be at least 1")
 
+    # The cross-sectional estimator derives sr* from the *dispersion of the
+    # trial alphas* and scales it by sqrt(2 * ln(N)). It therefore assumes
+    # that `trial_alphas` IS the complete set of N benchmarks tested: a
+    # caller who reports n_benchmarks=10 but supplies only 3 trial alphas
+    # gets a correction scaled for 10 benchmarks from 3 data points --
+    # a stronger deflation than either input justifies, and a silent
+    # overstatement of the multiple-testing burden. The two inputs must
+    # agree when the cross-sectional estimator is in use.
+    if trial_alphas is not None and len(trial_alphas) != int(n_benchmarks):
+        raise ValueError(
+            f"n_benchmarks={n_benchmarks} but trial_alphas has "
+            f"{len(trial_alphas)} entries: the cross-sectional estimator "
+            "derives the expected maximum from the trial alphas' dispersion "
+            "scaled by sqrt(2*ln(N)), so it requires exactly N trial alphas. "
+            "Supply all N alphas, or drop trial_alphas to use the i.i.d.-null "
+            "fallback (which uses N alone)."
+        )
+
     returns = returns.dropna()
     if len(returns) < 2:
         raise ValueError("Need at least 2 return observations for Deflated Alpha Ratio")

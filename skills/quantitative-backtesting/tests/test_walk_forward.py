@@ -8014,6 +8014,88 @@ TEST_REGISTRY.append(
 )
 
 
+def test_deflated_alpha_ratio_rejects_mismatched_trial_alphas_count():
+    """The cross-sectional estimator requires exactly N trial alphas.
+
+    Positive control for the deflation benchmark: the cross-sectional
+    estimator derives sr* from the dispersion of the trial alphas and scales
+    it by sqrt(2*ln(N)), so it assumes `trial_alphas` IS the complete set of N
+    benchmarks tested. A caller who reports n_benchmarks=10 but supplies only
+    3 trial alphas gets a correction scaled for 10 benchmarks built from 3
+    data points -- a stronger deflation than either input justifies, i.e. a
+    silent overstatement of the multiple-testing burden. The guard must
+    reject that mismatch explicitly rather than silently emitting a
+    over-corrected DAR.
+
+    The i.i.d.-null fallback (trial_alphas=None) is unaffected: it uses N
+    alone and must keep working for any N >= 1.
+    """
+    dates = pd.date_range("2020-01-01", periods=500, freq="B")
+    rng = np.random.default_rng(7)
+    returns = pd.Series(rng.normal(0.0012, 0.015, 500), index=dates)
+    alpha_ann = 0.05
+
+    # Mismatch: n_benchmarks=10 but only 3 trial alphas supplied.
+    try:
+        deflated_alpha_ratio(
+            alpha=alpha_ann,
+            returns=returns,
+            benchmark_returns=returns,
+            n_benchmarks=10,
+            trial_alphas=[0.03, 0.05, 0.07],
+        )
+    except ValueError as e:
+        assert "trial_alphas" in str(e) or "n_benchmarks" in str(e), (
+            f"error should mention trial_alphas / n_benchmarks, got: {e}"
+        )
+    else:
+        assert False, (
+            "expected ValueError for n_benchmarks=10 with only 3 trial_alphas"
+        )
+
+    # Reverse mismatch also rejected.
+    try:
+        deflated_alpha_ratio(
+            alpha=alpha_ann,
+            returns=returns,
+            benchmark_returns=returns,
+            n_benchmarks=3,
+            trial_alphas=[0.03, 0.05, 0.07, 0.09],
+        )
+    except ValueError:
+        pass
+    else:
+        assert False, (
+            "expected ValueError for n_benchmarks=3 with 4 trial_alphas"
+        )
+
+    # Consistent cross-sectional call (N == len(trial_alphas)) still works.
+    res_cs = deflated_alpha_ratio(
+        alpha=alpha_ann,
+        returns=returns,
+        benchmark_returns=returns,
+        n_benchmarks=3,
+        trial_alphas=[0.03, 0.05, 0.07],
+    )
+    assert 0.0 <= res_cs["deflated_alpha_ratio"] <= 1.0
+
+    # The fallback path (trial_alphas=None) is unaffected and works for any N.
+    res_fb = deflated_alpha_ratio(
+        alpha=alpha_ann,
+        returns=returns,
+        benchmark_returns=returns,
+        n_benchmarks=10,
+    )
+    assert 0.0 <= res_fb["deflated_alpha_ratio"] <= 1.0
+    assert res_fb["n_benchmarks"] == 10
+
+
+TEST_REGISTRY.append(
+    ("test_deflated_alpha_ratio_rejects_mismatched_trial_alphas_count",
+     test_deflated_alpha_ratio_rejects_mismatched_trial_alphas_count)
+)
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(main())

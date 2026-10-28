@@ -276,6 +276,84 @@ def test_standalone_no_nan_on_extreme_single_move():
     )
 
 
+def test_probability_of_ruin_sensitivity_to_drift():
+    """Probability of ruin must move with the sign of the drift.
+
+    Positive control for the ruin metric: a strategy with a strong negative
+    drift should almost always bust (equity falls below 50% of initial in a
+    large fraction of simulated paths), while a strategy with a strong
+    positive drift should rarely bust. If the ruin counter were broken --
+    for example, if it counted equity below threshold on the *original*
+    series instead of on each simulated path, or if it divided by the wrong
+    denominator -- both directions would report similar, uninformative
+    probabilities and this test would fail.
+
+    The thresholds are deliberately wide (>= 0.8 / <= 0.2) so the test is
+    robust to the exact drift magnitude and RNG seed.
+    """
+    dates = pd.date_range("2020-01-01", periods=252, freq="B")
+
+    # Negative drift: most paths bust.
+    rng_neg = np.random.default_rng(11)
+    neg_returns = pd.Series(rng_neg.normal(-0.015, 0.015, 252), index=dates)
+    mc_neg = monte_carlo_simulation(base_returns=neg_returns, n_simulations=500, seed=11)
+    assert mc_neg["probability_of_ruin"] >= 0.8, (
+        f"negative drift should produce ruin prob >= 0.8, got "
+        f"{mc_neg['probability_of_ruin']}"
+    )
+
+    # Positive drift: almost no path busts.
+    rng_pos = np.random.default_rng(12)
+    pos_returns = pd.Series(rng_pos.normal(0.015, 0.015, 252), index=dates)
+    mc_pos = monte_carlo_simulation(base_returns=pos_returns, n_simulations=500, seed=12)
+    assert mc_pos["probability_of_ruin"] <= 0.2, (
+        f"positive drift should produce ruin prob <= 0.2, got "
+        f"{mc_pos['probability_of_ruin']}"
+    )
+
+    # The two directions must be clearly separated.
+    assert mc_neg["probability_of_ruin"] > mc_pos["probability_of_ruin"]
+
+
+def test_confidence_intervals_monotonic_wider_levels():
+    """Confidence intervals must widen monotonically as the level increases.
+
+    Positive control for the percentile computation: a 99% CI must be at
+    least as wide as a 95% CI, which must be at least as wide as a 90% CI,
+    which must be at least as wide as a 50% CI, for every metric. A swapped
+    alpha, an inverted percentile call, or a (1 - level) used where level
+    was intended would make some wider level produce a *narrower* band and
+    this test would fail.
+
+    The widths are compared strictly: a degenerate distribution (all sims
+    identical) would make every width zero and the strict inequality would
+    fail, which is the correct behaviour -- a Monte Carlo with zero spread
+    is not a meaningful uncertainty statement.
+    """
+    rng = np.random.default_rng(7)
+    dates = pd.date_range("2020-01-01", periods=252, freq="B")
+    returns = pd.Series(rng.normal(0.0005, 0.015, 252), index=dates)
+
+    levels = [0.50, 0.90, 0.95, 0.99]
+    mc = monte_carlo_simulation(
+        base_returns=returns,
+        n_simulations=1000,
+        confidence_levels=levels,
+        seed=7,
+    )
+
+    for metric in ["total_return", "sharpe_ratio", "max_drawdown",
+                   "annualized_volatility"]:
+        ci = mc["confidence_intervals"][metric]
+        widths = [ci[level][1] - ci[level][0] for level in levels]
+        for i in range(len(widths) - 1):
+            assert widths[i + 1] > widths[i], (
+                f"{metric}: CI width must strictly increase with confidence "
+                f"level ({levels[i]} -> {levels[i + 1]}), but widths were "
+                f"{widths}"
+            )
+
+
 def test_annualization_factor_known_frequencies():
     """_annualization_factor maps known frequencies and defaults to 252.
 
@@ -406,6 +484,8 @@ TEST_REGISTRY = [
     ("annualization_factor_known_frequencies", test_annualization_factor_known_frequencies),
     ("annualization_factor_minute_does_not_collide_with_month", test_annualization_factor_minute_does_not_collide_with_month),
     ("annualization_factor_non_datetime_index", test_annualization_factor_non_datetime_index),
+    ("probability_of_ruin_sensitivity_to_drift", test_probability_of_ruin_sensitivity_to_drift),
+    ("confidence_intervals_monotonic_wider_levels", test_confidence_intervals_monotonic_wider_levels),
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 
