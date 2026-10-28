@@ -7984,6 +7984,30 @@ TEST_REGISTRY.append(
     ("test_book_cost_components_all_nan_returns_none",
      test_book_cost_components_all_nan_returns_none)
 )
+def test_book_cost_components_mixed_nan_returns_dict():
+    """A book with some usable (non-NaN) positions must not be treated as
+    having no usable book: book_cost_components should return a cost dict
+    rather than None."""
+    from walk_forward import book_cost_components
+
+    dates = pd.date_range("2020-01-01", periods=5, freq="B")
+    held = pd.DataFrame(
+        {"A": [1.0, np.nan, 0.5, np.nan, -0.3],
+         "B": [np.nan, 0.2, np.nan, 0.4, 0.1]},
+        index=dates,
+    )
+    result = book_cost_components(held)
+    assert result is not None
+    assert set(result.keys()) == {"turnover", "transaction", "short_exposure",
+                                  "gross_exposure", "borrow", "funding", "total"}
+    assert result["total"].notna().any()
+
+
+TEST_REGISTRY.append(
+    ("test_book_cost_components_mixed_nan_returns_dict",
+     test_book_cost_components_mixed_nan_returns_dict)
+)
+
 TEST_REGISTRY.append(
     ("test_book_cost_components_empty_returns_none",
      test_book_cost_components_empty_returns_none)
