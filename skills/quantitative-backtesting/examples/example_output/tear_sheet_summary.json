@@ -33,8 +33,5 @@
     "tail_ratio": 0.9284182629637894,
     "initial_capital": null
   },
-  "plot_files": [
-    "equity_curve.png",
-    "returns_distribution.png"
-  ]
+  "plot_files": []
 }
