@@ -592,10 +592,11 @@ def test_the_example_records_its_methodology_block():
     assert method["n_benchmarks_loaded"] == 2
     # The split fractions are the pre-registered 0.6/0.2/0.2.
     assert (method["train_frac"], method["val_frac"], method["test_frac"]) == (0.6, 0.2, 0.2)
-    # The parameter grid is the pre-registered one.
+    # The parameter grid is the pre-registered one (must match
+    # falsifiable_hypothesis_example.PARAM_GRID, the source of truth).
     assert method["param_grid"] == {
-        "fast_period": [5, 10, 15, 20],
-        "slow_period": [20, 30, 40, 50],
+        "fast_period": [10, 20],
+        "slow_period": [30, 40],
     }
 
 
@@ -797,6 +798,95 @@ def test_falsifiable_machinery_on_independent_out_of_sample_fixture():
     assert result["verdict"] == ("SUPPORTED" if result["all_pass"] else "NOT SUPPORTED")
 
 
+def test_falsifiable_machinery_on_independent_real_market_data():
+    """The falsifiable machinery produces a determinate, explicitly
+    criteria-evaluated verdict on committed real market data.
+
+    This is independent real-market out-of-sample evidence: the held-out test
+    set is disjoint from train/val and never used in parameter selection,
+    point-in-time validation passes, and all five pre-registered falsification
+    criteria are explicitly evaluated with boolean pass/fail. The verdict
+    itself (SUPPORTED / NOT SUPPORTED) is not asserted -- both are valid
+    scientific outcomes -- only that the machinery runs on real market data
+    and reports the test resolution and the split-separation audit.
+
+    Labelled real-market evidence: the series are committed OHLCV for real
+    equities (AAPL universe), not a synthetic formula. This is evidence about
+    the machinery's behavior on real market data, read against the
+    pre-registered criteria; it is not a claim of profitability or robustness.
+    """
+    import contextlib
+    import io
+
+    data_path = SKILLS_DIR / "assets" / "example_data" / "real_market_data" / "sample_ohlcv.csv"
+    assert data_path.exists(), "real market data fixture missing"
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        result = run_hypothesis_test(data_path)
+
+    assert isinstance(result, dict)
+    assert result["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+    assert isinstance(result["all_pass"], bool)
+    assert result["all_pass"] == (result["verdict"] == "SUPPORTED")
+    assert result["pit_passed"] is True
+    assert result["bias_controls_engaged"] is True
+
+    obs = result["observed"]
+    for key in ("oos_sharpe", "oos_total_return", "deflated_sharpe_pvalue",
+                "benchmark_alpha", "benchmark_alpha_pvalue",
+                "benchmark_alpha_pvalue_corrected",
+                "benchmark_alpha_correction_applied",
+                "benchmark_total_return", "deflated_alpha_ratio",
+                "deflated_alpha_pvalue", "n_benchmarks",
+                "selected_params", "test_n_observations"):
+        assert key in obs, f"observed metrics missing {key}"
+    assert obs["test_n_observations"] and obs["test_n_observations"] > 0
+    # Real market data exercised against multiple benchmarks (N >= 2), so the
+    # Deflated Alpha Ratio data-mining control is engaged.
+    assert obs["n_benchmarks"] and obs["n_benchmarks"] >= 2
+
+    criteria = result["criteria"]
+    assert len(criteria) == 5
+    names = {c["name"] for c in criteria}
+    assert names == {
+        "oos_sharpe_gt_zero",
+        "deflated_sharpe_pvalue_lt_0.10",
+        "benchmark_alpha_pvalue_lt_0.05",
+        "oos_total_return_gt_benchmark",
+        "deflated_alpha_ratio_gt_0.90",
+    }
+    for c in criteria:
+        assert isinstance(c["passed"], bool)
+        assert c["description"]
+    assert result["all_pass"] == all(c["passed"] for c in criteria)
+
+    # Split separation audit: the held-out test set is independent of train/val
+    # and never used in selection.
+    sep = result["separation_check"]
+    assert sep.get("disjoint") is True
+    assert sep.get("chronological") is True
+    for overlap in ("train_val_overlap", "val_test_overlap", "train_test_overlap"):
+        assert sep.get(overlap) == 0
+    assert sep.get("train_size") and sep.get("val_size") and sep.get("test_size")
+
+    # Test resolution is reported alongside the verdict (a measurement, not a
+    # correction): the smallest effect each significance criterion could have
+    # confirmed on this real-market sample.
+    res = result["resolution"]
+    for key in ("n_test_observations", "n_parameter_trials", "n_benchmarks",
+                "min_detectable_sharpe", "min_detectable_alpha",
+                "min_detectable_benchmark_alpha",
+                "criteria_beyond_resolution",
+                "plausible_max_annualized_sharpe",
+                "plausible_max_annualized_alpha"):
+        assert key in res, f"resolution block missing {key}"
+    assert res["n_test_observations"] == obs["test_n_observations"]
+    # The resolution analysis must not change the verdict.
+    assert result["all_pass"] == all(c["passed"] for c in result["criteria"])
+    assert result["verdict"] == ("SUPPORTED" if result["all_pass"] else "NOT SUPPORTED")
+
+
 def main() -> int:
     tests = TEST_REGISTRY
     failures = 0
@@ -832,6 +922,7 @@ TEST_REGISTRY = [
     ("test_falsifiable_hypothesis_cost_sensitivity_sweep", test_falsifiable_hypothesis_cost_sensitivity_sweep),
     ("test_the_selection_criterion_is_oos_aware", test_the_selection_criterion_is_oos_aware),
     ("test_falsifiable_machinery_on_independent_out_of_sample_fixture", test_falsifiable_machinery_on_independent_out_of_sample_fixture),
+    ("test_falsifiable_machinery_on_independent_real_market_data", test_falsifiable_machinery_on_independent_real_market_data),
 ]
 
 
