@@ -1,14 +1,16 @@
-# Handoff — session 2026-10-27 (follow-up)
+# Handoff — session 2026-10-28 (follow-up)
 
 ## What changed
-- No code changes. Verification session only (walk_forward suite too slow to complete within timeout).
+- No source changes. Full verification session.
 
 ## What was actually verified
-- Baseline suite `test_walk_forward.py` not completed in this session (timeout at 120s).
+- `tests/test_walk_forward.py`: 192 passed in 262.05s (full suite green).
+- Slowest test: `test_falsifiable_hypothesis_example_runs` (119.71s).
+- Focused `book_cost_components` edge cases: 3 passed.
 
 ## What remains unresolved
-- Cost-model book path edge cases still not specifically regression-tested beyond existing suite.
 - No independent out-of-sample evidence beyond synthetic fixtures.
+- Cost-model book path edge cases only covered by existing suite.
 
 ## One precise next task
-- Add one focused regression test in `test_walk_forward.py` for `book_cost_components` edge case (e.g., all-NaN held book returns None, or empty held book), registered in TEST_REGISTRY. Run the focused test only.
+- Add a bounded methodological improvement in `skills/quantitative-backtesting/` (e.g., cost sensitivity or an OOS evaluation window) with a focused test; do not commit unless explicitly asked.
