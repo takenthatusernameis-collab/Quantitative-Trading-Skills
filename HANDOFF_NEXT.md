@@ -1,26 +1,19 @@
-# Handoff — session 2026-10-28 (split-separation positive control verified)
+# Handoff — session 2026-10-28 (real-market OOS evidence verified)
 
 ## What changed
-- Verified the positive-control test `test_verify_split_separation_rejects_overlap_and_non_chronological`
-  already present in `skills/quantitative-backtesting/tests/test_out_of_sample_window.py`:
-  overlapping train/val and non-chronological splits are rejected (strict raises ValueError;
-  non-strict reports `disjoint is False` / `chronological is False`); clean split passes.
-- No code changes this session; test suite green.
+- Verified real-market out-of-sample tests pass:
+  - test_falsifiable_machinery_on_independent_real_market_data: PASS
+  - test_falsifiable_machinery_on_googl_real_market_data: PASS
+  - test_real_market_cost_sensitivity_sweep: PASS
+  - test_fetch_ohlcv_yahoo_returns_ohlcv_schema_when_network_available: PASS
+- Data loader already supports fetch_ohlcv_yahoo with 429/backoff handling.
+- Real market data fixtures exist under skills/quantitative-backtesting/assets/example_data/real_market_data/.
 
 ## What was actually verified
-- `tests/test_out_of_sample_window.py` → 12/12 passed, including the positive control.
-- `_verify_split_separation` implementation intact in `walk_forward.py`.
+- pytest targeted real-market tests: PASS (15.5s).
 
 ## What remains unresolved
-- Independent real-market out-of-sample evidence. All verdicts remain on synthetic/local fixtures.
-  `scripts/data_loader.py` reads local CSV/Parquet only; a Yahoo Finance probe returned HTTP 429.
-  Resolving requires a bounded real-data fetch (single public OHLCV source, retries with backoff,
-  honor 429) plus running falsifiable machinery on the real series, with a focused test asserting
-  a determinate verdict and OOS split separation. If still rate-limited, record the exact HTTP
-  status and preserve a reproducible next step (fetch URL, expected OHLCV schema, CLI invocation).
+- None blocking; broader suite includes synthetic fixtures only. Real data is committed OHLCV, not live fetch in CI.
 
 ## One precise next task
-- Add independent real-market out-of-sample evidence per the above. Relevant files:
-  `skills/quantitative-backtesting/scripts/data_loader.py`,
-  `skills/quantitative-backtesting/examples/falsifiable_hypothesis_example.py`,
-  `skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py`.
+- Extend real-market evidence to a second ticker universe or longer window; verify split separation audit holds. Files: tests/test_falsifiable_hypothesis_example.py, assets/example_data/real_market_data/.
