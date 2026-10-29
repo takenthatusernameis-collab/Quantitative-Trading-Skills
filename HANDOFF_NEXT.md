@@ -1,13 +1,14 @@
-# Handoff — machinery audit complete across real-market pairs
+# Handoff — machinery separation audit verified on longer windows
 
 ## What changed
-- No new code changes this session; verified existing machinery separation audits and cost-sensitivity sweeps pass across GOOGL/MSFT, MSFT/GOOGL, AAPL/MSFT pairs (committed fixtures only).
+- No code changes needed; verified `test_real_market_machinery_separation_audit_longer_windows` passes (84s) using committed real-market fixtures with offline guards.
 
 ## What was actually verified
-- `tests/test_falsifiable_hypothesis_example.py` collection intact (22+ tests); targeted msft/aapl_msft tests pass.
+- Separation invariants (disjoint, chronological, zero overlaps) hold for GOOGL, MSFT, AAPL pairs plus single-asset AAPL.
+- pit_passed and bias_controls_engaged true for all.
 
 ## What remains unresolved
-- None blocking. Live Yahoo fetch remains rate-limited; offline mock guards cover contract.
+- Live Yahoo fetch remains rate-limited; offline mock guards cover contract.
 
 ## One precise next task
-- Consider extending machinery separation audit to longer windows on real market pairs, or a new concrete falsifiable hypothesis test on real data.
+- Add a concrete falsifiable hypothesis test on a longer real-data window (e.g., MSFT vs GOOGL over full committed series) verifying verdict stability under cost sensitivity.

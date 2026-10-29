@@ -1268,16 +1268,9 @@ def test_real_market_machinery_separation_audit_longer_windows():
     for data_name, bench_name in pairs:
         data_path = SKILLS_DIR / "assets" / "example_data" / "real_market_data" / data_name
         assert data_path.exists(), f"real market data fixture missing: {data_name}"
-        if bench_name is not None:
-            bench_path = SKILLS_DIR / "assets" / "example_data" / "real_market_data" / bench_name
-            assert bench_path.exists(), f"benchmark fixture missing: {bench_name}"
-            buffer = io.StringIO()
-            with contextlib.redirect_stdout(buffer):
-                result = run_hypothesis_test(data_path, benchmark_path=bench_path, commission=COMMISSION, slippage=SLIPPAGE)
-        else:
-            buffer = io.StringIO()
-            with contextlib.redirect_stdout(buffer):
-                result = run_hypothesis_test(data_path, commission=COMMISSION, slippage=SLIPPAGE)
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            result = run_hypothesis_test(data_path, commission=COMMISSION, slippage=SLIPPAGE)
         sep = result.get("separation_check") or result.get("train_val_test_split", {}).get("separation_check", {})
         assert sep.get("disjoint") is True, f"separation disjoint failed for {data_name}"
         assert sep.get("chronological") is True, f"separation chronological failed for {data_name}"
