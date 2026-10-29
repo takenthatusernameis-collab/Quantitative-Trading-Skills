@@ -1,13 +1,13 @@
-# Handoff — zscore cost-sensitivity on MSFT/GOOGL real window
+# Handoff — zscore hypothesis + cost sensitivity on MSFT/GOOGL real window
 
 ## What changed
-- Added tests/test_zscore_cost_sensitivity_real_msft_googl.py: builds a combined two-symbol CSV from committed real-market MSFT.csv and GOOGL.csv and runs run_cost_sweep, asserting the cost sweep completes and records all five ascending levels.
+- Verified existing tests pass: test_zscore_hypothesis_real_msft_googl.py, test_zscore_cost_sensitivity_real_msft_googl.py.
 
 ## What was actually verified
-- Test passes (4.67s); cost sweep monotonicity assertions hold.
+- 2/2 passed (2.86s); verdict separation invariants and cost sweep monotonicity hold.
 
 ## What remains unresolved
-- The pair is not cointegration-tested; verdict stability semantics depend on run_backtest metrics availability. No claim of profitability.
+- Pair not cointegration-tested; verdict stability semantics depend on run_backtest metrics.
 
 ## One precise next task
-- Add a full falsifiable hypothesis test (run_hypothesis_test) on the MSFT/GOOGL combined real window asserting separation invariants and verdict reporting.
+- Add focused real-market tests on committed GOOGL/MSFT single-asset or multi-asset panel using falsifiable machinery; or implement bounded fetch in data_loader.py honoring 429/backoff against local mock.
