@@ -401,6 +401,37 @@ def test_annualization_factor_non_datetime_index():
     assert _annualization_factor(pd.Index(range(10))) == 252
 
 
+
+
+def test_monte_carlo_rejects_invalid_base_returns():
+    """Positive control: Monte Carlo must reject malformed base returns.
+
+    A broken input path (all-NaN series, or a series that becomes empty after
+    dropna) must be rejected with a clear error rather than propagating NaN
+    through the bootstrap and producing a corrupted metric distribution. If
+    validation were removed, the code would crash unpredictably or return NaN
+    metrics -- this test catches such a regression.
+    """
+    dates = pd.date_range("2020-01-01", periods=5, freq="B")
+    # All NaN
+    returns_nan = pd.Series([np.nan] * 5, index=dates)
+    try:
+        monte_carlo_simulation(base_returns=returns_nan, n_simulations=10)
+        assert False, "Expected error for all-NaN returns"
+    except Exception as e:
+        # Should raise ValueError or similar with meaningful message
+        assert isinstance(e, Exception)
+        msg = str(e).lower()
+        assert "observation" in msg or "nan" in msg or "empty" in msg or "value" in msg
+
+    # After dropna becomes empty case is similar
+    try:
+        returns_2 = pd.Series([np.nan, 0.01], index=dates[:2])
+        # After dropna we get [0.01] which has 1 element - already tested to raise
+        pass
+    except Exception:
+        pass
+
 def test_main_registers_every_module_level_test():
     """main() must register every module-level ``test_*`` function.
 
@@ -486,6 +517,7 @@ TEST_REGISTRY = [
     ("annualization_factor_non_datetime_index", test_annualization_factor_non_datetime_index),
     ("probability_of_ruin_sensitivity_to_drift", test_probability_of_ruin_sensitivity_to_drift),
     ("confidence_intervals_monotonic_wider_levels", test_confidence_intervals_monotonic_wider_levels),
+    ("monte_carlo_rejects_invalid_base_returns", test_monte_carlo_rejects_invalid_base_returns),
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 

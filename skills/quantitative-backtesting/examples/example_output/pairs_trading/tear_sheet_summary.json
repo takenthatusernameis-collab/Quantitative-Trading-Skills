@@ -30,7 +30,10 @@
     "tail_ratio": Infinity,
     "initial_capital": 100000
   },
-  "plot_files": [],
+  "plot_files": [
+    "equity_curve.png",
+    "returns_distribution.png"
+  ],
   "book_diagnostic": {
     "n_periods": 755,
     "n_periods_with_book": 29,

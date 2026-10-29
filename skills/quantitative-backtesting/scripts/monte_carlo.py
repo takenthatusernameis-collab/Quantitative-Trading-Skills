@@ -140,10 +140,10 @@ def monte_carlo_simulation(
     if confidence_levels is None:
         confidence_levels = [0.90, 0.95, 0.99]
 
+    base_returns = base_returns.dropna()
     if len(base_returns) < 2:
         raise ValueError("Need at least 2 return observations for Monte Carlo")
 
-    base_returns = base_returns.dropna()
     n_obs = len(base_returns)
     ann_factor = _annualization_factor(base_returns.index)
 
