@@ -1,13 +1,14 @@
-# Handoff — zscore hypothesis + cost sensitivity on MSFT/GOOGL real window
+# Handoff — walk-forward determinism regression test
 
 ## What changed
-- Verified existing tests pass: test_zscore_hypothesis_real_msft_googl.py, test_zscore_cost_sensitivity_real_msft_googl.py.
+- Added `test_walk_forward_determinism_across_repeated_runs` to `skills/quantitative-backtesting/tests/test_walk_forward.py` (and registered it). The test asserts identical split boundaries/selected params/OOS Sharpe and deflated Sharpe across repeated runs of `walk_forward_analysis`, `out_of_sample_validation` (walk-forward), and `cpcv_analysis`.
 
 ## What was actually verified
-- 2/2 passed (2.86s); verdict separation invariants and cost sweep monotonicity hold.
+- `python -m pytest tests/test_walk_forward.py -k determinism -v` → PASSED (1 passed).
+- Existing walk-forward logic uses fixed iteration order (no RNG in grid search/splitting) and the regression test confirms determinism holds.
 
 ## What remains unresolved
-- Pair not cointegration-tested; verdict stability semantics depend on run_backtest metrics.
+- None for this bounded task. The walk-forward module appears deterministic under the tested paths.
 
 ## One precise next task
-- Add focused real-market tests on committed GOOGL/MSFT single-asset or multi-asset panel using falsifiable machinery; or implement bounded fetch in data_loader.py honoring 429/backoff against local mock.
+- Extend determinism coverage to `monte_carlo_simulation` output shape/ordering if needed (note in test says monte_carlo excluded because it's a distribution; only block-size selection pinned elsewhere) — or alternatively add a quick check that `cpcv_analysis` with default params remains deterministic on a fixed seed/data in a separate small test. File: `skills/quantitative-backtesting/tests/test_walk_forward.py`. Bounded, offline.
