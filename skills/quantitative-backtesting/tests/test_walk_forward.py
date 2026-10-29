@@ -8002,10 +8002,6 @@ def test_book_cost_components_empty_returns_none():
     assert book_cost_components(held) is None
 
 
-TEST_REGISTRY.append(
-    ("test_book_cost_components_all_nan_returns_none",
-     test_book_cost_components_all_nan_returns_none)
-)
 def test_book_cost_components_mixed_nan_returns_dict():
     """A book with some usable (non-NaN) positions must not be treated as
     having no usable book: book_cost_components should return a cost dict
@@ -8118,6 +8114,86 @@ TEST_REGISTRY.append(
 )
 
 
+TEST_REGISTRY.append(
+    ("test_book_cost_components_all_nan_returns_none",
+     test_book_cost_components_all_nan_returns_none)
+)
+
+TEST_REGISTRY.append(
+    ("test_walk_forward_determinism_across_repeated_runs",
+     test_walk_forward_determinism_across_repeated_runs)
+)
+
 if __name__ == "__main__":
     import sys
     sys.exit(main())
+
+
+def test_walk_forward_determinism_across_repeated_runs():
+    """Walk-forward / OOS / CPCV results are deterministic across repeated runs.
+
+    Positive control for reproducibility: the grid search has no RNG of its own
+    (split boundaries come from calendar offsets, itertools.product iterates in
+    a fixed order, ties break on first-seen), so two runs on identical input
+    must produce identical split boundaries, selected parameters per period,
+    OOS return series, and aggregate Sharpe. A regression that introduced a
+    nondeterministic ordering (e.g. dict/set iteration leaking into selection)
+    would silently change the selected params or the OOS record and this test
+    would fail.
+
+    The monte_carlo path is excluded: it is seeded but its *output* is a
+    distribution, so only its block-size selection is pinned (see
+    test_monte_carlo_auto_block_size_reproducible).
+    """
+    data = _make_ohlcv_data(periods=1200, seed=11)
+    pg = {"fast_period": [5, 10, 15], "slow_period": [20, 30, 40]}
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+
+    # Walk-forward: boundaries, selections, and OOS Sharpe must be identical.
+    wf1 = walk_forward_analysis(data, factory, pg, train_months=12, test_months=3,
+                                step_months=3, apply_deflation=True)
+    wf2 = walk_forward_analysis(data, factory, pg, train_months=12, test_months=3,
+                                step_months=3, apply_deflation=True)
+    assert [tuple(sorted(p["best_params"].items())) for p in wf1["periods"]] == \
+           [tuple(sorted(p["best_params"].items())) for p in wf2["periods"]]
+    assert [(str(p["train_start"]), str(p["train_end"]), str(p["test_start"]),
+             str(p["test_end"])) for p in wf1["periods"]] == \
+           [(str(p["train_start"]), str(p["train_end"]), str(p["test_start"]),
+             str(p["test_end"])) for p in wf2["periods"]]
+    assert wf1["summary"].get("oos_sharpe") == wf2["summary"].get("oos_sharpe")
+    assert wf1["summary"].get("deflated_sharpe", {}).get("deflated_sharpe_ratio") == \
+           wf2["summary"].get("deflated_sharpe", {}).get("deflated_sharpe_ratio")
+
+    # Out-of-sample wrapper: same contract on the inner validation results.
+    oos1 = out_of_sample_validation(data, factory, pg, train_frac=0.6, val_frac=0.2,
+                                    test_frac=0.2, validation_method="walk_forward",
+                                    walk_forward_train_months=12,
+                                    walk_forward_test_months=3,
+                                    walk_forward_step_months=3,
+                                    apply_deflation=True, validate_pit=False)
+    oos2 = out_of_sample_validation(data, factory, pg, train_frac=0.6, val_frac=0.2,
+                                    test_frac=0.2, validation_method="walk_forward",
+                                    walk_forward_train_months=12,
+                                    walk_forward_test_months=3,
+                                    walk_forward_step_months=3,
+                                    apply_deflation=True, validate_pit=False)
+    inner1 = oos1["validation_results"]["periods"]
+    inner2 = oos2["validation_results"]["periods"]
+    assert [tuple(sorted(p["best_params"].items())) for p in inner1] == \
+           [tuple(sorted(p["best_params"].items())) for p in inner2]
+    assert oos1["summary"].get("oos_sharpe") == oos2["summary"].get("oos_sharpe")
+
+    # CPCV: fold boundaries and selections must be identical across runs.
+    cpcv1 = cpcv_analysis(data, factory, pg, n_splits=3, test_size=0.2,
+                          purge_size=0.02, embargo_size=0.01,
+                          apply_deflation=True, validate_pit=False)
+    cpcv2 = cpcv_analysis(data, factory, pg, n_splits=3, test_size=0.2,
+                          purge_size=0.02, embargo_size=0.01,
+                          apply_deflation=True, validate_pit=False)
+    assert [tuple(sorted(f["best_params"].items())) for f in cpcv1["folds"]] == \
+           [tuple(sorted(f["best_params"].items())) for f in cpcv2["folds"]]
+    assert [(str(f["train_start"]), str(f["train_end"]), str(f["test_start"]),
+             str(f["test_end"])) for f in cpcv1["folds"]] == \
+           [(str(f["train_start"]), str(f["train_end"]), str(f["test_start"]),
+             str(f["test_end"])) for f in cpcv2["folds"]]
+    assert cpcv1["summary"].get("oos_sharpe") == cpcv2["summary"].get("oos_sharpe")
