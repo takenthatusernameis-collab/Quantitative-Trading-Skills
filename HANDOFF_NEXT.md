@@ -1,14 +1,17 @@
-# Handoff — walk-forward determinism regression test
+# Handoff — next task (walk-forward determinism audit complete; run slow regression gate)
 
 ## What changed
-- Added `test_walk_forward_determinism_across_repeated_runs` to `skills/quantitative-backtesting/tests/test_walk_forward.py` (and registered it). The test asserts identical split boundaries/selected params/OOS Sharpe and deflated Sharpe across repeated runs of `walk_forward_analysis`, `out_of_sample_validation` (walk-forward), and `cpcv_analysis`.
-
-## What was actually verified
-- `python -m pytest tests/test_walk_forward.py -k determinism -v` → PASSED (1 passed).
-- Existing walk-forward logic uses fixed iteration order (no RNG in grid search/splitting) and the regression test confirms determinism holds.
-
-## What remains unresolved
-- None for this bounded task. The walk-forward module appears deterministic under the tested paths.
+No source or test changes this session. The walk-forward determinism/reproducibility audit (HANDOFF_SESSION25) was verified already complete: `test_walk_forward_determinism_across_repeated_runs`, `test_walk_forward_normal_run_keeps_current_numbers` (pinned OOS return reference), `test_main_registers_every_module_level_test`, and split-boundary tests all PASS.
 
 ## One precise next task
-- Extend determinism coverage to `monte_carlo_simulation` output shape/ordering if needed (note in test says monte_carlo excluded because it's a distribution; only block-size selection pinned elsewhere) — or alternatively add a quick check that `cpcv_analysis` with default params remains deterministic on a fixed seed/data in a separate small test. File: `skills/quantitative-backtesting/tests/test_walk_forward.py`. Bounded, offline.
+Run the full slow framework suite as a regression gate to confirm no regression across the determinism/reproducibility pins:
+```
+cd skills/quantitative-backtesting
+python3 -m pytest tests/test_walk_forward.py tests/test_cpcv.py tests/test_resolution_vs_sample_size.py -p no:cacheprovider -q
+```
+Confirm walk-forward matches the 194/194 baseline (last recorded 2026-10-28) and cpcv + resolution complete green.
+
+## Constraints / evidence
+- Offline, bounded session; committed fixtures only (`assets/example_data/real_market_data/*.csv`); no live network (Yahoo fetch is HTTP 429 rate-limited; `fetch_ohlcv_yahoo` already has bounded 429/Retry-After/backoff).
+- Do not assert SUPPORTED/NOT SUPPORTED as a profitability claim; verdicts are falsification outcomes.
+- If green, follow-up: bounded real-market falsification experiment on committed fixtures.
