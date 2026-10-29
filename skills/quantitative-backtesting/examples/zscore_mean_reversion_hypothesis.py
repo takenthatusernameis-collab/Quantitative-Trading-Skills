@@ -463,6 +463,108 @@ def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID):
     return rows
 
 
+# Elevated cost levels exercised by the elevated-cost confirmation sweep on
+# the real-market MSFT/GOOGL pair. These are higher than the advertised 3bps
+# (2bp comm + 1bp slip) round-trip, spanning realistic institutional-to-hedge-
+# fund round-trip costs. The advertised level is re-run inside the sweep as
+# the reference baseline, so verdict changes are reported relative to it.
+ELEVATED_COST_SWEEP_LEVELS = [
+    (COMMISSION, SLIPPAGE),          # advertised 3bps reference
+    (0.0005, 0.00025),               # 5bp comm + 2.5bp slip (10bps round-trip)
+    (0.0010, 0.0005),                # 10bp comm + 5bp slip (30bps round-trip)
+    (0.0020, 0.0010),                # 20bp comm + 10bp slip (60bps round-trip)
+]
+
+
+def run_elevated_cost_sweep(data_path, grid=ELEVATED_COST_SWEEP_LEVELS):
+    """Elevated-cost confirmation sweep on a real-market pair.
+
+    Runs the same pre-registered falsification criteria at a set of ascending
+    cost levels that are higher than the advertised 3bps round-trip, with the
+    advertised level re-run first as the reference baseline. Reports per-
+    criterion pass/fail and the verdict at each level, and flags whether the
+    verdict flips as costs rise. This is a robustness/sensitivity analysis on
+    committed fixtures, not evidence about any market. No claim is made about
+    profitability; verdict flips are the signal that the result is not robust
+    to elevated trading costs.
+
+    Returns a list of rows, one per cost level, each with the commission /
+    slippage, per-criterion pass/fail, and the overall verdict.
+    """
+    data_path = Path(data_path)
+
+    print("\n" + "=" * 80)
+    print("ELEVATED COST SENSITIVITY SWEEP: ascending costs above advertised (falsifiable criteria)")
+    print("=" * 80)
+    print(f"  {'cost level':<36} {'comm':>6} {'slip':>6} {'Sharpe':>9} {'Return':>9} {'verdict':>12}")
+    print("  " + "-" * 90)
+
+    rows = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        for commission, slippage in grid:
+            metrics = _run_backtest_metrics(data_path, commission, slippage, tmpdir_path)
+            sharpe = metrics.get("sharpe_ratio")
+            ret = metrics.get("total_return")
+            ok1 = sharpe is not None and float(sharpe) > 0
+            ok2 = ret is not None and float(ret) > 0
+            passes = {"oos_sharpe_gt_zero": bool(ok1), "oos_total_return_positive": bool(ok2)}
+            verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+            rows.append({
+                "commission": commission,
+                "slippage": slippage,
+                "commission_bps": commission * 10_000,
+                "slippage_bps": slippage * 10_000,
+                "sharpe_ratio": sharpe,
+                "total_return": ret,
+                "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+                "verdict": verdict,
+                "all_pass": all(passes.values()),
+            })
+            print(
+                f"  {commission*10_000:.0f}bp comm + {slippage*10_000:.2f}bp slip".ljust(36)
+                + f" {commission*10_000:>6.0f} {slippage*10_000:>6.2f} "
+                + f"{_fmt_num(sharpe):>9} {_fmt_pct(ret):>9} {verdict[:12]:>12}"
+            )
+
+    # Structural sanity: every level produced a determinate row with consistent
+    # per-criterion reporting; the advertised level is the first rung.
+    assert len(rows) == len(grid), "elevated cost sweep did not cover every level"
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
+        assert r["verdict"] == ("SUPPORTED" if r["all_pass"] else "NOT SUPPORTED")
+        assert len(r["criteria"]) == 2
+    assert rows[0]["commission_bps"] == COMMISSION * 10_000, (
+        "first level of elevated sweep must be the advertised reference"
+    )
+    assert rows[0]["slippage_bps"] == SLIPPAGE * 10_000, (
+        "first level of elevated sweep must be the advertised reference"
+    )
+    # Ascending costs.
+    for prev, curr in zip(rows, rows[1:]):
+        assert curr["commission_bps"] >= prev["commission_bps"]
+        assert curr["slippage_bps"] >= prev["slippage_bps"]
+
+    # Report verdict changes relative to the advertised reference.
+    print("\n  VERDICT BY ELEVATED COST LEVEL (with failing criteria):")
+    for i, r in enumerate(rows):
+        failed = [c["name"] for c in r["criteria"] if not c["passed"]]
+        failed_str = ", ".join(failed) if failed else "none"
+        tag = " [advertised reference]" if i == 0 else ""
+        print(f"    [{i}] {r['commission_bps']:.0f}bp+{r['slippage_bps']:.2f}bp -> {r['verdict']}: failing={failed_str}{tag}")
+    verdicts = [r["verdict"] for r in rows]
+    if len(set(verdicts)) > 1:
+        print(f"  VERDICT FLIPS under elevated costs: {verdicts[0]} -> ... -> {verdicts[-1]} (result not robust to elevated costs)")
+    else:
+        print(f"  VERDICT STABLE under elevated costs: {verdicts[0]} (holds at all tested cost levels)")
+
+    print("  Elevated cost sweep completed.")
+    print("=" * 80)
+
+    return rows
+
+
 def main():
     results = []
     for label, filename in FIXTURES:
