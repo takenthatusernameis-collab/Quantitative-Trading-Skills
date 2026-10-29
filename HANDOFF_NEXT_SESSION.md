@@ -1,22 +1,15 @@
-# Handoff — session 2026-10-28 (MSFT vs GOOGL real-market cost-sensitivity sweep)
+# Handoff — next task (real-market MSFT/GOOGL elevated-cost confirmation)
 
 ## What changed
-- The PIT-strengthening next task (from the prior handoff) was inspected and found complete: every PIT test in `skills/quantitative-backtesting/tests/test_data_loader.py` already asserts `passed=False` with specific violation types (`next-period returns`, `monotonically`, `Invalid lookback`) plus negative controls. No weak spots to strengthen; no change made there.
-- Executed the pending HANDOFF_SESSION24 task: extended real-market cost-sensitivity evidence to a genuine second symbol pair. `test_real_market_cost_sensitivity_sweep_msft` in `skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py` now runs `run_cost_sensitivity_sweep(MSFT.csv, benchmark_path=GOOGL.csv)` — MSFT strategy vs the committed GOOGL benchmark — instead of the previous degenerate MSFT-vs-MSFT run (the default benchmark `sample_benchmark.csv` is byte-identical to `MSFT.csv`). Updated the docstring accordingly. Registered entry already present in `TEST_REGISTRY`; only this one test function was modified.
-
-## What was actually verified
-- `test_real_market_cost_sensitivity_sweep_msft` → PASS (MSFT vs GOOGL; all 5 cost levels produce a determinate SUPPORTED/NOT SUPPORTED verdict; directional claim holds: Sharpe / total return / DAR non-increasing as cost rises; verdict NOT SUPPORTED — an honest falsification, not a profitability claim).
-- Full `test_falsifiable_hypothesis_example.py` → **25/25 passed**.
-- Regression suites re-confirmed green:
-  - `tests/test_data_loader.py` → **36/36 passed** (incl. offline 429/Retry-After/exhaustion guards).
-  - `tests/test_walk_forward.py` → **194/194 passed**.
-- Working tree contains only the one modified test function; no source, example, or fixture files touched; no network used (committed fixtures only).
-
-## What remains unresolved
-- None for this bounded task. Real-market cost-sensitivity evidence now covers three symbol pairs with independent benchmarks: GOOGL→MSFT, MSFT→GOOGL, AAPL→MSFT.
-
-## Approaches already tried / failed
-- None this session. Prior sessions resolved Yahoo live-fetch 429 by committing real fixtures + offline mock-server guards (no blind retries, no live-network dependence).
+Session 2026-10-29 completed the z-score parameter-sensitivity pass on the real-market MSFT/GOOGL pair (see HANDOFF_SESSION28.md):
+- `skills/quantitative-backtesting/examples/zscore_mean_reversion_hypothesis.py` — added `PARAM_SENSITIVITY_GRID` (6 settings) + `run_param_sensitivity_sweep()`; `_run_backtest_metrics` gained optional `params` arg.
+- `skills/quantitative-backtesting/tests/test_zscore_param_sensitivity_real_msft_googl.py` (new).
+- Verified: 3 real-market tests pass (5.59s); all 6 settings NOT SUPPORTED on committed MSFT/GOOGL fixtures; per-criterion flips demonstrate sensitivity; no profitability claim.
 
 ## One precise next task
-- Complete real-market out-of-sample machinery coverage across all three symbol pairs: add `test_falsifiable_machinery_on_msft_real_market_data` (MSFT strategy vs committed GOOGL benchmark) mirroring the existing `test_falsifiable_machinery_on_googl_real_market_data` and `test_falsifiable_machinery_on_aapl_real_market_data`. It must assert determinate verdict (SUPPORTED/NOT SUPPORTED both valid), PIT passed, bias controls engaged, 5 explicitly-evaluated criteria, split separation (disjoint + chronological, zero overlaps), and resolution block present — without asserting the verdict itself. Bounded (~70s), offline, committed fixtures only. File: `skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py` (add test + TEST_REGISTRY entry). Constraint: do not touch the live network; do not assert SUPPORTED/NOT SUPPORTED; keep the change to one test.
+Extend real-market MSFT/GOOGL robustness evidence with an elevated-cost confirmation: run backtests/cost-sweep on the committed MSFT+GOOGL pair at higher cost levels (e.g., 5bp+2.5bp and/or 10bp+5bp slippage) and report per-criterion pass/fail + verdict changes vs the advertised 3bps (2bp+1bp) level. Confirm whether the NOT SUPPORTED verdict holds or flips under elevated costs — verdict flips are the signal, not a profitability claim.
+- File to extend: `skills/quantitative-backtesting/tests/test_zscore_cost_sensitivity_real_msft_googl.py` (add higher-cost sweep test) or `skills/quantitative-backtesting/examples/zscore_mean_reversion_hypothesis.py` (add cost levels to `COST_SWEEP_LEVELS`).
+- Constraints: offline, committed fixtures only; book panel pricing; chronological split; do not assert SUPPORTED as profitability; bounded (~30s); no live network.
+
+## Evidence
+- Sweep output captured in HANDOFF_SESSION28.md: Sharpe −0.27 to −1.06 across grid, verdict stable NOT SUPPORTED, return criterion flips sign across settings.

@@ -63,6 +63,20 @@ COST_SWEEP_LEVELS = [
     (0.0010, 0.0005),
 ]
 
+# Narrow, pre-registered z-score parameter grid used by the parameter
+# sensitivity sweep. Every setting is a small perturbation of the advertised
+# parameters (period=20, entry_z=2.0, exit_z=0.5); the advertised setting is
+# the first rung. The grid is fixed before looking at results, so verdict
+# flips across it are robustness/sensitivity signal, not parameter hunting.
+PARAM_SENSITIVITY_GRID = (
+    (20, 2.0, 0.5),   # advertised baseline
+    (20, 1.5, 0.5),   # looser entry
+    (20, 2.5, 0.5),   # tighter entry
+    (20, 2.0, 0.3),   # earlier exit
+    (20, 2.0, 0.7),   # later exit
+    (15, 2.0, 0.5),   # shorter lookback
+)
+
 HYPOTHESIS = (
     "A Z-Score mean-reversion (pairs) strategy on a cointegrated two-asset "
     "pair produces positive out-of-sample risk-adjusted returns (Sharpe > 0) "
@@ -222,13 +236,14 @@ def run_hypothesis_test(data_path, label):
     }
 
 
-def _run_backtest_metrics(data_path, commission, slippage, tmpdir_path):
+def _run_backtest_metrics(data_path, commission, slippage, tmpdir_path, params=PARAMS):
     """Run run_backtest.py once at the given cost setting and return metrics.
 
     Uses the same CLI invocation as run_hypothesis_test (multi-symbol panel,
     book pricing, chronological train/val/test split, point-in-time
-    validation) but with the caller-specified commission / slippage. Returns
-    the parsed metrics.json, or {} if no metrics file was written.
+    validation) but with the caller-specified commission / slippage and the
+    caller-specified strategy params JSON. Returns the parsed metrics.json,
+    or {} if no metrics file was written.
     """
     cmd = [
         sys.executable,
@@ -236,7 +251,7 @@ def _run_backtest_metrics(data_path, commission, slippage, tmpdir_path):
         "--data", str(data_path),
         "--strategy", "zscore_mean_reversion",
         "--multi-symbol",
-        "--params", PARAMS,
+        "--params", params,
         "--commission", str(commission),
         "--slippage", str(slippage),
         "--train-frac", "0.6",
@@ -351,6 +366,98 @@ def run_cost_sweep(data_path):
         print(f"  VERDICT STABLE across cost sweep: {verdicts[0]} (pre-registered criteria applied at each level)")
 
     print("  Costs sweep completed with directional sensitivity observed.")
+    print("=" * 80)
+
+    return rows
+
+
+def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID):
+    """Sweep z-score parameters across a narrow pre-registered grid and report
+    an explicit falsification verdict at each setting.
+
+    Reports how the per-criterion pass/fail and overall verdict change as the
+    z-score mean-reversion parameters are perturbed around the advertised
+    setting, holding commission/slippage fixed at the advertised level. This
+    is a robustness/sensitivity analysis on the shipped fixture, not evidence
+    about any market. No claim is made about which setting is "best"; verdict
+    flips across the grid are the signal that the result is not robust to
+    small parameter changes.
+
+    Returns a list of rows, one per grid setting, each with the params used,
+    per-criterion pass/fail, and the overall verdict ("SUPPORTED" / "NOT
+    SUPPORTED"). No assertion is made about the verdict itself.
+    """
+    data_path = Path(data_path)
+    fixed_params_base = {
+        "spread_method": "log_ratio",
+        "hedge_ratio": 1.0,
+        "hedge_lookback": 30,
+    }
+
+    print("\n" + "=" * 80)
+    print("PARAMETER SENSITIVITY SWEEP: z-score params around the advertised setting")
+    print("=" * 80)
+    print(f"  Fixed costs: {COMMISSION*10_000:.0f}bp comm + {SLIPPAGE*10_000:.0f}bp slip")
+    print(f"  Fixed: spread_method=log_ratio, hedge_ratio=1.0, hedge_lookback=30")
+    print(
+        f"  {'period':>6} {'entry_z':>7} {'exit_z':>7} {'Sharpe':>9} {'Return':>9} "
+        f"{'criteria':>10} {'verdict':>12}"
+    )
+    print("  " + "-" * 90)
+
+    rows = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        for period, entry_z, exit_z in grid:
+            params = json.dumps({**fixed_params_base, "period": period, "entry_z": entry_z, "exit_z": exit_z})
+            metrics = _run_backtest_metrics(data_path, COMMISSION, SLIPPAGE, tmpdir_path, params=params)
+            sharpe = metrics.get("sharpe_ratio")
+            ret = metrics.get("total_return")
+            ok1 = sharpe is not None and float(sharpe) > 0
+            ok2 = ret is not None and float(ret) > 0
+            passes = {"oos_sharpe_gt_zero": bool(ok1), "oos_total_return_positive": bool(ok2)}
+            failed = [name for name, ok in passes.items() if not ok]
+            verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+            rows.append({
+                "period": period,
+                "entry_z": entry_z,
+                "exit_z": exit_z,
+                "commission": COMMISSION,
+                "slippage": SLIPPAGE,
+                "commission_bps": COMMISSION * 10_000,
+                "slippage_bps": SLIPPAGE * 10_000,
+                "sharpe_ratio": sharpe,
+                "total_return": ret,
+                "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+                "verdict": verdict,
+                "all_pass": all(passes.values()),
+            })
+            crit_str = ",".join(
+                "1" if c["passed"] else "0" for c in rows[-1]["criteria"]
+            )
+            print(
+                f"  {period:>6} {entry_z:>7} {exit_z:>7} "
+                f"{_fmt_num(sharpe):>9} {_fmt_pct(ret):>9} "
+                f"{crit_str:>10} {verdict[:12]:>12}"
+            )
+
+    # Structural sanity: every grid setting produced a determinate row with
+    # consistent per-criterion reporting. No claim is made about the verdict.
+    assert len(rows) == len(grid), "param sensitivity sweep did not cover every grid setting"
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
+        assert r["verdict"] == ("SUPPORTED" if r["all_pass"] else "NOT SUPPORTED")
+        assert len(r["criteria"]) == 2
+        assert r["commission_bps"] == COMMISSION * 10_000
+        assert r["slippage_bps"] == SLIPPAGE * 10_000
+
+    verdicts = [r["verdict"] for r in rows]
+    if len(set(verdicts)) > 1:
+        print(f"\n  VERDICT CHANGES across param grid: {verdicts[0]} -> ... -> {verdicts[-1]} "
+              f"(sensitivity to small param changes demonstrated)")
+    else:
+        print(f"\n  VERDICT STABLE across param grid: {verdicts[0]} (pre-registered criteria applied at each setting)")
     print("=" * 80)
 
     return rows
