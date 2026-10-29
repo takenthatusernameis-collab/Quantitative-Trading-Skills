@@ -1,14 +1,13 @@
-# Handoff — machinery separation audit verified on longer windows
+# Handoff — zscore cost-sensitivity on MSFT/GOOGL real window
 
 ## What changed
-- No code changes needed; verified `test_real_market_machinery_separation_audit_longer_windows` passes (84s) using committed real-market fixtures with offline guards.
+- Added tests/test_zscore_cost_sensitivity_real_msft_googl.py: builds a combined two-symbol CSV from committed real-market MSFT.csv and GOOGL.csv and runs run_cost_sweep, asserting the cost sweep completes and records all five ascending levels.
 
 ## What was actually verified
-- Separation invariants (disjoint, chronological, zero overlaps) hold for GOOGL, MSFT, AAPL pairs plus single-asset AAPL.
-- pit_passed and bias_controls_engaged true for all.
+- Test passes (4.67s); cost sweep monotonicity assertions hold.
 
 ## What remains unresolved
-- Live Yahoo fetch remains rate-limited; offline mock guards cover contract.
+- The pair is not cointegration-tested; verdict stability semantics depend on run_backtest metrics availability. No claim of profitability.
 
 ## One precise next task
-- Add a concrete falsifiable hypothesis test on a longer real-data window (e.g., MSFT vs GOOGL over full committed series) verifying verdict stability under cost sensitivity.
+- Add a full falsifiable hypothesis test (run_hypothesis_test) on the MSFT/GOOGL combined real window asserting separation invariants and verdict reporting.
