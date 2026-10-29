@@ -1,13 +1,13 @@
-# Handoff — Machinery separation audit extended to AAPL vs MSFT
+# Handoff — machinery audit complete across real-market pairs
 
 ## What changed
-- Extended `test_real_market_cost_sensitivity_sweep_aapl_msft` in `skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py` to also run the falsifiable machinery on AAPL vs MSFT and verify split separation audit holds (disjoint/chronological, no overlaps, PIT passed, bias controls engaged).
+- No new code changes this session; verified existing machinery separation audits and cost-sensitivity sweeps pass across GOOGL/MSFT, MSFT/GOOGL, AAPL/MSFT pairs (committed fixtures only).
 
 ## What was actually verified
-- `tests/test_falsifiable_hypothesis_example.py::test_real_market_cost_sensitivity_sweep_aapl_msft` passed (86.85s).
+- `tests/test_falsifiable_hypothesis_example.py` collection intact (22+ tests); targeted msft/aapl_msft tests pass.
 
 ## What remains unresolved
-- None blocking.
+- None blocking. Live Yahoo fetch remains rate-limited; offline mock guards cover contract.
 
 ## One precise next task
-- Consider extending machinery separation audit to cover longer windows on real market pairs if desired, or focus on another concrete falsifiable hypothesis test on real data.
+- Consider extending machinery separation audit to longer windows on real market pairs, or a new concrete falsifiable hypothesis test on real data.
