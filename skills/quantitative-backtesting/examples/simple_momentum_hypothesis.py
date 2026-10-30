@@ -170,6 +170,21 @@ def run_hypothesis_test(data_path, benchmark_path=None):
                     metrics = json.load(f)
                 break
 
+        # The bias-control fields (train_val_test_split,
+        # point_in_time_validation) live in the tear sheet SUMMARY, not in
+        # metrics.json: metrics.json is the performance artifact and carries no
+        # split or PIT block. Reading them from metrics.json alone silently
+        # prints "Point-in-time validation: None" on real data, which is a false
+        # negative about the methodology controls. Merge the summary in so the
+        # banner reports the run's actual controls.
+        summary_path = tmpdir_path / "results" / "tear_sheet_summary.json"
+        if summary_path.exists() and summary_path.is_file():
+            with open(summary_path) as f:
+                summary = json.load(f)
+            for key in ("train_val_test_split", "point_in_time_validation"):
+                if key in summary and key not in metrics:
+                    metrics[key] = summary[key]
+
     print("\n1. METHODOLOGY CONTROLS")
     split_info = metrics.get("train_val_test_split", {})
     if split_info:

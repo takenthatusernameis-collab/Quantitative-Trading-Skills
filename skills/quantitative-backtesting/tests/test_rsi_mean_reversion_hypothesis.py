@@ -5,6 +5,7 @@ Regression tests for a falsifiable RSI mean-reversion hypothesis using run_backt
 
 import contextlib
 import io
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,15 @@ SKILLS_DIR = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = SKILLS_DIR / "scripts"
 EXAMPLES_DIR = SKILLS_DIR / "examples"
 ASSETS_DIR = SKILLS_DIR / "assets" / "example_data"
+REAL_MARKET_DIR = ASSETS_DIR / "real_market_data"
+
+sys.path.insert(0, str(EXAMPLES_DIR))
+from rsi_mean_reversion_hypothesis import (  # noqa: E402
+    COMMISSION,
+    COST_SWEEP_LEVELS,
+    run_cost_sweep,
+    run_hypothesis_test,
+)
 
 
 def test_rsi_mean_reversion_hypothesis_example_exists():
@@ -68,13 +78,7 @@ def test_rsi_cost_sensitivity_sweep():
     This pins a core methodological control: sensitivity to transaction costs
     must be measured and reported, not merely stated. The sweep is a
     sensitivity analysis on the shipped sample, not evidence about any market;
-    the claim is purely directional."""
-    sys.path.insert(0, str(EXAMPLES_DIR))
-    from rsi_mean_reversion_hypothesis import (  # noqa: E402
-        COMMISSION,
-        COST_SWEEP_LEVELS,
-        run_cost_sweep,
-    )
+the claim is purely directional."""
     data_path = ASSETS_DIR / "sample_ohlcv.csv"
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
@@ -114,9 +118,50 @@ def test_rsi_cost_sensitivity_sweep():
     )
 
 
+def test_hypothesis_reports_its_bias_controls_on_real_market_data():
+    """The methodology banner reports the run's ACTUAL bias controls on real
+    market data, rather than silently printing None.
+
+    The bias-control fields (train_val_test_split, point_in_time_validation) are
+    carried by the tear sheet SUMMARY, not by metrics.json: metrics.json is the
+    performance artifact and has no split or PIT block. A hypothesis example
+    that reads only metrics.json therefore printed
+    "Point-in-time validation: None" on real data -- a false negative about the
+    methodology controls, because the run's own summary shows point-in-time
+    validation passed and the split was disjoint and chronological.
+
+    This is a regression guard on the example's summary merge: the banner must
+    name the split sizes, the chronological/disjoint audit, and a passing
+    point-in-time validation on a real-market run. The verdict itself
+    (SUPPORTED / NOT SUPPORTED) is not asserted -- both are valid scientific
+    outcomes. Offline, committed fixtures only.
+    """
+    assert (REAL_MARKET_DIR / "MSFT.csv").exists(), "MSFT fixture missing"
+    assert (REAL_MARKET_DIR / "GOOGL.csv").exists(), "GOOGL fixture missing"
+
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        shutil.copyfile(REAL_MARKET_DIR / "MSFT.csv", d / "sample_ohlcv.csv")
+        shutil.copyfile(REAL_MARKET_DIR / "GOOGL.csv", d / "sample_benchmark.csv")
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            run_hypothesis_test(d / "sample_ohlcv.csv")
+        out = buffer.getvalue()
+
+    assert "Split sizes (train/val/test):" in out
+    assert "Chronological: True, Disjoint: True" in out, (
+        "the banner must report the split-separation audit on real market data"
+    )
+    assert "Point-in-time validation: True" in out, (
+        "the banner must report that point-in-time validation passed on real "
+        "market data (a None here is a false negative, not a finding)"
+    )
+
+
 if __name__ == "__main__":
     test_rsi_mean_reversion_hypothesis_example_exists()
     test_run_backtest_rsi_produces_results()
     test_hypothesis_example_runs_successfully()
     test_rsi_cost_sensitivity_sweep()
+    test_hypothesis_reports_its_bias_controls_on_real_market_data()
     print("All tests passed")
