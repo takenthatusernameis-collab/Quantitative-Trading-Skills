@@ -86,6 +86,7 @@ CRITERIA = [
 # Each fixture: (label, symbols to combine from the committed real-market CSVs).
 FIXTURES = [
     ("MSFT / GOOGL real window (cross-sectional momentum)", ("MSFT.csv", "GOOGL.csv")),
+    ("AAPL / GOOGL real window (cross-sectional momentum)", ("AAPL.csv", "GOOGL.csv")),
 ]
 
 
@@ -426,7 +427,8 @@ def main():
             frames.append(frame)
         combined = pd.concat(frames, ignore_index=True)
         with tempfile.TemporaryDirectory() as tmpdir:
-            data_path = Path(tmpdir) / "msft_googl_pair.csv"
+            safe_name = label.lower().replace(" ", "_").replace("/", "_").replace("(", "").replace(")", "")
+            data_path = Path(tmpdir) / f"{safe_name}.csv"
             combined.to_csv(data_path, index=False)
             results.append(run_hypothesis_test(data_path, label))
 
