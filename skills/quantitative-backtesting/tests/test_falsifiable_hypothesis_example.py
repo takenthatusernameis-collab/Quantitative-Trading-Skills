@@ -656,12 +656,12 @@ def test_falsifiable_hypothesis_cost_sensitivity_sweep():
         "first cost sweep level must be frictionless"
     )
 
-    series = {
-        "sharpe_ratio": "Sharpe ratio",
-        "total_return": "total return",
-        "deflated_alpha_ratio": "Deflated Alpha Ratio",
-    }
-    for key, label in series.items():
+    # Sharpe and total return are always computed; Deflated Alpha Ratio is
+    # only defined when multiple benchmarks are engaged. Single-benchmark
+    # runs report None for DAR (the framework's n_benchmarks == 1 contract,
+    # see run_hypothesis_test), so the DAR sensitivity claim is asserted only
+    # where DAR is actually computed.
+    for key, label in (("sharpe_ratio", "Sharpe ratio"), ("total_return", "total return")):
         values = [r[key] for r in rows]
         assert all(v is not None and np.isfinite(v) for v in values), (
             f"{label} is missing or non-finite at one or more cost levels: {values}"
@@ -669,6 +669,18 @@ def test_falsifiable_hypothesis_cost_sensitivity_sweep():
         for prev, curr in zip(values, values[1:]):
             assert curr <= prev + 1e-12, (
                 f"{label} does not degrade monotonically with cost: "
+                f"{prev} -> {curr}"
+            )
+    dar_values = [r["deflated_alpha_ratio"] for r in rows]
+    finite_dar = [v for v in dar_values if v is not None and np.isfinite(v)]
+    if finite_dar:
+        assert len(finite_dar) == len(dar_values), (
+            "Deflated Alpha Ratio is missing or non-finite at one or more cost "
+            f"levels: {dar_values}"
+        )
+        for prev, curr in zip(dar_values, dar_values[1:]):
+            assert curr <= prev + 1e-12, (
+                "Deflated Alpha Ratio does not degrade monotonically with cost: "
                 f"{prev} -> {curr}"
             )
 
@@ -1061,12 +1073,12 @@ def test_real_market_cost_sensitivity_sweep():
     )
 
     # Directional claim: higher per-trade costs never improve net metrics.
-    series = {
-        "sharpe_ratio": "Sharpe ratio",
-        "total_return": "total return",
-        "deflated_alpha_ratio": "Deflated Alpha Ratio",
-    }
-    for key, label in series.items():
+    # Sharpe and total return are always computed; Deflated Alpha Ratio is
+    # only defined when multiple benchmarks are engaged. Single-benchmark
+    # runs report None for DAR (the framework's n_benchmarks == 1 contract,
+    # see run_hypothesis_test), so the DAR sensitivity claim is asserted only
+    # where DAR is actually computed.
+    for key, label in (("sharpe_ratio", "Sharpe ratio"), ("total_return", "total return")):
         values = [r[key] for r in rows]
         assert all(v is not None and np.isfinite(v) for v in values), (
             f"{label} is missing or non-finite at one or more cost levels: {values}"
@@ -1075,6 +1087,18 @@ def test_real_market_cost_sensitivity_sweep():
             assert curr <= prev + 1e-12, (
                 f"{label} does not degrade monotonically with cost on real "
                 f"market data: {prev} -> {curr}"
+            )
+    dar_values = [r["deflated_alpha_ratio"] for r in rows]
+    finite_dar = [v for v in dar_values if v is not None and np.isfinite(v)]
+    if finite_dar:
+        assert len(finite_dar) == len(dar_values), (
+            "Deflated Alpha Ratio is missing or non-finite at one or more cost "
+            f"levels: {dar_values}"
+        )
+        for prev, curr in zip(dar_values, dar_values[1:]):
+            assert curr <= prev + 1e-12, (
+                "Deflated Alpha Ratio does not degrade monotonically with cost: "
+                f"{prev} -> {curr}"
             )
 
     # Each cost level produces a determinate, criteria-evaluated verdict.
@@ -1138,12 +1162,12 @@ def test_real_market_cost_sensitivity_sweep_msft():
         "first cost sweep level must be frictionless"
     )
 
-    series = {
-        "sharpe_ratio": "Sharpe ratio",
-        "total_return": "total return",
-        "deflated_alpha_ratio": "Deflated Alpha Ratio",
-    }
-    for key, label in series.items():
+    # Sharpe and total return are always computed; Deflated Alpha Ratio is
+    # only defined when multiple benchmarks are engaged. Single-benchmark
+    # runs report None for DAR (the framework's n_benchmarks == 1 contract,
+    # see run_hypothesis_test), so the DAR sensitivity claim is asserted only
+    # where DAR is actually computed.
+    for key, label in (("sharpe_ratio", "Sharpe ratio"), ("total_return", "total return")):
         values = [r[key] for r in rows]
         assert all(v is not None and np.isfinite(v) for v in values), (
             f"{label} is missing or non-finite at one or more cost levels: {values}"
@@ -1152,6 +1176,18 @@ def test_real_market_cost_sensitivity_sweep_msft():
             assert curr <= prev + 1e-12, (
                 f"{label} does not degrade monotonically with cost on real "
                 f"market data: {prev} -> {curr}"
+            )
+    dar_values = [r["deflated_alpha_ratio"] for r in rows]
+    finite_dar = [v for v in dar_values if v is not None and np.isfinite(v)]
+    if finite_dar:
+        assert len(finite_dar) == len(dar_values), (
+            "Deflated Alpha Ratio is missing or non-finite at one or more cost "
+            f"levels: {dar_values}"
+        )
+        for prev, curr in zip(dar_values, dar_values[1:]):
+            assert curr <= prev + 1e-12, (
+                "Deflated Alpha Ratio does not degrade monotonically with cost: "
+                f"{prev} -> {curr}"
             )
 
     for r in rows:
@@ -1212,12 +1248,12 @@ def test_real_market_cost_sensitivity_sweep_aapl_msft():
         "first cost sweep level must be frictionless"
     )
 
-    series = {
-        "sharpe_ratio": "Sharpe ratio",
-        "total_return": "total return",
-        "deflated_alpha_ratio": "Deflated Alpha Ratio",
-    }
-    for key, label in series.items():
+    # Sharpe and total return are always computed; Deflated Alpha Ratio is
+    # only defined when multiple benchmarks are engaged. Single-benchmark
+    # runs report None for DAR (the framework's n_benchmarks == 1 contract,
+    # see run_hypothesis_test), so the DAR sensitivity claim is asserted only
+    # where DAR is actually computed.
+    for key, label in (("sharpe_ratio", "Sharpe ratio"), ("total_return", "total return")):
         values = [r[key] for r in rows]
         assert all(v is not None and np.isfinite(v) for v in values), (
             f"{label} is missing or non-finite at one or more cost levels: {values}"
@@ -1226,6 +1262,18 @@ def test_real_market_cost_sensitivity_sweep_aapl_msft():
             assert curr <= prev + 1e-12, (
                 f"{label} does not degrade monotonically with cost on real "
                 f"market data: {prev} -> {curr}"
+            )
+    dar_values = [r["deflated_alpha_ratio"] for r in rows]
+    finite_dar = [v for v in dar_values if v is not None and np.isfinite(v)]
+    if finite_dar:
+        assert len(finite_dar) == len(dar_values), (
+            "Deflated Alpha Ratio is missing or non-finite at one or more cost "
+            f"levels: {dar_values}"
+        )
+        for prev, curr in zip(dar_values, dar_values[1:]):
+            assert curr <= prev + 1e-12, (
+                "Deflated Alpha Ratio does not degrade monotonically with cost: "
+                f"{prev} -> {curr}"
             )
 
     for r in rows:
@@ -1313,12 +1361,12 @@ def test_real_market_cost_sensitivity_sweep_aapl():
         "first cost sweep level must be frictionless"
     )
 
-    series = {
-        "sharpe_ratio": "Sharpe ratio",
-        "total_return": "total return",
-        "deflated_alpha_ratio": "Deflated Alpha Ratio",
-    }
-    for key, label in series.items():
+    # Sharpe and total return are always computed; Deflated Alpha Ratio is
+    # only defined when multiple benchmarks are engaged. Single-benchmark
+    # runs report None for DAR (the framework's n_benchmarks == 1 contract,
+    # see run_hypothesis_test), so the DAR sensitivity claim is asserted only
+    # where DAR is actually computed.
+    for key, label in (("sharpe_ratio", "Sharpe ratio"), ("total_return", "total return")):
         values = [r[key] for r in rows]
         assert all(v is not None and np.isfinite(v) for v in values), (
             f"{label} is missing or non-finite at one or more cost levels: {values}"
@@ -1327,6 +1375,18 @@ def test_real_market_cost_sensitivity_sweep_aapl():
             assert curr <= prev + 1e-12, (
                 f"{label} does not degrade monotonically with cost on real "
                 f"market data: {prev} -> {curr}"
+            )
+    dar_values = [r["deflated_alpha_ratio"] for r in rows]
+    finite_dar = [v for v in dar_values if v is not None and np.isfinite(v)]
+    if finite_dar:
+        assert len(finite_dar) == len(dar_values), (
+            "Deflated Alpha Ratio is missing or non-finite at one or more cost "
+            f"levels: {dar_values}"
+        )
+        for prev, curr in zip(dar_values, dar_values[1:]):
+            assert curr <= prev + 1e-12, (
+                "Deflated Alpha Ratio does not degrade monotonically with cost: "
+                f"{prev} -> {curr}"
             )
 
     for r in rows:
