@@ -1,47 +1,31 @@
-# Handoff — session 2026-10-30 (cross-sectional momentum extended to AAPL/MSFT elevated-cost sweep)
+# Handoff — cross-sectional momentum full sweep parity (cost/param sensitivity across pairs)
 
 ## What changed
-- Verified the prior session's assigned work (MSFT/GOOGL cross-sectional momentum elevated-cost sweep) is complete and green:
-  `tests/test_cross_sectional_momentum_elevated_cost_real_msft_googl.py` +
-  `tests/test_cross_sectional_momentum_hypothesis_real_msft_googl.py` → 2 passed (8.13s).
-- Added bounded new work:
-  `skills/quantitative-backtesting/tests/test_cross_sectional_momentum_elevated_cost_real_aapl_msft.py` — elevated-cost
-  confirmation sweep for cross-sectional momentum on the committed real-market AAPL/MSFT pair, mirroring the MSFT/GOOGL
-  elevated test and `test_zscore_elevated_cost_sensitivity_real_aapl_msft.py`. Imports `run_elevated_cost_sweep` /
-  `ELEVATED_COST_SWEEP_LEVELS` from `examples/cross_sectional_momentum_hypothesis.py` (already implemented). Builds the
-  AAPL/MSFT panel CSV in a temp dir; no tracked fixtures or source modified; no repo writes. No profitability claim.
+- Extended cross-sectional momentum test coverage to match/complete sweep parity across the committed pairs:
+  - Added `skills/quantitative-backtesting/tests/test_cross_sectional_momentum_cost_sensitivity_real_aapl_msft.py` (ascending cost sweep on AAPL/MSFT, mirroring `test_cross_sectional_momentum_cost_sensitivity_real_msft_googl.py`).
+  - Added `skills/quantitative-backtesting/tests/test_cross_sectional_momentum_cost_sensitivity_real_aapl_googl.py` (AAPL/GOOGL).
+  - Added `skills/quantitative-backtesting/tests/test_cross_sectional_momentum_param_sensitivity_real_aapl_msft.py` (PARAM_SENSITIVITY_GRID sweep on AAPL/MSFT).
+  - Added `skills/quantitative-backtesting/tests/test_cross_sectional_momentum_param_sensitivity_real_aapl_googl.py` (AAPL/GOOGL).
+- No changes to tracked fixtures or skill/example source; all tests build panel CSVs in temp dirs and use only committed real-market fixtures.
 
 ## What was actually verified
-- `py_compile` on the new test → OK.
-- `test_cross_sectional_momentum_elevated_cost_real_aapl_msft.py` → 1 passed.
-- Full cross-sectional momentum real-market gate
-  (`test_cross_sectional_momentum_elevated_cost_real_aapl_msft.py`,
-  `test_cross_sectional_momentum_elevated_cost_real_msft_googl.py`,
-  `test_cross_sectional_momentum_hypothesis_real_aapl_msft.py`,
-  `test_cross_sectional_momentum_hypothesis_real_msft_googl.py`) → 4 passed in 15.97s, EXIT=0.
-- Diff scoped to one new untracked file; `git status --short` shows only the new test.
+- `py_compile` on all four new tests → OK.
+- Each new test passed standalone (pytest).
+- Full cross-sectional momentum gate: `cd skills/quantitative-backtesting && python3 -m pytest tests/test_cross_sectional_momentum_*.py -p no:cacheprovider -q` → **13 passed in 56.56s**, EXIT=0.
+- Diff is additive tests only; working tree has only the four new untracked test files.
 
 ## What remains unresolved
-- Cross-sectional momentum real-market evidence (hypothesis + elevated-cost sweep) exists for MSFT/GOOGL and AAPL/MSFT,
-  but not yet for the AAPL/GOOGL or MSFT/AAPL pairs.
-- The slow framework regression gate was previously recorded green (303 passed, HANDOFF_NEXT.md baseline) and is
-  unaffected by these additive new test files.
+- Z-score mean-reversion family has cost-sensitivity and param-sensitivity tests only on MSFT/GOOGL (`test_zscore_cost_sensitivity_real_msft_googl.py`, `test_zscore_param_sensitivity_real_msft_googl.py`) while having hypothesis + elevated-cost coverage across all three pairs. Adding sweep parity for zscore (cost/param across AAPL/MSFT, AAPL/GOOGL) would make the two families more directly comparable.
+- Offline Yahoo fetch remains rate-limited (HTTP 429) — use committed fixtures only.
 
 ## Approaches already tried / failed
-- (none this session; the elevated-cost sweep pattern is already validated on MSFT/GOOGL and zscore AAPL/MSFT)
+- None this session; followed existing test patterns exactly.
 
 ## One precise next task
-Add a real-market falsification test for cross-sectional momentum on the AAPL/GOOGL pair (third pair), mirroring
-`tests/test_cross_sectional_momentum_hypothesis_real_aapl_msft.py`: build the AAPL/GOOGL panel CSV in a temp dir, call
-`run_hypothesis_test`, assert chronological/disjoint split, point-in-time validation = True, determinate verdict, and the
-two pre-registered criteria (`oos_sharpe_gt_zero`, `oos_total_return_positive`). Then run it plus the full cross-sectional
-momentum gate to confirm no regression. File: `tests/test_cross_sectional_momentum_hypothesis_real_aapl_googl.py`.
+Add z-score cost-sensitivity and/or parameter-sensitivity real-market tests for AAPL/MSFT and AAPL/GOOGL to achieve parity with cross-sectional momentum, mirroring `test_zscore_cost_sensitivity_real_msft_googl.py` and `test_zscore_param_sensitivity_real_msft_googl.py`. Use `zscore_mean_reversion_hypothesis` (`run_cost_sweep`, `run_param_sensitivity_sweep`, `COST_SWEEP_LEVELS`, `PARAM_SENSITIVITY_GRID`) with panel CSVs built in temp dirs from committed fixtures. Assert ascending costs / grid coverage, per-criterion pass/fail + verdict, monotonic cost behavior where applicable, and no profitability claims. Run each new test + full zscore real-market gate to confirm no regression.
 
 ## Constraints / evidence
-- Offline, committed fixtures only (`assets/example_data/real_market_data/{AAPL,GOOGL,MSFT}.csv`); Yahoo fetch is HTTP 429
-  rate-limited — no live network.
+- Offline, committed fixtures only (`assets/example_data/real_market_data/{AAPL,GOOGL,MSFT}.csv`).
 - Verdicts are falsification outcomes, never profitability claims.
-- Do not modify tracked fixtures or skill source; new test writes only to temp dirs.
-- Regression baseline: cross-sectional momentum gate = 4 passed in 15.97s; slow framework gate = 303 passed.
-
-(End of file - total 83 lines)
+- Do not modify tracked fixtures or example/source code.
+- Baseline: cross-sectional momentum gate = 13 passed in 56.56s.
