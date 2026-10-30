@@ -356,7 +356,7 @@ def _test_resolution(summary, test_returns, benchmark_frame, primary_bench, data
     return resolution
 
 
-def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage=SLIPPAGE):
+def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage=SLIPPAGE, benchmark_path=None):
     """Run the pre-registered falsifiable hypothesis test.
 
     Returns a dict with the observed metrics, per-criterion pass/fail, the
@@ -372,6 +372,11 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
     The benchmark set is resolved from BENCHMARK_FILES relative to this
     example's assets directory (the same directory as `data_path`), so the
     test exercises the multiple-benchmark Deflated Alpha Ratio path by default.
+    Pass ``benchmark_path`` to override that resolution with a single
+    committed benchmark file -- the real-market separation-audit tests use it
+    to pair a strategy symbol (e.g. MSFT.csv) with a different benchmark
+    (e.g. GOOGL.csv) in the same directory, which BENCHMARK_FILES cannot
+    express because it resolves to fixed sibling filenames.
     """
     base_dir = Path(data_path).resolve().parent
     print("=" * 80)
@@ -403,7 +408,18 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
     # benchmark alpha for the number of benchmarks tested. The primary
     # benchmark is the first entry; the remainder are alternative universes
     # the strategy might have "cherry-picked" alpha against.
-    benchmarks = [load_data(str(base_dir / p), symbol=symbol) for p in BENCHMARK_FILES]
+    #
+    # The default set is BENCHMARK_FILES (the primary universe plus the
+    # alternative sample_benchmark.csv). A caller may override it with a
+    # single committed benchmark file via ``benchmark_path``; that path is
+    # used as the primary benchmark and the alternative is dropped, so the
+    # run is a single-benchmark comparison (the Deflated Alpha Ratio is then
+    # not applicable, matching the framework's n_benchmarks == 1 contract).
+    if benchmark_path is not None:
+        benchmark_paths = [Path(benchmark_path)]
+    else:
+        benchmark_paths = [Path(base_dir / p) for p in BENCHMARK_FILES]
+    benchmarks = [load_data(str(p), symbol=symbol) for p in benchmark_paths]
     print(f"  Strategy data: {len(df)} rows ({df.index.min().date()} -> {df.index.max().date()})")
     print(f"  Benchmarks: {len(benchmarks)} ({[len(b) for b in benchmarks]} rows each)")
 
@@ -811,7 +827,12 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
         with contextlib.redirect_stdout(buffer):
             try:
                 # Run core test logic more efficiently - call run_hypothesis_test
-                result = run_hypothesis_test(data_path, commission=commission, slippage=slippage)
+                result = run_hypothesis_test(
+                    data_path,
+                    commission=commission,
+                    slippage=slippage,
+                    benchmark_path=benchmark_path,
+                )
                 obs = result["observed"]
                 da = obs.get("deflated_alpha_ratio")
                 row = {
