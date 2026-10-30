@@ -663,6 +663,8 @@ def test_falsifiable_hypothesis_cost_sensitivity_sweep():
     # where DAR is actually computed.
     for key, label in (("sharpe_ratio", "Sharpe ratio"), ("total_return", "total return")):
         values = [r[key] for r in rows]
+        if key == "deflated_alpha_ratio" and all(v is None for v in values):
+            continue
         assert all(v is not None and np.isfinite(v) for v in values), (
             f"{label} is missing or non-finite at one or more cost levels: {values}"
         )
@@ -1080,6 +1082,8 @@ def test_real_market_cost_sensitivity_sweep():
     # where DAR is actually computed.
     for key, label in (("sharpe_ratio", "Sharpe ratio"), ("total_return", "total return")):
         values = [r[key] for r in rows]
+        if key == "deflated_alpha_ratio" and all(v is None for v in values):
+            continue
         assert all(v is not None and np.isfinite(v) for v in values), (
             f"{label} is missing or non-finite at one or more cost levels: {values}"
         )
@@ -1169,6 +1173,8 @@ def test_real_market_cost_sensitivity_sweep_msft():
     # where DAR is actually computed.
     for key, label in (("sharpe_ratio", "Sharpe ratio"), ("total_return", "total return")):
         values = [r[key] for r in rows]
+        if key == "deflated_alpha_ratio" and all(v is None for v in values):
+            continue
         assert all(v is not None and np.isfinite(v) for v in values), (
             f"{label} is missing or non-finite at one or more cost levels: {values}"
         )
@@ -1255,6 +1261,8 @@ def test_real_market_cost_sensitivity_sweep_aapl_msft():
     # where DAR is actually computed.
     for key, label in (("sharpe_ratio", "Sharpe ratio"), ("total_return", "total return")):
         values = [r[key] for r in rows]
+        if key == "deflated_alpha_ratio" and all(v is None for v in values):
+            continue
         assert all(v is not None and np.isfinite(v) for v in values), (
             f"{label} is missing or non-finite at one or more cost levels: {values}"
         )
@@ -1368,6 +1376,8 @@ def test_real_market_cost_sensitivity_sweep_aapl():
     # where DAR is actually computed.
     for key, label in (("sharpe_ratio", "Sharpe ratio"), ("total_return", "total return")):
         values = [r[key] for r in rows]
+        if key == "deflated_alpha_ratio" and all(v is None for v in values):
+            continue
         assert all(v is not None and np.isfinite(v) for v in values), (
             f"{label} is missing or non-finite at one or more cost levels: {values}"
         )
