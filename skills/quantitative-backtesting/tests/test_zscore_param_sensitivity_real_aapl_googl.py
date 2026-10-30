@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Parameter sensitivity on the committed real-market AAPL/GOOGL pair for z-score.
+"""Parameter sensitivity on the committed real-market AAPL/GOOGL pair for z-score mean reversion.
 
-Mirrors `test_zscore_param_sensitivity_real_msft_googl.py`: sweeps z-score
-parameters across a narrow pre-registered grid holding costs fixed at the
-advertised level, reporting per-criterion pass/fail and the verdict at each
-setting. No profitability claim is made.
+Mirrors `test_zscore_param_sensitivity_real_msft_googl.py`: exercises every grid
+setting in order, holds costs fixed at advertised levels, asserts per-criterion
+reporting and determinate verdicts (never profitability claims).
 
 Offline, committed fixtures only (assets/example_data/real_market_data/
 {AAPL,GOOGL}.csv). No live network.

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Cost sensitivity on the committed real-market AAPL/GOOGL pair for z-score.
+"""Cost sensitivity on the committed real-market AAPL/GOOGL pair for z-score mean reversion.
 
-Mirrors `test_zscore_cost_sensitivity_real_msft_googl.py`: sweeps commission /
-slippage across ascending levels from frictionless to 10bp comm + 5bp slip,
-reporting per-criterion pass/fail and the verdict at each level. No
-profitability claim is made.
+Mirrors z-score cost-sensitivity tests: sweeps commission/slippage across
+ascending levels, reporting per-criterion pass/fail and verdict at each level.
+No profitability claim.
 
 Offline, committed fixtures only (assets/example_data/real_market_data/
 {AAPL,GOOGL}.csv). No live network.
