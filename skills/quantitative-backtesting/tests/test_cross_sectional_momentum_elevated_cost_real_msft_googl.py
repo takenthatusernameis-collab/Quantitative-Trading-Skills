@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Elevated-cost confirmation on the committed real-market MSFT/GOOGL pair.
 
 Extends the cost-sensitivity evidence with a sweep at cost levels higher than
@@ -44,7 +43,7 @@ def _build_pair_csv(dest: Path) -> Path:
     return out
 
 
-def test_elevated_cost_sweep_runs_on_msft_googl_real_window_cross_sectional_momentum():
+def test_elevated_cost_sweep_runs_on_msft_googl_real_window():
     assert (SRC / "MSFT.csv").exists()
     assert (SRC / "GOOGL.csv").exists()
 
@@ -76,8 +75,3 @@ def test_elevated_cost_sweep_runs_on_msft_googl_real_window_cross_sectional_mome
     out = buffer.getvalue()
     assert "ELEVATED COST SENSITIVITY SWEEP" in out
     assert "VERDICT" in out
-
-
-if __name__ == "__main__":
-    test_elevated_cost_sweep_runs_on_msft_googl_real_window_cross_sectional_momentum()
-    print("OK")
