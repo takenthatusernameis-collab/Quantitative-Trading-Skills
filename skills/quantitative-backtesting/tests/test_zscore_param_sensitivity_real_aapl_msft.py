@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""Parameter sensitivity on the committed real-market AAPL/MSFT pair for z-score mean reversion.
-
-Mirrors `test_zscore_param_sensitivity_real_msft_googl.py`: exercises every grid
-setting in order, holds costs fixed at advertised levels, asserts per-criterion
-reporting and determinate verdicts (never profitability claims).
-
-Offline, committed fixtures only (assets/example_data/real_market_data/
-{AAPL,MSFT}.csv). No live network.
-"""
 import contextlib
 import io
 import sys
@@ -41,7 +32,7 @@ def _build_pair_csv(dest: Path) -> Path:
     return out
 
 
-def test_param_sensitivity_runs_on_aapl_msft_real_window_zscore():
+def test_param_sensitivity_runs_on_aapl_msft_real_window():
     assert (SRC / "AAPL.csv").exists()
     assert (SRC / "MSFT.csv").exists()
 
@@ -75,5 +66,5 @@ def test_param_sensitivity_runs_on_aapl_msft_real_window_zscore():
 
 
 if __name__ == "__main__":
-    test_param_sensitivity_runs_on_aapl_msft_real_window_zscore()
+    test_param_sensitivity_runs_on_aapl_msft_real_window()
     print("OK")

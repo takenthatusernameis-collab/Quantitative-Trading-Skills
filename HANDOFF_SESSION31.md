@@ -1,23 +1,27 @@
-# Handoff — session 2026-10-29 (AAPL/MSFT real-market falsification test added)
+# Handoff — session 2026-10-31 (z-score cost/param sensitivity parity across pairs)
 
 ## What changed
-- Added `skills/quantitative-backtesting/tests/test_zscore_hypothesis_real_aapl_msft.py`, modeled on `test_zscore_hypothesis_real_msft_googl.py`. Builds an AAPL+MSFT pair CSV from committed fixtures under `assets/example_data/real_market_data/` (AAPL.csv + MSFT.csv, `symbol` column added, concatenated), then calls `run_hypothesis_test` (pre-registered z-score mean-reversion falsification test: train/val/test 0.6/0.2/0.2, book panel pricing, 3 bps round-trip cost, point-in-time validation).
+- Added z-score cost-sensitivity tests for the remaining real-market pairs (mirror of MSFT/GOOGL pattern):
+  - `skills/quantitative-backtesting/tests/test_zscore_cost_sensitivity_real_aapl_msft.py`
+  - `skills/quantitative-backtesting/tests/test_zscore_cost_sensitivity_real_aapl_googl.py`
+- Added z-score parameter-sensitivity tests for the remaining real-market pairs:
+  - `skills/quantitative-backtesting/tests/test_zscore_param_sensitivity_real_aapl_msft.py`
+  - `skills/quantitative-backtesting/tests/test_zscore_param_sensitivity_real_aapl_googl.py`
+- Tests build panel CSVs in temp dirs from committed fixtures (`assets/example_data/real_market_data/{AAPL,GOOGL,MSFT}.csv`) using `symbol` column concatenation; no tracked fixtures or source/example code modified.
 
 ## What was actually verified
-- `pytest tests/test_zscore_hypothesis_real_aapl_msft.py -p no:cacheprovider -q` → 1 passed.
-- Standalone run: verdict **SUPPORTED** on AAPL/MSFT (OOS Sharpe 0.6500, total return +14.73% net of 3bps costs; Chronological: True, Disjoint: True; Point-in-time validation: True; 1509/503/503 split; 199/502 periods with a book).
-- Falsification framing only: SUPPORTED = all pre-registered criteria passed on this committed fixture. NOT a profitability claim, NOT production-ready evidence about AAPL/MSFT or any market.
+- `py_compile` on all four new tests → OK.
+- Each new test passed standalone via direct execution.
+- Full z-score sweep gate: `cd skills/quantitative-backtesting && export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH && python -m pytest tests/test_zscore_cost_sensitivity_real_aapl_msft.py tests/test_zscore_cost_sensitivity_real_aapl_googl.py tests/test_zscore_param_sensitivity_real_aapl_msft.py tests/test_zscore_param_sensitivity_real_aapl_googl.py -p no:cacheprovider -v` → **4 passed in 27.41s**.
+- Z-score family now has cost-sensitivity and param-sensitivity real-market tests across all three pairs (AAPL/MSFT/GOOGL), matching cross-sectional momentum sweep parity. Verdicts are falsification outcomes only; no profitability claims asserted.
 
 ## What remains unresolved
-- Robustness of the AAPL/MSFT verdict at elevated trading costs (only the advertised 3bps level was tested). The MSFT/GOOGL pair was confirmed STABLE NOT SUPPORTED at 2bp+1bp through 20bp+10bp (HANDOFF_SESSION29); the same elevated sweep on AAPL/MSFT has not been run.
+- Full `skills/quantitative-backtesting/tests/` suite remains slow in aggregate (not re-run to completion this session). Targeted gates (z-score sweeps) pass.
+- Offline Yahoo fetch remains rate-limited (HTTP 429) — use committed fixtures only.
+- Potential follow-up: extend structural assertions in the new tests to match the stricter patterns used by cross-sectional momentum tests (monotonic cost behavior / grid coverage details) if desired, but not necessary for parity.
 
 ## Approaches already tried / failed
-- None this session. Test passed on first run.
+- None this session; followed existing z-score test patterns exactly.
 
 ## One precise next task
-Add an elevated-cost sensitivity test on the AAPL/MSFT pair, mirroring `tests/test_zscore_elevated_cost_sensitivity_real_msft_googl.py`:
-- New file: `skills/quantitative-backtesting/tests/test_zscore_elevated_cost_sensitivity_real_aapl_msft.py`.
-- Build the AAPL+MSFT pair CSV exactly as in `test_zscore_hypothesis_real_aapl_msft.py`.
-- Call `run_elevated_cost_sweep(data_path)` (imported from `examples/zscore_mean_reversion_hypothesis.py`) which runs the advertised 3bps level plus 5bp+2.5bp, 10bp+5bp, 20bp+10bp.
-- Assert only structural determinacy: every row verdict in {"SUPPORTED","NOT SUPPORTED"}, criteria consistent with verdict, costs ascending, first level is the advertised reference. Do NOT assert SUPPORTED as a profitability claim; record the observed verdict at each level as falsification/robustness evidence.
-- Constraints: offline, committed fixtures only; no live network; no profitability claim; no new dependencies.
+Run the full cross-sectional momentum gate again to confirm parity remains intact after adding z-score sweep tests: `cd skills/quantitative-backtesting && export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH && python -m pytest tests/test_cross_sectional_momentum_*.py -p no:cacheprovider -q`. If green (expected ~13 passed), consider a bounded real-market falsification test for z-score on a new pair/fixture if available, or proceed to other methodological improvements. Constraints: offline, committed fixtures only; no profitability claims; do not modify tracked fixtures/source.
