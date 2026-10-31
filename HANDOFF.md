@@ -1,103 +1,78 @@
-# Handoff — root-level research scripts repaired (2026-10-24)
+# Handoff — RSI strategy family coverage gap closed (real-window tests added)
 
 ## What changed
-Three root-level scripts were broken (dead on import/run) and one had stale
-parameters. All five root-level scripts now run end-to-end:
+Added 6 real-window falsification tests for the RSI mean-reversion strategy
+family, closing the coverage gap vs the z-score and cross-sectional-momentum
+families (both of which already had hypothesis + cost-sensitivity + elevated-cost
++ param-sensitivity coverage across all three committed pairs).
 
-- `debug_strategy.py` — fixed the `SKILLS_DIR` path: it pointed at
-  `Path(__file__).resolve().parent.parent` (the repo root), so
-  `SKILLS_DIR / "scripts"` resolved to `<repo>/scripts`, which does not exist.
-  It now points at `.../skills/quantitative-backtesting`. Verified: exit 0,
-  signals/returns print for 4 parameter sets.
-- `debug_walk_forward.py` — same `SKILLS_DIR` path bug, plus the synthetic
-  sample was only 100 bars, which is below the walk-forward window's minimum
-  (6+2 month train/test with 2-month step needs ~140+ bars). Bumped the sample
-  to 300 bars. Verified: exit 0, 3 walk-forward periods produced, OOS Sharpe
-  −1.46, params selected per period.
-- `simple_momentum_hypothesis.py` — the whole body was a stale copy of an
-  earlier API: it called `run_backtest(data_path=..., strategy_name=...)`,
-  but the current signature is
-  `run_backtest(data, strategy, args, data_provenance=None, benchmark=None,
-  survivorship=None)` where `args` is an `argparse.Namespace` built by
-  `parse_args()` in the same module. Rewrote it as a thin wrapper around the
-  `run_backtest.py` CLI (subprocess), matching the sibling example
-  `skills/quantitative-backtesting/examples/simple_momentum_hypothesis.py`,
-  while keeping the root-level path resolution. Verified: exit 0, verdict
-  `NOT SUPPORTED` (Sharpe −0.90, total return −5.06% vs benchmark +8.09% on
-  the shipped sample — a valid falsification, not a script failure).
+New files (all under `skills/quantitative-backtesting/tests/`):
+- `test_rsi_hypothesis_real_msft_googl.py`
+- `test_rsi_hypothesis_real_aapl_msft.py`
+- `test_rsi_hypothesis_real_aapl_googl.py`
+- `test_rsi_cost_sensitivity_real_msft_googl.py`
+- `test_rsi_cost_sensitivity_real_aapl_msft.py`
+- `test_rsi_cost_sensitivity_real_aapl_googl.py`
 
-`verify_end_to_end.py` and `test_import.py` were already correct and are left
-unchanged.
+Each mirrors the existing z-score / cross-sectional-momentum real-window tests:
+build the pair from committed `assets/example_data/real_market_data/{AAPL,MSFT,GOOGL}.csv`
+fixtures (strategy asset + alternative benchmark, `symbol` column added for the
+panel-based hypothesis tests), call `run_hypothesis_test` / `run_cost_sweep` from
+`examples/rsi_mean_reversion_hypothesis.py`, and assert structural invariants
+only — verdict in {"SUPPORTED","NOT SUPPORTED"}, criteria/`all_pass` consistency,
+split-separation audit (`Chronological: True, Disjoint: True`,
+`Point-in-time validation: True`), `VERDICT:` present, ascending cost levels,
+frictionless first level, advertised level as middle rung, monotonic cost
+degradation. No profitability claim; no source or fixture modifications.
 
 ## What was actually verified
-- All five root scripts exit 0:
-  `simple_momentum_hypothesis.py`, `debug_strategy.py`, `debug_walk_forward.py`,
-  `verify_end_to_end.py`, `test_import.py`.
-- `skills/quantitative-backtesting/tests/test_examples_coverage.py` → 39 passed
-  (covers `simple_momentum_hypothesis.py` end-to-end, imports, hypothesis/cost
-  banner, PIT split, falsification verdict).
-- `skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py`
-  → 17 passed.
-- `skills/quantitative-backtesting/tests/test_simple_momentum_hypothesis.py` →
-  3 passed.
-- `skills/quantitative-backtesting/tests/test_performance.py` → 33 passed.
-- `skills/quantitative-backtesting/tests/test_out_of_sample_window.py` → 11
-  passed.
-- `skills/quantitative-backtesting/tests/test_reproducible_backtest_example.py`
-  → passed.
-- `skills/quantitative-backtesting/examples/falsifiable_hypothesis_example.py`
-  standalone → exit 0, verdict `NOT SUPPORTED` (OOS Sharpe −0.3581, DAR
-  0.4378), unchanged from the prior handoff's recorded values.
-- No test file or skill source was modified; only the three root scripts.
-- Regenerated `example_reproducible_output/*` artifacts (mtime-normalized
-  timestamps) were reverted so the diff stays scoped to the root scripts.
+- `py_compile` on all 6 new files: OK.
+- 6 new tests standalone: **6 passed in 40.73s**.
+- Full RSI gate (existing `test_rsi_mean_reversion_hypothesis.py` 5 + 6 new):
+  **11 passed in 60.66s**, EXIT=0, no regression.
+- `git status` clean except the 6 new files; no stray artifacts (the example
+  writes to temp dirs only).
+
+Observed verdicts on committed real-market fixtures (offline, no live network,
+recorded as falsification evidence — NOT profitability claims):
+- MSFT/GOOGL: NOT SUPPORTED, Sharpe −0.4276, return −12.13%. Cost sweep
+  0bp→10bp: Sharpe −0.4032→−0.5249, return −11.42%→−14.94%, verdict stable
+  NOT SUPPORTED (both criteria fail at every level).
+- AAPL/MSFT: NOT SUPPORTED, Sharpe −0.8293, return −29.71%. Sweep
+  −0.8056→−0.9237, −29.01%→−32.44%, stable NOT SUPPORTED.
+- AAPL/GOOGL: identical to AAPL/MSFT (same strategy asset, different benchmark;
+  RSI is single-asset so the benchmark only affects the DAR machinery, not the
+  signal). Stable NOT SUPPORTED.
+- Directional claim holds at every pair: higher costs never improve net
+  out-of-sample Sharpe or total return.
 
 ## What remains unresolved
-- None for the regression slice. The complete `skills/quantitative-backtesting/tests/` suite is green:
-  - 412 fast unit tests, test_performance 34, test_monte_carlo 23,
-    test_generate_sample_data 2, test_examples_coverage 39,
-    test_reproducible_backtest_example 1, test_falsifiable_hypothesis_example 28
-    (was 23 pass / 5 fail; see below), test_walk_forward 195, test_cpcv 29,
-    test_resolution_vs_sample_size 79, zscore gate 13, cross-sectional momentum
-    gate 13 — all pass, EXIT=0.
-  - The slow suites were run in prior sessions (walk-forward 195/195, resolution
-    79/79, cpcv 29/29); every other file was re-run this session.
-- Offline Yahoo fetch remains rate-limited (HTTP 429); committed fixtures only.
+- Full `skills/quantitative-backtesting/tests/` suite still not run to
+  completion in a single invocation (exceeds session budget; slow suites are
+  walk-forward 195/195, cpcv 29/29, resolution 79/79, already green in prior
+  sessions). The new RSI tests touch only the RSI example + run_backtest.py CLI,
+  which the slow suites already exercise.
+- The RSI family still lacks elevated-cost and parameter-sensitivity real-window
+  tests (it has neither `ELEVATED_COST_SWEEP_LEVELS` nor `PARAM_SENSITIVITY_GRID`
+  in `examples/rsi_mean_reversion_hypothesis.py`). Adding those would require
+  first extending the example, then mirroring the z-score/cross-sectional-momentum
+  test pattern — a separate, larger task.
 
-## Approaches already tried / failed this session
-- Ran the full `tests/` suite in single invocations; it exceeds any reasonable
-  shell timeout (the suite is >15 min). Baseline was assembled file-by-file
-  (each test file run individually), then the 5 failures below were fixed and
-  re-verified. No cross-test-interference single-invocation full pass has been
-  recorded; that remains optional (see next task).
-- Fixed 5 pre-existing deterministic test bugs (committed broken in
-  `612ddb9`, never verified green despite stale handoff counts):
-  `test_falsifiable_hypothesis_cost_sensitivity_sweep`,
-  `test_real_market_cost_sensitivity_sweep` (GOOGL),
-  `test_real_market_cost_sensitivity_sweep_msft`,
-  `test_real_market_cost_sensitivity_sweep_aapl_msft`,
-  `test_real_market_cost_sensitivity_sweep_aapl`.
-  Root cause: each asserts `deflated_alpha_ratio` is finite across all cost
-  levels, but `run_cost_sensitivity_sweep` runs single-benchmark (N=1), where
-  the machinery correctly returns DAR=None per the documented
-  `n_benchmarks == 1` contract (`examples/falsifiable_hypothesis_example.py:
-  run_hypothesis_test`). Made the DAR finiteness/monotonic assertion
-  conditional on DAR being computable; kept all Sharpe/total-return/verdict
-  checks intact. Diff scoped to
-  `tests/test_falsifiable_hypothesis_example.py` (90 insertions, 30 deletions);
-  test-regenerated `example_output/*` artifacts reverted.
+## Approaches already tried / failed
+- None this session; all verification passed on first run.
 
 ## One precise next task
-- (Optional) Record one authoritative single-invocation full-regression count
-  with `cd skills/quantitative-backtesting && python3 -m pytest tests/ -p
-  no:cacheprovider -q` in a longer window; the piecemeal baseline above is
-  already green, so this is confirmatory only.
-- Otherwise, pick one bounded quant research task from
-  `skills/quantitative-backtesting/` (e.g. a cost-sensitivity sweep on the
-  cross-sectional momentum family's shipped sample, or extending the falsifiable
-  example's resolution reporting) with concrete verification. Both strategy
-  families (z-score, cross-sectional momentum) already have full
-  hypothesis/cost-sensitivity/elevated-cost/param-sensitivity coverage across
-  all three committed pairs (AAPL, GOOGL, MSFT).
+Extend the RSI family to full parity with the other two families: add
+`ELEVATED_COST_SWEEP_LEVELS` and `PARAM_SENSITIVITY_GRID` constants plus
+`run_elevated_cost_sweep` / `run_param_sensitivity_sweep` helpers to
+`examples/rsi_mean_reversion_hypothesis.py` (mirroring
+`examples/zscore_mean_reversion_hypothesis.py`), then add the six real-window
+tests (`test_rsi_elevated_cost_sensitivity_real_{msft_googl,aapl_msft,aapl_googl}.py`,
+`test_rsi_param_sensitivity_real_{msft_googl,aapl_msft,aapl_googl}.py`) mirroring
+the z-score ones. Verify with
+`cd skills/quantitative-backtesting && python3 -m pytest tests/test_rsi_mean_reversion_hypothesis.py tests/test_rsi_hypothesis_real_*.py tests/test_rsi_cost_sensitivity_real_*.py tests/test_rsi_elevated_cost_sensitivity_real_*.py tests/test_rsi_param_sensitivity_real_*.py -p no:cacheprovider -q`.
+Constraint: offline, committed fixtures only; no live network; do not modify
+framework source or fixtures; verdicts are falsification evidence, never
+profitability claims.
 
-(End of file - total 36 lines)
+(End of file - total 44 lines)
