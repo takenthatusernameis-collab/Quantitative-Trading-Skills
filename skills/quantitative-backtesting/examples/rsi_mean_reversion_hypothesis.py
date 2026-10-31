@@ -242,17 +242,19 @@ def run_hypothesis_test(data_path, benchmark_path=None):
     }
 
 
-def _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdir_path):
+def _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdir_path, params=None):
     """Run run_backtest.py once at the given cost setting and return metrics."""
     scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
     bench_paths = _resolve_benchmarks(data_path, benchmark_path)
+    if params is None:
+        params = '{"period": 14, "oversold": 30, "overbought": 70, "neutral": 50}'
     cmd = [
         sys.executable,
         str(scripts_dir / "run_backtest.py"),
         "--data", str(data_path),
         "--strategy", "rsi_mean_reversion",
         "--symbol", "SPY",
-        "--params", '{"period": 14, "oversold": 30, "overbought": 70, "neutral": 50}',
+        "--params", params,
         "--commission", str(commission),
         "--slippage", str(slippage),
         "--train-frac", "0.6",
@@ -380,6 +382,99 @@ def run_cost_sweep(data_path, benchmark_path=None):
     print("  Costs sweep completed with directional sensitivity observed.")
     print("=" * 80)
 
+    return rows
+
+
+ELEVATED_COST_SWEEP_LEVELS = [
+    (COMMISSION, SLIPPAGE),
+    (0.0005, 0.00025),
+    (0.0010, 0.0005),
+    (0.0020, 0.0010),
+]
+
+PARAM_SENSITIVITY_GRID = (
+    (14, 30, 70),
+    (10, 30, 70),
+    (20, 30, 70),
+    (14, 25, 70),
+    (14, 35, 70),
+)
+
+
+def run_elevated_cost_sweep(data_path, benchmark_path=None, grid=ELEVATED_COST_SWEEP_LEVELS):
+    data_path = Path(data_path)
+    if benchmark_path is None:
+        benchmark_path = data_path.parent / "sample_benchmark.csv"
+    benchmark_path = Path(benchmark_path)
+    rows = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        for commission, slippage in grid:
+            metrics = _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdir_path)
+            sharpe = metrics.get("sharpe_ratio")
+            ret = metrics.get("total_return")
+            ok1 = sharpe is not None and float(sharpe) > 0
+            ok2 = ret is not None and float(ret) > 0
+            passes = {"oos_sharpe_gt_zero": bool(ok1), "oos_total_return_positive": bool(ok2)}
+            verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+            rows.append({
+                "commission": commission,
+                "slippage": slippage,
+                "commission_bps": commission * 10_000,
+                "slippage_bps": slippage * 10_000,
+                "sharpe_ratio": sharpe,
+                "total_return": ret,
+                "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+                "verdict": verdict,
+                "all_pass": all(passes.values()),
+            })
+    assert len(rows) == len(grid)
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
+    assert rows[0]["commission_bps"] == COMMISSION * 10_000
+    assert rows[0]["slippage_bps"] == SLIPPAGE * 10_000
+    for prev, curr in zip(rows, rows[1:]):
+        assert curr["commission_bps"] >= prev["commission_bps"]
+        assert curr["slippage_bps"] >= prev["slippage_bps"]
+    return rows
+
+
+def run_param_sensitivity_sweep(data_path, benchmark_path=None, grid=PARAM_SENSITIVITY_GRID):
+    data_path = Path(data_path)
+    if benchmark_path is None:
+        benchmark_path = data_path.parent / "sample_benchmark.csv"
+    benchmark_path = Path(benchmark_path)
+    rows = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        for period, oversold, overbought in grid:
+            params = '{"period": %d, "oversold": %d, "overbought": %d, "neutral": 50}' % (period, oversold, overbought)
+            metrics = _run_backtest_metrics(data_path, benchmark_path, COMMISSION, SLIPPAGE, tmpdir_path, params=params)
+            sharpe = metrics.get("sharpe_ratio")
+            ret = metrics.get("total_return")
+            ok1 = sharpe is not None and float(sharpe) > 0
+            ok2 = ret is not None and float(ret) > 0
+            passes = {"oos_sharpe_gt_zero": bool(ok1), "oos_total_return_positive": bool(ok2)}
+            verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+            rows.append({
+                "period": period,
+                "oversold": oversold,
+                "overbought": overbought,
+                "commission": COMMISSION,
+                "slippage": SLIPPAGE,
+                "commission_bps": COMMISSION * 10_000,
+                "slippage_bps": SLIPPAGE * 10_000,
+                "sharpe_ratio": sharpe,
+                "total_return": ret,
+                "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+                "verdict": verdict,
+                "all_pass": all(passes.values()),
+            })
+    assert len(rows) == len(grid)
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
     return rows
 
 
