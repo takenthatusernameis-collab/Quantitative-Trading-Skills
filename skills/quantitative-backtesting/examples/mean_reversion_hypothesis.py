@@ -351,3 +351,13 @@ def run_cost_sweep(data_path, benchmark_path=None):
     print("=" * 80)
 
     return rows
+
+
+def main():
+    data_path = Path(__file__).resolve().parent.parent / "assets" / "example_data" / "sample_ohlcv.csv"
+    run_hypothesis_test(data_path)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

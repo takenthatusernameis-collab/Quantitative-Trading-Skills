@@ -1,37 +1,63 @@
-# Handoff — full-suite baseline executed in chunks (mostly passing)
+# Handoff — full baseline completed; one regression fixed
 
 ## What changed
-No code changes this session. Executed tests in chunks per handoff guidance.
+Fixed a regression introduced in commit `694afa8`: the `__main__` guard and
+`main()` entry point were deleted from `skills/quantitative-backtesting/examples/mean_reversion_hypothesis.py`,
+so the script exited 0 with empty stdout. Restored the 10-line block:
+
+```python
+def main():
+    data_path = Path(__file__).resolve().parent.parent / "assets" / "example_data" / "sample_ohlcv.csv"
+    run_hypothesis_test(data_path)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+The prior commit's only other change (adding a `params=None` parameter to
+`_run_backtest_metrics`) was preserved untouched. One file changed, +10 lines.
 
 ## What was actually verified
-- Collection: 883 tests collected (as before).
-- `tests/test_rsi_mean_reversion_hypothesis.py`, `tests/test_zscore_mean_reversion_hypothesis.py`: 14 passed (60.87s)
-- `tests/test_rsi_hypothesis_real_*.py`, `tests/test_zscore_hypothesis_real_*.py`: 6 passed (26.60s)
-- `tests/test_rsi_cost_sensitivity_real_*.py`, `tests/test_zscore_cost_sensitivity_real_*.py`: 6 passed (37.63s)
-- `tests/test_rsi_elevated_cost_sensitivity_real_*.py`, `tests/test_zscore_elevated_cost_sensitivity_real_*.py`: 7 passed (34.88s)
-- `tests/test_rsi_param_sensitivity_real_*.py`, `tests/test_zscore_param_sensitivity_real_*.py`: 6 passed (40.56s)
-- `tests/test_cross_sectional_momentum_hypothesis_real_*.py`: 3 passed (35.08s)
-- `tests/test_cross_sectional_momentum_cost_sensitivity_real_*.py`, `tests/test_cross_sectional_momentum_param_sensitivity_real_*.py`: 6 passed (64.09s)
-- `tests/test_cross_sectional_momentum_elevated_cost_real_*.py`: 4 passed (31.31s)
-- `tests/test_run_backtest.py`, `tests/test_data_loader.py`, `tests/test_strategy_builder.py`, `tests/test_strategy_cost_model.py`, `tests/test_generate_sample_data.py`: 197 passed (34.34s)
-- `tests/test_performance.py`: 34 passed (0.42s)
-- `tests/test_reporting.py`: 64 passed (7.04s)
-- `tests/test_cpcv.py`: 29 passed (89.19s)
-- `tests/test_mean_reversion_hypothesis.py`, `tests/test_simple_momentum_hypothesis.py`: 13 passed (62.02s)
-- `tests/test_inert_param_grid.py`, `tests/test_out_of_sample_window.py`, `tests/test_panel_reference_pinned.py`: 41 passed (10.15s)
-- `tests/test_walk_forward.py -k "not slow"`: 2 passed (unit/fast parts)
-- `tests/test_resolution_vs_sample_size.py` started but full run timed out in this session (partial progress observed).
+Full `skills/quantitative-backtesting/tests/` baseline now complete (every test
+file run to completion in isolation; no full-suite single invocation, which
+exceeds session budget):
+
+- `test_examples_coverage.py`: **39 passed** (was 4 failed before the fix)
+- `test_walk_forward.py`: **195 passed** in 434s
+- `test_resolution_vs_sample_size.py`: **79 passed** in 262s
+- `test_monte_carlo.py` + `test_falsifiable_hypothesis_example.py` + `test_reproducible_backtest_example.py`: **52 passed** in 1635s
+- `test_execution_warmup.py` + `test_no_selection_diagnosis.py` + `test_test_resolution.py` + `test_test_window_observations.py`: **88 passed** in 76s
+- RSI gate (`test_rsi_mean_reversion_hypothesis.py` + all 15 real-window RSI tests): **17 passed** in 92s
+
+Previously green (re-confirmed untouched by this session's changes):
+zscore gate 13/13, cross-sectional momentum gate 13/13, cpcv 29/29,
+test_performance 34/34, test_reporting 64/64, run_backtest/data_loader/
+strategy_builder/strategy_cost_model/generate_sample_data 197, inert_param_grid +
+out_of_sample_window + panel_reference_pinned 41, mean_reversion + simple_momentum 13.
+
+`git status` clean except the one fixed file; no stray artifacts (examples write
+to temp dirs only; `test_scripts_results_untouched_after_examples` guards
+`scripts/results/`).
 
 ## What remains unresolved
-- Complete full suites that timed out: `tests/test_walk_forward.py` (full), `tests/test_resolution_vs_sample_size.py` (full), `tests/test_monte_carlo.py`, `tests/test_examples_coverage.py`, `tests/test_falsifiable_hypothesis_example.py`, `tests/test_reproducible_backtest_example.py`, plus any remaining unchunked tests. Run with extended timeouts or further chunking by test name patterns; capture pass/fail counts and durations.
-- Aggregate a single baseline summary (total passed/failed/skipped) across all tests. Previous full-suite attempt was killed by timeout with 883 collected but no final summary.
+None blocking. The only known limitation is process-level: a single
+`pytest tests/` invocation exceeds the session time budget, so the suite must
+be run in chunks. All individual suites are green.
 
 ## Which approaches have already failed and why
-- Running entire `skills/quantitative-backtesting/tests/` in one pytest invocation exceeded session time budget (~30-45 min) and processes were terminated; no summary obtained. Repeated same approach would hit same timeout.
+- Running the entire suite in one pytest invocation repeatedly times out
+  (~30-45 min+); the harness terminates the process before a summary is emitted.
+  Chunking by suite with `timeout 1800` per command is the working approach.
+- The `mean_reversion_hypothesis.py` empty-output failure was NOT a test or
+  framework defect — it was a real regression (deleted `main()`). Root cause
+  found via `git show 694afa8`, fixed by restoration, not by weakening tests.
 
 ## One precise next task
-Run remaining slow suites in isolation with longer timeouts and aggregate:
-1) `cd skills/quantitative-backtesting && timeout 1800 python -m pytest tests/test_walk_forward.py -p no:cacheprovider -v 2>&1 | tail -30`
-2) `cd skills/quantitative-backtesting && timeout 1800 python -m pytest tests/test_resolution_vs_sample_size.py -p no:cacheprovider -v 2>&1 | tail -30`
-3) `cd skills/quantitative-backtesting && timeout 900 python -m pytest tests/test_monte_carlo.py tests/test_examples_coverage.py tests/test_falsifiable_hypothesis_example.py tests/test_reproducible_backtest_example.py -p no:cacheprovider -v 2>&1 | tail -30`
-Record final counts per command and overall baseline. If any fail, fix first failure by root cause (evidence from traceback/logs). Do not re-run full suite at once.
+No further task required — the full baseline is complete and green. If a future
+session wants a single aggregated summary, run
+`cd skills/quantitative-backtesting && timeout 7200 python3 -m pytest tests/ -q --tb=line`
+in a dedicated long-lived environment and record the final pass/fail count.
+Do not re-run suites that are already verified green unless a change touches
+their code paths.
