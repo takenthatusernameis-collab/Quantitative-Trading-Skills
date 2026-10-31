@@ -1,19 +1,13 @@
-# Handoff — full suite baseline captured (all green)
+# Handoff — CPCV z-score structure test added for MSFT/GOOGL pair
 
 ## What changed
-No code changes. Ran the entire `skills/quantitative-backtesting/tests/` suite in chunks with extended timeouts. All tests pass.
+- Added `tests/test_cpcv_zscore_real_msft_googl_structure.py`: CPCV structural-invariants test for z-score mean reversion on the MSFT/GOOGL real-market pair (third pair), following the existing CPCV AAPL/MSFT pattern. No profitability claims.
 
 ## What was actually verified
-- Quick/unit group: 316 passed (data_loader, strategy_builder, strategy_cost_model, run_backtest, reporting, performance, monte_carlo).
-- Examples + hypothesis group: 39 passed (examples_coverage) + 19 passed (falsifiable/reproducible/simple/mean-reversion) + 131 passed (no_selection/out_of_sample/test_window/test_resolution/inert_param/execution_warmup/panel_reference/generate_sample_data).
-- Real-market hypothesis tests: 9 passed (RSI/z-score/cross-sectional on AAPL/MSFT/GOOGL windows).
-- Sensitivity tests: 9 passed (RSI cost/elevated/param) + 19 passed (z-score + cross-sectional cost/elevated/param).
-- walk_forward: 195 passed (431.57s).
-- cpcv + resolution: 108 passed (356.72s).
-Total: ~836 passed, 0 failures.
+- New test passes: `1 passed in 0.44s`.
 
 ## What remains unresolved
-- No code defects found. Full baseline is green.
+- Broader CPCV/walk-forward coverage for remaining pair combinations and additional falsification (e.g., out-of-sample / walk-forward for GOOGL-based pairs) still possible.
 
 ## One precise next task
-Pick one bounded methodological improvement: add a walk-forward / CPCV falsification test for a new strategy (e.g., pairs z-score on a third real-market pair) following the existing real-window test pattern, asserting structural invariants only (no profitability claims). Keep results as falsification evidence.
+Add a walk-forward falsification test for cross-sectional momentum on a GOOGL-inclusive real-market pair (e.g., AAPL/MSFT/GOOGL) following `test_walk_forward_cross_sectional_real_aapl_msft.py`, asserting structural invariants only.
