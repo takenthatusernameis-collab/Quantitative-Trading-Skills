@@ -1,22 +1,40 @@
-# Handoff — CPCV z-score structure test added for AAPL/GOOGL pair
+# Handoff — CPCV cross-sectional pair matrix completed
 
 ## What changed
-- Added `skills/quantitative-backtesting/tests/test_cpcv_zscore_real_aapl_googl_structure.py`: CPCV structural-invariants test for z-score mean reversion on the AAPL/GOOGL real-market pair, completing the pair matrix (AAPL/MSFT and MSFT/GOOGL already existed; AAPL/GOOGL was the missing third). No profitability claims.
+- Added 2 CPCV cross-sectional momentum pair structure tests, completing the pair matrix (AAPL/GOOGL and triple already existed; AAPL/MSFT and MSFT/GOOGL were the missing two):
+  - `skills/quantitative-backtesting/tests/test_cpcv_cross_sectional_real_aapl_msft_structure.py`
+  - `skills/quantitative-backtesting/tests/test_cpcv_cross_sectional_real_msft_googl_structure.py`
+- Each mirrors `test_cpcv_cross_sectional_real_aapl_googl_structure.py` using `cpcv_analysis` + `build_strategy("cross_sectional_momentum", ...)`, building pair panels from committed fixtures only. Structural-invariant assertions only; no profitability claims.
+
+## Coverage matrix now complete
+| Framework | AAPL/MSFT | MSFT/GOOGL | AAPL/GOOGL | Triple |
+|-----------|-----------|------------|------------|--------|
+| CPCV z-score | ✓ | ✓ | ✓ | ✓ |
+| CPCV cross-sectional | ✓ (new) | ✓ (new) | ✓ | ✓ |
+| Walk-forward z-score | ✓ | ✓ | ✓ | ✓ |
+| Walk-forward cross-sectional | ✓ | ✓ | ✓ | ✓ |
 
 ## What was actually verified
-- New test passes standalone: `1 passed in 0.45s`.
-- Full CPCV z-score structure gate (all three pairs): **3 passed in 0.92s**, EXIT=0.
-- Full CPCV gate (`test_cpcv.py` + 4 z-score structure tests + cross-sectional triple): **33 passed in 56.27s**, EXIT=0 (baseline 29; +4 new, no regression).
-- `py_compile` on new file: OK.
+- py_compile on both new files: OK.
+- 2 new tests standalone: `2 passed in 4.54s`.
+- Full CPCV cross-sectional gate (all 4 structure tests): `4 passed in 8.94s`.
+- Full CPCV gate (`test_cpcv.py` + 8 structure tests): **37 passed in 62.59s**, EXIT=0 (baseline 33; +4 new, no regression).
+- Warnings observed are pre-existing (symmetric-quantile flat-signal note; pandas `set_index(inplace=)` deprecation), not failures.
 - Offline, committed fixtures only (`assets/example_data/real_market_data/{AAPL,GOOGL,MSFT}.csv`); no live network.
 
 ## What remains unresolved
-- None for the CPCV z-score pair matrix; all three pairs are now covered at structural-invariant parity with the cross-sectional momentum family.
+- None for the CPCV/walk-forward structure coverage slice; all 16 framework × family × asset-combination structure tests are now covered.
+- Full `tests/` suite regression pass (HANDOFF_SESSION34 next task) still outstanding: individual slices verified at different times, no single full-suite baseline this session.
 
 ## Approaches already tried / failed
 - None this session; verification passed on first run.
 
 ## One precise next task
-No further action required on this task. If continuing coverage expansion, the remaining untested combination is CPCV cross-sectional momentum on the AAPL/GOOGL pair (only AAPL/MSFT, MSFT/GOOGL, and the triple are covered). Mirror `test_cpcv_zscore_real_aapl_googl_structure.py` with `cross_sectional_momentum` and the AAPL/GOOGL panel. Verify with `cd skills/quantitative-backtesting && python3 -m pytest tests/test_cpcv_zscore_real_aapl_googl_structure.py -p no:cacheprovider -q`.
+Run the complete `skills/quantitative-backtesting/tests/` suite as a single full-regression pass and record the pass/fail count, since individual slices were verified at different times and no full-suite baseline exists this session. Investigate and fix any failure; if a failure is a pre-existing flake unrelated to this session's changes, document it.
 
-(End of file - total 32 lines)
+Evidence/constraints:
+- Baseline slices already green this session: CPCV gate 37/37 (incl. 4 cross-sectional structure); prior sessions: walk-forward 195/195, resolution 79/79, zscore gate 13/13, cross-sectional momentum gate 13/13.
+- Offline, committed fixtures only; no live network; do not modify framework source or fixtures.
+- Gate command template: `cd skills/quantitative-backtesting && python3 -m pytest tests/ -p no:cacheprovider -q` (expect several minutes; slow suites are already known green).
+
+(End of file - total 54 lines)
