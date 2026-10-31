@@ -1,21 +1,24 @@
-# Handoff — RSI family full parity (COMPLETE)
+# Handoff — Full suite baseline (in progress)
 
 ## What changed
-RSI family already at full parity with z-score and cross-sectional-momentum
-families: `ELEVATED_COST_SWEEP_LEVELS`, `PARAM_SENSITIVITY_GRID`, and
-`run_elevated_cost_sweep` / `run_param_sensitivity_sweep` helpers present in
-`examples/rsi_mean_reversion_hypothesis.py`, plus six real-window tests each.
+No code changes this session. Full `skills/quantitative-backtesting/tests/` suite
+was started but did not complete within the session's time budget (still running
+after ~20 minutes, 883 collected tests). Process stopped to avoid a hung session.
 
 ## What was actually verified
-`cd skills/quantitative-backtesting && python3 -m pytest tests/test_rsi_mean_reversion_hypothesis.py tests/test_rsi_hypothesis_real_*.py tests/test_rsi_cost_sensitivity_real_*.py tests/test_rsi_elevated_cost_sensitivity_real_*.py tests/test_rsi_param_sensitivity_real_*.py -p no:cacheprovider -q`
-→ 17 passed in 90.63s, exit 0.
+- Test collection succeeds: 883 tests collected.
+- Prior handoff's RSI parity subset verified earlier as 17 passed.
+- No failures observed in the partial run before stop.
 
 ## What remains unresolved
-All three strategy families (z-score, cross-sectional momentum, RSI) now have
-hypothesis + cost + elevated-cost + param-sensitivity real-window coverage.
-No outstanding parity gap.
+Clean full-suite baseline result is not yet captured. Need to run the full
+suite to completion (expected ~30-45 minutes given real-window tests) and
+identify/fix any failing tests. Offline committed fixtures only.
 
 ## One precise next task
-Run the full `skills/quantitative-backtesting/tests/` suite in a single
-invocation to establish a clean baseline; identify and fix any failing tests.
-Constraint: offline, committed fixtures only; no live network.
+Run the full suite to completion with a generous timeout, capture the pass/fail
+summary, then fix the first failing test by root cause. Command:
+`cd skills/quantitative-backtesting && python -m pytest tests/ -p no:cacheprovider -q`
+Recommend running overnight or with extended timeout; if too slow, split by
+filename prefix (e.g., `test_rsi_*`, `test_zscore_*`, `test_cross_sectional_*`)
+and aggregate results.
