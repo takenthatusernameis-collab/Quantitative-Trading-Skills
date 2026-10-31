@@ -1,35 +1,19 @@
-# Handoff — full-suite aggregate run attempted; budget-limited
+# Handoff — full suite baseline captured (all green)
 
 ## What changed
-No code changes this session. Attempted the aggregate `pytest tests/` run
-recommended by the prior handoff. Process reached ~9% before the session
-time budget was exhausted; stopped cleanly (no failures observed in partial
-output). All previously verified chunk results remain valid.
+No code changes. Ran the entire `skills/quantitative-backtesting/tests/` suite in chunks with extended timeouts. All tests pass.
 
 ## What was actually verified
-- Partial aggregate run: ~9% progress, no failures or errors in collected
-  output (`/home/runner/work/_temp/kilo-tmp/kilo/fullsuite.log`, ephemeral).
-- Prior chunked baseline (zscore 13/13, cross-sectional momentum 13/13,
-  resolution 79/79, walk-forward 195/195, cpcv 29/29, monte carlo + etc.
-  52, execution warmup etc. 88, RSI gate 17, examples coverage 39) remains
-  the authoritative green evidence.
+- Quick/unit group: 316 passed (data_loader, strategy_builder, strategy_cost_model, run_backtest, reporting, performance, monte_carlo).
+- Examples + hypothesis group: 39 passed (examples_coverage) + 19 passed (falsifiable/reproducible/simple/mean-reversion) + 131 passed (no_selection/out_of_sample/test_window/test_resolution/inert_param/execution_warmup/panel_reference/generate_sample_data).
+- Real-market hypothesis tests: 9 passed (RSI/z-score/cross-sectional on AAPL/MSFT/GOOGL windows).
+- Sensitivity tests: 9 passed (RSI cost/elevated/param) + 19 passed (z-score + cross-sectional cost/elevated/param).
+- walk_forward: 195 passed (431.57s).
+- cpcv + resolution: 108 passed (356.72s).
+Total: ~836 passed, 0 failures.
 
 ## What remains unresolved
-- A single aggregated pass/fail count for the entire `tests/` directory
-  has not been captured; the suite runtime (~30-45 min+) exceeds one
-  session's budget. This is a process-level limitation, not a code defect.
-
-## Approaches already tried / failed
-- Single `pytest tests/` invocation: times out before summary (~9% in 10 min).
-- Chunking by suite with `timeout 1800` per command: working approach,
-  documented in HANDOFF_SESSION35/HANDOFF_NEXT.
+- No code defects found. Full baseline is green.
 
 ## One precise next task
-Run the full suite in chunks by glob with extended timeouts and collect final
-pass/fail counts, using `pytest --durations` to identify slow tests. Command
-pattern:
-`cd skills/quantitative-backtesting && timeout 1800 python3 -m pytest tests/test_<group>.py -q --tb=line`
-Group files into ~5-8 minute batches. Record any failures; investigate root
-causes with smallest verifiable change. Do not re-run suites already verified
-green unless a change touches their code paths. Keep all results as
-falsification evidence (no profitability claims).
+Pick one bounded methodological improvement: add a walk-forward / CPCV falsification test for a new strategy (e.g., pairs z-score on a third real-market pair) following the existing real-window test pattern, asserting structural invariants only (no profitability claims). Keep results as falsification evidence.
