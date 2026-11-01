@@ -453,6 +453,7 @@ _AUDIT_PARAMS = {
     "dual_momentum": '{"lookback": 21}',
     "zscore_mean_reversion": None,
     "macd": None,
+    "multi_pair_zscore_mean_reversion": None,
 }
 
 
