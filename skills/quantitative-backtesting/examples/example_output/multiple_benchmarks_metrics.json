@@ -33,7 +33,7 @@
   "benchmark_1_benchmark_slippage": 0.0001,
   "benchmark_1_benchmark_expense_ratio": 0.0,
   "benchmark_1_benchmark_cost_is_periodic": false,
-  "benchmark_1_correlation_with_benchmark": 0.02866131091371453,
+  "benchmark_1_correlation_with_benchmark": 0.028661310913714533,
   "benchmark_1_alpha": -0.04502443687082482,
   "benchmark_1_beta": 0.028639282442357757,
   "benchmark_1_tracking_error": 0.22156412120316737,
