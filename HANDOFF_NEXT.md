@@ -1,16 +1,18 @@
-# Handoff — strategy-level gate passed
+# Handoff — assigned gate hangs on real-market tests
 
 ## What changed
-- No source changes. Re-ran assigned gate `tests/test_strategy_builder.py tests/test_strategy_cost_model.py tests/test_out_of_sample_window.py`: 63 passed.
-- Additional focused gate `tests/test_data_loader.py tests/test_monte_carlo.py tests/test_performance.py tests/test_reporting.py`: 157 passed.
+- No source changes. Ran assigned gate; non-real unit tests pass individually, but real-market tests in `test_falsifiable_hypothesis_example.py` hang beyond 60s each.
 
 ## What was actually verified
-- Strategy builder/cost model/out-of-sample window: 63 passed in 2.66s.
-- Data loader/monte carlo/performance/reporting: 157 passed in 8.55s.
+- `test_examples_coverage.py`: 39 passed.
+- `test_mean_reversion_hypothesis.py`: 6 passed.
+- `test_rsi_mean_reversion_hypothesis.py`: 5 passed.
+- `test_panel_reference_pinned.py`: 2 passed.
+- `test_falsifiable_hypothesis_example.py` non-real subset: first 7 passed; real-market tests (`test_real_market_*`, `test_falsifiable_machinery_on_*_real_market_data`) hang.
 
 ## What remains unresolved
-- Full quant-backtesting regression not re-verified (times out at 120s+). Real-data hypothesis tests not run this session.
+- Real-market cost-sensitivity sweeps in `test_falsifiable_hypothesis_example.py` do not complete within 60s; root cause (compute-bound vs hang) not determined.
+- `test_simple_momentum_hypothesis.py` and `test_test_window_observations.py` not yet run.
 
 ## One precise next task
-Run remaining non-real unit tests as focused gate:
-`cd skills/quantitative-backtesting && python3 -m pytest tests/test_examples_coverage.py tests/test_falsifiable_hypothesis_example.py tests/test_mean_reversion_hypothesis.py tests/test_rsi_mean_reversion_hypothesis.py tests/test_simple_momentum_hypothesis.py tests/test_test_window_observations.py tests/test_panel_reference_pinned.py -p no:cacheprovider -q`
+Run `cd skills/quantitative-backtesting && python3 -m pytest tests/test_simple_momentum_hypothesis.py tests/test_test_window_observations.py -p no:cacheprovider -q` (should be fast). Then profile a single hanging real-market test with `timeout 120` and capture partial output to determine if it is compute-bound or deadlocked.
