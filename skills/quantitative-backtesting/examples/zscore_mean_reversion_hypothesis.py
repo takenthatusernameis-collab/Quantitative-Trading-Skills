@@ -118,7 +118,7 @@ def _fmt_num(v, nd=4):
         return "N/A"
 
 
-def run_hypothesis_test(data_path, label):
+def run_hypothesis_test(data_path, label, strategy="zscore_mean_reversion"):
     """Run the pre-registered falsification test on one pair fixture.
 
     Returns a dict with the observed metrics, per-criterion pass/fail, and
@@ -131,7 +131,7 @@ def run_hypothesis_test(data_path, label):
     print(f"Hypothesis: {HYPOTHESIS}")
     print(f"Trading costs: {COMMISSION*10000:.0f} bps commission + {SLIPPAGE*10000:.0f} bps slippage")
     print(f"Data: {data_path}")
-    print(f"Strategy: zscore_mean_reversion {PARAMS}")
+    print(f"Strategy: {strategy} {PARAMS}")
     print("Split: train/val/test = 0.6/0.2/0.2 (test split only)")
     print("Panel pricing: book (true per-asset book return, costs charged on the book)")
     print("=" * 80)
@@ -143,7 +143,7 @@ def run_hypothesis_test(data_path, label):
             sys.executable,
             str(SCRIPTS_DIR / "run_backtest.py"),
             "--data", str(data_path),
-            "--strategy", "zscore_mean_reversion",
+            "--strategy", strategy,
             "--multi-symbol",
             "--params", PARAMS,
             "--commission", str(COMMISSION),
@@ -236,7 +236,7 @@ def run_hypothesis_test(data_path, label):
     }
 
 
-def _run_backtest_metrics(data_path, commission, slippage, tmpdir_path, params=PARAMS):
+def _run_backtest_metrics(data_path, commission, slippage, tmpdir_path, params=PARAMS, strategy="zscore_mean_reversion"):
     """Run run_backtest.py once at the given cost setting and return metrics.
 
     Uses the same CLI invocation as run_hypothesis_test (multi-symbol panel,
@@ -249,7 +249,7 @@ def _run_backtest_metrics(data_path, commission, slippage, tmpdir_path, params=P
         sys.executable,
         str(SCRIPTS_DIR / "run_backtest.py"),
         "--data", str(data_path),
-        "--strategy", "zscore_mean_reversion",
+        "--strategy", strategy,
         "--multi-symbol",
         "--params", params,
         "--commission", str(commission),
@@ -276,7 +276,7 @@ def _run_backtest_metrics(data_path, commission, slippage, tmpdir_path, params=P
     return metrics
 
 
-def run_cost_sweep(data_path):
+def run_cost_sweep(data_path, strategy="zscore_mean_reversion"):
     """Sweep commission / slippage across ascending levels and report an
     explicit falsification verdict at each level.
 
@@ -297,7 +297,7 @@ def run_cost_sweep(data_path):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
         for commission, slippage in COST_SWEEP_LEVELS:
-            metrics = _run_backtest_metrics(data_path, commission, slippage, tmpdir_path)
+            metrics = _run_backtest_metrics(data_path, commission, slippage, tmpdir_path, strategy=strategy)
             sharpe = metrics.get("sharpe_ratio")
             ret = metrics.get("total_return")
             ok1 = sharpe is not None and float(sharpe) > 0
@@ -476,7 +476,7 @@ ELEVATED_COST_SWEEP_LEVELS = [
 ]
 
 
-def run_elevated_cost_sweep(data_path, grid=ELEVATED_COST_SWEEP_LEVELS):
+def run_elevated_cost_sweep(data_path, grid=ELEVATED_COST_SWEEP_LEVELS, strategy="zscore_mean_reversion"):
     """Elevated-cost confirmation sweep on a real-market pair.
 
     Runs the same pre-registered falsification criteria at a set of ascending
@@ -503,7 +503,7 @@ def run_elevated_cost_sweep(data_path, grid=ELEVATED_COST_SWEEP_LEVELS):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
         for commission, slippage in grid:
-            metrics = _run_backtest_metrics(data_path, commission, slippage, tmpdir_path)
+            metrics = _run_backtest_metrics(data_path, commission, slippage, tmpdir_path, strategy=strategy)
             sharpe = metrics.get("sharpe_ratio")
             ret = metrics.get("total_return")
             ok1 = sharpe is not None and float(sharpe) > 0

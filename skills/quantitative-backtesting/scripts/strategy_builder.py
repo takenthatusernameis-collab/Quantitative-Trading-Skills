@@ -1153,6 +1153,129 @@ class MeanReversionZScore(StrategyBase):
         return None
 
 
+class MultiPairZScoreMeanReversion(MeanReversionZScore):
+    """Z-Score Mean Reversion over every pair in an N-asset panel.
+
+    Trades each of the N choose 2 pairs as an independent z-score spread
+    (long the cheap leg / short the expensive leg when |z| > entry_z, flat
+    once |z| retreats into [-exit_z, +exit_z]) and aggregates the per-pair
+    books into a single per-asset target book. A pair long the spread
+    contributes +0.5 to the numerator asset and -0.5 to the denominator;
+    short the spread reverses. The aggregate book carries net exposure in
+    general, so it is priced under ``--panel-pricing book`` (true per-asset
+    book return ``sum_i w_i r_i``, costs charged on the book's rotation);
+    under net-exposure pricing the framework sees only the book's net
+    exposure.
+
+    This is a separate strategy from ``MeanReversionZScore``. The single-pair
+    guard on that class (exactly 2 assets) is intentionally left untouched;
+    this class generalises pairs trading to a universe without weakening it.
+    """
+
+    def _panel_closes(self, data):
+        """Return (symbols, closes) for a panel, or None when not usable.
+
+        ``closes`` maps each symbol to its close Series, all aligned to the
+        panel's common index. Supports a dict of symbol -> DataFrame and a
+        MultiIndex DataFrame; returns None for anything else or for fewer
+        than two assets.
+        """
+        symbols = None
+        frames = {}
+        if isinstance(data, dict):
+            symbols = list(data.keys())
+            frames = data
+        elif isinstance(getattr(data, "columns", None), pd.MultiIndex):
+            try:
+                symbols = sorted(set(data.columns.get_level_values(1)))
+            except Exception:
+                return None
+            if "close" not in data.columns.get_level_values(0):
+                return None
+            for sym in symbols:
+                frames[sym] = data[("close", sym)]
+        else:
+            return None
+
+        if symbols is None or len(symbols) < 2:
+            return None
+
+        common = None
+        closes = {}
+        for sym in symbols:
+            try:
+                close = frames[sym]["close"] if isinstance(frames[sym], pd.DataFrame) else frames[sym]
+            except Exception:
+                return None
+            close = close.dropna()
+            common = close.index if common is None else common.intersection(close.index)
+            closes[sym] = close
+        if common is None or len(common) == 0:
+            return None
+        common = common.sort_values()
+        for sym in symbols:
+            closes[sym] = closes[sym].loc[common]
+        return symbols, closes
+
+    def generate_signals(self, data) -> pd.Series:
+        """Flat signal for panel data; P&L is produced by the book path.
+
+        For dict panels the point-in-time check ignores the signal value, so
+        a flat series keeps the check well-defined without encoding any
+        look-ahead. Single-asset input falls back to the parent.
+        """
+        if isinstance(data, dict):
+            if len(data) < 2:
+                return pd.Series(0.0, index=next(iter(data.values())).index)
+            resolved = self._panel_closes(data)
+            if resolved is None:
+                return pd.Series(0.0, index=next(iter(data.values())).index)
+            _, closes = resolved
+            return pd.Series(0.0, index=next(iter(closes.values())).index)
+        if isinstance(getattr(data, "columns", None), pd.MultiIndex):
+            resolved = self._panel_closes(data)
+            if resolved is None:
+                return pd.Series(0.0, index=data.index)
+            _, closes = resolved
+            return pd.Series(0.0, index=next(iter(closes.values())).index)
+        return super().generate_signals(data)
+
+    def generate_target_weights(self, data) -> Optional[pd.DataFrame]:
+        """Per-asset target book aggregated over every pair in the panel."""
+        period = self.parameters.get("period", 20)
+        entry_z = self.parameters.get("entry_z", 2.0)
+        exit_z = self.parameters.get("exit_z", 0.5)
+        spread_method = self.parameters.get("spread_method", "log_ratio")
+        hedge_ratio = self.parameters.get("hedge_ratio", 1.0)
+        hedge_lookback = self.parameters.get("hedge_lookback", 30)
+
+        resolved = self._panel_closes(data)
+        if resolved is None:
+            return None
+        symbols, closes = resolved
+        common_index = next(iter(closes.values())).index
+
+        weights = pd.DataFrame(0.0, index=common_index, columns=symbols)
+        for i in range(len(symbols)):
+            for j in range(i + 1, len(symbols)):
+                sym_i, sym_j = symbols[i], symbols[j]
+                pos = self._pairs_positions_from_two_series(
+                    closes[sym_i], closes[sym_j], period, entry_z, exit_z,
+                    spread_method, hedge_ratio, hedge_lookback,
+                )
+                pair_w = pd.DataFrame(0.0, index=pos.index, columns=[sym_i, sym_j])
+                long_spread = pos == 1
+                short_spread = pos == -1
+                if long_spread.any():
+                    pair_w.loc[long_spread, sym_i] = 0.5
+                    pair_w.loc[long_spread, sym_j] = -0.5
+                if short_spread.any():
+                    pair_w.loc[short_spread, sym_i] = -0.5
+                    pair_w.loc[short_spread, sym_j] = 0.5
+                weights[[sym_i, sym_j]] = weights[[sym_i, sym_j]].add(pair_w, fill_value=0.0)
+        return weights
+
+
 class VolatilityTargeting(StrategyBase):
     """Volatility Targeting Position Sizing.
 
@@ -1194,6 +1317,7 @@ STRATEGY_REGISTRY = {
     "cross_sectional_momentum": CrossSectionalMomentum,
     "dual_momentum": DualMomentumStrategy,
     "zscore_mean_reversion": MeanReversionZScore,
+    "multi_pair_zscore_mean_reversion": MultiPairZScoreMeanReversion,
 }
 
 
@@ -1237,6 +1361,7 @@ def list_strategies() -> Dict[str, str]:
         "cross_sectional_momentum": "Cross-Sectional Momentum (Multi-Asset Panel Data)",
         "dual_momentum": "Dual Momentum (Absolute + Relative, Multi-Asset Panel Data)",
         "zscore_mean_reversion": "Z-Score Mean Reversion (Pairs Style)",
+        "multi_pair_zscore_mean_reversion": "Multi-Pair Z-Score Mean Reversion (N-Asset Panel)",
     }
 
 
@@ -1252,6 +1377,7 @@ def get_strategy_defaults(strategy_type: str) -> Dict[str, Any]:
         "cross_sectional_momentum": {"lookback": 252, "top_quantile": 0.2, "bottom_quantile": 0.2},
         "dual_momentum": {"lookback": 252, "top_quantile": 0.2, "risk_free_rate": 0.0},
         "zscore_mean_reversion": {"period": 20, "entry_z": 2.0, "exit_z": 0.5, "spread_method": "log_ratio", "hedge_ratio": 1.0, "hedge_lookback": 30},
+        "multi_pair_zscore_mean_reversion": {"period": 20, "entry_z": 2.0, "exit_z": 0.5, "spread_method": "log_ratio", "hedge_ratio": 1.0, "hedge_lookback": 30},
     }
     return defaults.get(strategy_type, {})
 
