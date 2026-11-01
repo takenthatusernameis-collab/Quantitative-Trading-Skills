@@ -371,7 +371,7 @@ def run_cost_sweep(data_path, strategy="zscore_mean_reversion"):
     return rows
 
 
-def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID):
+def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID, strategy="zscore_mean_reversion"):
     """Sweep z-score parameters across a narrow pre-registered grid and report
     an explicit falsification verdict at each setting.
 
@@ -382,6 +382,12 @@ def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID):
     about any market. No claim is made about which setting is "best"; verdict
     flips across the grid are the signal that the result is not robust to
     small parameter changes.
+
+    The ``strategy`` argument selects which registered strategy runs the sweep;
+    it defaults to the single-pair ``zscore_mean_reversion`` (which requires
+    exactly two assets) and may be set to ``multi_pair_zscore_mean_reversion``
+    for N-asset panels. The two-asset guard on ``MeanReversionZScore`` is left
+    untouched.
 
     Returns a list of rows, one per grid setting, each with the params used,
     per-criterion pass/fail, and the overall verdict ("SUPPORTED" / "NOT
@@ -410,7 +416,7 @@ def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID):
         tmpdir_path = Path(tmpdir)
         for period, entry_z, exit_z in grid:
             params = json.dumps({**fixed_params_base, "period": period, "entry_z": entry_z, "exit_z": exit_z})
-            metrics = _run_backtest_metrics(data_path, COMMISSION, SLIPPAGE, tmpdir_path, params=params)
+            metrics = _run_backtest_metrics(data_path, COMMISSION, SLIPPAGE, tmpdir_path, params=params, strategy=strategy)
             sharpe = metrics.get("sharpe_ratio")
             ret = metrics.get("total_return")
             ok1 = sharpe is not None and float(sharpe) > 0
