@@ -1480,15 +1480,14 @@ def test_real_market_fetch_save_and_run_path_is_offline_safe():
             body = json.dumps({
                 "chart": {
                     "result": [{
-                        # 2023-01-03 and 2023-01-04 UTC
-                        "timestamp": [1672704000, 1672790400],
+                        "timestamp": list(range(1672704000, 1672704000 + 200 * 86400, 86400)),
                         "indicators": {
                             "quote": [{
-                                "open": [100.0, 101.0],
-                                "high": [102.0, 103.0],
-                                "low": [99.0, 100.5],
-                                "close": [101.0, 102.0],
-                                "volume": [1000, 2000],
+                                "open": [100.0 + i * 0.1 for i in range(200)],
+                                "high": [102.0 + i * 0.1 for i in range(200)],
+                                "low": [99.0 + i * 0.1 for i in range(200)],
+                                "close": [101.0 + i * 0.1 for i in range(200)],
+                                "volume": [1000 + i for i in range(200)],
                             }]
                         },
                     }]
@@ -1518,6 +1517,11 @@ def test_real_market_fetch_save_and_run_path_is_offline_safe():
             )
             assert src_bench.exists(), "committed sample_benchmark fixture missing"
             shutil.copyfile(src_bench, fixtures / "sample_benchmark.csv")
+            src_primary = (
+                SKILLS_DIR / "assets" / "example_data" / "sample_ohlcv.csv"
+            )
+            assert src_primary.exists(), "committed sample_ohlcv fixture missing"
+            shutil.copyfile(src_primary, fixtures / "sample_ohlcv.csv")
             # 1. Fetch + normalize + cache (must not touch committed fixtures).
             path = _ensure_real_market_data(
                 symbol="AAPL",
@@ -1546,8 +1550,8 @@ def test_real_market_fetch_save_and_run_path_is_offline_safe():
             assert loaded.index.is_monotonic_increasing, (
                 "cached frame index is not sorted ascending"
             )
-            assert len(loaded) == 2
-            assert loaded["close"].tolist() == [101.0, 102.0]
+            assert len(loaded) == 200
+            assert loaded["close"].tolist() == [101.0 + i * 0.1 for i in range(200)]
 
             # 3. The cached frame must drive the full falsifiable machinery to a
             # determinate, criteria-evaluated verdict.
