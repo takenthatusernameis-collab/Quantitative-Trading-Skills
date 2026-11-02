@@ -18,8 +18,11 @@ metric values themselves; these tests guard executability and API stability.
 import re
 import subprocess
 import sys
+import tempfile
 import traceback
 from pathlib import Path
+
+import pandas as pd
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 
@@ -33,6 +36,23 @@ _MEAN_REVERSION_PATH = SKILLS_DIR / "examples" / "mean_reversion_hypothesis.py"
 _RSI_MR_PATH = SKILLS_DIR / "examples" / "rsi_mean_reversion_hypothesis.py"
 _ZSCORE_MR_PATH = SKILLS_DIR / "examples" / "zscore_mean_reversion_hypothesis.py"
 _REAL_DATA_PIPELINE_PATH = SKILLS_DIR / "examples" / "real_data_pipeline_example.py"
+_DUAL_MOMENTUM_PATH = SKILLS_DIR / "examples" / "dual_momentum_hypothesis.py"
+
+_REAL_MARKET_DATA = SKILLS_DIR / "assets" / "example_data" / "real_market_data"
+
+
+def _build_triple_csv(dest: Path) -> Path:
+    """Combine the committed AAPL/MSFT/GOOGL fixtures into one panel CSV."""
+    frames = []
+    for name in ("AAPL.csv", "MSFT.csv", "GOOGL.csv"):
+        frame = pd.read_csv(_REAL_MARKET_DATA / name)
+        frame["symbol"] = Path(name).stem
+        frames.append(frame)
+    combined = pd.concat(frames, ignore_index=True)
+    out = dest / "aapl_msft_googl_triple.csv"
+    combined.to_csv(out, index=False)
+    return out
+_DUAL_MOMENTUM_PATH = SKILLS_DIR / "examples" / "dual_momentum_hypothesis.py"
 
 
 def _import_module(name, path):
@@ -384,6 +404,86 @@ def test_simple_momentum_hypothesis_emits_falsification_verdict():
     # Criteria must include numeric values (Sharpe/returns) in numerically sane form
     assert "Sharpe" in result.stdout
     assert "Total Return" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# dual_momentum_hypothesis.py
+# ---------------------------------------------------------------------------
+
+
+def test_dual_momentum_hypothesis_imports():
+    """dual_momentum_hypothesis must import cleanly and expose its entry points."""
+    module = _import_module("dual_momentum_hypothesis", _DUAL_MOMENTUM_PATH)
+    assert hasattr(module, "run_hypothesis_test")
+    assert callable(module.run_hypothesis_test)
+    assert hasattr(module, "run_benchmark_aware_hypothesis_test")
+    assert callable(module.run_benchmark_aware_hypothesis_test)
+    assert hasattr(module, "main")
+    assert callable(module.main)
+    assert hasattr(module, "BENCHMARK_CRITERIA")
+    assert hasattr(module, "N_TRIALS")
+    assert module.N_TRIALS == len(module.PARAM_SENSITIVITY_GRID)
+
+
+def test_dual_momentum_hypothesis_runs():
+    """dual_momentum_hypothesis must run end-to-end and exit 0."""
+    for name in ("AAPL.csv", "MSFT.csv", "GOOGL.csv"):
+        assert (_REAL_MARKET_DATA / name).exists()
+    with tempfile.TemporaryDirectory() as td:
+        data_path = _build_triple_csv(Path(td))
+        result = subprocess.run(
+            [sys.executable, str(_DUAL_MOMENTUM_PATH), "--data", str(data_path), "--no-benchmark"],
+            capture_output=True, text=True, timeout=600,
+        )
+    assert result.returncode == 0, (
+        f"dual_momentum_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "FALSIFIABLE HYPOTHESIS TEST" in result.stdout
+    assert "VERDICT:" in result.stdout
+
+
+def test_dual_momentum_hypothesis_emits_baseline_verdict():
+    """dual_momentum_hypothesis baseline path reports the two baseline criteria."""
+    for name in ("AAPL.csv", "MSFT.csv", "GOOGL.csv"):
+        assert (_REAL_MARKET_DATA / name).exists()
+    with tempfile.TemporaryDirectory() as td:
+        data_path = _build_triple_csv(Path(td))
+        result = subprocess.run(
+            [sys.executable, str(_DUAL_MOMENTUM_PATH), "--data", str(data_path), "--no-benchmark"],
+            capture_output=True, text=True, timeout=600,
+        )
+    assert result.returncode == 0, (
+        f"dual_momentum_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "FALSIFICATION CRITERIA" in result.stdout
+    assert re.search(r"\[(PASS|FAIL)\].*oos_sharpe_gt_zero", result.stdout)
+    assert re.search(r"\[(PASS|FAIL)\].*oos_total_return_positive", result.stdout)
+    assert re.search(r"VERDICT:\s*(SUPPORTED|NOT SUPPORTED)", result.stdout)
+
+
+def test_dual_momentum_hypothesis_emits_benchmark_verdict():
+    """dual_momentum_hypothesis benchmark-aware path reports the four criteria."""
+    for name in ("AAPL.csv", "MSFT.csv", "GOOGL.csv"):
+        assert (_REAL_MARKET_DATA / name).exists()
+    with tempfile.TemporaryDirectory() as td:
+        data_path = _build_triple_csv(Path(td))
+        result = subprocess.run(
+            [sys.executable, str(_DUAL_MOMENTUM_PATH), "--data", str(data_path)],
+            capture_output=True, text=True, timeout=600,
+        )
+    assert result.returncode == 0, (
+        f"dual_momentum_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "FALSIFICATION CRITERIA" in result.stdout
+    assert re.search(r"\[(PASS|FAIL)\].*oos_sharpe_gt_zero", result.stdout)
+    assert re.search(r"\[(PASS|FAIL)\].*oos_total_return_gt_benchmark", result.stdout)
+    assert re.search(r"\[(PASS|FAIL)\].*deflated_sharpe_pvalue_lt_0.10", result.stdout)
+    assert re.search(r"\[(PASS|FAIL)\].*benchmark_alpha_pvalue_lt_0.05", result.stdout)
+    assert re.search(r"VERDICT:\s*(SUPPORTED|NOT SUPPORTED)", result.stdout)
+    assert "Deflated Sharpe" in result.stdout or "Deflated" in result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -757,6 +857,10 @@ TEST_REGISTRY = [
     ("test_zscore_mean_reversion_hypothesis_emits_hypothesis_and_costs", test_zscore_mean_reversion_hypothesis_emits_hypothesis_and_costs),
     ("test_zscore_mean_reversion_hypothesis_uses_point_in_time_split", test_zscore_mean_reversion_hypothesis_uses_point_in_time_split),
     ("test_zscore_mean_reversion_hypothesis_emits_falsification_verdict", test_zscore_mean_reversion_hypothesis_emits_falsification_verdict),
+    ("test_dual_momentum_hypothesis_imports", test_dual_momentum_hypothesis_imports),
+    ("test_dual_momentum_hypothesis_runs", test_dual_momentum_hypothesis_runs),
+    ("test_dual_momentum_hypothesis_emits_baseline_verdict", test_dual_momentum_hypothesis_emits_baseline_verdict),
+    ("test_dual_momentum_hypothesis_emits_benchmark_verdict", test_dual_momentum_hypothesis_emits_benchmark_verdict),
     ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
     ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
     ("test_real_data_pipeline_example_emits_deflated_alpha_outputs", test_real_data_pipeline_example_emits_deflated_alpha_outputs),

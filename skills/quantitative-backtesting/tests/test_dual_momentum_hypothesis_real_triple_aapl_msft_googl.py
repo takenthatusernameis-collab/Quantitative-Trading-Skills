@@ -70,6 +70,42 @@ def test_hypothesis_runs_on_triple_real_window_dual_momentum():
     assert "VERDICT:" in out
 
 
+def test_baseline_metrics_pinned_on_triple_real_window_dual_momentum():
+    """Regression guard: the baseline (no-benchmark) advertised run on the
+    committed triple must reproduce the pinned out-of-sample metrics so a
+    silent change to the backtest numbers is caught. Relative tolerance only,
+    never exact equality (last decimals depend on the numpy/pandas build).
+    """
+    for name in ("AAPL.csv", "MSFT.csv", "GOOGL.csv"):
+        assert (SRC / name).exists()
+
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        data_path = _build_triple_csv(d)
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            result = run_hypothesis_test(
+                data_path, "aapl_msft_googl triple dual momentum real window"
+            )
+
+    observed = result.get("observed") or {}
+    assert observed.get("sharpe_ratio") is not None
+    assert observed.get("total_return") is not None
+
+    EXPECTED = {
+        "sharpe_ratio": 1.1676593094877479,
+        "total_return": 0.40834454698372635,
+    }
+    REL_TOL = 1e-3
+    for key, exp in EXPECTED.items():
+        got = observed[key]
+        assert abs(got - exp) <= REL_TOL * max(abs(exp), 1e-9), (
+            f"{key} regression: got {got}, expected {exp}"
+        )
+    assert observed.get("benchmark_path") is None
+
+
 if __name__ == "__main__":
     test_hypothesis_runs_on_triple_real_window_dual_momentum()
+    test_baseline_metrics_pinned_on_triple_real_window_dual_momentum()
     print("OK")
