@@ -75,6 +75,33 @@ def test_elevated_cost_sweep_runs_on_triple_real_window_multi_pair_zscore():
             "oos_sharpe_gt_zero",
             "oos_total_return_positive",
         }
+
+    # Regression guard: pin the observed out-of-sample metrics per cost level
+    # so the falsification evidence (SUPPORTED at advertised/low cost, NOT
+    # SUPPORTED at elevated cost) is reproducible and any silent change to the
+    # backtest numbers is caught. Values reproduced on committed fixtures with
+    # the current library build; compared with a relative tolerance (never exact
+    # equality, since the last decimals depend on the numpy/pandas build).
+    EXPECTED_METRICS = {
+        (2, 1): (0.22928163042546806, 0.08885542249506262),
+        (5, 2.5): (0.03645166937976205, 0.030174339523501903),
+        (10, 5): (-0.28347173461581776, -0.060753438896405165),
+        (20, 10): (-0.9118979386313808, -0.21945634456115926),
+    }
+    REL_TOL = 1e-3
+    for r in rows:
+        key = (r["commission_bps"], r["slippage_bps"])
+        assert key in EXPECTED_METRICS, f"unexpected cost level {key}"
+        exp_sharpe, exp_ret = EXPECTED_METRICS[key]
+        assert r["sharpe_ratio"] is not None, f"missing sharpe at {key}"
+        assert r["total_return"] is not None, f"missing total_return at {key}"
+        assert abs(r["sharpe_ratio"] - exp_sharpe) <= REL_TOL * max(
+            abs(exp_sharpe), 1e-9
+        ), f"sharpe regression at {key}: got {r['sharpe_ratio']}, expected {exp_sharpe}"
+        assert abs(r["total_return"] - exp_ret) <= REL_TOL * max(
+            abs(exp_ret), 1e-9
+        ), f"total_return regression at {key}: got {r['total_return']}, expected {exp_ret}"
+
     out = buffer.getvalue()
     assert "ELEVATED COST SENSITIVITY SWEEP" in out
     assert "VERDICT" in out

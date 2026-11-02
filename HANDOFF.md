@@ -1,38 +1,41 @@
-# Handoff — full regression pass complete; zero regressions from z-score triple-panel change
+# Handoff — pinned real-market falsification evidence as regression guards
 
 ## What changed (this session)
-- No source code changes. The z-score triple-panel parameter-sensitivity coverage (commit `aba0e1e`) and its `run_param_sensitivity_sweep` `strategy` kwarg are already committed.
-- Ran the full `skills/quantitative-backtesting/tests/` regression pass (908 collected tests, ~48 min).
-- Restored test-regenerated example output files (`examples/example_output/*`, `examples/example_reproducible_output/*`) — these were timestamp/plot-file churn from test runs, not source changes; working tree is clean.
+- Added regression guards to `skills/quantitative-backtesting/tests/test_zscore_elevated_cost_sensitivity_real_triple_aapl_msft_googl.py` pinning the observed out-of-sample metrics per cost level for multi-pair z-score mean reversion on the committed AAPL/MSFT/GOOGL triple:
+  - 2bp+1bp: Sharpe 0.2293, Return +8.89% -> SUPPORTED
+  - 5bp+2.5bp: Sharpe 0.0365, Return +3.02% -> SUPPORTED
+  - 10bp+5bp: Sharpe -0.2835, Return -6.08% -> NOT SUPPORTED
+  - 20bp+10bp: Sharpe -0.9119, Return -21.95% -> NOT SUPPORTED
+- Compared with a relative tolerance (1e-3), never exact equality (last decimals depend on the numpy/pandas build), matching the repo's existing pinning convention.
+- Reverted test-regenerated `examples/example_output/*` timestamp/float churn so the working tree contains only the intended test change.
 
 ## What was actually verified
-- Full regression pass: **908 passed, 10 failed** in 2903.82s (0:48:23).
-- The 10 failures are **pre-existing** — verified identical on parent commit `8d405d2` (before the z-score change) via a temporary worktree:
-  - 6 × `test_reporting.py::TestParameterHeatmap` — "unexpectedly None" (headless matplotlib, no display backend).
-  - 4 × reporting/tear-sheet and run-backtest failures, including `test_run_backtest_trade_ledger_valid_for_all_registered_strategies` — `multi_pair_zscore_mean_reversion` is registered in `strategy_builder.py:1320` but missing from `_AUDIT_PARAMS` in `tests/test_run_backtest.py:446`.
-- **Zero regressions** from the z-score triple-panel change: the `strategy` kwarg addition and new test file introduce no new failures.
-- Both real-market falsification gates remain green: z-score 26 tests + cross-sectional momentum 17 tests = 43 passed in 154.73s.
+- `test_zscore_elevated_cost_sensitivity_real_triple_aapl_msft_googl.py`: 1 passed in 5.48s, with the pinned metrics reproducing exactly (gate: `cd skills/quantitative-backtesting && python3 -m pytest tests/test_zscore_elevated_cost_sensitivity_real_triple_aapl_msft_googl.py -p no:cacheprovider -q`).
+- Stale items from prior handoffs now green:
+  - `tests/test_reporting.py`: 64 passed (TestParameterHeatmap no longer fails headless).
+  - `tests/test_run_backtest.py`: 108 passed (trade-ledger/audit-params reconciled).
+  - `tests/test_cpcv.py`, `test_data_loader.py`, `test_monte_carlo.py`, `test_performance.py`: 122 passed.
+- Offline, committed fixtures only; no live network.
 
 ## What remains unresolved
-- 10 pre-existing test failures (not caused by this session):
-  - Matplotlib/tear-sheet headless-environment failures (6 heatmap + tear-sheet PNG tests).
-  - Strategy-registry/audit-params mismatch: `multi_pair_zscore_mean_reversion` missing from `_AUDIT_PARAMS` (`tests/test_run_backtest.py:446-456`). Note: this strategy operates on a multi-asset panel, while the audit test's `_make_data()` is single-asset, so a one-line dict add may not suffice — verify the strategy can produce trades on single-asset data before adding it, otherwise re-scope the test.
-- No pair/triple tested shows positive out-of-sample behavior net of costs that is robust to parameter or cost perturbation.
+- No pair/triple tested shows positive out-of-sample behavior net of costs that is robust to parameter or cost perturbation (momentum falsified at all cost levels; z-score flips SUPPORTED->NOT SUPPORTED between 5bp+2.5bp and 10bp+5bp round-trip).
+- `tests/test_walk_forward.py` hangs on its compute-heavy CLI sweep tests in batch runs (does not block the run_backtest-based hypothesis tests). Not pursued as infra work; focused verification is more reliable here.
 
 ## Approaches already tried / failed
-- Full `tests/` regression pass (7200s timeout): completed, 48 min, 10 pre-existing failures only. Not a regression from this session's change.
+- Full `tests/` regression pass: ~48 min, 10 pre-existing failures only, zero regressions from prior z-score change.
+- Batch runs of large test groups time out/hang; per-file focused gates are the reliable verification mode in this environment.
 
 ## One precise next task
-Fix the pre-existing `test_run_backtest_trade_ledger_valid_for_all_registered_strategies` failure by reconciling `_AUDIT_PARAMS` with `STRATEGY_REGISTRY` for `multi_pair_zscore_mean_reversion`:
-
-1. Inspect `tests/test_run_backtest.py:_make_data()` (single-asset fixture) and `scripts/strategy_builder.py:1156` (`MultiPairZScoreMeanReversion`) to determine whether the strategy can produce trades on single-asset data.
-2. If yes: add `"multi_pair_zscore_mean_reversion": <params>` to `_AUDIT_PARAMS` (tests/test_run_backtest.py:446) and re-run `tests/test_run_backtest.py::test_run_backtest_trade_ledger_valid_for_all_registered_strategies` → expect PASS.
-3. If no (strategy requires multi-asset data): re-scope the audit test to skip or separately handle multi-asset strategies; do not force a mismatch.
+Propose and test the smallest falsifiable alternative on the same triple (AAPL/MSFT/GOOGL) using committed fixtures only (per HANDOFF_SESSION38):
+1. Define a specific hypothesis (explicit signal, universe, holding/exit, rank/threshold) with pre-registered falsification criteria (OOS Sharpe>0 and OOS total return>0) and explicit rejection if either fails. Do NOT tune parameters to force SUPPORT.
+2. Enforce chronological disjoint train/validation/test splits (no lookahead), PIT correctness, and survivorship/lookahead controls.
+3. Run elevated-cost sweep (2bp+1bp, 5bp+2.5bp, 10bp+5bp, 20bp+10bp) and report SUPPORTED/NOT SUPPORTED per level with evidence.
+4. If it also fails, record exact limitations and the smallest reproducible next step without expanding to live data or infrastructure changes.
+Reuse the existing `zscore_mean_reversion_hypothesis.py` (`run_elevated_cost_sweep`) convention and pinned-metrics pattern just added above.
 
 Evidence/constraints:
-- Offline, committed fixtures only; no live network.
-- Do not modify framework source beyond the minimal `_AUDIT_PARAMS` entry or test re-scope.
-- Python environment: system python3.12 with pandas 3.1.0, numpy 2.5.4, pytest 9.2.0 installed to `/home/runner/work/_temp/kilo-home/.local/` (add to PATH: `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`).
-- Gate command: `cd skills/quantitative-backtesting && python3 -m pytest tests/test_run_backtest.py::test_run_backtest_trade_ledger_valid_for_all_registered_strategies -p no:cacheprovider -q`
+- Committed fixtures: `assets/example_data/real_market_data/{AAPL,MSFT,GOOGL}.csv` only; no live network.
+- Python env: system python3.12, pandas 3.1.0, numpy 2.5.4, pytest 9.2.0 at `/home/runner/work/_temp/kilo-home/.local/` (`export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`).
+- Do not modify framework source beyond the minimal new hypothesis test/example; keep changes small and reversible.
 
 (End of file)
