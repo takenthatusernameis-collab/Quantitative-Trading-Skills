@@ -975,10 +975,82 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
 
 
 def main():
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(description="Falsifiable hypothesis test (pre-registered criteria).")
+    parser.add_argument("--fetch-real", dest="fetch_real", metavar="SYMBOL", help="Fetch/run on real market data for SYMBOL (best-effort).")
+    parser.add_argument("--start", dest="start", default="2020-01-01", help="Start date for real data (YYYY-MM-DD).")
+    parser.add_argument("--end", dest="end", default="2023-12-31", help="End date for real data (YYYY-MM-DD).")
+    parser.add_argument("--benchmark", dest="benchmark", default=None, help="Optional benchmark CSV path.")
+    parser.add_argument("--output-json", dest="output_json", default=None, help="Write results to JSON file.")
+    parser.add_argument("--no-cost-sweep", dest="no_cost_sweep", action="store_true", help="Skip cost sensitivity sweep.")
+    args = parser.parse_args()
+
+    if args.fetch_real:
+        try:
+            result = _run_on_real_market(
+                symbol=args.fetch_real,
+                start=args.start,
+                end=args.end,
+                benchmark_path=args.benchmark,
+            )
+            if args.output_json:
+                try:
+                    out_path = Path(args.output_json)
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    # Avoid serializing non-JSON friendly objects
+                    serializable = {}
+                    for k, v in result.items():
+                        if k in ("criteria", "resolution", "observed", "separation_check", "trade_statistics", "cost_sweep"):
+                            serializable[k] = v
+                        elif k in ("verdict", "all_pass", "pit_passed", "bias_controls_engaged", "hypothesis", "strategy"):
+                            serializable[k] = v
+                    serializable["label"] = "real-market"
+                    serializable["symbol"] = args.fetch_real
+                    serializable["date_range"] = {"start": args.start, "end": args.end}
+                    serializable["note"] = "Evidence about machinery behavior on real market data; not a claim of profitability or robustness."
+                    out_path.write_text(json.dumps(serializable, indent=2))
+                    print(f"\n  Results written to {out_path} (no profitability claims).")
+                except Exception as e:
+                    print(f"\n  (failed to write JSON: {e})")
+            if not args.no_cost_sweep:
+                try:
+                    data_path = Path(__file__).resolve().parent.parent / "assets" / "example_data" / "real_market_data" / f"{args.fetch_real}.csv"
+                    if not data_path.exists():
+                        # try to ensure again
+                        p = _ensure_real_market_data(symbol=args.fetch_real, start=args.start, end=args.end)
+                        if p:
+                            data_path = p
+                    run_cost_sensitivity_sweep(str(data_path))
+                except Exception as e:
+                    print("\n  (cost sensitivity sweep unavailable: %s)" % e)
+            return 0
+        except Exception as e:
+            print(f"  (real-market fetch/run failed: {e})")
+            print("  Falling back to sample data (offline/network-safe).")
+
     data_path = Path(__file__).resolve().parent.parent / "assets" / "example_data" / "sample_ohlcv.csv"
     result = run_hypothesis_test(data_path)
+    if args.output_json:
+        try:
+            out_path = Path(args.output_json)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            serializable = {}
+            for k, v in result.items():
+                if k in ("criteria", "resolution", "observed", "separation_check", "trade_statistics", "cost_sweep"):
+                    serializable[k] = v
+                elif k in ("verdict", "all_pass", "pit_passed", "bias_controls_engaged", "hypothesis", "strategy"):
+                    serializable[k] = v
+            serializable["label"] = "sample"
+            serializable["note"] = "Machinery check on sample data."
+            out_path.write_text(json.dumps(serializable, indent=2))
+            print(f"\n  Results written to {out_path}.")
+        except Exception as e:
+            print(f"\n  (failed to write JSON: {e})")
     try:
-        run_cost_sensitivity_sweep(data_path)
+        if not args.no_cost_sweep:
+            run_cost_sensitivity_sweep(data_path)
     except Exception as e:
         print("\n  (cost sensitivity sweep unavailable: %s)" % e)
     # Exit 0 when the test runs successfully; the verdict (SUPPORTED / NOT
