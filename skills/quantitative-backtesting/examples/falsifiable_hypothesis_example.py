@@ -123,14 +123,31 @@ CRITERIA = [
      lambda v: v is not None and v > 0.90),
 ]
 
-def _ensure_real_market_data(symbol="AAPL", start="2020-01-01", end="2023-12-31"):
+def _ensure_real_market_data(symbol="AAPL", start="2020-01-01", end="2023-12-31",
+                             fixtures_dir=None, base_url=None):
     """Ensure committed real market data exists for symbol.
 
     If the expected CSV is missing, attempt to fetch from Yahoo Finance via
     data_loader.fetch_ohlcv_yahoo and save it to the committed fixtures
     directory. Fetch is best-effort and offline-safe (returns None on failure).
+
+    ``fixtures_dir`` overrides the default committed directory (used by tests
+    to redirect writes to a temp dir so the committed fixtures are never
+    touched). ``base_url`` is passed through to fetch_ohlcv_yahoo so the fetch
+    can be pointed at a local HTTP server for offline testing.
+
+    The fetched frame is normalized to the exact schema ``load_data`` expects
+    before it is written: the date column is located case-insensitively (accept
+    "date", "Date", "DATE", or a DatetimeIndex named "date"), parsed as
+    datetime, converted to UTC and stripped of timezone information, normalized
+    to date granularity, sorted ascending, and written with the canonical
+    column order ["date", "open", "high", "low", "close", "volume"]. This keeps
+    the cached fixture byte-for-byte compatible with load_data regardless of
+    how the upstream API happens to label its columns or timezones.
     """
-    fixtures_dir = Path(__file__).resolve().parent.parent / "assets" / "example_data" / "real_market_data"
+    if fixtures_dir is None:
+        fixtures_dir = Path(__file__).resolve().parent.parent / "assets" / "example_data" / "real_market_data"
+    fixtures_dir = Path(fixtures_dir)
     fixtures_dir.mkdir(parents=True, exist_ok=True)
     path = fixtures_dir / f"{symbol}.csv"
     if path.exists():
@@ -138,22 +155,47 @@ def _ensure_real_market_data(symbol="AAPL", start="2020-01-01", end="2023-12-31"
     if fetch_ohlcv_yahoo is None:
         return None
     try:
-        df = fetch_ohlcv_yahoo(symbol, start, end)
+        fetch_kwargs = {}
+        if base_url is not None:
+            fetch_kwargs["base_url"] = base_url
+        df = fetch_ohlcv_yahoo(symbol, start, end, **fetch_kwargs)
         if df is None or len(df) == 0:
             return None
-        # Normalize to format compatible with load_data
         out = df.copy()
-        if "date" in out.columns:
-            out = out.rename(columns={"date": "date"})
-        else:
+
+        # Locate the date column case-insensitively; fall back to resetting a
+        # DatetimeIndex named "date" (or any index) so the column is present.
+        date_col = None
+        for c in out.columns:
+            if str(c).strip().lower() == "date":
+                date_col = c
+                break
+        if date_col is None:
             out.index.name = "date"
             out = out.reset_index()
-        # Ensure columns expected
+            date_col = "date"
+        elif date_col != "date":
+            out = out.rename(columns={date_col: "date"})
+            date_col = "date"
+
+        # Timezone/format normalization: parse, convert to UTC, strip the
+        # timezone, keep date granularity, and sort ascending so the cached CSV
+        # matches what load_data expects (sorted, tz-naive dates).
+        out["date"] = (
+            pd.to_datetime(out["date"], errors="coerce", utc=True)
+            .dt.tz_localize(None)
+            .dt.normalize()
+        )
+        out = out.sort_values("date").reset_index(drop=True)
+
+        # Ensure the canonical columns exist and are in canonical order.
         required = ["date", "open", "high", "low", "close", "volume"]
         for c in required:
             if c not in out.columns:
                 return None
         out = out[required]
+        for c in required[1:]:
+            out[c] = pd.to_numeric(out[c], errors="coerce")
         out.to_csv(path, index=False)
         return path
     except Exception:
@@ -164,12 +206,16 @@ SLIPPAGE = 0.0001     # 1 bps per trade
 PARAM_GRID = {"fast_period": [10, 20], "slow_period": [30, 40]}
 
 
-def _run_on_real_market(symbol="AAPL", start="2020-01-01", end="2023-12-31", commission=COMMISSION, slippage=SLIPPAGE, benchmark_path=None):
+def _run_on_real_market(symbol="AAPL", start="2020-01-01", end="2023-12-31",
+                        commission=COMMISSION, slippage=SLIPPAGE, benchmark_path=None,
+                        fixtures_dir=None, base_url=None):
     """Run falsifiable hypothesis test on real market data (with optional fetch)."""
-    path = _ensure_real_market_data(symbol=symbol, start=start, end=end)
+    path = _ensure_real_market_data(symbol=symbol, start=start, end=end,
+                                    fixtures_dir=fixtures_dir, base_url=base_url)
     if path is None:
         raise RuntimeError(f"Could not obtain real market data for {symbol}")
-    return run_hypothesis_test(str(path), symbol=symbol, commission=commission, slippage=slippage, benchmark_path=benchmark_path)
+    return run_hypothesis_test(str(path), symbol=symbol, commission=commission,
+                               slippage=slippage, benchmark_path=benchmark_path)
 
 # Plausibility bounds used to flag a criterion as beyond the sample's
 # resolution. These are ASSUMPTIONS, declared up front and printed with the
@@ -985,6 +1031,8 @@ def main():
     parser.add_argument("--benchmark", dest="benchmark", default=None, help="Optional benchmark CSV path.")
     parser.add_argument("--output-json", dest="output_json", default=None, help="Write results to JSON file.")
     parser.add_argument("--no-cost-sweep", dest="no_cost_sweep", action="store_true", help="Skip cost sensitivity sweep.")
+    parser.add_argument("--fixtures-dir", dest="fixtures_dir", default=None, help="Override the real-market fixtures directory (tests).")
+    parser.add_argument("--fetch-base-url", dest="fetch_base_url", default=None, help="Override the Yahoo fetch base URL (tests).")
     args = parser.parse_args()
 
     if args.fetch_real:
@@ -994,6 +1042,8 @@ def main():
                 start=args.start,
                 end=args.end,
                 benchmark_path=args.benchmark,
+                fixtures_dir=args.fixtures_dir,
+                base_url=args.fetch_base_url,
             )
             if args.output_json:
                 try:
@@ -1016,9 +1066,18 @@ def main():
                     print(f"\n  (failed to write JSON: {e})")
             if not args.no_cost_sweep:
                 try:
-                    p = _ensure_real_market_data(symbol=args.fetch_real, start=args.start, end=args.end)
+                    # Re-resolve the cached/fetched path through the same helper
+                    # so the sweep always runs against the data actually used,
+                    # and pass the caller's benchmark through unchanged.
+                    p = _ensure_real_market_data(
+                        symbol=args.fetch_real,
+                        start=args.start,
+                        end=args.end,
+                        fixtures_dir=args.fixtures_dir,
+                        base_url=args.fetch_base_url,
+                    )
                     if p is not None:
-                        run_cost_sensitivity_sweep(str(p))
+                        run_cost_sensitivity_sweep(str(p), benchmark_path=args.benchmark)
                     else:
                         print("\n  (cost sensitivity sweep unavailable: no real market data path)")
                 except Exception as e:

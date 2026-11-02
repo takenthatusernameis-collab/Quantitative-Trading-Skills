@@ -48,6 +48,7 @@ No third-party test framework is required; uses only the standard library.
 
 import contextlib
 import io
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1436,6 +1437,140 @@ def test_real_market_machinery_separation_audit_longer_windows():
         assert result.get("bias_controls_engaged") is True
 
 
+def test_real_market_fetch_save_and_run_path_is_offline_safe():
+    """The real-market fetch + save + run path works offline against a local
+    HTTP server, without making any network call to Yahoo.
+
+    Exercises the full chain that ``--fetch-real`` relies on:
+      1. ``fetch_ohlcv_yahoo`` (via ``base_url``) returns a Yahoo chart-API
+         frame from a local server.
+      2. ``_ensure_real_market_data`` normalizes that frame to the schema
+         ``load_data`` expects (case-insensitive date column, tz-naive sorted
+         dates, canonical column order) and writes it to a caller-supplied
+         fixtures directory.
+      3. ``run_hypothesis_test`` then loads the cached CSV and produces a
+         determinate, criteria-evaluated verdict.
+
+    Offline and deterministic: no network, no committed fixtures touched
+    (writes are redirected to a temp dir). The verdict itself is not asserted
+    -- both are valid scientific outcomes -- only that the machinery runs end
+    to end on data it fetched itself and that the cached frame is byte-for-byte
+    loadable by load_data.
+    """
+    import http.server
+    import json
+    import socketserver
+    import threading
+    from pathlib import Path
+
+    from falsifiable_hypothesis_example import (
+        _ensure_real_market_data,
+        run_hypothesis_test,
+    )
+    from data_loader import load_data
+
+    class _YahooHandler(http.server.BaseHTTPRequestHandler):
+        attempts = 0
+
+        def log_message(self, *args, **kwargs):  # silence default stderr log
+            pass
+
+        def do_GET(self):
+            _YahooHandler.attempts += 1
+            body = json.dumps({
+                "chart": {
+                    "result": [{
+                        # 2023-01-03 and 2023-01-04 UTC
+                        "timestamp": [1672704000, 1672790400],
+                        "indicators": {
+                            "quote": [{
+                                "open": [100.0, 101.0],
+                                "high": [102.0, 103.0],
+                                "low": [99.0, 100.5],
+                                "close": [101.0, 102.0],
+                                "volume": [1000, 2000],
+                            }]
+                        },
+                    }]
+                }
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _YahooHandler)
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            fixtures = Path(td) / "real_market_data"
+            fixtures.mkdir(parents=True, exist_ok=True)
+            # Seed the temp fixtures dir with the committed benchmark so the
+            # multi-benchmark path of run_hypothesis_test resolves the same
+            # sibling files it would in the committed directory (the test must
+            # not depend on the committed fixtures dir itself, which stays
+            # untouched).
+            src_bench = (
+                SKILLS_DIR / "assets" / "example_data" / "sample_benchmark.csv"
+            )
+            assert src_bench.exists(), "committed sample_benchmark fixture missing"
+            shutil.copyfile(src_bench, fixtures / "sample_benchmark.csv")
+            # 1. Fetch + normalize + cache (must not touch committed fixtures).
+            path = _ensure_real_market_data(
+                symbol="AAPL",
+                start="2023-01-01",
+                end="2023-03-31",
+                fixtures_dir=fixtures,
+                base_url=f"http://127.0.0.1:{port}",
+            )
+            assert path is not None, "fetch+save path did not return a CSV path"
+            assert path == fixtures / "AAPL.csv"
+            assert path.exists(), "cached fixture was not written"
+            assert _YahooHandler.attempts == 1, (
+                f"expected exactly 1 fetch attempt, got {_YahooHandler.attempts}"
+            )
+
+            # 2. The cached frame must be loadable by load_data with the same
+            # schema the rest of the machinery expects (tz-naive sorted dates,
+            # canonical OHLCV columns).
+            loaded = load_data(str(path), symbol="AAPL")
+            assert list(loaded.columns) == ["open", "high", "low", "close", "volume"], (
+                f"cached frame schema mismatch: {list(loaded.columns)}"
+            )
+            assert pd.api.types.is_datetime64_any_dtype(loaded.index), (
+                "cached frame index is not datetime"
+            )
+            assert loaded.index.is_monotonic_increasing, (
+                "cached frame index is not sorted ascending"
+            )
+            assert len(loaded) == 2
+            assert loaded["close"].tolist() == [101.0, 102.0]
+
+            # 3. The cached frame must drive the full falsifiable machinery to a
+            # determinate, criteria-evaluated verdict.
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                result = run_hypothesis_test(str(path))
+            assert isinstance(result, dict)
+            assert result["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+            assert isinstance(result["all_pass"], bool)
+            assert result["all_pass"] == (result["verdict"] == "SUPPORTED")
+            assert result["pit_passed"] is True
+            assert result["bias_controls_engaged"] is True
+            assert len(result["criteria"]) == 5
+            sep = result["separation_check"]
+            assert sep.get("disjoint") is True
+            assert sep.get("chronological") is True
+            for overlap in ("train_val_overlap", "val_test_overlap", "train_test_overlap"):
+                assert sep.get(overlap) == 0
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
 def main() -> int:
     tests = TEST_REGISTRY
     failures = 0
@@ -1480,6 +1615,7 @@ TEST_REGISTRY = [
     ("test_real_market_cost_sensitivity_sweep_aapl", test_real_market_cost_sensitivity_sweep_aapl),
     ("test_real_market_cost_sensitivity_sweep_aapl_msft", test_real_market_cost_sensitivity_sweep_aapl_msft),
     ("test_real_market_machinery_separation_audit_longer_windows", test_real_market_machinery_separation_audit_longer_windows),
+    ("test_real_market_fetch_save_and_run_path_is_offline_safe", test_real_market_fetch_save_and_run_path_is_offline_safe),
 ]
 
 
