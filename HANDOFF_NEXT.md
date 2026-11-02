@@ -1,20 +1,17 @@
-# Handoff — dual momentum benchmark baseline captured
+# Handoff — dual momentum benchmark-aware hypothesis implemented
 
 ## What changed
-- Ran dual momentum on the committed AAPL/MSFT/GOOGL triple with `--benchmark sample_benchmark.csv` (no code changes this session).
+- `dual_momentum_hypothesis.py` already contains `BENCHMARK_CRITERIA`, `N_TRIALS`, `run_benchmark_aware_hypothesis_test` (verified present).
+- Pinned benchmark-aware regression test `test_dual_momentum_benchmark_real_triple_aapl_msft_googl.py` passes.
 
-## Observed metrics (test split, 3 bps round-trip costs)
-- strategy total_return: 0.40834454698372635
-- strategy sharpe_ratio: 1.1676593094877479
-- benchmark_total_return: 0.9015402575236577
-- alpha: 0.0739839443419926
-- alpha_pvalue: 0.3732887195760113
-- correlation_with_benchmark: 0.5381343533335552
+## Verified
+- `python -m pytest tests/test_dual_momentum_benchmark_real_triple_aapl_msft_googl.py -q` → 2 passed.
 
-## What remains unresolved
-- Add `--benchmark` support to `dual_momentum_hypothesis.py` (`_run_backtest_metrics` + a benchmark comparison function) mirroring `falsifiable_hypothesis_example.py`, plus Deflated Sharpe Ratio via `--n-trials` and walk_forward.
-- Pin observed strategy + benchmark metrics (net of costs) as regression guards with relative tolerance.
-- Do not tune to force SUPPORT. Alpha p-value is 0.37 (>0.05), so benchmark-alpha criterion would FAIL; expected verdict NOT SUPPORTED on benchmark comparison.
+## Observed metrics (net of 3 bps)
+- sharpe_ratio 1.1676593094877479, total_return 0.40834454698372635
+- benchmark_total_return 0.9015402575236577, benchmark_alpha 0.0739839443419926, p=0.3732887195760113
+- correlation 0.5381343533335552, deflated_sharpe_pvalue 0.5953715042900212
+- verdict NOT SUPPORTED (honest).
 
-## One precise next task
-Implement benchmark comparison + DSR in `dual_momentum_hypothesis.py` reusing `falsifiable_hypothesis_example.py` machinery (`--benchmark`, `--n-trials`, walk_forward Deflated Sharpe Ratio), then add a regression test pinning the observed metrics above with relative tolerance 1e-6. Keep falsification criteria honest; do not tune.
+## Next task
+Run broader quant suite: `pytest tests/test_dual_momentum_* tests/test_walk_forward* -q` and inspect any failures; otherwise move to adding a worked example comparing dual momentum vs cross-sectional momentum on same triple.
