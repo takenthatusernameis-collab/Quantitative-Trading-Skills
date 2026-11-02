@@ -1,60 +1,47 @@
-# Handoff — dual momentum SUPPORTED on triple (AAPL/MSFT/GOOGL), robust to elevated costs and parameter perturbation
+# Handoff — benchmark-aware falsification complete for dual momentum AND cross-sectional momentum on the triple (AAPL/MSFT/GOOGL)
 
 ## What changed
-- Added three new regression tests exercising the previously untested dual momentum family on the committed three-asset panel (AAPL / MSFT / GOOGL):
-  - `skills/quantitative-backtesting/tests/test_dual_momentum_hypothesis_real_triple_aapl_msft_googl.py` — hypothesis test, chronological 0.6/0.2/0.2 split, PIT true, panel book pricing, net of costs.
-  - `skills/quantitative-backtesting/tests/test_dual_momentum_elevated_cost_real_triple_aapl_msft_googl.py` — elevated-cost sweep with pinned metrics per cost level.
-  - `skills/quantitative-backtesting/tests/test_dual_momentum_param_sensitivity_real_triple_aapl_msft_googl.py` — pre-registered parameter-sensitivity sweep with pinned metrics per setting.
-- Added `run_param_sensitivity_sweep` and `PARAM_SENSITIVITY_GRID` to `skills/quantitative-backtesting/examples/dual_momentum_hypothesis.py`, mirroring the existing `cross_sectional_momentum_hypothesis.py` convention. No framework source changes.
+- Dual momentum family fully wired for benchmark-aware falsification (already committed): `skills/quantitative-backtesting/examples/dual_momentum_hypothesis.py` exposes `--benchmark` / `--n-trials`, `BENCHMARK_CRITERIA` (OOS Sharpe > 0, OOS total return > benchmark, Deflated Sharpe p-value < 0.10 across N=6 pre-registered parameter grid, raw benchmark alpha p-value < 0.05) and `run_benchmark_aware_hypothesis_test`. Benchmark test `tests/test_dual_momentum_benchmark_real_triple_aapl_msft_googl.py` pins strategy + benchmark metrics (rel tol 1e-6).
+- THIS SESSION: extended the same benchmark-aware machinery to cross-sectional momentum in `skills/quantitative-backtesting/examples/cross_sectional_momentum_hypothesis.py`:
+  - Added `BENCHMARK_FILE = "MSFT.csv"`, `N_TRIALS = len(PARAM_SENSITIVITY_GRID) == 6`, `BENCHMARK_CRITERIA` (4 criteria), `_resolve_benchmark`, `--benchmark`/`--n-trials`/`--no-benchmark`/`--output-json` CLI args, and `run_benchmark_aware_hypothesis_test`.
+  - `run_hypothesis_test` now accepts optional `benchmark_path`/`n_trials` (backward compatible; baseline 2-criterion path unchanged).
+  - Added regression test `tests/test_cross_sectional_momentum_benchmark_real_triple_aapl_msft_googl.py` (run + pinned metrics, rel tol 1e-6).
+- No framework source changes; offline, committed fixtures only; no live network.
 
 ## What was actually verified
-- New tests: 3 passed in 23.31s.
-- Prior regression guards still green: z-score elevated cost triple, cross-sectional momentum elevated cost triple, cross-sectional momentum param sensitivity triple — 3 passed in 26.69s.
-- Offline, committed fixtures only; no live network.
+- Dual momentum (8 tests): all pass in 86.29s. Benchmark-aware verdict honestly NOT SUPPORTED: Sharpe 1.1677, return 40.83% vs benchmark MSFT 90.15%; alpha p=0.3733 (>0.05), DSR p=0.5954 (>0.10).
+- Cross-sectional momentum (5 tests incl. new benchmark test): all pass in 60.16s. Benchmark-aware verdict honestly NOT SUPPORTED: Sharpe -0.3896, return -2.06% vs benchmark +90.15%; alpha p=0.9366, DSR p=0.9924. All four benchmark-aware criteria fail.
+- Existing cross-sectional momentum guards (baseline hypothesis, elevated cost, param sensitivity) still pass — backward compatible.
+- Prior regression guards (dual momentum baseline/elevated cost/param sensitivity, z-score/mean_reversion fast groups) remain green per earlier sessions.
 
-Dual momentum on the triple (committed fixtures, chronological disjoint split, PIT true, panel book pricing, net of costs):
+Key honest comparative result (same triple, same costs, chronological 0.6/0.2/0.2 split, PIT true, panel book pricing, net of costs):
+| Family | OOS Sharpe | OOS Return | Benchmark (MSFT) Return | Alpha p-value | DSR p-value | Benchmark-aware verdict |
+|---|---|---|---|---|---|---|
+| Dual momentum | 1.1677 | +40.83% | +90.15% | 0.3733 | 0.5954 | NOT SUPPORTED |
+| Cross-sectional momentum | -0.3896 | -2.06% | +90.15% | 0.9366 | 0.9924 | NOT SUPPORTED |
 
-Elevated-cost sweep:
-| Cost level | Sharpe | Return | Verdict |
-|---|---|---|---|
-| 2bp comm + 1.00bp slip | 1.1677 | 40.83% | SUPPORTED |
-| 5bp comm + 2.50bp slip | 1.1033 | 38.38% | SUPPORTED |
-| 10bp comm + 5.00bp slip | 0.9958 | 34.39% | SUPPORTED |
-| 20bp comm + 10.00bp slip | 0.7804 | 26.73% | SUPPORTED |
-
-Parameter sensitivity grid (fixed costs 2bp+1bp), all six pre-registered settings SUPPORTED:
-| lookback | top_q | rf | Sharpe | Return | Verdict |
-|---|---|---|---|---|---|
-| 252 | 0.5 | 0.00 | 1.1677 | 40.83% | SUPPORTED |
-| 189 | 0.5 | 0.00 | 0.9194 | 42.99% | SUPPORTED |
-| 315 | 0.5 | 0.00 | 1.2420 | 38.32% | SUPPORTED |
-| 252 | 0.4 | 0.00 | 1.1677 | 40.83% | SUPPORTED |
-| 252 | 0.6 | 0.00 | 1.2250 | 43.51% | SUPPORTED |
-| 252 | 0.5 | 0.02 | 1.3044 | 46.06% | SUPPORTED |
-
-(top_quantile 0.4 and 0.5 give identical metrics on a 3-asset panel because ceil(3*0.4) == ceil(3*0.5) == 2 assets in the long book; structural, not a regression.)
-
-This is the first family on the triple to pass pre-registered falsification criteria net of costs, survive the full elevated-cost sweep, AND remain SUPPORTED across a pre-registered parameter perturbation grid. Contrast: cross-sectional momentum NOT SUPPORTED at all levels; multi-pair z-score flips SUPPORTED→NOT SUPPORTED between 5bp+2.5bp and 10bp+5bp.
+Neither momentum family beats buy-and-hold MSFT on the held-out test split net of costs.
 
 ## What remains unresolved
-- This is a single-panel, single-hypothesis positive result on committed fixtures. It is NOT evidence about any market and has NOT been tested for: multiple-testing/deflated-sharpe correction, benchmark (buy-and-hold) alpha comparison, walk-forward re-optimization, or alternative universes/lookback ranges. Per the repo's evidence standards, a robust claim requires independent/out-of-sample evidence net of plausible costs plus multiple-testing controls.
-- Full real-market suite (`test_falsifiable_hypothesis_example.py`) remains slow (minutes per test); not re-run in full this session.
+- All results are single-panel, single-window, committed fixtures only; NOT evidence about any market. No multiple-testing/deflated-Sharpe beyond the pre-registered N=6 grid, no walk-forward re-optimization, no alternative universes.
+- z-score mean reversion family still lacks benchmark-aware treatment (has baseline + walk_forward tests only), so it is not yet comparable on the same honest criteria.
+- Full slow framework suites (`test_falsifiable_hypothesis_example.py`, `test_walk_forward.py`, `test_cpcv.py`, `test_resolution_vs_sample_size.py`) not re-run in full this session; per-file focused gates are the reliable verification mode.
 
 ## Approaches already tried / failed
-- Cross-sectional momentum on triple: NOT SUPPORTED at all cost levels (monotonic degradation).
-- Multi-pair z-score on triple: SUPPORTED at advertised/5bp+2.5bp, NOT SUPPORTED at 10bp+5bp and above (verdict flips — not robust).
+- Cross-sectional momentum baseline: NOT SUPPORTED at all cost levels (monotonic degradation).
+- Multi-pair z-score: cost-fragile (verdict flips between cost levels).
+- Dual momentum baseline: SUPPORTED, but does NOT survive benchmark comparison (honest NOT SUPPORTED).
 - Batch runs of large test groups time out/hang; per-file focused gates are the reliable verification mode.
 
 ## One precise next task
-Strengthen the dual momentum evidence with the methodology controls the repo already applies to the SMA-crossover example in `falsifiable_hypothesis_example.py`, on the same triple (AAPL/MSFT/GOOGL) using committed fixtures only:
-1. Add a benchmark (buy-and-hold) comparison for dual momentum — reuse the existing `--benchmark` / Deflated Alpha Ratio machinery where applicable, or report benchmark alpha/total-return alongside the strategy on the held-out test split.
-2. If multiple parameter settings are compared, apply the Deflated Sharpe Ratio multiple-testing correction (the framework already exposes it via `--n-trials` / `walk_forward`); report the corrected p-value as an additional pre-registered criterion rather than tuning to force SUPPORT.
-3. Pin the observed metrics (strategy + benchmark, net of costs) as regression guards with relative tolerance, mirroring the pinned-metrics pattern already used in the three new dual momentum tests.
-Keep changes small and reversible; do not expand to live data or infrastructure changes.
+Extend benchmark-aware falsification to the z-score mean reversion family on the committed triple (AAPL/MSFT/GOOGL), mirroring the `cross_sectional_momentum_hypothesis.py` / `dual_momentum_hypothesis.py` template:
+1. Add `BENCHMARK_FILE`, `N_TRIALS`, `BENCHMARK_CRITERIA`, `_resolve_benchmark`, `--benchmark`/`--n-trials`/`--no-benchmark`/`--output-json` CLI, and `run_benchmark_aware_hypothesis_test` to `skills/quantitative-backtesting/examples/zscore_mean_reversion_hypothesis.py` (keep its baseline 2-criterion path backward compatible).
+2. Add `tests/test_zscore_mean_reversion_benchmark_real_triple_aapl_msft_googl.py` with a run test + pinned regression test (rel tol 1e-6) using OBSERVED metrics only — run it first to capture real numbers, do not fabricate or tune to force SUPPORT.
+3. Verify the new test passes and that existing z-score tests (`test_zscore_mean_reversion_hypothesis.py`, `test_walk_forward_zscore_*`) still pass.
+Keep changes small and reversible; committed fixtures only; no live network.
 
 Evidence/constraints:
-- Committed fixtures: `assets/example_data/real_market_data/{AAPL,MSFT,GOOGL}.csv` only; no live network.
-- Python env: system python3.12, pandas 3.1.0, numpy 2.5.4, pytest 9.2.0 at `/home/runner/work/_temp/kilo-home/.local/` (`export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`).
-- Reuse `dual_momentum_hypothesis.py` and the pinned-metrics pattern.
+- Committed fixtures: `skills/quantitative-backtesting/assets/example_data/real_market_data/{AAPL,MSFT,GOOGL}.csv` only; benchmark MSFT.csv.
+- Python env: system python3.12, pandas 3.1.0, numpy 2.5.4, pytest 9.2.0 at `/home/runner/work/_temp/kilo-home/.local/bin` (`export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`).
 
 (End of file)
