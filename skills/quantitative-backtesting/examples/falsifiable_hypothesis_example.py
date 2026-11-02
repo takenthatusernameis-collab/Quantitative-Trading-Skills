@@ -68,6 +68,10 @@ scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(scripts_dir))
 
 from data_loader import load_data
+try:
+    from data_loader import fetch_ohlcv_yahoo
+except Exception:
+    fetch_ohlcv_yahoo = None
 from performance import t_critical_value
 from strategy_builder import build_strategy
 from walk_forward import (
@@ -119,12 +123,53 @@ CRITERIA = [
      lambda v: v is not None and v > 0.90),
 ]
 
+def _ensure_real_market_data(symbol="AAPL", start="2020-01-01", end="2023-12-31"):
+    """Ensure committed real market data exists for symbol.
+
+    If the expected CSV is missing, attempt to fetch from Yahoo Finance via
+    data_loader.fetch_ohlcv_yahoo and save it to the committed fixtures
+    directory. Fetch is best-effort and offline-safe (returns None on failure).
+    """
+    fixtures_dir = Path(__file__).resolve().parent.parent / "assets" / "example_data" / "real_market_data"
+    fixtures_dir.mkdir(parents=True, exist_ok=True)
+    path = fixtures_dir / f"{symbol}.csv"
+    if path.exists():
+        return path
+    if fetch_ohlcv_yahoo is None:
+        return None
+    try:
+        df = fetch_ohlcv_yahoo(symbol, start, end)
+        if df is None or len(df) == 0:
+            return None
+        # Normalize to format compatible with load_data
+        out = df.copy()
+        if "date" in out.columns:
+            out = out.rename(columns={"date": "date"})
+        else:
+            out.index.name = "date"
+            out = out.reset_index()
+        # Ensure columns expected
+        required = ["date", "open", "high", "low", "close", "volume"]
+        for c in required:
+            if c not in out.columns:
+                return None
+        out = out[required]
+        out.to_csv(path, index=False)
+        return path
+    except Exception:
+        return None
+
 COMMISSION = 0.0002   # 2 bps per trade
 SLIPPAGE = 0.0001     # 1 bps per trade
 PARAM_GRID = {"fast_period": [10, 20], "slow_period": [30, 40]}
 
-# Significance level the deflated criteria are stated at (criteria 2 and 5).
-CRITERION_P_VALUE_THRESHOLD = 0.10
+
+def _run_on_real_market(symbol="AAPL", start="2020-01-01", end="2023-12-31", commission=COMMISSION, slippage=SLIPPAGE, benchmark_path=None):
+    """Run falsifiable hypothesis test on real market data (with optional fetch)."""
+    path = _ensure_real_market_data(symbol=symbol, start=start, end=end)
+    if path is None:
+        raise RuntimeError(f"Could not obtain real market data for {symbol}")
+    return run_hypothesis_test(str(path), symbol=symbol, commission=commission, slippage=slippage, benchmark_path=benchmark_path)
 
 # Plausibility bounds used to flag a criterion as beyond the sample's
 # resolution. These are ASSUMPTIONS, declared up front and printed with the
@@ -149,6 +194,9 @@ BENCHMARK_FILES = [
     "sample_ohlcv.csv",     # primary (same universe)
     "sample_benchmark.csv",  # alternative benchmark
 ]
+
+# Significance level the deflated criteria are stated at (criteria 2 and 5).
+CRITERION_P_VALUE_THRESHOLD = 0.10
 
 # Commission / slippage levels exercised by the cost-sensitivity sweep, in
 # ascending order. The sweep asserts the honest directional claim -- higher
