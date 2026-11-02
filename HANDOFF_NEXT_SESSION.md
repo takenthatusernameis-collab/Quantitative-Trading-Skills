@@ -1,16 +1,14 @@
-# Handoff — real-market cost sensitivity is compute-bound, not hung
+# Handoff — real-market falsifiable hypothesis tests still compute-bound
 
 ## What changed
-- No source changes. Executed the previous handoff's next task: ran the two tests that were not yet run (`test_simple_momentum_hypothesis`, `test_test_window_observations`), both passed. Profiled `test_real_market_cost_sensitivity_sweep_msft` (a real-market cost-sensitivity sweep on MSFT vs GOOGL).
+- No source changes. Executed the previous handoff's next task: ran `test_falsifiable_hypothesis_example.py -k real` with generous timeout. Process progressed to 4 passed tests before being stopped; tests are compute-bound (each ~minutes), not deadlocked.
 
 ## What was actually verified
-- `skills/quantitative-backtesting/tests/test_simple_momentum_hypothesis.py`: all tests pass (e.g. `test_root_cost_sensitivity_sweep_is_monotone`, `test_root_capacity_sensitivity_sweep_falls_with_impact`, `test_hypothesis_example_runs_successfully`).
-- `skills/quantitative-backtesting/tests/test_test_window_observations.py`: all tests pass (observation counts/renames reported correctly).
-- `test_real_market_cost_sensitivity_sweep_msft`: completes in ~191s (compute-bound), not deadlocked. Produces monotonic cost sensitivity (Sharpe/Return degrade as costs rise), verdict stable as NOT SUPPORTED, separation audit passes. The full real-market cost-sensitivity suite in `test_falsifiable_hypothesis_example.py` (MSFT/AAPL variants) appears similarly compute-heavy.
+- Real-market cost-sensitivity tests run and pass individually (4+ observed); monotonic cost sensitivity and separation audit hold per prior run.
 
 ## What remains unresolved
-- The real-market tests in `test_falsifiable_hypothesis_example.py` are slow (on the order of minutes total). The "hang" observed earlier is likely a timeout in the previous environment/command; they need sufficient time (several minutes) to run.
-- The other real-market cost-sensitivity tests exist; whether all complete within CI time constraints needs to be considered if gates must pass quickly.
+- Full real-market suite not completed in this session due to aggregate runtime (minutes per test, tens of tests).
+- Optimization of repeated `run_hypothesis_test` calls in cost-sensitivity sweep still a candidate, must preserve assertions.
 
 ## One precise next task
-If a gate requires these tests, either (1) run `test_falsifiable_hypothesis_example.py` real-market tests with generous timeout (e.g., 1200-1800s) in an environment that allows it, or (2) investigate if the cost-sensitivity sweep can be optimized without changing its methodology/assertions (e.g., caching repeated runs inside the sweep, or reducing redundant calls). The sweep already redirects output and runs 5 cost levels; the bottleneck is repeated full `run_hypothesis_test` calls (each does walk-forward/CPCV-like machinery). Any optimization must preserve monotonicity assertions and the separation audit.
+Run the full real-market suite in an environment allowing ~30-60 min, or profile/optimize the sweep's redundant `run_hypothesis_test` calls while preserving monotonicity and separation-audit assertions.
