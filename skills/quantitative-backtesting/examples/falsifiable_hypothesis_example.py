@@ -1016,13 +1016,11 @@ def main():
                     print(f"\n  (failed to write JSON: {e})")
             if not args.no_cost_sweep:
                 try:
-                    data_path = Path(__file__).resolve().parent.parent / "assets" / "example_data" / "real_market_data" / f"{args.fetch_real}.csv"
-                    if not data_path.exists():
-                        # try to ensure again
-                        p = _ensure_real_market_data(symbol=args.fetch_real, start=args.start, end=args.end)
-                        if p:
-                            data_path = p
-                    run_cost_sensitivity_sweep(str(data_path))
+                    p = _ensure_real_market_data(symbol=args.fetch_real, start=args.start, end=args.end)
+                    if p is not None:
+                        run_cost_sensitivity_sweep(str(p))
+                    else:
+                        print("\n  (cost sensitivity sweep unavailable: no real market data path)")
                 except Exception as e:
                     print("\n  (cost sensitivity sweep unavailable: %s)" % e)
             return 0
