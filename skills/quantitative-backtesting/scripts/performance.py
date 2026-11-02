@@ -343,10 +343,12 @@ def calculate_metrics(
         # Sortino: downside deviation
         downside_returns = excess_returns[excess_returns < 0]
         downside_std = downside_returns.std()
-        if downside_std > 0:
+        if downside_std > 0 and not _is_constant_returns(downside_returns):
             metrics["sortino_ratio"] = float(
                 excess_returns.mean() / downside_std * np.sqrt(ann_factor)
             )
+        elif downside_std == 0 or _is_constant_returns(downside_returns):
+            metrics["sortino_ratio"] = float("inf") if excess_returns.mean() >= 0 else 0.0
         else:
             metrics["sortino_ratio"] = float("inf")
     else:
@@ -392,7 +394,13 @@ def calculate_metrics(
 
     # --- Value at Risk ---
     metrics["var_95"] = float(returns.quantile(0.05))
-    metrics["cvar_95"] = float(returns[returns <= returns.quantile(0.05)].mean())
+    var_95 = metrics["var_95"]
+    cvar95_series = returns[returns <= var_95]
+    metrics["cvar_95"] = float(cvar95_series.mean()) if len(cvar95_series) > 0 else float(var_95)
+    metrics["var_99"] = float(returns.quantile(0.01))
+    var_99 = metrics["var_99"]
+    cvar99_series = returns[returns <= var_99]
+    metrics["cvar_99"] = float(cvar99_series.mean()) if len(cvar99_series) > 0 else float(var_99)
 
     # --- Return Distribution ---
     metrics["skewness"] = float(returns.skew())
@@ -758,6 +766,8 @@ def generate_report(
         f"Avg Drawdown:          {metrics.get('avg_drawdown', 0):.2%}",
         f"VaR (95%):             {metrics.get('var_95', 0):.2%}",
         f"CVaR (95%):            {metrics.get('cvar_95', 0):.2%}",
+        f"VaR (99%):             {metrics.get('var_99', 0):.2%}",
+        f"CVaR (99%):            {metrics.get('cvar_99', 0):.2%}",
         f"Skewness:              {metrics.get('skewness', 0):.2f}",
         f"Kurtosis:              {metrics.get('kurtosis', 0):.2f}",
         "",

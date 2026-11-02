@@ -1306,6 +1306,47 @@ class VolatilityTargeting(StrategyBase):
         return sized_signals
 
 
+class KellyCriterion(StrategyBase):
+    """Kelly Criterion Position Sizing.
+
+    Adjusts position size according to the Kelly criterion to maximize
+    long-term growth rate. This is a position sizing overlay, not a
+    signal generator.
+    """
+
+    def __init__(self, config: StrategyConfig, base_strategy: StrategyBase):
+        super().__init__(config)
+        self.base_strategy = base_strategy
+        self.lookback = self.parameters.get("lookback", 252)  # ~1 year
+        self.fraction = self.parameters.get("fraction", 0.5)  # Fractional Kelly (half-Kelly)
+        self.max_leverage = self.parameters.get("max_leverage", 2.0)
+        self.min_leverage = self.parameters.get("min_leverage", 0.0)
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+        base_signals = self.base_strategy.generate_signals(data)
+
+        # Calculate returns
+        returns = data["close"].pct_change()
+
+        # Calculate Kelly fraction: f* = (mu - r)/sigma^2 for continuous approx
+        # or f* = (p*b - q)/b for binary outcomes; use continuous approximation
+        # Assume risk-free rate of 0 for simplicity
+        mu = returns.rolling(self.lookback).mean() * 252  # annualized mean
+        sigma = returns.rolling(self.lookback).std() * np.sqrt(252)  # annualized vol
+
+        # Kelly fraction = mu / sigma^2 (for r=0)
+        kelly_fraction = mu / (sigma ** 2)
+        # Apply fractional Kelly for more conservative sizing
+        kelly_fraction = kelly_fraction * self.fraction
+        # Clip to reasonable bounds
+        kelly_fraction = kelly_fraction.clip(self.min_leverage, self.max_leverage)
+
+        # Apply to base signals (preserve direction)
+        sized_signals = base_signals * kelly_fraction
+
+        return sized_signals
+
+
 # Strategy registry
 STRATEGY_REGISTRY = {
     "sma_crossover": SMACrossoverStrategy,
@@ -1318,6 +1359,8 @@ STRATEGY_REGISTRY = {
     "dual_momentum": DualMomentumStrategy,
     "zscore_mean_reversion": MeanReversionZScore,
     "multi_pair_zscore_mean_reversion": MultiPairZScoreMeanReversion,
+    "volatility_targeting": VolatilityTargeting,
+    "kelly_criterion": KellyCriterion,
 }
 
 
