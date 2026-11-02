@@ -234,4 +234,111 @@ def run_elevated_cost_sweep(data_path, grid=ELEVATED_COST_SWEEP_LEVELS):
     else:
         print(f"\n  VERDICT STABLE across elevated cost sweep: {verdicts[0]}")
     print("=" * 80)
+
+    return rows
+
+
+# Narrow, pre-registered dual momentum parameter grid used by the parameter
+# sensitivity sweep. Every setting is a small perturbation of the advertised
+# parameters (lookback=252, top_quantile=0.5, risk_free_rate=0.0); the
+# advertised setting is the first rung. The grid is fixed before looking at
+# results, so verdict flips across it are robustness/sensitivity signal, not
+# parameter hunting.
+PARAM_SENSITIVITY_GRID = (
+    (252, 0.5, 0.0),   # advertised baseline
+    (189, 0.5, 0.0),   # shorter lookback (~39 weeks)
+    (315, 0.5, 0.0),   # longer lookback (~63 weeks)
+    (252, 0.4, 0.0),   # lower top quantile (more assets in the long book)
+    (252, 0.6, 0.0),   # higher top quantile (fewer assets in the long book)
+    (252, 0.5, 0.02),  # positive risk-free rate for the absolute-momentum floor
+)
+
+
+def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID):
+    """Sweep dual momentum parameters across a narrow pre-registered grid and
+    report an explicit falsification verdict at each setting.
+
+    Reports how the per-criterion pass/fail and overall verdict change as
+    parameters are perturbed around the advertised setting
+    (lookback=252, top_quantile=0.5, risk_free_rate=0.0), holding
+    commission/slippage fixed at the advertised level. This is a
+    robustness/sensitivity analysis on the committed sample, not evidence about
+    any market. No claim is made about which setting is "best"; verdict flips
+    across the grid are the signal that the result is not robust to small
+    parameter changes.
+    """
+    data_path = Path(data_path)
+
+    print("\n" + "=" * 80)
+    print("PARAMETER SENSITIVITY SWEEP: dual momentum params around the advertised setting")
+    print("=" * 80)
+    print(f"  Fixed costs: {COMMISSION*10_000:.0f}bp comm + {SLIPPAGE*10_000:.0f}bp slip")
+    print(
+        f"  {'lookback':>8} {'top_q':>7} {'rf':>7} {'Sharpe':>9} {'Return':>9} "
+        f"{'criteria':>10} {'verdict':>12}"
+    )
+    print("  " + "-" * 90)
+
+    rows = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        for lookback, top_q, risk_free_rate in grid:
+            params = json.dumps({
+                "lookback": int(lookback),
+                "top_quantile": float(top_q),
+                "risk_free_rate": float(risk_free_rate),
+            })
+            metrics = _run_backtest_metrics(data_path, COMMISSION, SLIPPAGE, tmpdir_path, params=params)
+            sharpe = metrics.get("sharpe_ratio")
+            ret = metrics.get("total_return")
+            ok1 = sharpe is not None and float(sharpe) > 0
+            ok2 = ret is not None and float(ret) > 0
+            passes = {"oos_sharpe_gt_zero": bool(ok1), "oos_total_return_positive": bool(ok2)}
+            failed = [name for name, ok in passes.items() if not ok]
+            verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+            rows.append({
+                "lookback": int(lookback),
+                "top_quantile": float(top_q),
+                "risk_free_rate": float(risk_free_rate),
+                "commission": COMMISSION,
+                "slippage": SLIPPAGE,
+                "commission_bps": COMMISSION * 10_000,
+                "slippage_bps": SLIPPAGE * 10_000,
+                "sharpe_ratio": sharpe,
+                "total_return": ret,
+                "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+                "verdict": verdict,
+                "all_pass": all(passes.values()),
+                "failed_criteria": failed,
+            })
+            print(
+                f"  {int(lookback):>8} {float(top_q):>7.1f} {float(risk_free_rate):>7.2f} "
+                + f"{_fmt_num(sharpe):>9} {_fmt_pct(ret):>9} {','.join(failed) if failed else 'ok':>10} {verdict[:12]:>12}"
+            )
+
+    assert isinstance(rows, list) and len(rows) == len(grid)
+    for r, (lookback, top_q, risk_free_rate) in zip(rows, grid):
+        assert r["lookback"] == int(lookback)
+        assert r["top_quantile"] == float(top_q)
+        assert r["risk_free_rate"] == float(risk_free_rate)
+        assert r["commission"] == COMMISSION
+        assert r["slippage"] == SLIPPAGE
+        assert r["commission_bps"] == COMMISSION * 10_000
+        assert r["slippage_bps"] == SLIPPAGE * 10_000
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
+        assert r["verdict"] == ("SUPPORTED" if r["all_pass"] else "NOT SUPPORTED")
+        assert len(r["criteria"]) == 2
+        assert {c["name"] for c in r["criteria"]} == {
+            "oos_sharpe_gt_zero",
+            "oos_total_return_positive",
+        }
+
+    verdicts = [r["verdict"] for r in rows]
+    if len(set(verdicts)) > 1:
+        print(f"\n  VERDICT CHANGES across parameter grid: {verdicts[0]} -> ... -> {verdicts[-1]} (sensitivity demonstrated)")
+    else:
+        print(f"\n  VERDICT STABLE across parameter grid: {verdicts[0]} (pre-registered criteria applied at each setting)")
+    print("=" * 80)
+
     return rows

@@ -1,18 +1,23 @@
-# Handoff — assigned gate hangs on real-market tests
+# Handoff — dual momentum family fully added to triple regression suite
 
 ## What changed
-- No source changes. Ran assigned gate; non-real unit tests pass individually, but real-market tests in `test_falsifiable_hypothesis_example.py` hang beyond 60s each.
+- Added three new test files for the dual momentum family on the committed three-asset panel (AAPL / MSFT / GOOGL):
+  - `skills/quantitative-backtesting/tests/test_dual_momentum_hypothesis_real_triple_aapl_msft_googl.py`
+  - `skills/quantitative-backtesting/tests/test_dual_momentum_elevated_cost_real_triple_aapl_msft_googl.py`
+  - `skills/quantitative-backtesting/tests/test_dual_momentum_param_sensitivity_real_triple_aapl_msft_googl.py`
+- Added `run_param_sensitivity_sweep` + `PARAM_SENSITIVITY_GRID` to `skills/quantitative-backtesting/examples/dual_momentum_hypothesis.py` (mirrors cross-sectional convention). No framework source changes.
 
 ## What was actually verified
-- `test_examples_coverage.py`: 39 passed.
-- `test_mean_reversion_hypothesis.py`: 6 passed.
-- `test_rsi_mean_reversion_hypothesis.py`: 5 passed.
-- `test_panel_reference_pinned.py`: 2 passed.
-- `test_falsifiable_hypothesis_example.py` non-real subset: first 7 passed; real-market tests (`test_real_market_*`, `test_falsifiable_machinery_on_*_real_market_data`) hang.
+- New tests: 3 passed in 23.31s.
+- Prior regression guards (z-score elevated cost triple, cross-sectional momentum elevated cost triple, cross-sectional momentum param sensitivity triple): 3 passed in 26.69s.
+
+Dual momentum on the triple is SUPPORTED at all tested cost levels (2bp+1bp through 20bp+10bp) AND across all six pre-registered parameter settings (lookback 189/252/315, top_quantile 0.4/0.5/0.6, rf 0.0/0.02). First family on the triple to do so; cross-sectional momentum is NOT SUPPORTED at all levels and multi-pair z-score flips SUPPORTED→NOT SUPPORTED under elevated costs.
 
 ## What remains unresolved
-- Real-market cost-sensitivity sweeps in `test_falsifiable_hypothesis_example.py` do not complete within 60s; root cause (compute-bound vs hang) not determined.
-- `test_simple_momentum_hypothesis.py` and `test_test_window_observations.py` not yet run.
+- Single-panel result on committed fixtures; multiple-testing correction (Deflated Sharpe Ratio) and benchmark (buy-and-hold) alpha comparison not yet applied to dual momentum. Not evidence about any market.
+- Full `test_falsifiable_hypothesis_example.py` suite remains slow; not re-run in full.
 
 ## One precise next task
-Run `cd skills/quantitative-backtesting && python3 -m pytest tests/test_simple_momentum_hypothesis.py tests/test_test_window_observations.py -p no:cacheprovider -q` (should be fast). Then profile a single hanging real-market test with `timeout 120` and capture partial output to determine if it is compute-bound or deadlocked.
+Add benchmark comparison and, if multiple parameter settings are compared, the Deflated Sharpe Ratio multiple-testing correction to dual momentum on the same triple (AAPL/MSFT/GOOGL) using committed fixtures only, reusing the machinery already in `falsifiable_hypothesis_example.py` (`--benchmark`, `--n-trials`, `walk_forward` Deflated Sharpe Ratio). Pin observed strategy + benchmark metrics (net of costs) as regression guards with relative tolerance. Do not tune to force SUPPORT.
+
+(End of file)
