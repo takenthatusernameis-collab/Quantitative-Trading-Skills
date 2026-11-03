@@ -192,26 +192,33 @@ class RSIMeanReversion(StrategyBase):
 
     Long when RSI < oversold, exit when RSI > neutral.
     Short when RSI > overbought, exit when RSI < neutral.
+
+    Supports multi-asset panel data (dict of symbol -> DataFrame, or a
+    DataFrame with MultiIndex columns (field, symbol)): each asset is
+    traded independently and the per-asset positions are exposed as a
+    target book via ``generate_target_weights`` so the panel can be priced
+    with ``--panel-pricing book`` (true per-asset book return). For
+    single-asset data the behaviour is unchanged.
     """
 
-    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+    def _rsi_position_series(self, close: pd.Series) -> pd.Series:
+        """Position path for one close series (+1 long below oversold, -1
+        short above overbought, flat once RSI retreats into neutral)."""
         period = self.parameters.get("period", 14)
         oversold = self.parameters.get("oversold", 30)
         overbought = self.parameters.get("overbought", 70)
         neutral = self.parameters.get("neutral", 50)
 
-        delta = data["close"].diff()
+        delta = close.diff()
         gain = delta.where(delta > 0, 0).rolling(period).mean()
         loss = -delta.where(delta < 0, 0).rolling(period).mean()
         rs = gain / loss
         rsi = 100 - (100 / (1 + rs))
 
-        signals = pd.Series(0, index=data.index)
+        positions = pd.Series(0.0, index=close.index, dtype=float)
         position = 0
-
-        for i in range(len(data)):
+        for i in range(len(rsi)):
             rsi_val = rsi.iloc[i]
-
             if position == 0:
                 if rsi_val <= oversold:
                     position = 1
@@ -221,10 +228,84 @@ class RSIMeanReversion(StrategyBase):
                 position = 0
             elif position == -1 and rsi_val <= neutral:
                 position = 0
+            positions.iloc[i] = position
+        return positions
 
-            signals.iloc[i] = position
+    def _panel_positions(self, close_df: pd.DataFrame) -> pd.DataFrame:
+        """Per-asset RSI positions for a close DataFrame whose columns are
+        the panel symbols (rows are dates)."""
+        positions = pd.DataFrame(
+            0.0, index=close_df.index, columns=close_df.columns, dtype=float
+        )
+        for symbol in close_df.columns:
+            positions[symbol] = self._rsi_position_series(close_df[symbol])
+        return positions
 
-        return signals
+    def generate_signals(self, data: pd.DataFrame | dict) -> pd.Series:
+        if isinstance(data, dict):
+            if not data:
+                return pd.Series(dtype=float)
+            common_index = None
+            for df in data.values():
+                common_index = (
+                    df.index if common_index is None else common_index.intersection(df.index)
+                )
+            if common_index is None or len(common_index) == 0:
+                return pd.Series(dtype=float)
+            common_index = common_index.sort_values()
+            per_asset = pd.DataFrame(
+                0.0, index=common_index, columns=list(data.keys()), dtype=float
+            )
+            for symbol, df in data.items():
+                per_asset[symbol] = self._rsi_position_series(
+                    df.loc[common_index, "close"]
+                )
+            return per_asset.mean(axis=1)
+
+        if isinstance(data.columns, pd.MultiIndex):
+            if "close" not in data.columns.get_level_values(0):
+                raise ValueError("MultiIndex data must have 'close' as first level column")
+            close_df = data["close"]
+            per_asset = self._panel_positions(close_df)
+            return per_asset.mean(axis=1)
+
+        # Single-asset fallback (backward compatible).
+        return self._rsi_position_series(data["close"])
+
+    def generate_target_weights(self, data) -> Optional[pd.DataFrame]:
+        """Per-asset target book implied by the RSI mean-reversion position.
+
+        Each asset carries its own position (+1 long, -1 short, 0 flat), so
+        the book's net exposure varies across assets and periods. The book is
+        priced under ``--panel-pricing book`` (true per-asset book return
+        ``sum_i w_i r_i`` with costs charged on the book's rotation).
+
+        Returns ``None`` for single-asset data.
+        """
+        if isinstance(data, dict):
+            if not data:
+                return None
+            common_index = None
+            for df in data.values():
+                common_index = (
+                    df.index if common_index is None else common_index.intersection(df.index)
+                )
+            if common_index is None or len(common_index) == 0:
+                return None
+            common_index = common_index.sort_values()
+            weights = pd.DataFrame(
+                0.0, index=common_index, columns=list(data.keys()), dtype=float
+            )
+            for symbol, df in data.items():
+                weights[symbol] = self._rsi_position_series(df.loc[common_index, "close"])
+            return weights
+
+        if isinstance(data.columns, pd.MultiIndex):
+            if "close" not in data.columns.get_level_values(0):
+                return None
+            return self._panel_positions(data["close"])
+
+        return None
 
 
 class DonchianChannelBreakout(StrategyBase):

@@ -9,6 +9,35 @@ round-trip trading costs on the held-out test set.
 FALSIFICATION CRITERIA:
 1. Out-of-sample Sharpe ratio (net of costs) > 0
 2. Out-of-sample total return > 0 (net of costs)
+
+BENCHMARK-AWARE FALSIFICATION CRITERIA (used when a buy-and-hold benchmark is
+supplied; hypothesis NOT SUPPORTED if ANY fails):
+1. Out-of-sample Sharpe ratio (net of costs) > 0
+2. Out-of-sample total return (net of costs) > benchmark total return
+3. Deflated Sharpe p-value < 0.10 (multiple-testing corrected across the
+   pre-registered parameter grid, N = len(PARAM_SENSITIVITY_GRID) = 6)
+4. Benchmark alpha p-value < 0.05 (raw, uncorrected, vs the buy-and-hold
+   benchmark)
+
+The benchmark is MSFT, the strongest buy-and-hold name on the committed
+three-asset panel over the held-out window (~90% total return), so testing
+alpha against it is the least generous plausible baseline: if RSI mean
+reversion does not beat the best single name on the panel, it does not beat a
+market index either. With a single benchmark (N=1) the Deflated Alpha Ratio
+benchmark-selection correction is not applicable (the framework reports
+deflated_alpha=None for N<2), so it is deliberately NOT a criterion here --
+stating it would be a vacuous control.
+
+Methodology controls:
+- Chronological train/validation/test split (0.6 / 0.2 / 0.2)
+- Point-in-time validation (look-ahead/stale-data/temporal-ordering screening)
+- Panel priced with --panel-pricing book: the true per-asset book return
+- All figures net of trading costs
+- Offline only: committed fixtures under assets/example_data/real_market_data/
+
+Nothing here is evidence about any security or market: the three series are
+committed historical fixtures, and the verdict is a falsification outcome,
+not a profitability claim.
 """
 
 import json
@@ -29,8 +58,61 @@ CRITERIA = [
     ("oos_total_return_positive", "oos_total_return > 0 (net of costs)"),
 ]
 
+
+def _gt_zero(v):
+    return v is not None and float(v) > 0.0
+
+
+def _lt_0_10(v):
+    return v is not None and float(v) < 0.10
+
+
+def _lt_0_05(v):
+    return v is not None and float(v) < 0.05
+
+
+def _oos_total_return_gt_benchmark(strategy_total_return, benchmark_total_return):
+    return (strategy_total_return is not None
+            and benchmark_total_return is not None
+            and float(strategy_total_return) > float(benchmark_total_return))
+
+
+# Benchmark-aware falsification criteria. Stored as 3-tuples
+# (name, description, predicate). Criterion 3 (Deflated Sharpe p-value) is the
+# multiple-testing correction across the pre-registered parameter grid;
+# criterion 4 (raw benchmark alpha p-value) is the uncorrected buy-and-hold
+# comparison. With a single benchmark (N=1) the Deflated Alpha Ratio
+# benchmark-selection correction is not applicable (the framework reports
+# deflated_alpha=None for N<2), so it is deliberately NOT a criterion here --
+# stating it would be a vacuous control.
+BENCHMARK_CRITERIA = [
+    ("oos_sharpe_gt_zero", "oos_sharpe > 0 (net of costs)", _gt_zero),
+    ("oos_total_return_gt_benchmark",
+     "oos_total_return > benchmark_total_return (net of costs)",
+     _oos_total_return_gt_benchmark),
+    ("deflated_sharpe_pvalue_lt_0.10",
+     "deflated_sharpe_pvalue < 0.10 (multiple-testing corrected)",
+     _lt_0_10),
+    ("benchmark_alpha_pvalue_lt_0.05",
+     "benchmark_alpha_pvalue < 0.05 (raw, vs buy-and-hold)",
+     _lt_0_05),
+]
+
 COMMISSION = 0.0002
 SLIPPAGE = 0.0001
+
+PARAMS = '{"period": 14, "oversold": 30, "overbought": 70, "neutral": 50}'
+
+# Primary buy-and-hold benchmark for the RSI mean-reversion hypothesis on the
+# committed three-asset panel. MSFT is the strongest buy-and-hold name on the
+# panel over the held-out test window (total return ~90%), so testing alpha
+# against it is the least generous plausible baseline: if RSI mean reversion
+# does not beat the best single name on the panel, it does not beat a market
+# index either. Path is resolved relative to the committed real-market
+# fixtures directory.
+BENCHMARK_FILE = "MSFT.csv"
+
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets" / "example_data"
 
 # Commission / slippage levels exercised by the cost-sensitivity sweep, in
 # ascending order, spanning realistic retail-to-institutional round-trip
@@ -400,6 +482,12 @@ PARAM_SENSITIVITY_GRID = (
     (14, 35, 70),
 )
 
+# Number of parameter configurations in PARAM_SENSITIVITY_GRID, reported to
+# run_backtest via --n-trials so the Deflated Sharpe Ratio (multiple-testing
+# correction across the parameter grid) is computed. Pre-registered: it is the
+# length of the grid, fixed before any result is looked at.
+N_TRIALS = len(PARAM_SENSITIVITY_GRID)
+
 
 def run_elevated_cost_sweep(data_path, benchmark_path=None, grid=ELEVATED_COST_SWEEP_LEVELS):
     data_path = Path(data_path)
@@ -476,6 +564,175 @@ def run_param_sensitivity_sweep(data_path, benchmark_path=None, grid=PARAM_SENSI
         assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
         assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
     return rows
+
+
+def _resolve_benchmark(benchmark_path):
+    """Resolve a benchmark path relative to the committed fixtures directory
+    when it is relative, so callers can pass a bare filename like "MSFT.csv".
+    """
+    p = Path(benchmark_path)
+    if p.is_absolute():
+        return p
+    return ASSETS_DIR / "real_market_data" / p
+
+
+def run_benchmark_aware_hypothesis_test(data_path, benchmark_path=BENCHMARK_FILE,
+                                        n_trials=N_TRIALS):
+    """Run the benchmark-aware falsification test on the committed triple panel.
+
+    Wraps a run_backtest invocation with the committed buy-and-hold benchmark
+    and the pre-registered parameter-trial count, so callers (and the
+    regression test) have a single documented entry point that exercises the
+    Deflated Sharpe Ratio and the benchmark alpha comparison together.
+
+    ``benchmark_path`` is an optional committed buy-and-hold OHLCV file (a bare
+    filename like "MSFT.csv" is resolved relative to the committed real-market
+    fixtures directory).
+    """
+    data_path = Path(data_path)
+    benchmark = _resolve_benchmark(benchmark_path) if benchmark_path is not None else None
+    # Normalize the criterion list to (name, description, predicate) triples.
+    criteria = [(name, desc, fn) for name, desc, fn in BENCHMARK_CRITERIA]
+
+    print("=" * 80)
+    print("FALSIFIABLE HYPOTHESIS TEST (using run_backtest.py) -- rsi mean reversion "
+          "benchmark-aware real window")
+    print("=" * 80)
+    print(f"Hypothesis: {HYPOTHESIS}")
+    print(f"Trading costs: {COMMISSION*10000:.0f} bps commission + {SLIPPAGE*10000:.0f} bps slippage")
+    print(f"Data: {data_path}")
+    print(f"Strategy: rsi_mean_reversion {PARAMS}")
+    print("Split: train/val/test = 0.6/0.2/0.2 (test split only)")
+    print("Panel pricing: book (true per-asset book return, costs charged on the book)")
+    if benchmark is not None:
+        print(f"Benchmark (buy-and-hold): {benchmark}")
+        print(f"Parameter trials (Deflated Sharpe): {n_trials}")
+    print("=" * 80)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        cmd = [
+            sys.executable,
+            str(Path(__file__).resolve().parent.parent / "scripts" / "run_backtest.py"),
+            "--data", str(data_path),
+            "--strategy", "rsi_mean_reversion",
+            "--multi-symbol",
+            "--params", PARAMS,
+            "--commission", str(COMMISSION),
+            "--slippage", str(SLIPPAGE),
+            "--train-frac", "0.6",
+            "--val-frac", "0.2",
+            "--test-frac", "0.2",
+            "--run-split", "test",
+            "--panel-pricing", "book",
+            "--output", str(tmpdir_path / "results"),
+            "--validate-point-in-time",
+        ]
+        if benchmark is not None:
+            cmd += ["--benchmark", str(benchmark)]
+        if n_trials is not None:
+            cmd += ["--n-trials", str(int(n_trials))]
+        result = subprocess.run(cmd, cwd=str(Path(__file__).resolve().parent.parent / "scripts"),
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            print("STDOUT:", result.stdout[-800:])
+            print("STDERR:", result.stderr[-800:])
+            raise RuntimeError(f"run_backtest failed with code {result.returncode}")
+
+        metrics = {}
+        summary = {}
+        metrics_path = tmpdir_path / "results" / "metrics.json"
+        summary_path = tmpdir_path / "results" / "tear_sheet_summary.json"
+        if metrics_path.exists() and metrics_path.is_file():
+            with open(metrics_path) as f:
+                metrics = json.load(f)
+        if summary_path.exists() and summary_path.is_file():
+            with open(summary_path) as f:
+                summary = json.load(f)
+
+    print("\n1. METHODOLOGY CONTROLS")
+    split_info = summary.get("train_val_test_split", {})
+    if split_info:
+        sep = split_info.get("separation_check", {})
+        print(f"  Split sizes (train/val/test): {sep.get('train_size')}/{sep.get('val_size')}/{sep.get('test_size')}")
+        print(f"  Chronological: {sep.get('chronological')}, Disjoint: {sep.get('disjoint')}")
+    pit = summary.get("point_in_time_validation", {})
+    print(f"  Point-in-time validation: {pit.get('passed') if pit else None}")
+    print(f"  Run split: test only (held-out)")
+    print(f"  Commission: {COMMISSION}, Slippage: {SLIPPAGE}")
+    bd = metrics.get("book_diagnostic") or {}
+    print(f"  Panel pricing: book; periods with a book: {bd.get('n_periods_with_book')}/{bd.get('n_periods')}")
+
+    print("\n2. OUT-OF-SAMPLE PERFORMANCE (net of costs)")
+    print(f"  Total Return: {_fmt_pct(metrics.get('total_return'))}")
+    print(f"  Annualized Return: {_fmt_pct(metrics.get('annualized_return'))}")
+    print(f"  Sharpe Ratio: {_fmt_num(metrics.get('sharpe_ratio'))}")
+    print(f"  Max Drawdown: {_fmt_pct(metrics.get('max_drawdown'))}")
+    if benchmark is not None:
+        print(f"  Benchmark Total Return: {_fmt_pct(metrics.get('benchmark_total_return'))}")
+        print(f"  Benchmark Alpha: {_fmt_pct(metrics.get('alpha'))}")
+        print(f"  Benchmark Alpha p-value (raw): {_fmt_num(metrics.get('alpha_pvalue'))}")
+        print(f"  Correlation with benchmark: {_fmt_num(metrics.get('correlation_with_benchmark'))}")
+        dsr = metrics.get("deflated_sharpe") or {}
+        if isinstance(dsr, dict):
+            print(f"  Deflated Sharpe Ratio: {_fmt_num(dsr.get('deflated_sharpe_ratio'))} "
+                  f"(p-value {_fmt_num(dsr.get('p_value'))}, {dsr.get('n_trials')} trials)")
+
+    print("\n3. FALSIFICATION CRITERIA")
+    criterion_results = []
+    passes = []
+    sharpe = metrics.get('sharpe_ratio')
+    ret = metrics.get('total_return')
+    bench_ret = metrics.get('benchmark_total_return')
+    dsr_pvalue = None
+    if isinstance(metrics.get("deflated_sharpe"), dict):
+        dsr_pvalue = metrics["deflated_sharpe"].get("p_value")
+    alpha_pvalue = metrics.get('alpha_pvalue')
+
+    for name, desc, fn in criteria:
+        if name == "oos_sharpe_gt_zero":
+            ok = fn(sharpe)
+        elif name == "oos_total_return_gt_benchmark":
+            ok = bool(ret is not None and bench_ret is not None
+                      and float(ret) > float(bench_ret))
+        elif name == "deflated_sharpe_pvalue_lt_0.10":
+            ok = fn(dsr_pvalue)
+        elif name == "benchmark_alpha_pvalue_lt_0.05":
+            ok = fn(alpha_pvalue)
+        else:
+            ok = False
+        passes.append(ok)
+        criterion_results.append({"name": name, "description": desc, "passed": bool(ok)})
+        print(f"  [{'PASS' if ok else 'FAIL'}] {name}: {desc}")
+
+    all_pass = all(passes)
+    verdict = "SUPPORTED" if all_pass else "NOT SUPPORTED"
+
+    print("\n" + "=" * 80)
+    print(f"VERDICT: {verdict}")
+    print("  SUPPORTED   = all falsification criteria passed")
+    print("  NOT SUPPORTED = at least one criterion failed (hypothesis falsified)")
+    print("=" * 80)
+
+    observed = {
+        "sharpe_ratio": sharpe,
+        "total_return": ret,
+        "benchmark_total_return": bench_ret,
+        "benchmark_alpha": metrics.get('alpha'),
+        "benchmark_alpha_pvalue": alpha_pvalue,
+        "correlation_with_benchmark": metrics.get('correlation_with_benchmark'),
+        "deflated_sharpe_pvalue": dsr_pvalue,
+        "n_trials": n_trials,
+        "benchmark_path": str(benchmark) if benchmark is not None else None,
+    }
+
+    return {
+        "hypothesis": HYPOTHESIS,
+        "verdict": verdict,
+        "all_pass": all_pass,
+        "criteria": criterion_results,
+        "observed": observed,
+    }
 
 
 def main():

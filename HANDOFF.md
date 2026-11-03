@@ -1,33 +1,40 @@
-# Handoff — test suite restored to green after deterministic regressions
+# Handoff — benchmark-aware RSI mean-reversion test + panel support added
 
 ## What changed
-- Confirmed the prior agent's assigned task (benchmark comparison + Deflated Sharpe multiple-testing correction for dual momentum on the committed AAPL/MSFT/GOOGL triple) is already implemented and verified: `skills/quantitative-backtesting/tests/test_dual_momentum_benchmark_aware_real_triple_aapl_msft_googl.py` — 2 passed in 4.73s. No new code needed there.
-- Fixed 10 deterministic test failures in the quant-backtesting suite:
-  - 9 `test_reporting.py` failures: root cause `matplotlib` (declared dependency in requirements.txt) was not installed in the environment, so figures were never saved. Installed matplotlib; `test_reporting.py` 64 passed.
-  - 1 `test_run_backtest.py::test_run_backtest_trade_ledger_valid_for_all_registered_strategies` failure: root cause `build_strategy()` calls `strategy_class(config)` only, but `VolatilityTargeting` and `KellyCriterion` require `(config, base_strategy)`. Made `base_strategy` optional with a standalone degraded mode (plain momentum base signal) in `skills/quantitative-backtesting/scripts/strategy_builder.py`; audit test now passes.
-- `test_strategy_builder.py`: 33 passed (no regression from the overlay change).
-- Full bounded suite (all tests except the 4 known-slow: falsifiable_hypothesis_example, monte_carlo, performance, reproducible_backtest_example): reached 98% with zero `F`/FAILED markers; previously 870 passed / 10 failed, now all previously-failing tests pass individually (terminated only by tool timeout at the boundary, not by a test failure).
+- Made `RSIMeanReversion` panel-capable in `skills/quantitative-backtesting/scripts/strategy_builder.py`: `generate_signals` now accepts dict (`symbol -> DataFrame`) and MultiIndex-column panel data (returns per-asset positions, collapsed to a scalar net-exposure series), and a new `generate_target_weights` returns the per-asset position book (`None` for single-asset, unchanged behaviour). This enables `--multi-symbol --panel-pricing book` for RSI, mirroring dual momentum / z-score mean reversion. Single-asset RSI behaviour is untouched.
+- Extended `skills/quantitative-backtesting/examples/rsi_mean_reversion_hypothesis.py` with benchmark-aware machinery, mirroring `dual_momentum_hypothesis.py` / `zscore_mean_reversion_hypothesis.py`:
+  - `BENCHMARK_FILE = "MSFT.csv"` (resolved relative to `assets/example_data/real_market_data/`)
+  - `PARAMS`, `N_TRIALS = len(PARAM_SENSITIVITY_GRID)` (= 5)
+  - `_gt_zero`, `_lt_0_10`, `_lt_0_05`, `_oos_total_return_gt_benchmark` helpers
+  - `BENCHMARK_CRITERIA` (4 criteria: oos_sharpe > 0, oos_total_return > benchmark, deflated_sharpe_pvalue < 0.10, benchmark_alpha_pvalue < 0.05)
+  - `run_benchmark_aware_hypothesis_test(data_path, benchmark_path=BENCHMARK_FILE, n_trials=N_TRIALS)` using `--multi-symbol --panel-pricing book --benchmark --n-trials`
+  - Baseline `run_hypothesis_test` and `main()` unchanged (examples-coverage tests still pass).
+- Added `skills/quantitative-backtesting/tests/test_rsi_benchmark_aware_real_triple_aapl_msft_googl.py` (2 tests: run smoke + pinned regression guard).
 
 ## What was actually verified
-- `test_dual_momentum_benchmark_aware_real_triple_aapl_msft_googl.py`: 2 passed (prior task complete).
-- `test_reporting.py`: 64 passed.
-- `test_run_backtest.py` audit test: 1 passed.
-- `test_strategy_builder.py`: 33 passed.
-- Prior dual momentum group (13 tests) and cross-sectional/z-score benchmark-aware tests remain green.
+- New RSI benchmark-aware test: 2 passed (~2s), deterministic across repeated runs.
+- Observed (committed fixtures only, NOT evidence about any market), honest NOT SUPPORTED — no tuning:
+  - sharpe_ratio -0.2979, total_return -31.84%, vs benchmark MSFT total_return +90.15%
+  - benchmark_alpha -0.2281, benchmark_alpha_pvalue 0.4367 (> 0.05)
+  - deflated_sharpe_pvalue 0.9859 (> 0.10, 5 trials)
+  - All 4 benchmark-aware criteria fail; verdict pinned NOT SUPPORTED.
+- All 17 existing RSI tests pass (no regression from `strategy_builder.py` change).
+- RSI examples-coverage tests: 5 passed (`test_rsi_mean_reversion_hypothesis_*`).
+- `test_strategy_builder.py` + `test_run_backtest.py`: 141 passed (warnings are pre-existing and unrelated).
 
 ## What remains unresolved
-- 4 slow tests excluded from the bounded run (test_falsifiable_hypothesis_example.py, test_monte_carlo.py, test_performance.py, test_reproducible_backtest_example.py) not re-run in full; known slow.
-- `strategy_builder.py` change is uncommitted (working tree only); no commit was requested.
+- Full bounded quant-backtesting suite not re-run end-to-end after the `strategy_builder.py` change (only RSI + strategy_builder/run_backtest subsets). Broad regression risk is low (change isolated to RSIMeanReversion), but a full-suite pass would confirm it.
+- Changes are uncommitted (working tree only); no commit was requested.
 
 ## Approaches already tried / failed
-- Symmetric quantiles 0.2/0.2 for cross-sectional momentum (byte-identical to 0.5/0.5, still flat-signal) — rejected earlier; not relevant this session.
+- None for this task; RSI multi-symbol crashed before the panel change (fixed by making RSI panel-capable).
 
 ## One precise next task
-Add benchmark-aware (alpha p-value + Deflated Sharpe multiple-testing correction) falsification test + pinned regression guard for RSI mean reversion on the committed triple panel (AAPL/MSFT/GOOGL), following the established dual-momentum/z-score pattern:
-1. Extend `skills/quantitative-backtesting/examples/rsi_mean_reversion_hypothesis.py` with benchmark-aware machinery (`BENCHMARK_FILE="MSFT.csv"`, `BENCHMARK_CRITERIA`, `N_TRIALS`, `run_benchmark_aware_hypothesis_test`) — it currently only has basic `run_hypothesis_test`.
-2. Add `skills/quantitative-backtesting/tests/test_rsi_benchmark_aware_real_triple_aapl_msft_googl.py` pinning strategy + benchmark metrics (net of costs, relative tolerance) and asserting the honest NOT SUPPORTED verdict (do not tune to force SUPPORT).
-3. Run the new test + existing RSI tests; confirm green, no regressions.
+Run the full quant-backtesting test suite (`pytest skills/quantitative-backtesting/tests/`) to confirm no regressions from the shared `strategy_builder.py` change, then (if green and the user asks) commit the three changes:
+- `skills/quantitative-backtesting/scripts/strategy_builder.py`
+- `skills/quantitative-backtesting/examples/rsi_mean_reversion_hypothesis.py`
+- `skills/quantitative-backtesting/tests/test_rsi_benchmark_aware_real_triple_aapl_msft_googl.py`
 
 Evidence/constraints:
 - Offline, committed fixtures only; MSFT as buy-and-hold benchmark; relative tolerance only; no tuning to force SUPPORT.
-- Env: system python3.12, pandas 3.1.0, numpy 2.5.4, pytest 9.2.0 (+matplotlib now installed); `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`
+- Env: system python3.12, pandas 3.1.0, numpy 2.5.4, pytest 9.2.0; `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`
