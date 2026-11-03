@@ -19,6 +19,8 @@ Max Drawdown:          0.00%
 Avg Drawdown:          0.00%
 VaR (95%):             -1.84%
 CVaR (95%):            -2.56%
+VaR (99%):             -3.00%
+CVaR (99%):            -3.26%
 Skewness:              -0.16
 Kurtosis:              2.68
 
