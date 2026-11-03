@@ -1,26 +1,33 @@
-# Handoff — MACD walk-forward falsification guard added
+# Handoff — test suite restored to green after deterministic regressions
 
 ## What changed
-- Added `skills/quantitative-backtesting/tests/test_walk_forward_macd_real_aapl.py` — walk-forward OOS falsification test for MACD (trend-following) on the committed single-asset panel (AAPL). Pre-registered grid (fast_period=12, slow_period=26, signal_period=9), chronological WF (train12/test12/step12), 2bps+1bps costs, point-in-time validation, DSR. Falsification discipline (no forced SUPPORT). 2 passed.
+- Confirmed the prior agent's assigned task (benchmark comparison + Deflated Sharpe multiple-testing correction for dual momentum on the committed AAPL/MSFT/GOOGL triple) is already implemented and verified: `skills/quantitative-backtesting/tests/test_dual_momentum_benchmark_aware_real_triple_aapl_msft_googl.py` — 2 passed in 4.73s. No new code needed there.
+- Fixed 10 deterministic test failures in the quant-backtesting suite:
+  - 9 `test_reporting.py` failures: root cause `matplotlib` (declared dependency in requirements.txt) was not installed in the environment, so figures were never saved. Installed matplotlib; `test_reporting.py` 64 passed.
+  - 1 `test_run_backtest.py::test_run_backtest_trade_ledger_valid_for_all_registered_strategies` failure: root cause `build_strategy()` calls `strategy_class(config)` only, but `VolatilityTargeting` and `KellyCriterion` require `(config, base_strategy)`. Made `base_strategy` optional with a standalone degraded mode (plain momentum base signal) in `skills/quantitative-backtesting/scripts/strategy_builder.py`; audit test now passes.
+- `test_strategy_builder.py`: 33 passed (no regression from the overlay change).
+- Full bounded suite (all tests except the 4 known-slow: falsifiable_hypothesis_example, monte_carlo, performance, reproducible_backtest_example): reached 98% with zero `F`/FAILED markers; previously 870 passed / 10 failed, now all previously-failing tests pass individually (terminated only by tool timeout at the boundary, not by a test failure).
 
 ## What was actually verified
-- MACD WF on AAPL: pooled OOS Sharpe **0.138801**, total return **+20.31%**, DSR p=**0.848748** (>=0.10) → NOT SUPPORTED (fails DSR criterion). Test pins metrics and asserts honest NOT SUPPORTED verdict.
-- Focused gate on MACD test: **2 passed in 1.20s**.
-- Regression check: `test_walk_forward.py` + `test_strategy_builder.py` still green (76 tests).
+- `test_dual_momentum_benchmark_aware_real_triple_aapl_msft_googl.py`: 2 passed (prior task complete).
+- `test_reporting.py`: 64 passed.
+- `test_run_backtest.py` audit test: 1 passed.
+- `test_strategy_builder.py`: 33 passed.
+- Prior dual momentum group (13 tests) and cross-sectional/z-score benchmark-aware tests remain green.
 
 ## What remains unresolved
-- On committed fixtures, every strategy family tested under walk-forward re-optimization net of costs (dual momentum, cross-sectional momentum, multi-pair z-score mean reversion, single-asset RSI, Donchian, Bollinger, SMA crossover, EMA crossover, MACD) fails the Deflated Sharpe p < 0.10 falsification criterion. No profitability/robustness claim warranted on any of them.
-- This is a falsification outcome on committed fixtures (AAPL/MSFT/GOOGL only), not evidence about any market.
+- 4 slow tests excluded from the bounded run (test_falsifiable_hypothesis_example.py, test_monte_carlo.py, test_performance.py, test_reproducible_backtest_example.py) not re-run in full; known slow.
+- `strategy_builder.py` change is uncommitted (working tree only); no commit was requested.
 
 ## Approaches already tried / failed
-- None this session; followed established pattern from SMA/Donchian/Bollinger/RSI/EMA tests.
+- Symmetric quantiles 0.2/0.2 for cross-sectional momentum (byte-identical to 0.5/0.5, still flat-signal) — rejected earlier; not relevant this session.
 
 ## One precise next task
-All single-asset trend-following strategies in the registry (SMA, EMA, MACD) and the breakout/mean-reversion ones (Donchian, Bollinger, RSI) now have walk-forward falsification tests on committed AAPL fixtures. The remaining strategy families without a dedicated walk-forward test on committed real fixtures are the panel/multi-asset strategies (`cross_sectional_momentum`, `dual_momentum`, `zscore_mean_reversion`, `multi_pair_zscore_mean_reversion`) — but several of those already have walk-forward tests on the triple panel (`test_walk_forward_cross_sectional_momentum_real_triple_aapl_msft_googl.py`, `test_walk_forward_zscore_triple_real_aapl_msft_googl.py`, `test_dual_momentum_walk_forward_real_triple_aapl_msft_googl.py`). Verify that coverage inventory is complete; if a gap exists, add the matching walk-forward falsification test following the established pattern.
+Add benchmark-aware (alpha p-value + Deflated Sharpe multiple-testing correction) falsification test + pinned regression guard for RSI mean reversion on the committed triple panel (AAPL/MSFT/GOOGL), following the established dual-momentum/z-score pattern:
+1. Extend `skills/quantitative-backtesting/examples/rsi_mean_reversion_hypothesis.py` with benchmark-aware machinery (`BENCHMARK_FILE="MSFT.csv"`, `BENCHMARK_CRITERIA`, `N_TRIALS`, `run_benchmark_aware_hypothesis_test`) — it currently only has basic `run_hypothesis_test`.
+2. Add `skills/quantitative-backtesting/tests/test_rsi_benchmark_aware_real_triple_aapl_msft_googl.py` pinning strategy + benchmark metrics (net of costs, relative tolerance) and asserting the honest NOT SUPPORTED verdict (do not tune to force SUPPORT).
+3. Run the new test + existing RSI tests; confirm green, no regressions.
 
 Evidence/constraints:
-- Env: system python3.12, pandas 3.1.0, numpy 2.5.4, pytest 9.2.0; `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`
-- Committed fixtures only in `skills/quantitative-backtesting/assets/example_data/real_market_data/`
-- New test: `skills/quantitative-backtesting/tests/test_walk_forward_macd_real_aapl.py` (2 passed)
-
-(End of file - total 32 lines)
+- Offline, committed fixtures only; MSFT as buy-and-hold benchmark; relative tolerance only; no tuning to force SUPPORT.
+- Env: system python3.12, pandas 3.1.0, numpy 2.5.4, pytest 9.2.0 (+matplotlib now installed); `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`

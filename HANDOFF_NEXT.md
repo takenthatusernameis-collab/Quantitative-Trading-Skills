@@ -1,39 +1,15 @@
-# Handoff — cross-sectional momentum walk-forward tests re-parameterized
+# Handoff — next task
 
-## What changed
-The previous agent's commit (4292506) changed the cross-sectional momentum walk-forward test quantiles from 0.5/0.5 to 0.2/0.2, following HANDOFF_NEXT.md. That change had **zero effect** on test outcomes: the pinned metrics in the triple test were byte-identical before and after, and the "flat (zero) portfolio signal" warning still fired. Root cause: 0.2/0.2 is **symmetric** (equal values), which still triggers the flat-signal path under net-exposure pricing. The handoff's own premise was internally contradictory — it asked for "asymmetric" quantiles but specified symmetric equal values.
-
-This session re-parameterized the tests to genuinely asymmetric quantiles (**0.4/0.2**) and pinned the new out-of-sample metrics. Nine test files changed (full list in HANDOFF_SESSION_NEXT.md). All nine pass. Unit suites `test_walk_forward.py` (194/194) and `test_strategy_builder.py` (33/33) also pass.
-
-## What was actually verified
-- Triple (AAPL/MSFT/GOOGL) walk-forward with 0.4/0.2 + book pricing: **Sharpe +0.3708, total return +53.97%, Deflated Sharpe p-value 0.9298**. Honest verdict: NOT SUPPORTED (multiple-testing criterion fails). No flat-signal warning. 8/8 periods with position.
-- Pair-wise walk-forward with 0.4/0.2 + book pricing:
-  - AAPL/MSFT: Sharpe -0.9830, return -0.43% → NOT SUPPORTED
-  - AAPL/GOOGL: Sharpe -0.5980, return +5.89% → NOT SUPPORTED (Sharpe criterion fails)
-  - MSFT/GOOGL: Sharpe -2.6656, return -10.15% → NOT SUPPORTED
-- All metrics pinned with `REL_TOL = 1e-6`. All tests assert no "flat (zero) portfolio signal" warning is emitted.
-
-## What remains unresolved
-- The cross-sectional momentum falsification is now a genuine signal test, but the honest verdict is still NOT SUPPORTED across all panels. This is the expected pre-registered outcome; no tuning to force SUPPORT was done.
-- `test_cross_sectional_momentum_elevated_cost_real_msft_googl.py` is very slow (exceeds 30 min) both before and after these changes — pre-existing, unrelated to this work. It was not run to completion this session.
-
-## Approaches already tried / failed
-- **Symmetric quantiles (0.2/0.2) as the "asymmetric" fix**: produced byte-identical metrics to 0.5/0.5 and still emitted the flat-signal warning. Rejected as internally contradictory.
-- **Net-exposure pricing with asymmetric quantiles on pair-wise panels**: with 2 assets, `top_quantile=0.4` rounds to 1 long and `bottom_quantile=0.2` rounds to 1 short, so net exposure is still 0 → flat. Book pricing is required for pair-wise tests to take a genuine position.
+## What changed (this session)
+Prior agent's assigned task (benchmark + Deflated Sharpe for dual momentum on the committed triple) is already implemented and verified green. This session fixed 10 deterministic test regressions (9 matplotlib missing-dependency in test_reporting.py; 1 VolatilityTargeting/KellyCriterion constructor mismatch in strategy_builder.py) so the bounded quant-backtesting suite is green. See HANDOFF.md for details.
 
 ## One precise next task
-Run the elevated-cost sweep test (`test_cross_sectional_momentum_elevated_cost_real_msft_googl.py`) to completion to confirm it still passes after the quantile re-parameterization, or document its runtime as a known CI-timeout risk. It was not run to completion this session.
+Add benchmark-aware (alpha p-value + Deflated Sharpe multiple-testing correction) falsification test + pinned regression guard for RSI mean reversion on the committed triple panel (AAPL/MSFT/GOOGL), following the established dual-momentum/z-score pattern:
+1. Extend `skills/quantitative-backtesting/examples/rsi_mean_reversion_hypothesis.py` with benchmark-aware machinery (`BENCHMARK_FILE="MSFT.csv"`, `BENCHMARK_CRITERIA`, `N_TRIALS`, `run_benchmark_aware_hypothesis_test`) — it currently only has basic `run_hypothesis_test`.
+2. Add `skills/quantitative-backtesting/tests/test_rsi_benchmark_aware_real_triple_aapl_msft_googl.py` pinning strategy + benchmark metrics (net of costs, relative tolerance) and asserting the honest NOT SUPPORTED verdict (do not tune to force SUPPORT).
+3. Run the new test + existing RSI tests; confirm green, no regressions.
 
 Evidence/constraints:
-- File: `skills/quantitative-backtesting/tests/test_cross_sectional_momentum_elevated_cost_real_msft_googl.py`
-- Pre-existing slowness confirmed by running it against the pre-change baseline via `git stash` (still exceeded timeout)
-- All other cross-sectional tests pass; committed fixtures only, offline, no live network
-
-(End of file - total 63 lines)
-## Update (this session)
-- Ran `tests/test_cross_sectional_momentum_elevated_cost_real_msft_googl.py` to completion: **PASSED** in 5.29s. Previous report of >30 min was likely environment-related or stale; test now passes quickly.
-- All cross-sectional momentum tests pass; unit suites remain green.
-
-## Update (this session)
-- Verified `test_cross_sectional_momentum_elevated_cost_real_msft_googl.py` passes (8.2s).
-- Next bounded task: run the full cross-sectional momentum + z-score walk-forward test suites to confirm no regressions after quantile re-parameterization; inspect any remaining structure-only tests that still use symmetric 0.5/0.5 quantiles for whether they emit flat-signal warnings.
+- Offline, committed fixtures only; MSFT as buy-and-hold benchmark; relative tolerance only; no tuning to force SUPPORT.
+- Env: system python3.12, pandas 3.1.0, numpy 2.5.4, pytest 9.2.0 (+matplotlib installed); `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`
+- Relevant files: `skills/quantitative-backtesting/examples/rsi_mean_reversion_hypothesis.py`, `skills/quantitative-backtesting/examples/dual_momentum_hypothesis.py` (pattern to mirror), `skills/quantitative-backtesting/tests/test_dual_momentum_benchmark_aware_real_triple_aapl_msft_googl.py` (pattern to mirror).

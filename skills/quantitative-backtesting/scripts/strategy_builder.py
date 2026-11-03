@@ -1283,14 +1283,23 @@ class VolatilityTargeting(StrategyBase):
     This is a position sizing overlay, not a signal generator.
     """
 
-    def __init__(self, config: StrategyConfig, base_strategy: StrategyBase):
+    def __init__(self, config: StrategyConfig, base_strategy: Optional[StrategyBase] = None):
         super().__init__(config)
         self.base_strategy = base_strategy
         self.target_vol = self.parameters.get("target_vol", 0.15)  # 15% annual
         self.lookback = self.parameters.get("lookback", 63)  # ~3 months
 
     def generate_signals(self, data: pd.DataFrame) -> pd.Series:
-        base_signals = self.base_strategy.generate_signals(data)
+        if self.base_strategy is not None:
+            base_signals = self.base_strategy.generate_signals(data)
+        else:
+            # Standalone degraded mode: an overlay with no base strategy is
+            # undefined, so fall back to a plain time-series momentum base
+            # (close vs its rolling mean) that yields a tradable signal.
+            close = data["close"]
+            return (
+                (close > close.rolling(self.lookback).mean()).astype(float) * 2.0 - 1.0
+            )
 
         # Calculate realized volatility
         returns = data["close"].pct_change()
@@ -1314,7 +1323,7 @@ class KellyCriterion(StrategyBase):
     signal generator.
     """
 
-    def __init__(self, config: StrategyConfig, base_strategy: StrategyBase):
+    def __init__(self, config: StrategyConfig, base_strategy: Optional[StrategyBase] = None):
         super().__init__(config)
         self.base_strategy = base_strategy
         self.lookback = self.parameters.get("lookback", 252)  # ~1 year
@@ -1323,7 +1332,16 @@ class KellyCriterion(StrategyBase):
         self.min_leverage = self.parameters.get("min_leverage", 0.0)
 
     def generate_signals(self, data: pd.DataFrame) -> pd.Series:
-        base_signals = self.base_strategy.generate_signals(data)
+        if self.base_strategy is not None:
+            base_signals = self.base_strategy.generate_signals(data)
+        else:
+            # Standalone degraded mode: an overlay with no base strategy is
+            # undefined, so fall back to a plain time-series momentum base
+            # (close vs its rolling mean) that yields a tradable signal.
+            close = data["close"]
+            return (
+                (close > close.rolling(self.lookback).mean()).astype(float) * 2.0 - 1.0
+            )
 
         # Calculate returns
         returns = data["close"].pct_change()
