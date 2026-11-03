@@ -50,6 +50,14 @@ PARAMS = (
     '"spread_method": "log_ratio", "hedge_ratio": 1.0, "hedge_lookback": 30}'
 )
 
+# Primary buy-and-hold benchmark for the z-score mean-reversion hypothesis on
+# the committed three-asset panel. MSFT is the strongest buy-and-hold name on
+# the panel over the held-out test window, so testing alpha against it is the
+# least generous plausible baseline: if z-score mean reversion does not beat
+# the best single name on the panel, it does not beat a market index either.
+# Path is resolved relative to the committed real-market fixtures directory.
+BENCHMARK_FILE = "MSFT.csv"
+
 # Commission / slippage levels exercised by the cost-sensitivity sweep, in
 # ascending order, spanning realistic retail-to-institutional round-trip
 # costs (1 bps = 0.0001). The advertised setting is the middle rung. The
@@ -77,6 +85,12 @@ PARAM_SENSITIVITY_GRID = (
     (15, 2.0, 0.5),   # shorter lookback
 )
 
+# Number of parameter configurations in PARAM_SENSITIVITY_GRID, reported to
+# run_backtest via --n-trials so the Deflated Sharpe Ratio (multiple-testing
+# correction across the parameter grid) is computed. Pre-registered: it is the
+# length of the grid, fixed before any result is looked at.
+N_TRIALS = len(PARAM_SENSITIVITY_GRID)
+
 HYPOTHESIS = (
     "A Z-Score mean-reversion (pairs) strategy on a cointegrated two-asset "
     "pair produces positive out-of-sample risk-adjusted returns (Sharpe > 0) "
@@ -87,6 +101,46 @@ HYPOTHESIS = (
 CRITERIA = [
     ("oos_sharpe_gt_zero", "oos_sharpe > 0 (net of costs)"),
     ("oos_total_return_positive", "oos_total_return > 0 (net of costs)"),
+]
+
+
+def _gt_zero(v):
+    return v is not None and float(v) > 0.0
+
+
+def _lt_0_10(v):
+    return v is not None and float(v) < 0.10
+
+
+def _lt_0_05(v):
+    return v is not None and float(v) < 0.05
+
+
+def _oos_total_return_gt_benchmark(strategy_total_return, benchmark_total_return):
+    return (strategy_total_return is not None
+            and benchmark_total_return is not None
+            and float(strategy_total_return) > float(benchmark_total_return))
+
+
+# Benchmark-aware falsification criteria. Stored as 3-tuples
+# (name, description, predicate). Criterion 3 (Deflated Sharpe p-value) is the
+# multiple-testing correction across the pre-registered parameter grid;
+# criterion 4 (raw benchmark alpha p-value) is the uncorrected buy-and-hold
+# comparison. With a single benchmark (N=1) the Deflated Alpha Ratio
+# benchmark-selection correction is not applicable (the framework reports
+# deflated_alpha=None for N<2), so it is deliberately NOT a criterion here --
+# stating it would be a vacuous control.
+BENCHMARK_CRITERIA = [
+    ("oos_sharpe_gt_zero", "oos_sharpe > 0 (net of costs)", _gt_zero),
+    ("oos_total_return_gt_benchmark",
+     "oos_total_return > benchmark_total_return (net of costs)",
+     _oos_total_return_gt_benchmark),
+    ("deflated_sharpe_pvalue_lt_0.10",
+     "deflated_sharpe_pvalue < 0.10 (multiple-testing corrected)",
+     _lt_0_10),
+    ("benchmark_alpha_pvalue_lt_0.05",
+     "benchmark_alpha_pvalue < 0.05 (raw, vs buy-and-hold)",
+     _lt_0_05),
 ]
 
 # Each fixture: (label, file name relative to ASSETS_DIR). The cointegrated
@@ -118,13 +172,33 @@ def _fmt_num(v, nd=4):
         return "N/A"
 
 
-def run_hypothesis_test(data_path, label, strategy="zscore_mean_reversion"):
-    """Run the pre-registered falsification test on one pair fixture.
+def run_hypothesis_test(data_path, label, strategy="zscore_mean_reversion",
+                        benchmark_path=None, n_trials=None):
+    """Run the pre-registered falsification test on one panel fixture.
 
-    Returns a dict with the observed metrics, per-criterion pass/fail, and
-    the overall verdict ("SUPPORTED" / "NOT SUPPORTED").
+    ``benchmark_path`` is an optional committed buy-and-hold OHLCV file (a bare
+    filename like "MSFT.csv" is resolved relative to the committed real-market
+    fixtures directory). When provided, the benchmark-aware criteria in
+    BENCHMARK_CRITERIA are evaluated in place of the two baseline criteria and
+    the Deflated Sharpe Ratio is reported across ``n_trials`` parameter
+    configurations. Returns a dict with the observed metrics, per-criterion
+    pass/fail, and the overall verdict ("SUPPORTED" / "NOT SUPPORTED").
     """
     data_path = Path(data_path)
+    benchmark = _resolve_benchmark(benchmark_path) if benchmark_path is not None else None
+    # Normalize the criterion list to (name, description, predicate) triples so
+    # the baseline two-criterion list and the benchmark-aware four-criterion
+    # list are interchangeable in the evaluation loop below. The baseline
+    # list is stored as 2-tuples; the benchmark-aware list as 3-tuples.
+    raw_criteria = BENCHMARK_CRITERIA if benchmark is not None else CRITERIA
+    criteria = []
+    for entry in raw_criteria:
+        if len(entry) == 3:
+            criteria.append(tuple(entry))
+        else:
+            name, desc = entry
+            criteria.append((name, desc, lambda v: v is not None and float(v) > 0.0))
+
     print("=" * 80)
     print(f"FALSIFIABLE HYPOTHESIS TEST (using run_backtest.py) -- {label}")
     print("=" * 80)
@@ -134,6 +208,9 @@ def run_hypothesis_test(data_path, label, strategy="zscore_mean_reversion"):
     print(f"Strategy: {strategy} {PARAMS}")
     print("Split: train/val/test = 0.6/0.2/0.2 (test split only)")
     print("Panel pricing: book (true per-asset book return, costs charged on the book)")
+    if benchmark is not None:
+        print(f"Benchmark (buy-and-hold): {benchmark}")
+        print(f"Parameter trials (Deflated Sharpe): {n_trials}")
     print("=" * 80)
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -156,6 +233,10 @@ def run_hypothesis_test(data_path, label, strategy="zscore_mean_reversion"):
             "--output", str(tmpdir_path / "results"),
             "--validate-point-in-time",
         ]
+        if benchmark is not None:
+            cmd += ["--benchmark", str(benchmark)]
+        if n_trials is not None:
+            cmd += ["--n-trials", str(int(n_trials))]
         result = subprocess.run(cmd, cwd=str(SCRIPTS_DIR), capture_output=True, text=True)
         if result.returncode != 0:
             print("STDOUT:", result.stdout[-800:])
@@ -191,20 +272,44 @@ def run_hypothesis_test(data_path, label, strategy="zscore_mean_reversion"):
     print(f"  Annualized Return: {_fmt_pct(metrics.get('annualized_return'))}")
     print(f"  Sharpe Ratio: {_fmt_num(metrics.get('sharpe_ratio'))}")
     print(f"  Max Drawdown: {_fmt_pct(metrics.get('max_drawdown'))}")
+    if benchmark is not None:
+        print(f"  Benchmark Total Return: {_fmt_pct(metrics.get('benchmark_total_return'))}")
+        print(f"  Benchmark Alpha: {_fmt_pct(metrics.get('alpha'))}")
+        print(f"  Benchmark Alpha p-value (raw): {_fmt_num(metrics.get('alpha_pvalue'))}")
+        print(f"  Correlation with benchmark: {_fmt_num(metrics.get('correlation_with_benchmark'))}")
+        dsr = metrics.get("deflated_sharpe") or {}
+        if isinstance(dsr, dict):
+            print(f"  Deflated Sharpe Ratio: {_fmt_num(dsr.get('deflated_sharpe_ratio'))} "
+                  f"(p-value {_fmt_num(dsr.get('p_value'))}, {dsr.get('n_trials')} trials)")
 
     print("\n3. FALSIFICATION CRITERIA")
     criterion_results = []
     passes = []
     sharpe = metrics.get('sharpe_ratio')
-    ok1 = sharpe is not None and float(sharpe) > 0
-    passes.append(ok1)
-    criterion_results.append({"name": CRITERIA[0][0], "description": CRITERIA[0][1], "passed": bool(ok1)})
-    print(f"  [{'PASS' if ok1 else 'FAIL'}] {CRITERIA[0][0]}: {CRITERIA[0][1]} -> {_fmt_num(sharpe)}")
     ret = metrics.get('total_return')
-    ok2 = ret is not None and float(ret) > 0
-    passes.append(ok2)
-    criterion_results.append({"name": CRITERIA[1][0], "description": CRITERIA[1][1], "passed": bool(ok2)})
-    print(f"  [{'PASS' if ok2 else 'FAIL'}] {CRITERIA[1][0]}: {CRITERIA[1][1]} -> {_fmt_pct(ret)}")
+    bench_ret = metrics.get('benchmark_total_return')
+    dsr_pvalue = None
+    if isinstance(metrics.get("deflated_sharpe"), dict):
+        dsr_pvalue = metrics["deflated_sharpe"].get("p_value")
+    alpha_pvalue = metrics.get('alpha_pvalue')
+
+    for name, desc, fn in criteria:
+        if name == "oos_sharpe_gt_zero":
+            ok = fn(sharpe)
+        elif name == "oos_total_return_positive":
+            ok = fn(ret)
+        elif name == "oos_total_return_gt_benchmark":
+            ok = bool(ret is not None and bench_ret is not None
+                      and float(ret) > float(bench_ret))
+        elif name == "deflated_sharpe_pvalue_lt_0.10":
+            ok = fn(dsr_pvalue)
+        elif name == "benchmark_alpha_pvalue_lt_0.05":
+            ok = fn(alpha_pvalue)
+        else:
+            ok = False
+        passes.append(ok)
+        criterion_results.append({"name": name, "description": desc, "passed": bool(ok)})
+        print(f"  [{'PASS' if ok else 'FAIL'}] {name}: {desc}")
 
     all_pass = all(passes)
     verdict = "SUPPORTED" if all_pass else "NOT SUPPORTED"
@@ -220,7 +325,19 @@ def run_hypothesis_test(data_path, label, strategy="zscore_mean_reversion"):
     # claim -- higher per-trade costs never improve net performance. Run only
     # on the cointegrated pair fixture so the sweep is pinned to a single
     # data series (the no-effect pair is a control, not a sweep target).
-    cost_rows = run_cost_sweep(data_path) if label.startswith("cointegrated") else []
+    cost_rows = run_cost_sweep(data_path, strategy=strategy) if label.startswith("cointegrated") else []
+
+    observed = {
+        "sharpe_ratio": sharpe,
+        "total_return": ret,
+        "benchmark_total_return": bench_ret,
+        "benchmark_alpha": metrics.get('alpha'),
+        "benchmark_alpha_pvalue": alpha_pvalue,
+        "correlation_with_benchmark": metrics.get('correlation_with_benchmark'),
+        "deflated_sharpe_pvalue": dsr_pvalue,
+        "n_trials": n_trials,
+        "benchmark_path": str(benchmark) if benchmark is not None else None,
+    }
 
     return {
         "label": label,
@@ -229,6 +346,7 @@ def run_hypothesis_test(data_path, label, strategy="zscore_mean_reversion"):
         "all_pass": all_pass,
         "criteria": criterion_results,
         "cost_sweep": cost_rows,
+        "observed": observed,
         "metrics": {
             "sharpe_ratio": sharpe,
             "total_return": ret,
@@ -236,14 +354,19 @@ def run_hypothesis_test(data_path, label, strategy="zscore_mean_reversion"):
     }
 
 
-def _run_backtest_metrics(data_path, commission, slippage, tmpdir_path, params=PARAMS, strategy="zscore_mean_reversion"):
+def _run_backtest_metrics(data_path, commission, slippage, tmpdir_path, params=PARAMS,
+                          strategy="zscore_mean_reversion", benchmark=None, n_trials=None):
     """Run run_backtest.py once at the given cost setting and return metrics.
 
     Uses the same CLI invocation as run_hypothesis_test (multi-symbol panel,
     book pricing, chronological train/val/test split, point-in-time
     validation) but with the caller-specified commission / slippage and the
-    caller-specified strategy params JSON. Returns the parsed metrics.json,
-    or {} if no metrics file was written.
+    caller-specified strategy params JSON. ``benchmark`` is an optional path to
+    a committed buy-and-hold OHLCV file (resolved relative to the committed
+    real-market fixtures directory when relative). ``n_trials`` reports the
+    number of parameter configurations to the Deflated Sharpe Ratio machinery;
+    None disables the correction. Returns the parsed metrics.json, or {} if
+    no metrics file was written.
     """
     cmd = [
         sys.executable,
@@ -262,6 +385,10 @@ def _run_backtest_metrics(data_path, commission, slippage, tmpdir_path, params=P
         "--output", str(tmpdir_path / "results"),
         "--validate-point-in-time",
     ]
+    if benchmark is not None:
+        cmd += ["--benchmark", str(benchmark)]
+    if n_trials is not None:
+        cmd += ["--n-trials", str(int(n_trials))]
     result = subprocess.run(cmd, cwd=str(SCRIPTS_DIR), capture_output=True, text=True)
     if result.returncode != 0:
         print("STDOUT:", result.stdout[-800:])
@@ -274,6 +401,16 @@ def _run_backtest_metrics(data_path, commission, slippage, tmpdir_path, params=P
         with open(metrics_path) as f:
             metrics = json.load(f)
     return metrics
+
+
+def _resolve_benchmark(benchmark_path):
+    """Resolve a benchmark path relative to the committed fixtures directory
+    when it is relative, so callers can pass a bare filename like "MSFT.csv".
+    """
+    p = Path(benchmark_path)
+    if p.is_absolute():
+        return p
+    return ASSETS_DIR / "real_market_data" / p
 
 
 def run_cost_sweep(data_path, strategy="zscore_mean_reversion"):
@@ -469,6 +606,30 @@ def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID, strategy
     return rows
 
 
+def run_benchmark_aware_hypothesis_test(data_path, benchmark_path=BENCHMARK_FILE,
+                                        n_trials=N_TRIALS):
+    """Run the benchmark-aware falsification test on the committed real-market
+    triple (AAPL / MSFT / GOOGL).
+
+    Wraps ``run_hypothesis_test`` with the committed buy-and-hold benchmark and
+    the pre-registered parameter-trial count, using the multi-pair z-score
+    mean-reversion strategy (``multi_pair_zscore_mean_reversion``) that trades
+    every pair in the panel and aggregates into a book. The single-pair guard
+    on ``MeanReversionZScore`` (exactly two assets) is left untouched.
+
+    So callers (and the regression test) have a single documented entry point
+    that exercises the Deflated Sharpe Ratio and the benchmark alpha
+    comparison together.
+    """
+    return run_hypothesis_test(
+        data_path,
+        "aapl_msft_googl triple multi-pair z-score mean reversion benchmark-aware real window",
+        strategy="multi_pair_zscore_mean_reversion",
+        benchmark_path=benchmark_path,
+        n_trials=n_trials,
+    )
+
+
 # Elevated cost levels exercised by the elevated-cost confirmation sweep on
 # the real-market MSFT/GOOGL pair. These are higher than the advertised 3bps
 # (2bp comm + 1bp slip) round-trip, spanning realistic institutional-to-hedge-
@@ -572,22 +733,50 @@ def run_elevated_cost_sweep(data_path, grid=ELEVATED_COST_SWEEP_LEVELS, strategy
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Z-score mean-reversion falsifiable hypothesis test")
+    parser.add_argument("--data", type=str, default=None,
+                        help="Path to the multi-symbol panel CSV (default: run the committed synthetic pair fixtures)")
+    parser.add_argument("--benchmark", type=str, default=None,
+                        help="Buy-and-hold benchmark OHLCV path (default: no benchmark; committed MSFT.csv enables benchmark-aware mode)")
+    parser.add_argument("--no-benchmark", action="store_true",
+                        help="Run the baseline two-criterion test without a benchmark")
+    parser.add_argument("--n-trials", type=int, default=N_TRIALS,
+                        help="Parameter trials for the Deflated Sharpe Ratio")
+    parser.add_argument("--output-json", type=str, default=None, help="Write result JSON to this path")
+    args = parser.parse_args()
+
     results = []
-    for label, filename in FIXTURES:
-        data_path = ASSETS_DIR / filename
-        if not data_path.exists():
-            print(f"Missing fixture: {data_path}")
-            return 1
-        results.append(run_hypothesis_test(data_path, label))
+    if args.data is not None:
+        data_path = Path(args.data)
+        label = "z-score mean reversion benchmark-aware real window"
+        if args.no_benchmark or args.benchmark is None:
+            results.append(run_hypothesis_test(data_path, label))
+        else:
+            results.append(run_benchmark_aware_hypothesis_test(
+                data_path, benchmark_path=args.benchmark, n_trials=args.n_trials))
+    else:
+        for label, filename in FIXTURES:
+            data_path = ASSETS_DIR / filename
+            if not data_path.exists():
+                print(f"Missing fixture: {data_path}")
+                return 1
+            results.append(run_hypothesis_test(data_path, label))
 
     print("\n" + "=" * 80)
     print("SUMMARY")
     print("=" * 80)
     for r in results:
+        obs = r.get("observed", {})
         print(f"  {r['label']}: {r['verdict']} "
-              f"(Sharpe {_fmt_num(r['metrics']['sharpe_ratio'])}, "
-              f"total return {_fmt_pct(r['metrics']['total_return'])})")
+              f"(Sharpe {_fmt_num(obs.get('sharpe_ratio', r['metrics']['sharpe_ratio']))}, "
+              f"total return {_fmt_pct(obs.get('total_return', r['metrics']['total_return']))})")
     print()
+    if args.output_json:
+        with open(args.output_json, "w") as f:
+            json.dump(results, f, indent=2, default=str)
+        print(f"Result written to {args.output_json}")
     return 0
 
 
