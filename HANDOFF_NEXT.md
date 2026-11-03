@@ -1,23 +1,28 @@
-# Handoff — MACD walk-forward falsification guard added
+# Handoff — walk-forward panel inventory verified complete (no gap)
 
 ## What changed
-- Added `skills/quantitative-backtesting/tests/test_walk_forward_macd_real_aapl.py` — MACD walk-forward falsification on AAPL with pre-registered grid, costs, PIT, DSR. 2 passed.
+- No code change was required: the panel/multi-asset walk-forward falsification inventory on committed real fixtures (AAPL / MSFT / GOOGL) was already complete for every registered panel strategy family.
 
-## What was verified
-- MACD WF on AAPL: Sharpe 0.1388, total return +20.31%, DSR p=0.8487 >= 0.10 → NOT SUPPORTED. Focused gate passed.
-- `test_walk_forward.py` + `test_strategy_builder.py` still green (76 tests).
+## What was actually verified
+Ran the full panel walk-forward inventory (committed fixtures only, offline, no live network), all green:
+- zscore / multi_pair_zscore_mean_reversion: 3 pairs + triple — `test_walk_forward_zscore_real_{aapl_msft,aapl_googl,msft_googl}.py`, `test_walk_forward_zscore_triple_real_aapl_msft_googl.py` (5 tests)
+- dual momentum: 3 pairs + triple — `test_walk_forward_dual_momentum_real_{aapl_msft,aapl_googl,msft_googl}.py` (added in db82916), `test_dual_momentum_walk_forward_real_triple_aapl_msft_googl.py` (5 tests)
+- cross-sectional momentum: 3 pairs + triple — `test_walk_forward_cross_sectional_real_{aapl_msft,aapl_googl,msft_googl}.py`, `test_walk_forward_cross_sectional_momentum_real_triple_aapl_msft_googl.py` (5 tests)
+
+All 15 panel walk-forward tests pass. Verdicts are honest falsification outcomes (NOT SUPPORTED under Deflated Sharpe p >= 0.10); no profitability claims. Single-asset families (macd, bollinger, rsi, sma/ema crossover, donchian) have single-asset AAPL walk-forward tests but are not panel/multi-asset families, so they are out of scope for this inventory.
 
 ## What remains unresolved
-- All tested families fail DSR p < 0.10 on committed fixtures (AAPL/MSFT/GOOGL). No profitability/robustness claims warranted.
+- No gap in walk-forward coverage for the three panel/multi-asset families (`cross_sectional_momentum`, `dual_momentum`, `multi_pair_zscore_mean_reversion`). Inventory task is closed.
+- Methodological observation (evidence from this session): the cross-sectional momentum walk-forward tests use `top_quantile=0.5, bottom_quantile=0.5` (symmetric), which `walk_forward.py:695` flags as producing a flat zero portfolio signal by construction ("strategy never takes a position"). The strategy defaults (`strategy_builder.py:1420`) use asymmetric `top_quantile=0.2, bottom_quantile=0.2`. This makes the cross-sectional momentum falsification structurally trivial rather than a genuine signal test.
 
 ## Approaches already tried / failed
-- Followed established test pattern; no new failures.
+- None: inventory verification succeeded; nothing to re-try.
 
 ## One precise next task
-Verify walk-forward coverage inventory is complete for the panel/multi-asset strategy families; if a gap exists, add the matching walk-forward falsification test following the established pattern.
+Re-parameterize the cross-sectional momentum walk-forward tests (the triple test and the three pair-wise tests) to use asymmetric quantiles matching the strategy defaults (`top_quantile=0.2, bottom_quantile=0.2`) so they take genuine long/short positions and constitute a real falsification test. Re-run, re-pin the out-of-sample metrics (Sharpe, total return, Deflated Sharpe p-value/ratio) with relative tolerance, keep as honest falsification controls (expect NOT SUPPORTED). Do not tune to force SUPPORT.
 
 Evidence/constraints:
-- MACD in registry; committed fixtures in `skills/quantitative-backtesting/assets/example_data/real_market_data/`
-- New test: `skills/quantitative-backtesting/tests/test_walk_forward_macd_real_aapl.py` (2 passed)
-
-(End of file - total 19 lines)
+- Files: `skills/quantitative-backtesting/tests/test_walk_forward_cross_sectional_momentum_real_triple_aapl_msft_googl.py` and `tests/test_walk_forward_cross_sectional_real_{aapl_msft,aapl_googl,msft_googl}.py`
+- Current PARAM_GRID uses `top_quantile: [0.5], bottom_quantile: [0.5]`; strategy defaults are `top_quantile=0.2, bottom_quantile=0.2` (`skills/quantitative-backtesting/scripts/strategy_builder.py:1420`)
+- Flat-signal warning observed at `scripts/walk_forward.py:695` during this session's test runs
+- Committed fixtures only; offline; no live network; relative tolerance only, never exact equality
