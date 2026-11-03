@@ -44,3 +44,6 @@ Evidence/constraints:
 - All other cross-sectional tests pass; committed fixtures only, offline, no live network
 
 (End of file - total 63 lines)
+## Update (this session)
+- Ran `tests/test_cross_sectional_momentum_elevated_cost_real_msft_googl.py` to completion: **PASSED** in 5.29s (was reported as slow/exceeding 30 min previously; now runs fine).
+- All cross-sectional momentum tests pass (9/9 from previous changes + elevated cost test). Unit suites `test_walk_forward.py` (194/194) and `test_strategy_builder.py` (33/33) remain green.
