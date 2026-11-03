@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Benchmark-aware falsification test for the z-score mean-reversion family on
-the committed three-asset panel (AAPL / MSFT / GOOGL).
+"""Benchmark-aware falsification test for z-score mean reversion on the
+committed three-asset panel (AAPL / MSFT / GOOGL).
 
 Runs the pre-registered BENCHMARK_CRITERIA set (OOS Sharpe > 0, OOS total
 return > benchmark total return, Deflated Sharpe p-value < 0.10 across the
 pre-registered parameter grid, and raw benchmark alpha p-value < 0.05 vs the
 committed MSFT buy-and-hold benchmark) on the same triple where the baseline
-two-criterion test was already run. Uses the multi-pair z-score
-mean-reversion strategy (``multi_pair_zscore_mean_reversion``) that trades
-every pair in the panel and aggregates into a book. Verdicts are falsification
-outcomes, never profitability claims.
+two-criterion test was already run. Verdicts are falsification outcomes,
+never profitability claims.
 
 Offline, committed fixtures only; no live network.
 """
@@ -47,7 +45,7 @@ def _build_triple_csv(dest: Path) -> Path:
     return out
 
 
-def test_benchmark_aware_hypothesis_runs_on_triple_real_window_zscore():
+def test_benchmark_aware_hypothesis_runs_on_triple_real_window_zscore_mean_reversion():
     for name in ("AAPL.csv", "MSFT.csv", "GOOGL.csv"):
         assert (SRC / name).exists()
 
@@ -74,16 +72,11 @@ def test_benchmark_aware_hypothesis_runs_on_triple_real_window_zscore():
     assert "BENCHMARK" in out.upper() or "Benchmark" in out
 
 
-def test_benchmark_metrics_pinned_on_triple_real_window_zscore():
+def test_benchmark_metrics_pinned_on_triple_real_window_zscore_mean_reversion():
     """Regression guard: the benchmark-aware advertised run on the committed
     triple must reproduce the pinned strategy + benchmark metrics (net of
     costs) so a silent change to the backtest numbers is caught. Relative
-    tolerance only, never exact equality. The verdict is NOT SUPPORTED: the
-    multi-pair z-score mean-reversion strategy earns a positive OOS Sharpe
-    (0.2293) and +8.89% return, but does not beat buy-and-hold MSFT
-    (+90.15%), with benchmark alpha p-value 0.6077 > 0.05 and Deflated Sharpe
-    p-value 0.9427 > 0.10. This is the honest pre-registered outcome; the
-    test does not tune to force SUPPORT.
+    tolerance only, never exact equality.
     """
     for name in ("AAPL.csv", "MSFT.csv", "GOOGL.csv"):
         assert (SRC / name).exists()
@@ -117,17 +110,15 @@ def test_benchmark_metrics_pinned_on_triple_real_window_zscore():
             f"{key} regression: got {got}, expected {exp}"
         )
 
-    # Honest verdict: only oos_sharpe_gt_zero passes; the other three
-    # benchmark-aware criteria fail.
     assert result["verdict"] == "NOT SUPPORTED"
     assert result["all_pass"] is False
     failed = [c["name"] for c in result["criteria"] if not c["passed"]]
+    assert "oos_sharpe_gt_zero" not in failed  # passes
     assert "oos_total_return_gt_benchmark" in failed
     assert "deflated_sharpe_pvalue_lt_0.10" in failed
     assert "benchmark_alpha_pvalue_lt_0.05" in failed
 
 
 if __name__ == "__main__":
-    test_benchmark_aware_hypothesis_runs_on_triple_real_window_zscore()
-    test_benchmark_metrics_pinned_on_triple_real_window_zscore()
-    print("OK")
+    test_benchmark_aware_hypothesis_runs_on_triple_real_window_zscore_mean_reversion()
+    test_benchmark_metrics_pinned_on_triple_real_window_zscore_mean_reversion()
