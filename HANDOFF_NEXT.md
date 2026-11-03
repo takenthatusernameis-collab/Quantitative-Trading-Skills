@@ -33,3 +33,7 @@ Evidence/constraints:
 ## Update (this session)
 - Ran `tests/test_cross_sectional_momentum_elevated_cost_real_msft_googl.py` to completion: **PASSED** in 5.29s. Previous report of >30 min was likely environment-related or stale; test now passes quickly.
 - All cross-sectional momentum tests pass; unit suites remain green.
+
+## Update (this session)
+- Verified `test_cross_sectional_momentum_elevated_cost_real_msft_googl.py` passes (8.2s).
+- Next bounded task: run the full cross-sectional momentum + z-score walk-forward test suites to confirm no regressions after quantile re-parameterization; inspect any remaining structure-only tests that still use symmetric 0.5/0.5 quantiles for whether they emit flat-signal warnings.
