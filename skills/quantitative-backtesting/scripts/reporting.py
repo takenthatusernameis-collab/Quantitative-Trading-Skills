@@ -1188,7 +1188,6 @@ def generate_tear_sheet(
                         plt.close(fig)
                         plot_files.append(heatmap_path)
 
-            print('DEBUG returns', returns is not None, 'save_plots', save_plots)
             if returns is not None:
                 # Equity curve plot
                 if equity_values is not None:
@@ -1268,7 +1267,6 @@ def generate_tear_sheet(
 
                 # Walk-forward equity curve plot
                 wf_results = analysis.get("walk_forward")
-                print("DEBUG wf_results", wf_results is not None, "oos", wf_results.get("oos_returns") is not None if wf_results else None)
                 if wf_results and wf_results.get("oos_returns") is not None:
                     wf_oos_returns = wf_results["oos_returns"]
                     if isinstance(wf_oos_returns, pd.Series) and len(wf_oos_returns) > 0:
