@@ -1,21 +1,13 @@
-# Handoff — dual momentum vs cross-sectional momentum comparison added
+# Handoff — Donchian walk-forward falsification guard added
 
 ## What changed
-- Added `skills/quantitative-backtesting/examples/compare_dual_vs_cross_sectional_triple.py` to compare dual momentum vs cross-sectional momentum on the committed triple (AAPL/MSFT/GOOGL) with same split/costs/benchmark.
-- Ran comparison (OOS test, net of 3bps, benchmark MSFT):
-  - dual_momentum: Sharpe 1.1677, total_return 0.4083, maxDD -0.1055; benchmark TR 0.9015; alpha/deflated_sharpe p None in this direct CLI run (benchmark-aware criteria handled in hypothesis scripts)
-  - cross_sectional_momentum: Sharpe 0.3297, total_return 0.0864, maxDD -0.0795; benchmark TR 0.9015
+- Added `skills/quantitative-backtesting/tests/test_walk_forward_donchian_real_aapl.py` — walk-forward OOS falsification test for Donchian channel breakout trend-following on committed AAPL fixture. Pre-registered grid (period=20, exit_period=10), chronological WF (train12/test12/step12), 2bps+1bps costs, point-in-time validation, DSR. Falsification discipline (no forced SUPPORT). 2 passed.
 
-## Verified
-- `python -m pytest tests/test_dual_momentum_* -q` in skills/quantitative-backtesting → 8 passed (benchmark-aware test pinned and passing).
-- Comparison script executed successfully on committed fixtures.
+## What was verified
+- Donchian WF on AAPL: pooled OOS Sharpe 0.2629, total return +52.1%, DSR p=0.731 (>=0.10) → NOT SUPPORTED on multiple-testing-corrected criterion. Raw Sharpe positive but not DSR-significant. Test pins metrics; passes.
 
 ## What remains unresolved
-- Both underperform strong buy-and-hold MSFT on this window; need to assess if any configuration/robustness treatment can meet falsification criteria or justify different benchmark.
-- Walk-forward/CPCV deeper runs may take long; partial/slow tests need targeted runs.
+- All strategy families tested under WF re-optimization on committed fixtures fail DSR p<0.10. Donchian now added; still fails corrected criterion.
 
-## Failed approaches
-- None new. Previous benchmark-aware dual momentum correctly returned NOT SUPPORTED with honest metrics.
-
-## Precise next task
-Add a worked example showing walk-forward for both strategies on the same triple (or extend comparison to walk-forward) with same costs/benchmark and report OOS aggregate metrics net of costs; verify with a quick targeted test if exists.
+## Next task
+Add walk-forward falsification experiment for mean_reversion (single-asset) or MeanReversionZScore on committed fixtures, mirroring test_walk_forward_rsi_real_aapl.py. Run targeted gate. Do not tune to force SUPPORT.
