@@ -35,7 +35,7 @@ def test_walk_forward_cross_sectional_pairs_real_msft_googl_structure():
     assert (SRC / "GOOGL.csv").exists()
 
     data = _build_pair_data()
-    param_grid = {"lookback": [60], "top_quantile": [0.5], "bottom_quantile": [0.5]}  # symmetric to test structure only
+    param_grid = {"lookback": [60], "top_quantile": [0.2], "bottom_quantile": [0.2]}  # symmetric to test structure only
 
     with contextlib.redirect_stdout(io.StringIO()):
         result = walk_forward_analysis(

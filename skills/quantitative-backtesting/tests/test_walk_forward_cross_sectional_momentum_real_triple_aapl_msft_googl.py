@@ -41,8 +41,8 @@ SLIPPAGE = 0.0001     # 1 bps per trade
 # Fixed before any result is inspected; small enough to stay fast in CI.
 PARAM_GRID = {
     "lookback": [10, 20],
-    "top_quantile": [0.5],
-    "bottom_quantile": [0.5],
+    "top_quantile": [0.2],
+    "bottom_quantile": [0.2],
 }
 
 TRAIN_MONTHS = 12
