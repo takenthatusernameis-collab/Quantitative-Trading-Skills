@@ -1,26 +1,32 @@
-# Handoff — verified subsets for RSI benchmark-aware + panel support; full suite still slow
+# Handoff — full quant-backtesting suite verified green (981/981); no regressions
 
 ## What changed
-- Confirmed presence of panel/book support in `RSIMeanReversion` in `skills/quantitative-backtesting/scripts/strategy_builder.py` (`generate_signals` handles dict/MultiIndex panels, `generate_target_weights` returns per-asset book).
-- Confirmed `skills/quantitative-backtesting/examples/rsi_mean_reversion_hypothesis.py` extended with benchmark-aware machinery (MSFT benchmark, N_TRIALS=5, BENCHMARK_CRITERIA with alpha/Deflated Sharpe p-values, `run_benchmark_aware_hypothesis_test`).
-- Confirmed `skills/quantitative-backtesting/tests/test_rsi_benchmark_aware_real_triple_aapl_msft_googl.py` exists and passes.
+- Ran the full quant-backtesting test suite assigned in HANDOFF.md, capturing output to `/tmp/full_suite.log`:
+  `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH && cd skills/quantitative-backtesting && python3 -m pytest tests/ -q -p no:cacheprovider`
+- Result: **981 passed, 0 failed, 437 warnings in 2044.26s (~34 min)**. This is real, produced evidence — not a handoff claim.
+- Fast subset baseline re-verified first (143 passed in 17.95s): `test_strategy_builder.py` + `test_run_backtest.py` + `test_rsi_benchmark_aware_real_triple_aapl_msft_googl.py`.
+- Working tree restored to clean baseline after the run. During the run, `test_reproducible_backtest_example.py` regenerated committed files under `examples/example_reproducible_output/` (metrics.json, tear_sheet_summary.json, report.txt, tear_sheet.html, data_provenance.json) that were stale relative to the current code (e.g. missing `var_99`/`cvar_99` fields, old load_timestamp). These were reverted with `git checkout --` to preserve the baseline; they are NOT a defect in the suite — the suite passed.
 
 ## What was actually verified
-- Subsets pass (143 passed, 27 warnings in ~18s): `tests/test_strategy_builder.py`, `tests/test_run_backtest.py`, `tests/test_rsi_benchmark_aware_real_triple_aapl_msft_googl.py`. New benchmark-aware test reports honest NOT SUPPORTED (sharpe -0.2979, total_return -31.84% vs MSFT +90.15%, alpha pval 0.4367, deflated_sharpe pval 0.9859; all 4 criteria fail). All existing RSI tests pass.
-- Full suite `skills/quantitative-backtesting/tests/` started multiple times; still running slowly / not observed to complete in this session (progress seen at low percentages). Working tree clean; latest commit `8c6c99e` includes related example outputs/HANDOFF updates.
+- Full suite green: 981/981, exit 0. No regressions from the RSI benchmark-aware machinery added in commit a42d367 (latest).
+- Environment: system python3.12, pandas 3.1.0, numpy 2.5.4, pytest 9.2.0. Offline, committed fixtures only (`assets/example_data/real_market_data/{AAPL,MSFT,GOOGL}.csv` + sample fixtures). No live network.
+- The 437 warnings are pre-existing pandas 3.x deprecation warnings (e.g. `DataFrame.set_index(inplace=...)`, `CrossSectionalMomentum` flat-signal advisory); none are errors.
 
 ## What remains unresolved
-- Full quant-backtesting test suite completion and confirmation of no regressions across all tests (especially anything affected by shared `strategy_builder.py` changes). Need a definitive pass/fail from a complete run.
+- The full suite takes ~34 min to run. Per-file focused gates are the reliable verification mode for iterative quant work (e.g. `tests/test_walk_forward.py` alone is 195 tests / ~186s; the slow framework gate walk_forward+cpcv+resolution is 303 tests / ~810s).
+- Guard coverage survey (benchmark-aware / elevated-cost-sweep / param-sensitivity / walk-forward) across all 10 families:
+  - Complete (all four): dual_momentum, rsi, zscore, cross_sectional_momentum.
+  - Benchmark-aware only, sweeps present in example code but NOT pinned by regression tests: bollinger_bands, donchian_breakout, ema_cross, macd, mean_reversion, simple_momentum (all single-asset on committed AAPL).
+- All families evaluate to NOT SUPPORTED on committed fixtures under benchmark-aware / walk-forward criteria net of costs — a falsification outcome on fixtures, not evidence about any market.
 
 ## Approaches already tried / failed
-- Running full suite repeatedly in this session was slow/inconclusive (killed processes). The deterministic fix was already applied by previous agent (RSI panel-capable). No new failures observed in affected subsets.
+- Repeated full-suite runs were slow/inconclusive in prior sessions; this session the run completed once with a long timeout (34 min) and a single captured log. No approach change was needed — the deterministic blocker was simply time, now bounded and recorded.
+- Real-data network fetch remains blocked (Yahoo Finance returns HTTP 429); committed fixtures are the only evidence source.
 
 ## One precise next task
-1. Run the full quant-backtesting suite with a long timeout and capture output to a file: `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH && cd /home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills && timeout 1800 python -m pytest skills/quantitative-backtesting/tests/ -q 2>&1 | tail -30`.
-2. If all pass, no commit needed (working tree clean). If failures appear, inspect the failing tests - changes are isolated to `RSIMeanReversion` in `strategy_builder.py` plus the new RSI benchmark-aware test/example; fix with smallest reversible change or leave evidence-based handoff.
-3. If the suite is extremely slow due to environment, consider running with `-x` to fail fast or parallelizing only if safe and consistent with repo conventions.
+Pin the elevated-cost-sweep and parameter-sensitivity falsification results for the six single-asset families that already have the sweep machinery in their example scripts but no regression tests for it. Concretely, for one family (e.g. `ema_cross_hypothesis.py`, which has `run_elevated_cost_sweep` + `PARAM_SENSITIVITY_GRID` + `run_param_sensitivity_sweep`):
+1. Add `tests/test_ema_cross_elevated_cost_real_aapl.py` and `tests/test_ema_cross_param_sensitivity_real_aapl.py`, mirroring `tests/test_dual_momentum_elevated_cost_real_triple_aapl_msft_googl.py` / `test_dual_momentum_param_sensitivity_real_triple_aapl_msft_googl.py` (single-asset AAPL, relative-tolerance pinned metrics, honest verdict asserted — expect NOT SUPPORTED, do not tune to force SUPPORT).
+2. Verify with a focused gate: the two new tests + `test_ema_cross_benchmark_aware_real_aapl.py` + `test_walk_forward_ema_crossover_real_aapl.py`.
+3. Repeat for the remaining five families (bollinger_bands, donchian_breakout, macd, mean_reversion, simple_momentum) if time permits; otherwise hand off after one.
 
-Evidence/constraints:
-- Offline, committed fixtures only; MSFT as buy-and-hold benchmark; relative tolerance only; no tuning to force SUPPORT.
-- Env: system python3.12, pandas 3.1.0, numpy 2.5.4, pytest 9.2.0 (+matplotlib); `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`
-- Working tree clean (commit 8c6c99e is latest).
+Constraints: offline only, committed fixtures only, no live network, no profitability claims, do not tune parameters to force SUPPORT. Env: `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`. Do not commit unless explicitly asked.
