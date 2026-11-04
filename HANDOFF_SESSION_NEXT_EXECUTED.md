@@ -1,21 +1,14 @@
 # Handoff — session
 
 ## What changed
-- Evaluated the previously untested dual momentum family on the committed three-asset panel (AAPL/MSFT/GOOGL): SUPPORTED at all tested cost levels (Sharpe 1.1677 → 0.7804, Return 40.83% → 26.73%, 2bp+1bp through 20bp+10bp), chronological disjoint split, PIT true, panel book pricing, net of costs.
-- Added three regression tests pinning this result: `tests/test_dual_momentum_hypothesis_real_triple_aapl_msft_googl.py`, `tests/test_dual_momentum_elevated_cost_real_triple_aapl_msft_googl.py`, and `tests/test_dual_momentum_param_sensitivity_real_triple_aapl_msft_googl.py` (pinned metrics per cost level and per parameter setting, relative tolerance 1e-3). Added `run_param_sensitivity_sweep` + `PARAM_SENSITIVITY_GRID` to `examples/dual_momentum_hypothesis.py`.
-- Verified no regression: prior z-score and cross-sectional-momentum elevated-cost and param-sensitivity triple guards still pass; `test_mean_reversion_hypothesis.py`, `test_rsi_mean_reversion_hypothesis.py`, `test_panel_reference_pinned.py`, `test_examples_coverage.py` — 52 passed.
+- Inspected remaining single-asset families needing elevated-cost + param-sensitivity guards. bollinger_bands, donchian_breakout, mean_reversion already have both guards present and pass. Only simple_momentum remains, and its example script (simple_momentum_hypothesis.py) lacks the standard `run_elevated_cost_sweep` / `run_param_sensitivity_sweep` machinery and `ELEVATED_COST_SWEEP_LEVELS` constant that the MACD/EMA/Bollinger tests import.
 
 ## What was actually verified
-- New dual momentum tests: 3 passed in 23.31s.
-- Prior regression guards: 3 passed in 26.69s.
-- Fast existing groups: 52 passed in 227.61s.
-- Offline, committed fixtures only; no live network.
+- Confirmed via glob/grep that no simple_momentum elevated-cost or param-sensitivity test files exist.
+- Confirmed `_run_backtest_metrics` in simple_momentum does not accept a params argument; sweep machinery would require refactor.
 
 ## What remains unresolved
-- Dual momentum is the first family on the triple to pass pre-registered falsification criteria net of costs, survive the full elevated-cost sweep, AND remain SUPPORTED across a pre-registered parameter perturbation grid. Multiple-testing correction (Deflated Sharpe Ratio) and benchmark (buy-and-hold) alpha comparison not yet applied; single-panel result on committed fixtures, not evidence about any market.
-- Full `test_falsifiable_hypothesis_example.py` suite remains slow (minutes per test); not re-run in full.
+- simple_momentum needs `run_elevated_cost_sweep` + `run_param_sensitivity_sweep` added (mirroring macd) before tests can be pinned.
 
 ## One precise next task
-Add benchmark comparison and, if multiple parameter settings are compared, the Deflated Sharpe Ratio multiple-testing correction to dual momentum on the same triple (AAPL/MSFT/GOOGL) using committed fixtures only, reusing the machinery already in `falsifiable_hypothesis_example.py` (`--benchmark`, `--n-trials`, `walk_forward` Deflated Sharpe Ratio). Pin observed strategy + benchmark metrics (net of costs) as regression guards with relative tolerance. Do not tune to force SUPPORT.
-
-(End of file)
+Add machinery to examples/simple_momentum_hypothesis.py: define ELEVATED_COST_SWEEP_LEVELS, refactor _run_backtest_metrics to accept params, add run_elevated_cost_sweep and run_param_sensitivity_sweep using PARAM_SENSITIVITY_GRID, then add tests/test_simple_momentum_elevated_cost_real_aapl.py and tests/test_simple_momentum_param_sensitivity_real_aapl.py mirroring MACD tests, capturing metrics by running sweeps. Verify with focused gate: new tests + benchmark-aware + walk-forward.
