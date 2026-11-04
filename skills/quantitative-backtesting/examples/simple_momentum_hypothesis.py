@@ -64,8 +64,8 @@ HYPOTHESIS = (
 )
 
 CRITERIA = [
-    ("oos_sharpe_gt_zero", "oos_sharpe > 0 (net of costs)", _gt_zero),
-    ("oos_total_return_positive", "oos_total_return > 0 (net of costs)", _gt_zero),
+    ("oos_sharpe_gt_zero", "oos_sharpe > 0 (net of costs)"),
+    ("oos_total_return_positive", "oos_total_return > 0 (net of costs)"),
     ("deflated_alpha_ratio_gt_threshold", "deflated_alpha_ratio > 0.5 (multiple-benchmark deflated alpha)"),
     ("capacity_gt_initial_capital", "strategy capacity (notional) > initial capital at advertised impact level"),
 ]
