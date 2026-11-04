@@ -98,6 +98,37 @@ CAPACITY_SENSITIVITY_LEVELS = [0.0, 0.05, 0.1, 0.2]
 COMMISSION = 0.0002
 SLIPPAGE = 0.0001
 
+# Primary buy-and-hold benchmark for the benchmark-aware simple-momentum
+# hypothesis on single AAPL (self-benchmark), matching the single-asset
+# comparison style used by the MACD / Donchian / EMA / Bollinger Bands /
+# mean-reversion benchmark-aware guards.
+BENCHMARK_FILE = "AAPL.csv"
+
+# Pre-registered parameter grid (perturbations of the advertised fast=10 /
+# slow=30), fixed before any result is inspected. N = len(...) = 6 trials
+# reported to the Deflated Sharpe Ratio machinery.
+PARAM_SENSITIVITY_GRID = (
+    (10, 30),   # advertised baseline
+    (7, 30),    # shorter fast window
+    (15, 30),   # longer fast window
+    (10, 20),   # shorter slow window
+    (10, 40),   # longer slow window
+    (5, 20),    # both shorter
+)
+N_TRIALS = len(PARAM_SENSITIVITY_GRID)
+
+BENCHMARK_CRITERIA = [
+    ("oos_sharpe_gt_zero", "oos_sharpe > 0 (net of costs)"),
+    ("oos_total_return_gt_benchmark",
+     "oos_total_return > benchmark_total_return (net of costs)"),
+    ("deflated_sharpe_pvalue_lt_0.10",
+     "deflated_sharpe_pvalue < 0.10 (multiple-testing corrected)"),
+    ("benchmark_alpha_pvalue_lt_0.05",
+     "benchmark_alpha_pvalue < 0.05 (raw, vs buy-and-hold)"),
+]
+
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets" / "example_data"
+
 # Cost settings exercised by the cost sweep. The advertised setting is the
 # hypothesis's operating assumption; the zero-cost setting is the frictionless
 # upper bound. Comparing the two is a regression guard that the advertised
@@ -138,6 +169,14 @@ def _fmt_num(v, nd=4):
         return f"{float(v):.{nd}f}"
     except Exception:
         return "N/A"
+
+
+def _resolve_benchmark(benchmark_path):
+    """Resolve a benchmark name (e.g. "AAPL.csv") to a committed fixture path."""
+    p = Path(benchmark_path)
+    if p.is_absolute():
+        return p
+    return ASSETS_DIR / "real_market_data" / p
 
 
 def _resolve_benchmarks(data_path, benchmark_path=None):
@@ -366,7 +405,7 @@ def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1):
     print("  NOT SUPPORTED = at least one criterion failed (hypothesis falsified)")
     print("=" * 80)
 
-    return {
+    result = {
         "hypothesis": HYPOTHESIS,
         "verdict": verdict,
         "all_pass": all_pass,
@@ -381,6 +420,24 @@ def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1):
             "test_resolution": test_resolution,
         },
     }
+    # Benchmark-aware callers (single-asset self-benchmark convention) receive
+    # the observed strategy-vs-benchmark metrics in the same shape as the
+    # sibling MACD / Donchian / EMA / Bollinger Bands / mean-reversion guards,
+    # so a regression test can pin them with relative tolerance.
+    if benchmark_path is not None:
+        dsr = metrics.get("deflated_sharpe") or {}
+        result["observed"] = {
+            "sharpe_ratio": sharpe,
+            "total_return": ret,
+            "benchmark_total_return": bench_return,
+            "benchmark_alpha": alpha,
+            "benchmark_alpha_pvalue": metrics.get("alpha_pvalue"),
+            "correlation_with_benchmark": metrics.get("correlation_with_benchmark"),
+            "deflated_sharpe_pvalue": dsr.get("p_value"),
+            "n_trials": n_trials,
+            "benchmark_path": str(benchmark) if benchmark is not None else None,
+        }
+    return result
 
 
 def _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdir_path, impact_coefficient=0.1):
@@ -821,6 +878,34 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
     print("=" * 80)
 
     return rows
+
+
+def _resolve_benchmark(benchmark_path):
+    p = Path(benchmark_path)
+    if p.is_absolute():
+        return p
+    return ASSETS_DIR / "real_market_data" / p
+
+
+def run_benchmark_aware_hypothesis_test(data_path, benchmark_path=BENCHMARK_FILE,
+                                        n_trials=N_TRIALS):
+    """Run the benchmark-aware falsification test for simple momentum.
+
+    Mirrors the single-asset benchmark-aware convention used by the MACD /
+    Donchian / EMA / Bollinger Bands / mean-reversion guards: the strategy
+    asset is the committed single-asset panel (AAPL) and the buy-and-hold
+    benchmark is AAPL.csv itself (self-benchmark). Evaluates the four
+    pre-registered BENCHMARK_CRITERIA (OOS Sharpe > 0, OOS total return >
+    benchmark total return, Deflated Sharpe p-value < 0.10 across the
+    pre-registered parameter grid, raw benchmark alpha p-value < 0.05 vs
+    buy-and-hold). Verdicts are falsification outcomes, never profitability
+    claims.
+    """
+    return run_hypothesis_test(
+        data_path,
+        benchmark_path=benchmark_path,
+        n_trials=n_trials,
+    )
 
 
 def main():
