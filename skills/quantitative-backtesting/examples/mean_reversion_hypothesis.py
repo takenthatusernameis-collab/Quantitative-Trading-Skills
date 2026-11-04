@@ -154,6 +154,10 @@ BENCHMARK_CRITERIA = [
 
 def run_hypothesis_test(data_path, label, benchmark_path=None, n_trials=None):
     data_path = Path(data_path)
+    if benchmark_path is None:
+        cand = data_path.parent / "sample_benchmark.csv"
+        if cand.exists():
+            benchmark_path = cand
     benchmark = _resolve_benchmark(benchmark_path) if benchmark_path is not None else None
     raw_criteria = BENCHMARK_CRITERIA if benchmark is not None else CRITERIA
     criteria = []

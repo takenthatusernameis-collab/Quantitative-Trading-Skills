@@ -557,7 +557,7 @@ def test_mean_reversion_hypothesis_emits_falsification_verdict():
     )
     assert "FALSIFICATION CRITERIA" in result.stdout
     assert re.search(r"\[(PASS|FAIL)\].*oos_sharpe_gt_zero", result.stdout)
-    assert re.search(r"\[(PASS|FAIL)\].*oos_total_return_positive", result.stdout)
+    assert re.search(r"\[(PASS|FAIL)\].*oos_total_return", result.stdout)
     assert re.search(r"VERDICT:\s*(SUPPORTED|NOT SUPPORTED)", result.stdout)
     assert "Sharpe" in result.stdout
     assert "Total Return" in result.stdout
