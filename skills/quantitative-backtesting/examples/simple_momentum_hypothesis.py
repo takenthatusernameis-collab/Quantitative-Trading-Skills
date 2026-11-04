@@ -64,8 +64,8 @@ HYPOTHESIS = (
 )
 
 CRITERIA = [
-    ("oos_sharpe_gt_zero", "oos_sharpe > 0 (net of costs)"),
-    ("oos_total_return_positive", "oos_total_return > 0 (net of costs)"),
+    ("oos_sharpe_gt_zero", "oos_sharpe > 0 (net of costs)", _gt_zero),
+    ("oos_total_return_positive", "oos_total_return > 0 (net of costs)", _gt_zero),
     ("deflated_alpha_ratio_gt_threshold", "deflated_alpha_ratio > 0.5 (multiple-benchmark deflated alpha)"),
     ("capacity_gt_initial_capital", "strategy capacity (notional) > initial capital at advertised impact level"),
 ]
@@ -117,14 +117,35 @@ PARAM_SENSITIVITY_GRID = (
 )
 N_TRIALS = len(PARAM_SENSITIVITY_GRID)
 
+def _gt_zero(v):
+    return v is not None and float(v) > 0.0
+
+
+def _lt_0_10(v):
+    return v is not None and float(v) < 0.10
+
+
+def _lt_0_05(v):
+    return v is not None and float(v) < 0.05
+
+
+def _oos_total_return_gt_benchmark(strategy_total_return, benchmark_total_return):
+    return (strategy_total_return is not None
+            and benchmark_total_return is not None
+            and float(strategy_total_return) > float(benchmark_total_return))
+
+
 BENCHMARK_CRITERIA = [
-    ("oos_sharpe_gt_zero", "oos_sharpe > 0 (net of costs)"),
+    ("oos_sharpe_gt_zero", "oos_sharpe > 0 (net of costs)", _gt_zero),
     ("oos_total_return_gt_benchmark",
-     "oos_total_return > benchmark_total_return (net of costs)"),
+     "oos_total_return > benchmark_total_return (net of costs)",
+     _oos_total_return_gt_benchmark),
     ("deflated_sharpe_pvalue_lt_0.10",
-     "deflated_sharpe_pvalue < 0.10 (multiple-testing corrected)"),
+     "deflated_sharpe_pvalue < 0.10 (multiple-testing corrected)",
+     _lt_0_10),
     ("benchmark_alpha_pvalue_lt_0.05",
-     "benchmark_alpha_pvalue < 0.05 (raw, vs buy-and-hold)"),
+     "benchmark_alpha_pvalue < 0.05 (raw, vs buy-and-hold)",
+     _lt_0_05),
 ]
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets" / "example_data"
@@ -210,7 +231,7 @@ def _resolve_benchmarks(data_path, benchmark_path=None):
     return result
 
 
-def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1):
+def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1, n_trials=None):
     # Try to find scripts dir relative to repo root or relative to skill dir
     script_dir = Path(__file__).resolve().parent
     # Check if we're in examples dir (under skill) or in root
@@ -268,6 +289,8 @@ def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1):
             "--validate-point-in-time",
             "--impact-coefficient", str(impact_coefficient),
         ]
+        if n_trials is not None:
+            cmd.extend(["--n-trials", str(int(n_trials))])
         if bench_paths:
             cmd.extend(["--benchmark"] + [str(p) for p in bench_paths])
 
@@ -340,32 +363,85 @@ def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1):
     criterion_results = []
     passes = []
     sharpe = metrics.get('sharpe_ratio')
-    ok1 = sharpe is not None and float(sharpe) > 0
-    passes.append(ok1)
-    criterion_results.append({"name": CRITERIA[0][0], "description": CRITERIA[0][1], "passed": bool(ok1)})
-    print(f"  [{'PASS' if ok1 else 'FAIL'}] {CRITERIA[0][0]}: {CRITERIA[0][1]}")
     ret = metrics.get('total_return')
-    ok2 = ret is not None and float(ret) > 0
-    passes.append(ok2)
-    criterion_results.append({"name": CRITERIA[1][0], "description": CRITERIA[1][1], "passed": bool(ok2)})
-    print(f"  [{'PASS' if ok2 else 'FAIL'}] {CRITERIA[1][0]}: {CRITERIA[1][1]}")
-    da = metrics.get('deflated_alpha')
-    da_ratio = None
-    if isinstance(da, dict):
-        da_ratio = da.get('deflated_alpha_ratio')
-    ok3 = da_ratio is not None and float(da_ratio) > DEFLATED_ALPHA_THRESHOLD
-    passes.append(ok3)
-    criterion_results.append({"name": CRITERIA[2][0], "description": CRITERIA[2][1], "passed": bool(ok3)})
-    print(f"  [{'PASS' if ok3 else 'FAIL'}] {CRITERIA[2][0]}: {CRITERIA[2][1]} (ratio={_fmt_num(da_ratio)})")
+    bench_ret = bench_return
+    dsr = metrics.get("deflated_sharpe") or {}
+    dsr_pvalue = dsr.get("p_value") if isinstance(dsr, dict) else None
+    alpha_pvalue = metrics.get('alpha_pvalue')
 
-    # Test resolution beside the Deflated Alpha Ratio criterion: the smallest
-    # annualized alpha the test could have confirmed at the sample size
-    # actually available (run_backtest.py attaches metrics["test_resolution"]
-    # to every multi-benchmark run), and whether that threshold sits beyond the
-    # stated plausibility bound. A measurement, not a correction -- it changes
-    # no criterion outcome and no verdict. A FAIL verdict on a criterion the
-    # sample cannot resolve is a statement about the sample size, not about
-    # the strategy.
+    # Determine criteria set
+    using_benchmark = bench_paths and len(bench_paths) > 0
+    if using_benchmark and all(hasattr(c, '__len__') and len(c) == 3 for c in BENCHMARK_CRITERIA):
+        criteria_list = BENCHMARK_CRITERIA
+    else:
+        criteria_list = CRITERIA
+
+    for entry in criteria_list:
+        if len(entry) == 3:
+            name, desc, fn = entry
+        else:
+            name, desc = entry[0], entry[1]
+            if name == "oos_sharpe_gt_zero":
+                fn = _gt_zero
+            elif name == "oos_total_return_positive":
+                fn = _gt_zero
+            elif name == "oos_total_return_gt_benchmark":
+                def fn(x=None, br=bench_ret):
+                    return _oos_total_return_gt_benchmark(ret, br)
+            elif name == "deflated_sharpe_pvalue_lt_0.10":
+                fn = _lt_0_10
+            elif name == "benchmark_alpha_pvalue_lt_0.05":
+                fn = _lt_0_05
+            elif name == "deflated_alpha_ratio_gt_threshold":
+                def fn(x=None):
+                    da = metrics.get('deflated_alpha')
+                    if isinstance(da, dict):
+                        v = da.get('deflated_alpha_ratio')
+                        return v is not None and float(v) > DEFLATED_ALPHA_THRESHOLD
+                    return False
+            elif name == "capacity_gt_initial_capital":
+                def fn(x=None):
+                    cap = metrics.get('capacity')
+                    return cap is not None and float(cap) > CAPACITY_INITIAL_CAPITAL
+            else:
+                fn = _gt_zero
+
+        if name == "oos_sharpe_gt_zero":
+            ok = fn(sharpe)
+        elif name == "oos_total_return_positive":
+            ok = fn(ret)
+        elif name == "oos_total_return_gt_benchmark":
+            ok = _oos_total_return_gt_benchmark(ret, bench_ret)
+        elif name == "deflated_sharpe_pvalue_lt_0.10":
+            ok = fn(dsr_pvalue)
+        elif name == "benchmark_alpha_pvalue_lt_0.05":
+            ok = fn(alpha_pvalue)
+        elif name == "deflated_alpha_ratio_gt_threshold":
+            da = metrics.get('deflated_alpha')
+            da_ratio = da.get('deflated_alpha_ratio') if isinstance(da, dict) else None
+            ok = da_ratio is not None and float(da_ratio) > DEFLATED_ALPHA_THRESHOLD
+        elif name == "capacity_gt_initial_capital":
+            cap = metrics.get('capacity')
+            ok = cap is not None and float(cap) > CAPACITY_INITIAL_CAPITAL
+        else:
+            ok = False
+        passes.append(ok)
+        criterion_results.append({"name": name, "description": desc, "passed": bool(ok)})
+        if name == "deflated_alpha_ratio_gt_threshold":
+            da = metrics.get('deflated_alpha')
+            da_ratio = da.get('deflated_alpha_ratio') if isinstance(da, dict) else None
+            print(f"  [{'PASS' if ok else 'FAIL'}] {name}: {desc} (ratio={_fmt_num(da_ratio)})")
+        elif name == "capacity_gt_initial_capital":
+            cap = metrics.get('capacity')
+            print(f"  [{'PASS' if ok else 'FAIL'}] {name}: {desc} (capacity={_fmt_num(cap)})")
+        elif name == "deflated_sharpe_pvalue_lt_0.10":
+            print(f"  [{'PASS' if ok else 'FAIL'}] {name}: {desc} (p={_fmt_num(dsr_pvalue)})")
+        elif name == "benchmark_alpha_pvalue_lt_0.05":
+            print(f"  [{'PASS' if ok else 'FAIL'}] {name}: {desc} (p={_fmt_num(alpha_pvalue)})")
+        else:
+            print(f"  [{'PASS' if ok else 'FAIL'}] {name}: {desc}")
+
+    # Test resolution beside the Deflated Alpha Ratio criterion
     test_resolution = metrics.get("test_resolution") or {}
     if test_resolution:
         alpha_status = test_resolution.get("alpha_status")
@@ -389,12 +465,6 @@ def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1):
                 f"  Test resolution (criterion 3): not resolvable "
                 f"({test_resolution.get('alpha_reason') or test_resolution.get('message')})"
             )
-    capacity = metrics.get('capacity')
-    ok4 = capacity is not None and float(capacity) > CAPACITY_INITIAL_CAPITAL
-    passes.append(ok4)
-    criterion_results.append({"name": CRITERIA[3][0], "description": CRITERIA[3][1], "passed": bool(ok4)})
-    print(f"  [{'PASS' if ok4 else 'FAIL'}] {CRITERIA[3][0]}: {CRITERIA[3][1]} "
-          f"(capacity={_fmt_num(capacity)})")
 
     all_pass = all(passes)
     verdict = "SUPPORTED" if all_pass else "NOT SUPPORTED"
@@ -435,7 +505,7 @@ def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1):
             "correlation_with_benchmark": metrics.get("correlation_with_benchmark"),
             "deflated_sharpe_pvalue": dsr.get("p_value"),
             "n_trials": n_trials,
-            "benchmark_path": str(benchmark) if benchmark is not None else None,
+            "benchmark_path": str(benchmark_path) if benchmark_path is not None else None,
         }
     return result
 
