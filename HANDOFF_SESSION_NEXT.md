@@ -1,25 +1,26 @@
-# Handoff — Bollinger Bands benchmark-aware falsification guard added
+# Handoff — Benchmark-aware falsification guard coverage confirmed complete
 
 ## What changed
-- Confirmed `run_backtest.py` supports the `bollinger_bands` strategy (`skills/quantitative-backtesting/scripts/strategy_builder.py:1454`, defaults `{"period": 20, "std_dev": 2.0}`).
-- Added `skills/quantitative-backtesting/examples/bollinger_bands_hypothesis.py` (benchmark-aware `run_benchmark_aware_hypothesis_test` + `BENCHMARK_CRITERIA` + `N_TRIALS=6`, buy-and-hold AAPL self-benchmark, 3bp costs, chronological 0.6/0.2/0.2 split, PIT validation), mirroring `ema_cross_hypothesis.py` / `donchian_breakout_hypothesis.py`.
-- Added `skills/quantitative-backtesting/tests/test_bollinger_bands_benchmark_aware_real_aapl.py` mirroring `test_ema_cross_benchmark_aware_real_aapl.py`: asserts verdict NOT SUPPORTED, all four BENCHMARK_CRITERIA pass/fail, and pinned observed net-of-costs metrics (rel tol 1e-3).
-- Working tree otherwise clean: only the two new files are untracked.
+- No code changes this session. Inspected `examples/` and `tests/` per prior handoff.
+- Confirmed every hypothesis family that implements `run_benchmark_aware_hypothesis_test` (bollinger_bands, cross_sectional_momentum, donchian_breakout, dual_momentum, ema_cross, macd, mean_reversion, rsi_mean_reversion, simple_momentum, zscore_mean_reversion) has at least one benchmark-aware test:
+  - single-asset: bollinger_bands, donchian_breakout, ema_cross, macd, mean_reversion, simple_momentum
+  - multi-asset panel: cross_sectional_momentum, dual_momentum, rsi_mean_reversion, zscore_mean_reversion
+- `pairs_trading` is not a `run_backtest` strategy name (no `pairs` strategy in scripts/run_backtest.py); it is a derived signal pattern, not a standalone hypothesis family, so no benchmark-aware guard applies.
+- Re-ran `test_rsi_benchmark_aware_real_triple_aapl_msft_googl.py`: 2 passed.
 
 ## What was actually verified
-- New Bollinger Bands test: 2 passed.
-- No-regression gate: bollinger + ema + donchian + macd benchmark-aware tests: 8 passed in 10.82s.
-- Observed on committed AAPL (net of 3bp costs): Sharpe -1.3014, return -42.55% vs benchmark 77.43%, alpha p=0.0199, deflated Sharpe p=0.9999 (6 trials). Criteria: oos_sharpe_gt_zero FAIL, oos_total_return_gt_benchmark FAIL, deflated_sharpe_pvalue_lt_0.10 FAIL, benchmark_alpha_pvalue_lt_0.05 PASS → verdict NOT SUPPORTED. Elevated-cost sweep stays NOT SUPPORTED (stable).
-- Offline, committed fixtures only (assets/example_data/real_market_data/AAPL.csv); no live network; no tuning to force SUPPORT.
+- Coverage audit by grep + directory listing; benchmark-aware test presence confirmed for all 10 families.
+- RSI mean-reversion benchmark-aware test: 2 passed (2.72s).
 
 ## What remains unresolved
-- Full quant-backtesting suite (971 tests) is too slow to complete in-session; affected subsets confirmed green per prior handoffs. No remaining single-asset family lacks a benchmark-aware guard (MACD, Donchian, EMA, Bollinger Bands all now have one).
+- Full quant-backtesting suite (971 tests) not run this session; subsets remain green per prior handoffs.
+- No demonstrated methodological gap requiring a new guard.
 
 ## Approaches already tried / failed
-- None this session. Direct relative `--data` path fails because `_run_backtest_metrics` subprocesses with `cwd=scripts/`; tests pass an absolute `data_path` (via `SRC`).
+- None this session.
 
 ## One precise next task
-All four single-asset families (MACD, Donchian, EMA, Bollinger Bands) now have benchmark-aware + elevated-cost-sweep + param-sensitivity falsification guards on committed AAPL. The bounded single-asset guard work is complete.
-Next candidate: extend benchmark-aware coverage to a multi-asset panel, or review whether any remaining hypothesis family (e.g. zscore_mean_reversion, pairs_trading) lacks a benchmark-aware guard. Inspect `skills/quantitative-backtesting/examples/` and `tests/` to confirm coverage before declaring the falsification-guard layer complete; do not add guards merely for completeness without a demonstrated methodological gap.
+The bounded single-asset and panel benchmark-aware falsification-guard layer is complete. Next candidate: add genuinely out-of-sample (walk-forward / CPCV) benchmark-aware guards for one family that currently only has in-sample-ish or single-split benchmark-aware tests, OR improve statistical reporting (e.g., bootstrap confidence intervals / multiple-testing correction across families). Inspect `examples/walk_forward_compare_triple.py` and existing `test_walk_forward_*_benchmark` tests first; do not add guards merely for completeness without a demonstrated methodological gap.
 
-Constraints: offline only; relative tolerance only; verdict stays NOT SUPPORTED unless evidence genuinely warrants SUPPORT; smallest reversible change; do not touch inherited marketplace schemas/attribution/licenses.
+Constraints: offline only; relative tolerance only; verdict stays NOT SUPPORTED unless evidence warrants SUPPORT; smallest reversible change; do not touch inherited marketplace schemas/attribution/licenses.
+""" filePath="/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/HANDOFF_SESSION_NEXT.md
