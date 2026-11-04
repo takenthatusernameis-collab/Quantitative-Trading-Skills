@@ -287,6 +287,8 @@ def run_elevated_cost_sweep(data_path, grid=ELEVATED_COST_SWEEP_LEVELS):
     print("\n" + "=" * 80)
     print("ELEVATED COST SENSITIVITY SWEEP")
     print("=" * 80)
+    print(f"  {'cost level':<36} {'comm':>6} {'slip':>6} {'Sharpe':>9} {'Return':>9} {'verdict':>12}")
+    print("  " + "-" * 90)
     rows = []
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -309,7 +311,23 @@ def run_elevated_cost_sweep(data_path, grid=ELEVATED_COST_SWEEP_LEVELS):
                 "verdict": verdict,
                 "all_pass": all(passes.values()),
             })
+            print(
+                f"{commission*10_000:.0f}bp comm + {slippage*10_000:.2f}bp slip".ljust(36)
+                + f" {commission*10_000:>6.0f} {slippage*10_000:>6.2f} "
+                + f"{_fmt_num(sharpe):>9} {_fmt_pct(ret):>9} {verdict[:12]:>12}"
+            )
     assert len(rows) == len(grid)
+    assert rows[0]["commission_bps"] == COMMISSION * 10_000
+    assert rows[0]["slippage_bps"] == SLIPPAGE * 10_000
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
+    verdicts = [r["verdict"] for r in rows]
+    if len(set(verdicts)) > 1:
+        print(f"\n  VERDICT CHANGES across elevated cost sweep: {verdicts[0]} -> ... -> {verdicts[-1]} (sensitivity demonstrated)")
+    else:
+        print(f"\n  VERDICT STABLE across elevated cost sweep: {verdicts[0]}")
+    print("=" * 80)
     return rows
 
 
@@ -327,6 +345,15 @@ N_TRIALS = len(PARAM_SENSITIVITY_GRID)
 
 def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID):
     data_path = Path(data_path)
+    print("\n" + "=" * 80)
+    print("PARAMETER SENSITIVITY SWEEP")
+    print("=" * 80)
+    print(f"  Fixed costs: {COMMISSION*10_000:.0f}bp comm + {SLIPPAGE*10_000:.0f}bp slip")
+    print(
+        f"  {'period':>8} {'std_dev':>8} {'Sharpe':>9} {'Return':>9} "
+        f"{'criteria':>10} {'verdict':>12}"
+    )
+    print("  " + "-" * 90)
     rows = []
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
@@ -344,10 +371,27 @@ def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID):
                 "std_dev": float(std_dev),
                 "sharpe_ratio": sharpe,
                 "total_return": ret,
+                "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
                 "verdict": verdict,
                 "all_pass": all(passes.values()),
             })
+            crit = ", ".join(f"{k}:{'T' if v else 'F'}" for k, v in passes.items())
+            print(
+                f"  {int(period):>8} {float(std_dev):>8.2f} "
+                f"{_fmt_num(sharpe):>9} {_fmt_pct(ret):>9} "
+                f"{crit:>10} {verdict[:12]:>12}"
+            )
     assert isinstance(rows, list) and len(rows) == len(grid)
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
+        assert len(r["criteria"]) == 2
+    verdicts = [r["verdict"] for r in rows]
+    if len(set(verdicts)) > 1:
+        print(f"\n  VERDICT CHANGES across parameter sweep: {verdicts[0]} -> ... -> {verdicts[-1]} (sensitivity demonstrated)")
+    else:
+        print(f"\n  VERDICT STABLE across parameter sweep: {verdicts[0]}")
+    print("=" * 80)
     return rows
 
 

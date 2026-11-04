@@ -13,6 +13,8 @@
     "max_drawdown_recovery_days": null,
     "var_95": -0.018427332025286736,
     "cvar_95": -0.025594572201006645,
+    "var_99": -0.02998588294228716,
+    "cvar_99": -0.032582854720383934,
     "skewness": -0.15597649893308005,
     "kurtosis": 2.6694585370989126,
     "total_trades": 8,
@@ -42,7 +44,7 @@
   "panel_pricing": "net-exposure",
   "data_provenance": {
     "source_path": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv",
-    "load_timestamp": "2026-11-02T19:41:00.898440Z",
+    "load_timestamp": "2026-11-04T10:22:30.639820Z",
     "file_format": ".csv",
     "file_size_bytes": 46812,
     "symbol_filter": "SPY",
