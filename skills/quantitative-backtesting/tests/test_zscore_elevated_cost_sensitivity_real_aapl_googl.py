@@ -8,6 +8,16 @@ pass/fail and the verdict at each level, and flags whether the verdict flips
 as costs rise. Verdict flips are the signal that the result is not robust to
 elevated costs -- this test never asserts SUPPORTED as a profitability claim.
 
+METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
+Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
+z-score mean-reversion verdict is NOT SUPPORTED at every tested elevated cost
+level on this AAPL/GOOGL window: Sharpe degrades from -0.426 to -1.063 and
+total return from -3.1% to -12.3% as costs rise to 20bp/10bp. The stronger
+benchmark-aware guard (buy-and-hold MSFT + Deflated Sharpe) is recorded in
+test_zscore_mean_reversion_benchmark_aware_real_triple_aapl_msft_googl.py;
+this test records the weak-criterion falsification outcome honestly and does
+not claim profitability.
+
 Offline, committed fixtures only (assets/example_data/real_market_data/
 {AAPL,GOOGL}.csv). No live network.
 """
@@ -76,6 +86,39 @@ def test_elevated_cost_sweep_runs_on_aapl_googl_real_window():
     out = buffer.getvalue()
     assert "ELEVATED COST SENSITIVITY SWEEP" in out
     assert "VERDICT" in out
+
+    # Regression guard: pin strategy metrics (net of costs) per elevated cost
+    # level so the sensitivity evidence is reproducible and any silent change
+    # to the backtest numbers is caught. Compared with a relative tolerance.
+    EXPECTED_METRICS = {
+        (2.0, 1.0): {
+            "sharpe_ratio": -0.4256114742108271,
+            "total_return": -0.030959664968179257,
+        },
+        (5.0, 2.5): {
+            "sharpe_ratio": -0.5336697318874039,
+            "total_return": -0.046969474552062684,
+        },
+        (10.0, 5.0): {
+            "sharpe_ratio": -0.7125384303768411,
+            "total_return": -0.07308232848114982,
+        },
+        (20.0, 10.0): {
+            "sharpe_ratio": -1.0626776169126118,
+            "total_return": -0.12323612173328402,
+        },
+    }
+    REL_TOL = 1e-3
+    for r in rows:
+        key = (r["commission_bps"], r["slippage_bps"])
+        assert key in EXPECTED_METRICS, f"unexpected elevated cost level {key}"
+        exp = EXPECTED_METRICS[key]
+        for k, expv in exp.items():
+            assert k in r, f"missing {k} at {key}"
+            gotv = r[k]
+            assert abs(gotv - expv) <= REL_TOL * max(abs(expv), 1e-9), (
+                f"{k} regression at {key}: got {gotv}, expected {expv}"
+            )
 
 
 if __name__ == "__main__":

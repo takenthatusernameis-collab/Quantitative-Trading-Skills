@@ -64,6 +64,53 @@ def test_param_sensitivity_runs_on_aapl_googl_real_window():
     assert "PARAMETER SENSITIVITY SWEEP" in out
     assert "VERDICT" in out
 
+    # Regression guard: pin the observed out-of-sample metrics per parameter
+    # setting so the robustness evidence is reproducible and any silent change
+    # to the backtest numbers is caught. Compared with a relative tolerance.
+    # NOTE: the advertised baseline (20, 2.0, 0.5) is NOT SUPPORTED on this
+    # window, and one perturbed setting (20, 2.5, 0.5) happens to clear both
+    # weak criteria. Verdict flips across the grid are the signal that the
+    # result is not robust to small parameter changes -- this is sensitivity
+    # evidence, not a profitability claim, and no setting is tuned to force a
+    # particular outcome.
+    EXPECTED_METRICS = {
+        (20, 2.0, 0.5): {
+            "sharpe_ratio": -0.4256114742108271,
+            "total_return": -0.030959664968179257,
+        },
+        (20, 1.5, 0.5): {
+            "sharpe_ratio": -0.8618415086703106,
+            "total_return": -0.11133986900980664,
+        },
+        (20, 2.5, 0.5): {
+            "sharpe_ratio": 0.7913836712709592,
+            "total_return": 0.11160662522322795,
+        },
+        (20, 2.0, 0.3): {
+            "sharpe_ratio": -0.40120821787504435,
+            "total_return": -0.03128264779111278,
+        },
+        (20, 2.0, 0.7): {
+            "sharpe_ratio": -0.23944584663140164,
+            "total_return": -0.0006439866448758602,
+        },
+        (15, 2.0, 0.5): {
+            "sharpe_ratio": -0.682529049918234,
+            "total_return": -0.06780720583825284,
+        },
+    }
+    REL_TOL = 1e-3
+    for r in rows:
+        key = (r["period"], r["entry_z"], r["exit_z"])
+        assert key in EXPECTED_METRICS, f"unexpected parameter setting {key}"
+        exp = EXPECTED_METRICS[key]
+        for k, expv in exp.items():
+            assert k in r, f"missing {k} at {key}"
+            gotv = r[k]
+            assert abs(gotv - expv) <= REL_TOL * max(abs(expv), 1e-9), (
+                f"{k} regression at {key}: got {gotv}, expected {expv}"
+            )
+
 
 if __name__ == "__main__":
     test_param_sensitivity_runs_on_aapl_googl_real_window()
