@@ -3,20 +3,20 @@
 committed single-asset panel (AAPL).
 
 Sweeps the pre-registered PARAM_SENSITIVITY_GRID (narrow grid around the
-advertised period=20 / std_dev=2.0 setting) and pins the observed
+advertised period=20, std_dev=2.0 setting) and pins the observed
 out-of-sample metrics (net of costs) with relative tolerance so any silent
 change to the backtest numbers is caught.
 
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
 Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
 Bollinger Bands mean-reversion verdict is NOT SUPPORTED across all six
-pre-registered parameter settings on this window (Sharpe strongly negative,
-returns deeply negative). The stronger benchmark-aware guard
+pre-registered parameter settings on this window (all negative Sharpe and large
+negative returns net of costs). The stronger benchmark-aware guard
 (test_bollinger_bands_benchmark_aware_real_aapl.py) records NOT SUPPORTED
-(does not beat buy-and-hold AAPL, Deflated Sharpe p-value not significant).
-This test records the weak-criterion falsification outcome honestly and does
-not claim profitability; the uniform NOT SUPPORTED result is evidence of
-lack of robustness, not of a robust edge.
+for the advertised setting: does not beat buy-and-hold AAPL, Deflated Sharpe
+p = 1.00 across 6 trials. This test records the weak-criterion falsification
+outcome honestly and does not claim profitability; the uniform failure is
+evidence against robustness, not of an edge.
 
 Offline, committed fixtures only; no live network.
 """

@@ -9,17 +9,13 @@ change to the backtest numbers is caught.
 
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
 Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
-simple momentum crossover verdict is SUPPORTED across all tested cost levels on
-this window: Sharpe stays positive (1.50 -> 1.40) and total return stays
-positive (76.2% -> 69.2%) even at the 20bp + 10bp round-trip level. The
-stronger benchmark-aware guard
-(test_simple_momentum_benchmark_aware_real_aapl.py) records NOT SUPPORTED for
-the advertised setting: simple momentum does not beat buy-and-hold AAPL
-(strategy 76.2% vs benchmark 77.4%), the benchmark alpha is not significant
-(raw p = 0.12), and the Deflated Sharpe p-value is not significant (p = 0.41
-across 6 trials). The two verdicts are consistent -- the weak sweep overstates
-the edge and the benchmark-aware control falsifies it. This test records the
-weak-criterion falsification outcome honestly and does not claim profitability.
+simple momentum verdict is SUPPORTED across all tested cost levels on this
+window, but the stronger benchmark-aware guard
+(test_simple_momentum_benchmark_aware_real_aapl.py) records NOT SUPPORTED
+for the advertised setting when comparing against buy-and-hold AAPL with
+Deflated Sharpe correction. The two verdicts are consistent -- this test
+records the weak-criterion outcome honestly and does not claim profitability;
+benchmark-aware comparison is required.
 
 Offline, committed fixtures only; no live network.
 """
@@ -50,14 +46,11 @@ def test_elevated_cost_sweep_runs_on_aapl_real_window_simple_momentum():
         rows = run_elevated_cost_sweep(SRC / "AAPL.csv")
 
     assert isinstance(rows, list) and len(rows) == len(ELEVATED_COST_SWEEP_LEVELS)
-    # First level is the advertised reference, re-run for baseline comparison.
     assert rows[0]["commission_bps"] == COMMISSION * 10_000
     assert rows[0]["slippage_bps"] == SLIPPAGE * 10_000
-    # Ascending costs above the advertised reference.
     for prev, curr in zip(rows, rows[1:]):
         assert curr["commission_bps"] >= prev["commission_bps"]
         assert curr["slippage_bps"] >= prev["slippage_bps"]
-    # Determinate verdicts; never a profitability claim.
     for r in rows:
         assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
         assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
@@ -68,7 +61,6 @@ def test_elevated_cost_sweep_runs_on_aapl_real_window_simple_momentum():
             "oos_total_return_positive",
         }
 
-    # Regression guard: pin strategy metrics (net of costs) per cost level.
     EXPECTED_METRICS = {
         (2.0, 1.0): {
             "sharpe_ratio": 1.501892938128653,

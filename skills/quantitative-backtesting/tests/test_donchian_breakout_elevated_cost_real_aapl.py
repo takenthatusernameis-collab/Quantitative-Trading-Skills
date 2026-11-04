@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Elevated-cost confirmation sweep for Donchian breakout (period=20,
-exit_period=10, long/short) on the committed single-asset panel (AAPL).
+exit_period=10) on the committed single-asset panel (AAPL).
 
 Runs the pre-registered ELEVATED_COST_SWEEP_LEVELS (ascending commission +
 slippage above the advertised 3bps round-trip reference) and pins the observed
@@ -10,10 +10,12 @@ change to the backtest numbers is caught.
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
 Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
 Donchian breakout verdict is SUPPORTED across all tested cost levels on this
-window and stays SUPPORTED in the stronger benchmark-aware guard
-(test_donchian_breakout_benchmark_aware_real_aapl.py). The results are
-sensitive to costs (returns decline as costs rise). This test records the
-observed outcomes honestly and does not claim production readiness.
+window, and the stronger benchmark-aware guard
+(test_donchian_breakout_benchmark_aware_real_aapl.py) records NOT SUPPORTED
+when comparing against buy-and-hold AAPL with Deflated Sharpe correction.
+The two verdicts are consistent -- this test records the weak-criterion
+outcome honestly and does not claim profitability; benchmark-aware
+comparison is required.
 
 Offline, committed fixtures only; no live network.
 """

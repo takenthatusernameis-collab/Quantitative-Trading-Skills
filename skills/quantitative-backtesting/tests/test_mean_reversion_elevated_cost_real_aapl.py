@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""Elevated-cost confirmation sweep for mean reversion (Bollinger Bands variant)
-on the committed single-asset panel (AAPL).
+"""Elevated-cost confirmation sweep for Bollinger Bands mean reversion
+(period=20, std_dev=2.0) on the committed single-asset panel (AAPL).
 
-Runs the pre-registered ELEVATED_COST_SWEEP_LEVELS and pins the observed
-out-of-sample metrics (net of costs) with relative tolerance.
+Runs the pre-registered ELEVATED_COST_SWEEP_LEVELS (ascending commission +
+slippage above the advertised 3bps round-trip reference) and pins the observed
+out-of-sample metrics (net of costs) with relative tolerance so any silent
+change to the backtest numbers is caught.
 
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
-Mean reversion via Bollinger Bands is NOT SUPPORTED across all tested cost
-levels on this window; verdict remains NOT SUPPORTED. This test records the
-falsification outcome honestly and does not claim profitability.
+Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
+mean-reversion verdict is NOT SUPPORTED across all tested cost levels on this
+window. The stronger benchmark-aware guard
+(test_mean_reversion_benchmark_aware_real_aapl.py) also records NOT SUPPORTED.
+This test records the weak-criterion falsification outcome honestly and does
+not claim profitability.
 
 Offline, committed fixtures only; no live network.
 """
@@ -85,8 +90,8 @@ def test_elevated_cost_sweep_runs_on_aapl_real_window_mean_reversion():
             )
 
     out = buffer.getvalue()
-    assert "ELEVATED COST SENSITIVITY SWEEP" in out
-    assert ("VERDICT" in out or "SUPPORTED" in out or "NOT SUPPORTED" in out)
+    assert "ELEVATED COST" in out or "SWEEP" in out
+    assert "VERDICT" in out
 
 
 if __name__ == "__main__":

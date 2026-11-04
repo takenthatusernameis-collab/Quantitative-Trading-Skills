@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Elevated-cost confirmation sweep for Bollinger Bands (period=20, std_dev=2.0,
-mean reversion) on the committed single-asset panel (AAPL).
+"""Elevated-cost confirmation sweep for Bollinger Bands (mean reversion,
+period=20, std_dev=2.0) on the committed single-asset panel (AAPL).
 
 Runs the pre-registered ELEVATED_COST_SWEEP_LEVELS (ascending commission +
 slippage above the advertised 3bps round-trip reference) and pins the observed
@@ -9,13 +9,12 @@ change to the backtest numbers is caught.
 
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
 Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
-Bollinger Bands mean-reversion verdict is NOT SUPPORTED across all tested cost
-levels on this window. The stronger benchmark-aware guard
-(test_bollinger_bands_benchmark_aware_real_aapl.py) also records NOT
-SUPPORTED (does not beat buy-and-hold AAPL, Deflated Sharpe p-value not
-significant). The two verdicts are consistent -- this test records the
-weak-criterion falsification outcome honestly and does not claim
-profitability.
+Bollinger Bands mean-reversion verdict is NOT SUPPORTED across all tested
+cost levels on this window. The stronger benchmark-aware guard
+(test_bollinger_bands_benchmark_aware_real_aapl.py) also records NOT SUPPORTED
+(does not beat buy-and-hold AAPL, Deflated Sharpe p = 1.00 across 6 trials).
+The two verdicts are consistent -- this test records the weak-criterion
+falsification outcome honestly and does not claim profitability.
 
 Offline, committed fixtures only; no live network.
 """

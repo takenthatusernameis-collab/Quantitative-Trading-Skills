@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""Parameter sensitivity sweep for mean reversion (Bollinger Bands variant) on
-the committed single-asset panel (AAPL).
+"""Parameter sensitivity sweep for Bollinger Bands mean reversion (period /
+std_dev) on the committed single-asset panel (AAPL).
 
-Sweeps the pre-registered PARAM_SENSITIVITY_GRID and pins the observed
-out-of-sample metrics (net of costs) with relative tolerance.
+Sweeps the pre-registered PARAM_SENSITIVITY_GRID (narrow grid around the
+advertised period=20, std_dev=2.0 setting) and pins the observed
+out-of-sample metrics (net of costs) with relative tolerance so any silent
+change to the backtest numbers is caught.
 
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
-Mean reversion is NOT SUPPORTED across all tested parameter settings on this
-window. Results are consistent with the benchmark-aware evidence of no robust
-edge; this test records falsification outcomes honestly and does not claim
-profitability.
+Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
+mean-reversion verdict is NOT SUPPORTED across all six pre-registered
+parameter settings on this window. The stronger benchmark-aware guard
+(test_mean_reversion_benchmark_aware_real_aapl.py) records NOT SUPPORTED.
+This test records the weak-criterion falsification outcome honestly and does
+not claim profitability; uniform failure is evidence against robustness.
 
 Offline, committed fixtures only; no live network.
 """
@@ -43,9 +47,12 @@ def test_param_sensitivity_runs_on_aapl_real_window_mean_reversion():
     for r, (period, std_dev) in zip(rows, PARAM_SENSITIVITY_GRID):
         assert r["period"] == int(period)
         assert r["std_dev"] == float(std_dev)
+        assert r.get("commission") == COMMISSION or "commission" not in r
+        assert r.get("slippage") == SLIPPAGE or "slippage" not in r
         assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
-        assert r["all_pass"] == (r["verdict"] == "SUPPORTED")
-        assert len(r.get("criteria", [])) == 2
+        assert r["all_pass"] == (all(c["passed"] for c in r["criteria"]))
+        assert r["verdict"] == ("SUPPORTED" if r["all_pass"] else "NOT SUPPORTED")
+        assert len(r["criteria"]) == 2
         assert {c["name"] for c in r["criteria"]} == {
             "oos_sharpe_gt_zero",
             "oos_total_return_positive",

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Parameter sensitivity sweep for simple momentum (SMA crossover fast /
-slow periods) on the committed single-asset panel (AAPL).
+"""Parameter sensitivity sweep for simple momentum (SMA crossover fast / slow)
+on the committed single-asset panel (AAPL).
 
 Sweeps the pre-registered PARAM_SENSITIVITY_GRID (narrow grid around the
 advertised fast=10 / slow=30 setting) and pins the observed out-of-sample
@@ -9,17 +9,13 @@ backtest numbers is caught.
 
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
 Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
-simple momentum crossover verdict is SUPPORTED across all six pre-registered
-parameter settings on this window (Sharpe 1.45 -> 1.86, return 69.2% ->
-96.5%). The stronger benchmark-aware guard
-(test_simple_momentum_benchmark_aware_real_aapl.py) records NOT SUPPORTED for
-the advertised setting: simple momentum does not beat buy-and-hold AAPL
-(strategy 76.2% vs benchmark 77.4%), the benchmark alpha is not significant
-(raw p = 0.12), and the Deflated Sharpe p-value is not significant (p = 0.41
-across 6 trials). Uniform SUPPORT on the weak criterion is itself a robustness
-signal, but the benchmark-aware control is the stronger falsification. This
-test records the weak-criterion outcome honestly and does not claim
-profitability; a uniform result is not evidence of a robust edge.
+simple momentum verdict is SUPPORTED across all six pre-registered parameter
+settings on this window, but the stronger benchmark-aware guard
+(test_simple_momentum_benchmark_aware_real_aapl.py) records NOT SUPPORTED
+for the advertised setting when comparing against buy-and-hold AAPL with
+Deflated Sharpe correction. This test records the weak-criterion outcome
+honestly and does not claim profitability; benchmark-aware comparison is
+required.
 
 Offline, committed fixtures only; no live network.
 """
@@ -64,9 +60,6 @@ def test_param_sensitivity_runs_on_aapl_real_window_simple_momentum():
             "oos_total_return_positive",
         }
 
-    # Regression guard: pin the observed out-of-sample metrics per parameter
-    # setting so the robustness evidence is reproducible and any silent change
-    # to the backtest numbers is caught. Compared with a relative tolerance.
     EXPECTED_METRICS = {
         (10, 30): {
             "sharpe_ratio": 1.501892938128653,

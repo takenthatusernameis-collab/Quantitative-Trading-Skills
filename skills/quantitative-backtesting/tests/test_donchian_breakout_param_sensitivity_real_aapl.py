@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Parameter sensitivity sweep for Donchian breakout (period / exit_period) on
-the committed single-asset panel (AAPL).
+"""Parameter sensitivity sweep for Donchian breakout (period / exit_period)
+on the committed single-asset panel (AAPL).
 
 Sweeps the pre-registered PARAM_SENSITIVITY_GRID (narrow grid around the
-advertised period=20 / exit_period=10 setting) and pins the observed
+advertised period=20, exit_period=10 setting) and pins the observed
 out-of-sample metrics (net of costs) with relative tolerance so any silent
 change to the backtest numbers is caught.
 
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
 Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
 Donchian breakout verdict is SUPPORTED across all six pre-registered parameter
-settings on this window. The stronger benchmark-aware guard
-(test_donchian_breakout_benchmark_aware_real_aapl.py) also records SUPPORTED.
-Results remain sensitive to parameters/costs; no production readiness claim
-is made.
+settings on this window, but the stronger benchmark-aware guard
+(test_donchian_breakout_benchmark_aware_real_aapl.py) records NOT SUPPORTED
+for the advertised setting when comparing against buy-and-hold AAPL with
+Deflated Sharpe correction (does not beat benchmark with multiple-testing
+correction). This test records the weak-criterion outcome honestly and does not
+claim profitability; benchmark-aware comparison is required and robustness
+must be evaluated across both criteria.
 
 Offline, committed fixtures only; no live network.
 """
