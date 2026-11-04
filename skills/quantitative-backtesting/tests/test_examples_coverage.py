@@ -399,7 +399,7 @@ def test_simple_momentum_hypothesis_emits_falsification_verdict():
     )
     assert "FALSIFICATION CRITERIA" in result.stdout
     assert re.search(r"\[(PASS|FAIL)\].*oos_sharpe_gt_zero", result.stdout)
-    assert re.search(r"\[(PASS|FAIL)\].*oos_total_return_positive", result.stdout)
+    assert re.search(r"\[(PASS|FAIL)\].*oos_total_return_gt_benchmark", result.stdout)
     assert re.search(r"VERDICT:\s*(SUPPORTED|NOT SUPPORTED)", result.stdout)
     # Criteria must include numeric values (Sharpe/returns) in numerically sane form
     assert "Sharpe" in result.stdout
