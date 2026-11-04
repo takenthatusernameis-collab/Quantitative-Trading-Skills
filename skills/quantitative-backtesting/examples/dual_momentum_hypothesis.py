@@ -345,8 +345,10 @@ def run_hypothesis_test(data_path, label, benchmark_path=None, n_trials=None):
     }
 
 
-def run_elevated_cost_sweep(data_path, grid=ELEVATED_COST_SWEEP_LEVELS):
+def run_elevated_cost_sweep(data_path, grid=ELEVATED_COST_SWEEP_LEVELS,
+                            benchmark_path=None, n_trials=None):
     data_path = Path(data_path)
+    benchmark = _resolve_benchmark(benchmark_path) if benchmark_path is not None else None
 
     print("\n" + "=" * 80)
     print("ELEVATED COST SENSITIVITY SWEEP: ascending costs above advertised (falsifiable criteria)")
@@ -358,24 +360,63 @@ def run_elevated_cost_sweep(data_path, grid=ELEVATED_COST_SWEEP_LEVELS):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
         for commission, slippage in grid:
-            metrics = _run_backtest_metrics(data_path, commission, slippage, tmpdir_path)
+            metrics = _run_backtest_metrics(data_path, commission, slippage, tmpdir_path,
+                                            benchmark=benchmark, n_trials=n_trials)
             sharpe = metrics.get("sharpe_ratio")
             ret = metrics.get("total_return")
-            ok1 = sharpe is not None and float(sharpe) > 0
-            ok2 = ret is not None and float(ret) > 0
-            passes = {"oos_sharpe_gt_zero": bool(ok1), "oos_total_return_positive": bool(ok2)}
-            verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
-            rows.append({
-                "commission": commission,
-                "slippage": slippage,
-                "commission_bps": commission * 10_000,
-                "slippage_bps": slippage * 10_000,
-                "sharpe_ratio": sharpe,
-                "total_return": ret,
-                "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
-                "verdict": verdict,
-                "all_pass": all(passes.values()),
-            })
+            if benchmark is not None:
+                bench_ret = metrics.get("benchmark_total_return")
+                alpha_pvalue = metrics.get("alpha_pvalue") or metrics.get("benchmark_alpha_pvalue")
+                dsr = metrics.get("deflated_sharpe") or metrics.get("deflated_sharpe_ratio") or {}
+                if isinstance(dsr, dict):
+                    dsr_p = dsr.get("p_value") or dsr.get("deflated_sharpe_pvalue")
+                else:
+                    dsr_p = None
+                ok1 = sharpe is not None and float(sharpe) > 0
+                ok2 = ret is not None and bench_ret is not None and float(ret) > float(bench_ret)
+                ok3 = dsr_p is not None and float(dsr_p) < 0.10
+                ok4 = alpha_pvalue is not None and float(alpha_pvalue) < 0.05
+                passes = {
+                    "oos_sharpe_gt_zero": bool(ok1),
+                    "oos_total_return_gt_benchmark": bool(ok2),
+                    "deflated_sharpe_pvalue_lt_0.10": bool(ok3),
+                    "benchmark_alpha_pvalue_lt_0.05": bool(ok4),
+                }
+                verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+                rows.append({
+                    "commission": commission,
+                    "slippage": slippage,
+                    "commission_bps": commission * 10_000,
+                    "slippage_bps": slippage * 10_000,
+                    "sharpe_ratio": sharpe,
+                    "total_return": ret,
+                    "benchmark_total_return": bench_ret,
+                    "benchmark_alpha": metrics.get("alpha"),
+                    "benchmark_alpha_pvalue": alpha_pvalue,
+                    "correlation_with_benchmark": metrics.get("correlation_with_benchmark"),
+                    "deflated_sharpe_pvalue": dsr_p,
+                    "n_trials": n_trials,
+                    "benchmark_path": str(benchmark) if benchmark is not None else None,
+                    "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+                    "verdict": verdict,
+                    "all_pass": all(passes.values()),
+                })
+            else:
+                ok1 = sharpe is not None and float(sharpe) > 0
+                ok2 = ret is not None and float(ret) > 0
+                passes = {"oos_sharpe_gt_zero": bool(ok1), "oos_total_return_positive": bool(ok2)}
+                verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+                rows.append({
+                    "commission": commission,
+                    "slippage": slippage,
+                    "commission_bps": commission * 10_000,
+                    "slippage_bps": slippage * 10_000,
+                    "sharpe_ratio": sharpe,
+                    "total_return": ret,
+                    "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+                    "verdict": verdict,
+                    "all_pass": all(passes.values()),
+                })
             print(
                 f"  {commission*10_000:.0f}bp comm + {slippage*10_000:.2f}bp slip".ljust(36)
                 + f" {commission*10_000:>6.0f} {slippage*10_000:>6.2f} "
@@ -421,7 +462,8 @@ PARAM_SENSITIVITY_GRID = (
 N_TRIALS = len(PARAM_SENSITIVITY_GRID)
 
 
-def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID):
+def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID,
+                                 benchmark_path=None, n_trials=None):
     """Sweep dual momentum parameters across a narrow pre-registered grid and
     report an explicit falsification verdict at each setting.
 
@@ -435,6 +477,7 @@ def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID):
     parameter changes.
     """
     data_path = Path(data_path)
+    benchmark = _resolve_benchmark(benchmark_path) if benchmark_path is not None else None
 
     print("\n" + "=" * 80)
     print("PARAMETER SENSITIVITY SWEEP: dual momentum params around the advertised setting")
@@ -455,29 +498,73 @@ def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID):
                 "top_quantile": float(top_q),
                 "risk_free_rate": float(risk_free_rate),
             })
-            metrics = _run_backtest_metrics(data_path, COMMISSION, SLIPPAGE, tmpdir_path, params=params)
+            metrics = _run_backtest_metrics(data_path, COMMISSION, SLIPPAGE, tmpdir_path,
+                                            params=params, benchmark=benchmark, n_trials=n_trials)
             sharpe = metrics.get("sharpe_ratio")
             ret = metrics.get("total_return")
-            ok1 = sharpe is not None and float(sharpe) > 0
-            ok2 = ret is not None and float(ret) > 0
-            passes = {"oos_sharpe_gt_zero": bool(ok1), "oos_total_return_positive": bool(ok2)}
-            failed = [name for name, ok in passes.items() if not ok]
-            verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
-            rows.append({
-                "lookback": int(lookback),
-                "top_quantile": float(top_q),
-                "risk_free_rate": float(risk_free_rate),
-                "commission": COMMISSION,
-                "slippage": SLIPPAGE,
-                "commission_bps": COMMISSION * 10_000,
-                "slippage_bps": SLIPPAGE * 10_000,
-                "sharpe_ratio": sharpe,
-                "total_return": ret,
-                "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
-                "verdict": verdict,
-                "all_pass": all(passes.values()),
-                "failed_criteria": failed,
-            })
+            if benchmark is not None:
+                bench_ret = metrics.get("benchmark_total_return")
+                alpha_pvalue = metrics.get("alpha_pvalue") or metrics.get("benchmark_alpha_pvalue")
+                dsr = metrics.get("deflated_sharpe") or metrics.get("deflated_sharpe_ratio") or {}
+                if isinstance(dsr, dict):
+                    dsr_p = dsr.get("p_value") or dsr.get("deflated_sharpe_pvalue")
+                else:
+                    dsr_p = None
+                ok1 = sharpe is not None and float(sharpe) > 0
+                ok2 = ret is not None and bench_ret is not None and float(ret) > float(bench_ret)
+                ok3 = dsr_p is not None and float(dsr_p) < 0.10
+                ok4 = alpha_pvalue is not None and float(alpha_pvalue) < 0.05
+                passes = {
+                    "oos_sharpe_gt_zero": bool(ok1),
+                    "oos_total_return_gt_benchmark": bool(ok2),
+                    "deflated_sharpe_pvalue_lt_0.10": bool(ok3),
+                    "benchmark_alpha_pvalue_lt_0.05": bool(ok4),
+                }
+                failed = [name for name, ok in passes.items() if not ok]
+                verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+                rows.append({
+                    "lookback": int(lookback),
+                    "top_quantile": float(top_q),
+                    "risk_free_rate": float(risk_free_rate),
+                    "commission": COMMISSION,
+                    "slippage": SLIPPAGE,
+                    "commission_bps": COMMISSION * 10_000,
+                    "slippage_bps": SLIPPAGE * 10_000,
+                    "sharpe_ratio": sharpe,
+                    "total_return": ret,
+                    "benchmark_total_return": bench_ret,
+                    "benchmark_alpha": metrics.get("alpha"),
+                    "benchmark_alpha_pvalue": alpha_pvalue,
+                    "correlation_with_benchmark": metrics.get("correlation_with_benchmark"),
+                    "deflated_sharpe_pvalue": dsr_p,
+                    "n_trials": n_trials,
+                    "benchmark_path": str(benchmark) if benchmark is not None else None,
+                    "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+                    "verdict": verdict,
+                    "all_pass": all(passes.values()),
+                    "failed_criteria": failed,
+                })
+            else:
+                ok1 = sharpe is not None and float(sharpe) > 0
+                ok2 = ret is not None and float(ret) > 0
+                passes = {"oos_sharpe_gt_zero": bool(ok1), "oos_total_return_positive": bool(ok2)}
+                failed = [name for name, ok in passes.items() if not ok]
+                verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+                rows.append({
+                    "lookback": int(lookback),
+                    "top_quantile": float(top_q),
+                    "risk_free_rate": float(risk_free_rate),
+                    "commission": COMMISSION,
+                    "slippage": SLIPPAGE,
+                    "commission_bps": COMMISSION * 10_000,
+                    "slippage_bps": SLIPPAGE * 10_000,
+                    "sharpe_ratio": sharpe,
+                    "total_return": ret,
+                    "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+                    "verdict": verdict,
+                    "all_pass": all(passes.values()),
+                    "failed_criteria": failed,
+                })
             print(
                 f"  {int(lookback):>8} {float(top_q):>7.1f} {float(risk_free_rate):>7.2f} "
                 + f"{_fmt_num(sharpe):>9} {_fmt_pct(ret):>9} {','.join(failed) if failed else 'ok':>10} {verdict[:12]:>12}"
@@ -495,11 +582,20 @@ def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID):
         assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
         assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
         assert r["verdict"] == ("SUPPORTED" if r["all_pass"] else "NOT SUPPORTED")
-        assert len(r["criteria"]) == 2
-        assert {c["name"] for c in r["criteria"]} == {
-            "oos_sharpe_gt_zero",
-            "oos_total_return_positive",
-        }
+        if benchmark is not None:
+            assert len(r["criteria"]) == 4
+            assert {c["name"] for c in r["criteria"]} == {
+                "oos_sharpe_gt_zero",
+                "oos_total_return_gt_benchmark",
+                "deflated_sharpe_pvalue_lt_0.10",
+                "benchmark_alpha_pvalue_lt_0.05",
+            }
+        else:
+            assert len(r["criteria"]) == 2
+            assert {c["name"] for c in r["criteria"]} == {
+                "oos_sharpe_gt_zero",
+                "oos_total_return_positive",
+            }
 
     verdicts = [r["verdict"] for r in rows]
     if len(set(verdicts)) > 1:

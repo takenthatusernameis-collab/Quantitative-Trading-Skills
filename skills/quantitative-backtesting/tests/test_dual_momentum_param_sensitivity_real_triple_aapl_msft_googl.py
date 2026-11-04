@@ -4,14 +4,12 @@
 
 Sweeps dual momentum (absolute + relative momentum, long-only) parameters
 across a narrow pre-registered grid on the three-asset panel and reports an
-explicit falsification verdict at each setting. Reports how the per-criterion
-pass/fail and overall verdict change as parameters are perturbed around the
-advertised setting (lookback=252, top_quantile=0.5, risk_free_rate=0.0),
-holding commission/slippage fixed at the advertised level. This is a
-robustness/sensitivity analysis on committed fixtures, not evidence about
-any market. No claim is made about which setting is "best"; verdict flips
-across the grid are the signal that the result is not robust to small
-parameter changes.
+explicit falsification verdict at each setting. Extended to run benchmark-aware
+(MSFT buy-and-hold) with the Deflated Sharpe Ratio across the pre-registered
+parameter grid (N_TRIALS=6), pinning strategy + benchmark metrics (net of
+costs) with relative tolerance and asserting the four BENCHMARK_CRITERIA.
+Verdict remains NOT SUPPORTED on committed fixtures; we do not tune to force
+SUPPORT.
 
 Offline, committed fixtures only (assets/example_data/real_market_data/
 {AAPL,MSFT,GOOGL}.csv). No live network.
@@ -32,6 +30,7 @@ from dual_momentum_hypothesis import (  # noqa: E402
     COMMISSION,
     SLIPPAGE,
     PARAM_SENSITIVITY_GRID,
+    N_TRIALS,
     run_param_sensitivity_sweep,
 )
 
@@ -59,7 +58,11 @@ def test_param_sensitivity_runs_on_triple_real_window_dual_momentum():
         data_path = _build_triple_csv(d)
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            rows = run_param_sensitivity_sweep(data_path)
+            rows = run_param_sensitivity_sweep(
+                data_path,
+                benchmark_path="MSFT.csv",
+                n_trials=N_TRIALS,
+            )
 
     assert isinstance(rows, list) and len(rows) == len(PARAM_SENSITIVITY_GRID)
     for r, (lookback, top_q, risk_free_rate) in zip(rows, PARAM_SENSITIVITY_GRID):
@@ -73,42 +76,90 @@ def test_param_sensitivity_runs_on_triple_real_window_dual_momentum():
         assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
         assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
         assert r["verdict"] == ("SUPPORTED" if r["all_pass"] else "NOT SUPPORTED")
-        assert len(r["criteria"]) == 2
+        assert len(r["criteria"]) == 4
         assert {c["name"] for c in r["criteria"]} == {
             "oos_sharpe_gt_zero",
-            "oos_total_return_positive",
+            "oos_total_return_gt_benchmark",
+            "deflated_sharpe_pvalue_lt_0.10",
+            "benchmark_alpha_pvalue_lt_0.05",
         }
+        assert r.get("benchmark_path") is not None
+        assert str(r["benchmark_path"]).endswith("MSFT.csv")
+        assert r.get("n_trials") == N_TRIALS
 
     # Regression guard: pin the observed out-of-sample metrics per parameter
-    # setting so the robustness evidence (SUPPORTED across the whole
-    # pre-registered grid) is reproducible and any silent change to the
-    # backtest numbers is caught. Compared with a relative tolerance (never
-    # exact equality, since the last decimals depend on the numpy/pandas
-    # build). Note: top_quantile 0.4 and 0.5 produce identical metrics on a
-    # 3-asset panel because both round up to 2 assets in the long book
-    # (ceil(3 * 0.4) == ceil(3 * 0.5) == 2); that is a structural property
-    # of the quantile selection, not a regression.
+    # setting so the robustness evidence is reproducible and any silent change
+    # to the backtest numbers is caught. Compared with a relative tolerance.
     EXPECTED_METRICS = {
-        (252, 0.5, 0.0): (1.1676593094877479, 0.40834454698372635),
-        (189, 0.5, 0.0): (0.9194386277737749, 0.42993181642557343),
-        (315, 0.5, 0.0): (1.242023295571937, 0.38316601159509656),
-        (252, 0.4, 0.0): (1.1676593094877479, 0.40834454698372635),
-        (252, 0.6, 0.0): (1.2250203713496854, 0.43508755342027494),
-        (252, 0.5, 0.02): (1.3044258190300417, 0.46055895420767823),
+        (252, 0.5, 0.0): {
+            "sharpe_ratio": 1.1676593094877479,
+            "total_return": 0.40834454698372635,
+            "benchmark_total_return": 0.9015402575236577,
+            "benchmark_alpha": 0.0739839443419926,
+            "benchmark_alpha_pvalue": 0.3732887195760113,
+            "correlation_with_benchmark": 0.5381343533335553,
+            "deflated_sharpe_pvalue": 0.5953715042900212,
+        },
+        (189, 0.5, 0.0): {
+            "sharpe_ratio": 0.9194386277737749,
+            "total_return": 0.42993181642557343,
+            "benchmark_total_return": 0.9015402575236577,
+            "benchmark_alpha": -0.0061378270869824544,
+            "benchmark_alpha_pvalue": 0.9482433910676699,
+            "correlation_with_benchmark": 0.729718270027282,
+            "deflated_sharpe_pvalue": 0.7209023409630871,
+        },
+        (315, 0.5, 0.0): {
+            "sharpe_ratio": 1.242023295571937,
+            "total_return": 0.38316601159509656,
+            "benchmark_total_return": 0.9015402575236577,
+            "benchmark_alpha": 0.09969911148200665,
+            "benchmark_alpha_pvalue": 0.2064189113948267,
+            "correlation_with_benchmark": 0.403639332504999,
+            "deflated_sharpe_pvalue": 0.5530785879322582,
+        },
+        (252, 0.4, 0.0): {
+            "sharpe_ratio": 1.1676593094877479,
+            "total_return": 0.40834454698372635,
+            "benchmark_total_return": 0.9015402575236577,
+            "benchmark_alpha": 0.0739839443419926,
+            "benchmark_alpha_pvalue": 0.3732887195760113,
+            "correlation_with_benchmark": 0.5381343533335553,
+            "deflated_sharpe_pvalue": 0.5953715042900212,
+        },
+        (252, 0.6, 0.0): {
+            "sharpe_ratio": 1.2250203713496854,
+            "total_return": 0.43508755342027494,
+            "benchmark_total_return": 0.9015402575236577,
+            "benchmark_alpha": 0.08606039541048004,
+            "benchmark_alpha_pvalue": 0.31150627394124697,
+            "correlation_with_benchmark": 0.5207307432711014,
+            "deflated_sharpe_pvalue": 0.5635571804572976,
+        },
+        (252, 0.5, 0.02): {
+            "sharpe_ratio": 1.3044258190300417,
+            "total_return": 0.46055895420767823,
+            "benchmark_total_return": 0.9015402575236577,
+            "benchmark_alpha": 0.0915858137955125,
+            "benchmark_alpha_pvalue": 0.26673994407168033,
+            "correlation_with_benchmark": 0.5433158553828898,
+            "deflated_sharpe_pvalue": 0.5203337885460535,
+        },
     }
     REL_TOL = 1e-3
     for r in rows:
         key = (r["lookback"], r["top_quantile"], r["risk_free_rate"])
         assert key in EXPECTED_METRICS, f"unexpected parameter setting {key}"
-        exp_sharpe, exp_ret = EXPECTED_METRICS[key]
-        assert r["sharpe_ratio"] is not None, f"missing sharpe at {key}"
-        assert r["total_return"] is not None, f"missing total_return at {key}"
-        assert abs(r["sharpe_ratio"] - exp_sharpe) <= REL_TOL * max(
-            abs(exp_sharpe), 1e-9
-        ), f"sharpe regression at {key}: got {r['sharpe_ratio']}, expected {exp_sharpe}"
-        assert abs(r["total_return"] - exp_ret) <= REL_TOL * max(
-            abs(exp_ret), 1e-9
-        ), f"total_return regression at {key}: got {r['total_return']}, expected {exp_ret}"
+        exp = EXPECTED_METRICS[key]
+        for k, expv in exp.items():
+            assert k in r, f"missing {k} at {key}"
+            gotv = r[k]
+            assert abs(gotv - expv) <= REL_TOL * max(abs(expv), 1e-9), (
+                f"{k} regression at {key}: got {gotv}, expected {expv}"
+            )
+        if key == (252, 0.5, 0.0):
+            assert r["verdict"] == "NOT SUPPORTED"
+            assert r["all_pass"] is False
 
     out = buffer.getvalue()
     assert "PARAMETER SENSITIVITY SWEEP" in out
