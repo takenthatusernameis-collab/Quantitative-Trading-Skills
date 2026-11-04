@@ -1,19 +1,19 @@
 # Handoff — next task
 
 ## What changed (this session)
-Ran the slow framework regression gate from HANDOFF_SESSION_NEXT.md:
-- `tests/test_walk_forward.py`: 195 passed (baseline 194, +1 from prior determinism pin additions), 185.7s
-- `tests/test_cpcv.py` + `tests/test_resolution_vs_sample_size.py`: 108 passed, 157.5s
-- Total 303/303 green, no regressions. No source/test files modified.
+Executed the assigned bounded real-market falsification experiment for RSI mean reversion on the committed AAPL/MSFT/GOOGL triple panel using the existing benchmark-aware machinery (`examples/rsi_mean_reversion_hypothesis.py::run_benchmark_aware_hypothesis_test`, test `tests/test_rsi_benchmark_aware_real_triple_aapl_msft_googl.py`).
+- Test result: 2 passed (1.71s).
+- No source/test files modified; working tree clean except pre-existing untracked.
 
 ## What was actually verified
-- Walk-forward determinism/reproducibility pins intact; cpcv + resolution suites green.
-- Committed fixtures only, offline, no live network.
+- Net-of-costs metrics on held-out test window (3bp round-trip): Sharpe -0.298, total return -31.8%, benchmark (MSFT) +90.2%, alpha -22.8%, alpha p=0.437, deflated Sharpe p=0.986 (5 trials).
+- All four BENCHMARK_CRITERIA failed -> verdict NOT SUPPORTED (stable; not tuned to force SUPPORT).
+- Methodology controls: chronological split 0.6/0.2/0.2 disjoint=True, PIT validation=True, panel pricing=book.
 
 ## What remains unresolved
-- No real-market falsification experiment has been run end-to-end on committed fixtures as a single consolidated experiment (prior handoffs covered components separately). A bounded, hypothesis-driven experiment (e.g., RSI mean reversion or cross-sectional momentum) on the committed triple panel with full cost/robustness reporting is the natural next research step.
+- Other multi-asset hypothesis families (zscore_mean_reversion, cross-sectional momentum, dual momentum) may lack benchmark-aware guards; coverage not yet audited.
 
 ## One precise next task
-Design and run one bounded real-market falsification experiment on committed fixtures (AAPL/MSFT/GOOGL panel) for a pre-registered hypothesis with explicit falsification criteria, using the existing backtesting framework; report net-of-costs metrics, walk-forward/OOS Sharpe, deflated Sharpe, and a verdict. Reuse `examples/rsi_mean_reversion_hypothesis.py` machinery; do not tune to force SUPPORT.
+Audit `examples/` and `tests/` for benchmark-aware guard coverage across hypothesis families; add a benchmark-aware guard only where a demonstrated methodological gap exists (mirror the RSI triple-panel pattern), pinned metrics + NOT SUPPORTED verdict, offline committed fixtures only.
 
-Constraints: offline, committed fixtures only, no live network, no tuning.
+Constraints: offline, committed fixtures only, no tuning to force SUPPORT, smallest reversible change.
