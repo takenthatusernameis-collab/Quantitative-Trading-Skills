@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Elevated-cost confirmation sweep for MACD crossover (fast=12 / slow=26 /
-signal=9, long/flat) on the committed single-asset panel (AAPL).
+"""Elevated-cost confirmation sweep for MACD (fast=12 / slow=26 / signal=9,
+long/short) on the committed single-asset panel (AAPL).
 
 Runs the pre-registered ELEVATED_COST_SWEEP_LEVELS (ascending commission +
 slippage above the advertised 3bps round-trip reference) and pins the observed
@@ -9,12 +9,16 @@ change to the backtest numbers is caught.
 
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
 Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
-MACD crossover verdict is NOT SUPPORTED at every tested cost level: even at the
-advertised 3bps reference the out-of-sample total return is negative (-0.13%),
-and it deteriorates further as costs rise to 30bps round-trip. The stronger
-benchmark-aware guard (test_macd_benchmark_aware_real_aapl.py) records NOT
-SUPPORTED as well. This test records the weak-criterion falsification outcome
-honestly and does not claim profitability.
+MACD crossover verdict is NOT SUPPORTED across all tested cost levels on this
+window: the advertised setting already fails the total-return criterion
+(return -0.13% vs the zero baseline) and higher costs push both Sharpe and
+return negative. The stronger benchmark-aware guard
+(test_macd_benchmark_aware_real_aapl.py) records NOT SUPPORTED as well: MACD
+does not beat buy-and-hold AAPL (return 77.4%), the benchmark alpha is not
+significant (raw p = 0.60), and the Deflated Sharpe p-value is not significant
+(p = 0.96 across 6 trials). The two verdicts are consistent -- this test
+records the weak-criterion falsification outcome honestly and does not claim
+profitability.
 
 Offline, committed fixtures only; no live network.
 """

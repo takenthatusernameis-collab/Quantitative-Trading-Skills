@@ -1,19 +1,25 @@
 # Handoff — next task
 
 ## What changed (this session)
-Executed the assigned bounded real-market falsification experiment for RSI mean reversion on the committed AAPL/MSFT/GOOGL triple panel using the existing benchmark-aware machinery (`examples/rsi_mean_reversion_hypothesis.py::run_benchmark_aware_hypothesis_test`, test `tests/test_rsi_benchmark_aware_real_triple_aapl_msft_googl.py`).
-- Test result: 2 passed (1.71s).
-- No source/test files modified; working tree clean except pre-existing untracked.
+Executed the assigned bounded task: added the two missing MACD single-asset sweep regression guards.
+- Added `skills/quantitative-backtesting/tests/test_macd_param_sensitivity_real_aapl.py` (new), mirroring the EMA param-sensitivity test (6 pre-registered MACD fast/slow/signal settings, single-asset AAPL, relative-tolerance pinned metrics, honest verdict asserted).
+- Corrected the docstring of the pre-existing `skills/quantitative-backtesting/tests/test_macd_elevated_cost_real_aapl.py` ("long/flat" → "long/short"; methodological note now cites the benchmark-aware p-values).
+- No source/test files modified beyond these; working tree clean except the two new/edited test files.
 
 ## What was actually verified
-- Net-of-costs metrics on held-out test window (3bp round-trip): Sharpe -0.298, total return -31.8%, benchmark (MSFT) +90.2%, alpha -22.8%, alpha p=0.437, deflated Sharpe p=0.986 (5 trials).
-- All four BENCHMARK_CRITERIA failed -> verdict NOT SUPPORTED (stable; not tuned to force SUPPORT).
-- Methodology controls: chronological split 0.6/0.2/0.2 disjoint=True, PIT validation=True, panel pricing=book.
+- Focused gate: MACD elevated-cost + param-sensitivity + benchmark-aware + walk-forward → **6 passed, 0 failed** in 15.22s.
+- No-regression gate across the other single-asset families (ema_cross incl. its sweep guards, bollinger_bands, donchian_breakout, simple_momentum, mean_reversion benchmark-aware) → **14 passed, 0 failed** in 37.20s.
+- Honest findings recorded: MACD is NOT SUPPORTED at every tested cost level on committed AAPL, and mixed across the six pre-registered parameter settings (only (16,34,12) and (12,26,12) pass the weak 2-criterion sweep; the benchmark-aware guard pins NOT SUPPORTED, alpha p=0.60, deflated Sharpe p=0.96). No profitability claim.
 
 ## What remains unresolved
-- Other multi-asset hypothesis families (zscore_mean_reversion, cross-sectional momentum, dual momentum) may lack benchmark-aware guards; coverage not yet audited.
+- Four families still lack pinned elevated-cost-sweep + param-sensitivity regression guards despite having the sweep machinery in their example scripts: bollinger_bands, donchian_breakout, mean_reversion, simple_momentum.
 
 ## One precise next task
-Audit `examples/` and `tests/` for benchmark-aware guard coverage across hypothesis families; add a benchmark-aware guard only where a demonstrated methodological gap exists (mirror the RSI triple-panel pattern), pinned metrics + NOT SUPPORTED verdict, offline committed fixtures only.
+Pin the elevated-cost-sweep and parameter-sensitivity regression guards for the remaining four single-asset families. Start with `bollinger_bands_hypothesis.py`:
+1. Add `tests/test_bollinger_bands_elevated_cost_real_aapl.py` and `tests/test_bollinger_bands_param_sensitivity_real_aapl.py`, mirroring the two new MACD tests above (single-asset AAPL, relative-tolerance pinned metrics, honest verdict asserted — do not tune to force SUPPORT). Capture pinned metrics by running the sweep functions first; do not guess them.
+2. Verify with a focused gate: the two new tests + `test_bollinger_bands_benchmark_aware_real_aapl.py` + `test_walk_forward_bollinger_real_aapl.py`.
+3. Repeat for donchian_breakout, mean_reversion, simple_momentum if time permits; otherwise hand off after one.
 
 Constraints: offline, committed fixtures only, no tuning to force SUPPORT, smallest reversible change.
+
+(End of file - total 24 lines)
