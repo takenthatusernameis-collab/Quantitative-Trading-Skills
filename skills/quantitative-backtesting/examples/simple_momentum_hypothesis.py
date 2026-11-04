@@ -98,6 +98,22 @@ CAPACITY_SENSITIVITY_LEVELS = [0.0, 0.05, 0.1, 0.2]
 COMMISSION = 0.0002
 SLIPPAGE = 0.0001
 
+# Elevated commission / slippage levels above the advertised 3bps round-trip
+# reference, exercised by the elevated-cost sweep (regression guard, not a
+# profitability claim). Mirroring the MACD convention: advertised reference
+# first, then ascending cost levels.
+ELEVATED_COST_SWEEP_LEVELS = [
+    (COMMISSION, SLIPPAGE),          # advertised 3bps reference (2bp comm + 1bp slip)
+    (0.0005, 0.00025),               # 5bp comm + 2.5bp slip (10bps round-trip)
+    (0.0010, 0.0005),                # 10bp comm + 5bp slip (30bps round-trip)
+    (0.0020, 0.0010),                # 20bp comm + 10bp slip (60bps round-trip)
+]
+
+# Default advertised parameters for the sma_crossover strategy (fast=10 /
+# slow=30). Used as the fixed params for the elevated-cost sweep and as the
+# default when run_param_sensitivity_sweep is not varying them.
+DEFAULT_PARAMS = '{"fast_period": 10, "slow_period": 30}'
+
 # Primary buy-and-hold benchmark for the benchmark-aware simple-momentum
 # hypothesis on single AAPL (self-benchmark), matching the single-asset
 # comparison style used by the MACD / Donchian / EMA / Bollinger Bands /
@@ -510,7 +526,7 @@ def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1, 
     return result
 
 
-def _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdir_path, impact_coefficient=0.1):
+def _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdir_path, impact_coefficient=0.1, params=DEFAULT_PARAMS):
     """Run run_backtest.py at the given cost/impact settings and return parsed metrics."""
     scripts_dir = Path(__file__).resolve().parent
     # Find scripts dir
@@ -531,7 +547,7 @@ def _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdi
         "--data", str(data_path),
         "--strategy", "sma_crossover",
         "--symbol", "SPY",
-        "--params", '{"fast_period": 10, "slow_period": 30}',
+        "--params", params,
         "--commission", str(commission),
         "--slippage", str(slippage),
         "--train-frac", "0.6",
@@ -945,6 +961,141 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
 
     print("=" * 80)
     print("  COST SENSITIVITY SWEEP COMPLETE: verdicts/failing criteria reported per level above.")
+    print("=" * 80)
+
+    return rows
+
+
+def run_elevated_cost_sweep(data_path, grid=ELEVATED_COST_SWEEP_LEVELS):
+    """Elevated-cost sensitivity sweep above the advertised 3bps round-trip
+    reference (regression guard, not a profitability claim).
+
+    Runs the sma_crossover strategy at the advertised params across ascending
+    commission/slippage levels and records the weak two-criterion verdict
+    (oos_sharpe > 0, oos_total_return > 0) net of costs at each level.
+    """
+    data_path = Path(data_path)
+
+    print("\n" + "=" * 80)
+    print("ELEVATED COST SENSITIVITY SWEEP: ascending costs above advertised (falsifiable criteria)")
+    print("=" * 80)
+    print(f"  {'cost level':<36} {'comm':>6} {'slip':>6} {'Sharpe':>9} {'Return':>9} {'verdict':>12}")
+    print("  " + "-" * 90)
+
+    rows = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        for commission, slippage in grid:
+            metrics = _run_backtest_metrics(
+                data_path, None, commission, slippage, tmpdir_path,
+            )
+            sharpe = metrics.get("sharpe_ratio")
+            ret = metrics.get("total_return")
+            ok1 = sharpe is not None and float(sharpe) > 0
+            ok2 = ret is not None and float(ret) > 0
+            passes = {"oos_sharpe_gt_zero": bool(ok1), "oos_total_return_positive": bool(ok2)}
+            verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+            rows.append({
+                "commission": commission,
+                "slippage": slippage,
+                "commission_bps": commission * 10_000,
+                "slippage_bps": slippage * 10_000,
+                "sharpe_ratio": sharpe,
+                "total_return": ret,
+                "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+                "verdict": verdict,
+                "all_pass": all(passes.values()),
+            })
+            print(
+                f"{commission*10_000:.0f}bp comm + {slippage*10_000:.2f}bp slip".ljust(36)
+                + f" {commission*10_000:>6.0f} {slippage*10_000:>6.2f} "
+                + f"{_fmt_num(sharpe):>9} {_fmt_pct(ret):>9} {verdict[:12]:>12}"
+            )
+
+    assert len(rows) == len(grid)
+    assert rows[0]["commission_bps"] == COMMISSION * 10_000
+    assert rows[0]["slippage_bps"] == SLIPPAGE * 10_000
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
+
+    verdicts = [r["verdict"] for r in rows]
+    if len(set(verdicts)) > 1:
+        print(f"\n  VERDICT CHANGES across elevated cost sweep: {verdicts[0]} -> ... -> {verdicts[-1]} (sensitivity demonstrated)")
+    else:
+        print(f"\n  VERDICT STABLE across elevated cost sweep: {verdicts[0]}")
+    print("=" * 80)
+
+    return rows
+
+
+def run_param_sensitivity_sweep(data_path, grid=PARAM_SENSITIVITY_GRID):
+    """Parameter sensitivity sweep around the advertised fast=10 / slow=30
+    setting (regression guard, not a profitability claim).
+
+    Sweeps the pre-registered PARAM_SENSITIVITY_GRID at the advertised costs
+    and records the weak two-criterion verdict (oos_sharpe > 0,
+    oos_total_return > 0) net of costs per parameter setting.
+    """
+    data_path = Path(data_path)
+
+    print("\n" + "=" * 80)
+    print("PARAMETER SENSITIVITY SWEEP: SMA crossover params around the advertised setting")
+    print("=" * 80)
+    print(f"  Fixed costs: {COMMISSION*10_000:.0f}bp comm + {SLIPPAGE*10_000:.0f}bp slip")
+    print(
+        f"  {'fast':>6} {'slow':>6} {'Sharpe':>9} {'Return':>9} "
+        f"{'criteria':>10} {'verdict':>12}"
+    )
+    print("  " + "-" * 90)
+
+    rows = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        for fast, slow in grid:
+            params = json.dumps({
+                "fast_period": int(fast),
+                "slow_period": int(slow),
+            })
+            metrics = _run_backtest_metrics(data_path, None, COMMISSION, SLIPPAGE, tmpdir_path, params=params)
+            sharpe = metrics.get("sharpe_ratio")
+            ret = metrics.get("total_return")
+            ok1 = sharpe is not None and float(sharpe) > 0
+            ok2 = ret is not None and float(ret) > 0
+            passes = {"oos_sharpe_gt_zero": bool(ok1), "oos_total_return_positive": bool(ok2)}
+            failed = [name for name, ok in passes.items() if not ok]
+            verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+            rows.append({
+                "fast_period": int(fast),
+                "slow_period": int(slow),
+                "commission": COMMISSION,
+                "slippage": SLIPPAGE,
+                "sharpe_ratio": sharpe,
+                "total_return": ret,
+                "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+                "verdict": verdict,
+                "all_pass": all(passes.values()),
+                "failed_criteria": failed,
+            })
+            print(
+                f"  {int(fast):>6} {int(slow):>6} "
+                + f"{_fmt_num(sharpe):>9} {_fmt_pct(ret):>9} {','.join(failed) if failed else 'ok':>10} {verdict[:12]:>12}"
+            )
+
+    assert isinstance(rows, list) and len(rows) == len(grid)
+    for r, (fast, slow) in zip(rows, grid):
+        assert r["fast_period"] == int(fast)
+        assert r["slow_period"] == int(slow)
+        assert r["commission"] == COMMISSION
+        assert r["slippage"] == SLIPPAGE
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
+
+    verdicts = [r["verdict"] for r in rows]
+    if len(set(verdicts)) > 1:
+        print(f"\n  VERDICT CHANGES across parameter grid: {verdicts[0]} -> ... -> {verdicts[-1]} (sensitivity demonstrated)")
+    else:
+        print(f"\n  VERDICT STABLE across parameter grid: {verdicts[0]}")
     print("=" * 80)
 
     return rows
