@@ -17,7 +17,7 @@
 - Honest verdicts asserted; no tuning to force SUPPORT; offline/committed fixtures only; no live network.
 
 ## What remains unresolved
-- Full-suite end-to-end regression count not obtained (suite too slow for one session). Target: `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q` from repo root → **0 failures**, record pass/fail count. If any failure appears, investigate only the failing file; do not widen scope.
+- Full-suite end-to-end regression count not obtained (suite too slow for one session; ~90–100 min estimated vs session budget). Run **launched as persistent background process** (id `bgp_1ad505b93001go7rbiReOkMSLb`, pid 13064), logging to `/tmp/full_suite.log`, env `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`, from repo root: `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q`. So far ~38 tests completed, **0 failures** (no FAILED/ERROR lines). Target: **0 failures**, record pass/fail count. If any failure appears, investigate only the failing file; do not widen scope.
 - `test_falsifiable_hypothesis_example.py` attempted but too slow in-session (16/30 within 500s); `test_resolution_vs_sample_size.py` not yet attempted (both multi-minute walk-forward/CPCV/OOS validations — not bugs, not hangs; defer to offline window).
 
 ## Approaches already tried / failed
@@ -26,6 +26,6 @@
 - Running pytest from inside `skills/quantitative-backtesting/` with a bare `tests/...` path fails; always pass the full `skills/quantitative-backtesting/tests/...` path from the repo root.
 
 ## One precise next task (offline window)
-Run the full suite once to completion and record the count: `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH; python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q` from repo root, target **0 failures**. If green, the regression layer is fully verified. If any failure appears, inspect only that failing file and fix with the smallest reversible change; do not widen scope. Do not commit unless explicitly asked.
+Check the persistent full-suite run: `background_process status bgp_1ad505b93001go7rbiReOkMSLb` (or `ps aux | grep [p]ytest`) and read `/tmp/full_suite.log` for the final summary line and `EXIT_CODE`. Target **0 failures**, record pass/fail count. If the process has finished and is green, the regression layer is fully verified. If any failure appears, inspect only that failing file and fix with the smallest reversible change; do not widen scope. If not finished, let it continue (persistent) or re-launch: `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH; python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q` from repo root. Do not commit unless explicitly asked.
 
 (End of file)
