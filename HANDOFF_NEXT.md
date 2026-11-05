@@ -1,31 +1,34 @@
 # Handoff — next task for the following session
 
 ## Context
-The single-asset (MACD, EMA, Bollinger/mean-reversion, Donchian, simple momentum, RSI mean-reversion) and pair (z-score AAPL/GOOGL) falsification-guard families are now all complete and verified green on committed fixtures. The pending item from prior sessions is the full-suite regression gate, which is too slow to complete in a single session.
+The full quant-backtesting test suite was executed to completion from the repo root with offline committed fixtures only. All tests passed.
 
-## One precise next task
-Run the full quant-backtesting test suite once to completion in an offline window and record the pass/fail count:
-
+## What was actually verified
+- Command (run from repo root):
 ```
 export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH
-python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q
+python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider
 ```
+- Result: **1004 passed, 437 warnings in 4417.67s (1:13:37)**, **0 failures**.
+- Warnings are pre-existing (pandas deprecations, UserWarnings from strategy construction) and not related to failures.
 
-Run from the repo root. Target: **0 failures**. Record the exact pass/fail counts in the next handoff.
+## What remains unresolved
+- The handoff had suggested extending falsification coverage to a family still lacking a benchmark-aware guard (e.g. `pairs_trading_example.py` narrative or a panel strategy in `scripts/strategy_builder.py` without benchmark-aware + elevated-cost + param-sensitivity regression guard). That remains an open bounded task - not started in this session.
 
-Constraints:
-- If any failure appears, investigate only the failing file and fix with the smallest reversible change; do not widen scope to unrelated files.
-- Offline only, committed fixtures only (`skills/quantitative-backtesting/assets/example_data/real_market_data/{AAPL,MSFT,GOOGL}.csv`), no live network, no tuning to force SUPPORT, no profitability claims.
-- Do not commit unless explicitly asked.
+## Approaches already failed / notes
+- No failed approaches this session. Followed the exact task from HANDOFF_NEXT.md.
+- Long-running suite requires extended time (over an hour); ran in foreground with long timeout and monitored to completion.
 
-## If the full suite is green
-The next bounded quant research task would be to extend falsification coverage to a family still lacking a benchmark-aware guard. Candidate families to inspect first: `pairs_trading_example.py` (narrative only — determine whether it is worth converting to a falsifiable-hypothesis script) and any remaining panel strategy in `scripts/strategy_builder.py` without a benchmark-aware + elevated-cost + param-sensitivity regression guard. Reuse the existing framework pattern (book panel pricing, chronological 0.6/0.2/0.2 split, point-in-time validation, pre-registered criteria, Deflated Sharpe multiple-testing correction, relative-tolerance pinned metrics, honest NOT SUPPORTED verdicts).
+## One precise next task
+Extend falsification coverage to a family still lacking a benchmark-aware guard. Inspect first:
+1. `skills/quantitative-backtesting/examples/pairs_trading_example.py` - determine if it is worth converting to a falsifiable-hypothesis script following the project pattern.
+2. `skills/quantitative-backtesting/scripts/strategy_builder.py` panel strategies without benchmark-aware + elevated-cost + param-sensitivity regression guard.
+
+If converting/examples, reuse the existing framework pattern: book panel pricing, chronological 0.6/0.2/0.2 split, point-in-time validation, pre-registered criteria, Deflated Sharpe multiple-testing correction, relative-tolerance pinned metrics, honest NOT SUPPORTED verdicts. Offline only, committed fixtures only, no live network, no tuning to force SUPPORT, no profitability claims. Add/adjust tests as appropriate and run focused tests before broader checks.
 
 ## Environment
-`export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`. Python: system python3.12, pandas 3.1.1, numpy 2.5.4, pytest 9.2.0, matplotlib 3.11.2 (installed this session into user site-packages).
+- `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`. Python 3.12, pandas 3.1.1, numpy 2.5.4, pytest 9.2.0, matplotlib 3.11.2.
 
 ## Evidence
-- Focused gate run this session: 16 passed / 0 failed in 65.05s across the mean_reversion and zscore pair/triple benchmark-aware, elevated-cost, and param-sensitivity test files.
-- Prior verified baselines (from committed handoffs): walk_forward 195, cpcv 29, resolution_vs_sample_size 79 — all green.
-
-(End of file)
+- Full suite log tail (summary): `=============== 1004 passed, 437 warnings in 4417.67s (1:13:37) ================`
+- Previous focused gate (from prior handoff): 16 passed / 0 failed across mean_reversion and zscore pair/triple benchmark-aware, elevated-cost, param-sensitivity tests.
