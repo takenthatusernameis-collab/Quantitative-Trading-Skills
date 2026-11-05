@@ -609,6 +609,22 @@ def run_benchmark_aware_hypothesis_test(data_path, benchmark_path=BENCHMARK_FILE
         print(f"Parameter trials (Deflated Sharpe): {n_trials}")
     print("=" * 80)
 
+    # Detect multi-symbol panel files (symbol/ticker column) so run_backtest
+    # loads the full panel via --multi-symbol rather than treating the file as a
+    # single-asset series. This supports the committed triple panel and pair
+    # panels built from committed fixtures.
+    multi_symbol = False
+    try:
+        import pandas as _pd
+        _df = _pd.read_csv(data_path, nrows=0)
+        _sym_col = "symbol" if "symbol" in _df.columns else ("ticker" if "ticker" in _df.columns else None)
+        if _sym_col is not None:
+            _df2 = _pd.read_csv(data_path, usecols=[_sym_col])
+            if _df2[_sym_col].nunique(dropna=True) > 1:
+                multi_symbol = True
+    except Exception:
+        multi_symbol = False
+
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
         cmd = [
@@ -627,6 +643,8 @@ def run_benchmark_aware_hypothesis_test(data_path, benchmark_path=BENCHMARK_FILE
             "--output", str(tmpdir_path / "results"),
             "--validate-point-in-time",
         ]
+        if multi_symbol:
+            cmd += ["--multi-symbol"]
         if benchmark is not None:
             cmd += ["--benchmark", str(benchmark)]
         if n_trials is not None:
