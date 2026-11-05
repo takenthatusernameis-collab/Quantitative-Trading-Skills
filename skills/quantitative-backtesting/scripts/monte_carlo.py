@@ -92,6 +92,10 @@ def estimate_optimal_block_size(
         rho1 = acf[1]
         if rho1 <= 0:
             return 2
+        # Guard against rho1 >= 1 (numerical artifacts from near-constant /
+        # trending series or corrcoef edge cases) which would overflow the
+        # formula and produce an invalid block size.
+        rho1 = min(float(rho1), 1.0 - 1e-12)
         b_opt = (2 * rho1 / (1 - rho1) ** 2) ** (1 / 3) * n ** (1 / 3)
     else:
         # Politis & White (2004): q = sum_{k=1}^{max_lag} k * acf(k)^2
@@ -105,8 +109,10 @@ def estimate_optimal_block_size(
             return 2
         b_opt = (2 * q * n) ** (1 / 3)
 
-    # Clamp to reasonable bounds
-    b_opt = int(np.ceil(b_opt))
+    # Clamp to reasonable bounds (guard against non-finite b_opt)
+    if not np.isfinite(b_opt):
+        return n // 2 if n >= 4 else 2
+    b_opt = int(np.ceil(float(b_opt)))
     return max(2, min(b_opt, n // 2))
 
 

@@ -167,6 +167,21 @@ def test_estimate_optimal_block_size_zero_variance():
     assert b == 2
 
 
+def test_estimate_optimal_block_size_ar1_rho1_near_one():
+    """AR(1) block size must remain finite when rho1 is numerically >= 1.
+
+    Near-perfect trends or numerical artifacts can make corrcoef return
+    values >= 1, which would overflow (1-rho1)^2 in the AR(1) formula.
+    The estimator must clamp rho1 and return a finite block size in bounds.
+    """
+    dates = pd.date_range("2020-01-01", periods=100, freq="B")
+    returns = pd.Series(np.arange(100, dtype=float), index=dates)
+    b = estimate_optimal_block_size(returns, method="simple_ar1")
+    assert isinstance(b, int)
+    assert 2 <= b <= len(returns) // 2
+    assert np.isfinite(b)
+
+
 def test_monte_carlo_auto_block_size():
     """monte_carlo_simulation with block_size='auto' estimates and uses optimal block size."""
     returns = _make_returns(periods=252)
@@ -518,6 +533,7 @@ TEST_REGISTRY = [
     ("probability_of_ruin_sensitivity_to_drift", test_probability_of_ruin_sensitivity_to_drift),
     ("confidence_intervals_monotonic_wider_levels", test_confidence_intervals_monotonic_wider_levels),
     ("monte_carlo_rejects_invalid_base_returns", test_monte_carlo_rejects_invalid_base_returns),
+    ("test_estimate_optimal_block_size_ar1_rho1_near_one", test_estimate_optimal_block_size_ar1_rho1_near_one),
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 
