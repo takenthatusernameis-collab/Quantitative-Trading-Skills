@@ -616,6 +616,7 @@ def run_benchmark_aware_hypothesis_test(data_path, benchmark_path=BENCHMARK_FILE
             str(Path(__file__).resolve().parent.parent / "scripts" / "run_backtest.py"),
             "--data", str(data_path),
             "--strategy", "rsi_mean_reversion",
+            "--multi-symbol",
             "--params", PARAMS,
             "--commission", str(COMMISSION),
             "--slippage", str(SLIPPAGE),

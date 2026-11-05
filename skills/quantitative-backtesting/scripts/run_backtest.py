@@ -208,7 +208,7 @@ def _rewrite_provenance_timestamp(prov: Any) -> None:
         pass
 
 
-def _sanitize_provenance_timestamps(results: Dict[str, Any]) -> None:
+def _sanitize_provenance_timestamps(results: Any) -> None:
     """Rewrite every ``load_timestamp`` in ``results`` to the source file's mtime.
 
     Covers the single-symbol provenance dict, the per-symbol panel dict of
@@ -217,6 +217,8 @@ def _sanitize_provenance_timestamps(results: Dict[str, Any]) -> None:
     persists it, so the tear sheet HTML, the JSON summary and the persisted
     ``data_provenance.json`` all carry the same sanitized timestamp.
     """
+    if not isinstance(results, dict):
+        return
     prov = results.get("data_provenance")
     if isinstance(prov, dict):
         # Single-symbol: {field: value}. Multi-symbol panel:
@@ -1281,6 +1283,8 @@ def main():
 
     print("Running backtest...")
     results = run_backtest(data, strategy, args, data_provenance=provenance, benchmark=benchmark, survivorship=survivorship)
+    if isinstance(results, int):
+        return results
     # Thread benchmark provenance through results for downstream serialization
     try:
         if benchmark_provenance is not None:
