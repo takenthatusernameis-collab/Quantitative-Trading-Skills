@@ -1295,7 +1295,105 @@ def test_real_market_cost_sensitivity_sweep_aapl_msft():
 
     buffer2 = io.StringIO()
     with contextlib.redirect_stdout(buffer2):
-        result = run_hypothesis_test(data_path, commission=COMMISSION, slippage=SLIPPAGE)
+        result = run_hypothesis_test(
+            data_path, commission=COMMISSION, slippage=SLIPPAGE, benchmark_path=benchmark_path
+        )
+    sep = result.get("separation_check") or result.get("train_val_test_split", {}).get("separation_check", {})
+    assert sep.get("disjoint") is True
+    assert sep.get("chronological") is True
+    for overlap in ("train_val_overlap", "val_test_overlap", "train_test_overlap"):
+        assert sep.get(overlap) == 0
+    assert result.get("pit_passed") is True
+    assert result.get("bias_controls_engaged") is True
+
+
+def test_real_market_cost_sensitivity_sweep_googl_aapl():
+    """Transaction-cost sensitivity on committed real market data (GOOGL vs AAPL).
+
+    Runs the example's cost-sensitivity sweep on real market data
+    (GOOGL strategy vs the committed AAPL benchmark) across ascending
+    commission/slippage levels and asserts the honest directional claim:
+    as per-trade costs rise, net out-of-sample Sharpe, total return and
+    Deflated Alpha Ratio never improve.
+
+    Extends independent real-market out-of-sample sensitivity evidence on
+    committed fixtures (no synthetic formula, no network). The claim is purely
+    directional; the verdict at each cost level is not asserted.
+    Offline: uses only committed fixtures, no network.
+    """
+    data_path = (
+        SKILLS_DIR
+        / "assets"
+        / "example_data"
+        / "real_market_data"
+        / "GOOGL.csv"
+    )
+    benchmark_path = (
+        SKILLS_DIR
+        / "assets"
+        / "example_data"
+        / "real_market_data"
+        / "AAPL.csv"
+    )
+    assert data_path.exists(), "real market data fixture missing"
+    assert benchmark_path.exists(), "benchmark fixture missing"
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        rows = run_cost_sensitivity_sweep(data_path, benchmark_path=benchmark_path)
+
+    assert len(rows) == len(COST_SWEEP_LEVELS), (
+        f"expected {len(COST_SWEEP_LEVELS)} cost levels, got {len(rows)}"
+    )
+    assert [r["commission_bps"] for r in rows] == [
+        c * 10_000 for c, _ in COST_SWEEP_LEVELS
+    ], "cost sweep levels are not recorded in ascending order"
+    assert rows[0]["commission_bps"] == 0.0 and rows[0]["slippage_bps"] == 0.0, (
+        "first cost sweep level must be frictionless"
+    )
+
+    # Sharpe and total return are always computed; Deflated Alpha Ratio is
+    # only defined when multiple benchmarks are engaged. Single-benchmark
+    # runs report None for DAR (the framework's n_benchmarks == 1 contract,
+    # see run_hypothesis_test), so the DAR sensitivity claim is asserted only
+    # where DAR is actually computed.
+    for key, label in (("sharpe_ratio", "Sharpe ratio"), ("total_return", "total return")):
+        values = [r[key] for r in rows]
+        if key == "deflated_alpha_ratio" and all(v is None for v in values):
+            continue
+        assert all(v is not None and np.isfinite(v) for v in values), (
+            f"{label} is missing or non-finite at one or more cost levels: {values}"
+        )
+        for prev, curr in zip(values, values[1:]):
+            assert curr <= prev + 1e-12, (
+                f"{label} does not degrade monotonically with cost on real "
+                f"market data: {prev} -> {curr}"
+            )
+    dar_values = [r["deflated_alpha_ratio"] for r in rows]
+    finite_dar = [v for v in dar_values if v is not None and np.isfinite(v)]
+    if finite_dar:
+        assert len(finite_dar) == len(dar_values), (
+            "Deflated Alpha Ratio is missing or non-finite at one or more cost "
+            f"levels: {dar_values}"
+        )
+        for prev, curr in zip(dar_values, dar_values[1:]):
+            assert curr <= prev + 1e-12, (
+                "Deflated Alpha Ratio does not degrade monotonically with cost: "
+                f"{prev} -> {curr}"
+            )
+
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert len(r["criteria"]) == 5
+
+    # Machinery separation audit on GOOGL vs AAPL pair.
+    from falsifiable_hypothesis_example import run_hypothesis_test
+
+    buffer2 = io.StringIO()
+    with contextlib.redirect_stdout(buffer2):
+        result = run_hypothesis_test(
+            data_path, commission=COMMISSION, slippage=SLIPPAGE, benchmark_path=benchmark_path
+        )
     sep = result.get("separation_check") or result.get("train_val_test_split", {}).get("separation_check", {})
     assert sep.get("disjoint") is True
     assert sep.get("chronological") is True
@@ -1618,6 +1716,7 @@ TEST_REGISTRY = [
     ("test_real_market_cost_sensitivity_sweep_msft", test_real_market_cost_sensitivity_sweep_msft),
     ("test_real_market_cost_sensitivity_sweep_aapl", test_real_market_cost_sensitivity_sweep_aapl),
     ("test_real_market_cost_sensitivity_sweep_aapl_msft", test_real_market_cost_sensitivity_sweep_aapl_msft),
+    ("test_real_market_cost_sensitivity_sweep_googl_aapl", test_real_market_cost_sensitivity_sweep_googl_aapl),
     ("test_real_market_machinery_separation_audit_longer_windows", test_real_market_machinery_separation_audit_longer_windows),
     ("test_real_market_fetch_save_and_run_path_is_offline_safe", test_real_market_fetch_save_and_run_path_is_offline_safe),
 ]
