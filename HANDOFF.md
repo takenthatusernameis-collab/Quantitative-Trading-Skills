@@ -1,31 +1,28 @@
-# Handoff — regression-guard layer complete and green; full-suite run deferred to offline window
+# Handoff — cross_sectional_momentum pair benchmark-aware regression guard added
 
 ## What changed (this session)
-- Test environment established: `pip install pytest numpy pandas matplotlib` into `/home/runner/work/_temp/kilo-home/.local/bin` (add to `PATH`). `python3 -m pytest --version` → pytest 9.2.0; `numpy`/`pandas`/`matplotlib` import cleanly. No source or test file changes; working tree clean.
-- Inspected `skills/quantitative-backtesting/scripts/strategy_builder.py`: its classes are signal generators (StrategyBase subclasses), already unit-tested by `test_strategy_builder.py` (47 tests); they are not backtest/hypothesis strategies, so no benchmark-aware/elevated-cost/param-sensitivity regression guards are missing there (resolves HANDOFF_SESSION49 open item as "no gap").
-- Verified focused gates this session: `test_mean_reversion_elevated_cost_real_aapl.py` + `test_mean_reversion_param_sensitivity_real_aapl.py` → 2 passed; batch of 5 fast single-asset elevated-cost gates (macd, ema_cross, simple_momentum, bollinger_bands on AAPL) → 5 passed.
-- Verified the complete regression-guard layer is already in place for every family:
-  - Single-asset (AAPL): macd, ema_cross, bollinger_bands, donchian_breakout, simple_momentum, mean_reversion, rsi_mean_reversion — each has elevated_cost_sweep + param_sensitivity + benchmark_aware + walk_forward tests.
-  - Pair (AAPL/GOOGL vs MSFT): zscore_mean_reversion — elevated_cost_sweep, param_sensitivity, and benchmark_aware tests all pinned with relative-tolerance metrics.
-  - Multi-asset: cross_sectional_momentum, dual_momentum, rsi (cost/elevated/hypothesis/benchmark-aware), cpcv, monte_carlo, performance.py (deflated alpha + multi-benchmark).
-- All focused gates run this session: **0 failures** across ~500+ verified tests (macd/ema, bollinger/donchian, simple_momentum, mean_reversion/rsi_mean_reversion, cross_sectional/dual_momentum, zscore, rsi, cpcv/monte_carlo, data_loader/reporting, performance, examples_coverage, walk_forward families, misc examples). Honest verdicts asserted; no tuning to force SUPPORT; offline/committed fixtures only; no live network.
+- Added `skills/quantitative-backtesting/tests/test_cross_sectional_momentum_benchmark_aware_real_aapl_googl.py`: benchmark-aware falsification regression guard for cross-sectional momentum on the committed AAPL/GOOGL pair panel (MSFT buy-and-hold benchmark, `--panel-pricing book`, 2bp comm + 1bp slip, 0.6/0.2/0.2 test-only split, point-in-time validation on).
+- Mirrors `test_dual_momentum_benchmark_aware_real_aapl_googl.py` (pair pattern) and `test_cross_sectional_momentum_benchmark_aware_real_triple_aapl_msft_googl.py` (cross_sectional module pattern). Imports `BENCHMARK_CRITERIA`, `BENCHMARK_FILE`, `N_TRIALS`, `run_benchmark_aware_hypothesis_test` from `cross_sectional_momentum_hypothesis.py`; calls `run_benchmark_aware_hypothesis_test(data_path, benchmark_path="MSFT.csv", n_trials=N_TRIALS)`.
+- Two tests:
+  1. Structural gate: verdict in {SUPPORTED, NOT SUPPORTED}, `all_pass == all(c["passed"])`, 4 criteria matching BENCHMARK_CRITERIA names, verdict == NOT SUPPORTED, "VERDICT:" in output.
+  2. Pinned-metrics regression guard (rel tol 1e-3): sharpe_ratio=-0.3924330675740782, total_return=-0.06146316584235767, benchmark_total_return=0.9015402575236577, benchmark_alpha=-0.01089765046590818, benchmark_alpha_pvalue=0.8940255484273542, correlation_with_benchmark=-0.08606093325649128, deflated_sharpe_pvalue=0.9924762923384771, n_trials=6; all 4 criteria assert FAIL (oos_sharpe_gt_zero, oos_total_return_gt_benchmark, deflated_sharpe_pvalue_lt_0.10, benchmark_alpha_pvalue_lt_0.05); verdict NOT SUPPORTED. No tuning to force SUPPORT.
 
 ## What was actually verified
-- Focused gates for every family above all pass; mean_reversion sweep tests (2/2), zscore pair benchmark-aware pinned metrics, performance.py deflated-alpha multi-benchmark tests (34/34), examples_coverage (43/43). This session added: mean_reversion elevated_cost + param_sensitivity (2/2), fast single-asset elevated-cost batch (5/5).
-- Full suite is too slow to complete in-session (~90–100 min estimated at ~5–9s/test plus multi-minute full-framework validation tests). Prior in-session full-suite run timed out at 60 min — do not repeat unchanged in-session (repeated-failure rule); focused gates are the verification mode.
-- `test_falsifiable_hypothesis_example.py` (30 tests, multi-minute walk-forward/CPCV/OOS validations) also exceeds the in-session budget: only 16/30 reached within 500s. Not a bug/hang; needs an offline window.
-- Honest verdicts asserted; no tuning to force SUPPORT; offline/committed fixtures only; no live network.
+- New test file: **2 passed** (27.46s) via `python3 -m pytest ... -q` and via `__main__` ("OK").
+- Existing triple cross_sectional benchmark-aware test still **1 passed** (13.27s) — no regression.
+- Metrics re-derived live (not copied): all 4 criteria fail, honest verdict NOT SUPPORTED (strategy Sharpe -0.39, return -6.15%, vs MSFT buy-and-hold +90.2%, alpha p=0.894, DSR p=0.992).
+- Working tree contains only the new untracked test file; no source or other test files modified.
+- Offline, committed fixtures only; no live network.
 
 ## What remains unresolved
-- Full-suite end-to-end regression count not obtained (suite too slow for one session; ~90–100 min estimated vs session budget). Run **launched as persistent background process** (pid 13115; parent shell /bin/bash -l -c), logging to `/tmp/full_suite.log`, env `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`, from repo root: `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q`. As of this session: **14% complete (~147 tests), 0 failures** (no FAILED/ERROR lines). Target: **0 failures**, record final pass/fail count. If any failure appears, investigate only the failing file; do not widen scope.
-- `test_falsifiable_hypothesis_example.py` attempted but too slow in-session (16/30 within 500s); `test_resolution_vs_sample_size.py` not yet attempted (both multi-minute walk-forward/CPCV/OOS validations — not bugs, not hangs; defer to offline window).
+- None for the pair-panel four-guard families: cross_sectional_momentum pair now has benchmark_aware (new), elevated_cost, param_sensitivity, and walk-forward — all pinned with honest NOT SUPPORTED verdicts. dual_momentum pair and rsi_mean_reversion pair four-guard families were already complete.
+- Deferred (offline window, multi-minute walk-forward/CPCV/OOS): `test_falsifiable_hypothesis_example.py` (16/30 reached within 500s last attempt) and `test_resolution_vs_sample_size.py` (not yet attempted).
+- Full-suite regression gate not re-run this session (prior: 1022 passed + 2 flaky, now fixed; >60 min). Focused gates are the verification mode.
 
 ## Approaches already tried / failed
-- Running the full `skills/quantitative-backtesting/tests/` suite in-session: exceeds the session time budget (~90–100 min needed vs ~60 min limit). Materially different alternative = per-file focused gates (done, all pass).
-- Running `test_falsifiable_hypothesis_example.py` in-session: only 16/30 tests within 500s; same time-budget constraint, defer to offline window.
-- Running pytest from inside `skills/quantitative-backtesting/` with a bare `tests/...` path fails; always pass the full `skills/quantitative-backtesting/tests/...` path from the repo root.
+- None new this session. Stale handoffs claimed the pair walk-forward cross_sectional test and dual_momentum/rsi pair four-guard families were missing; inspection confirmed they already exist with pinned metrics — the only real gap was the cross_sectional pair benchmark-aware test, now filled.
 
-## One precise next task (offline window)
-Check the full-suite run: `ps aux | grep [p]ytest` (confirm pid 13115 still alive) and read `/tmp/full_suite.log` for the final summary line and `EXIT_CODE` (appended as `EXIT_CODE=N` when done). Target **0 failures**, record pass/fail count. If green, the regression layer is fully verified — then proceed to the pair-panel work in HANDOFF_NEXT.md (mirror `test_walk_forward_cross_sectional_momentum_real_triple_aapl_msft_googl.py` onto the AAPL/GOOGL pair panel, then the four-guard family for dual_momentum and rsi_mean_reversion on the pair panel). If any failure appears, inspect only that failing file and fix with the smallest reversible change; do not widen scope. If not finished, let it continue or re-launch: `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH; python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q` from repo root. Do not commit unless explicitly asked.
+## One precise next task
+Run the focused pair-panel regression gates together to confirm the cross_sectional_momentum pair four-guard family is green end-to-end: `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH; python3 -m pytest skills/quantitative-backtesting/tests/test_cross_sectional_momentum_benchmark_aware_real_aapl_googl.py skills/quantitative-backtesting/tests/test_cross_sectional_momentum_elevated_cost_real_aapl_googl.py skills/quantitative-backtesting/tests/test_cross_sectional_momentum_param_sensitivity_real_aapl_googl.py skills/quantitative-backtesting/tests/test_walk_forward_cross_sectional_momentum_real_pair_aapl_googl.py -p no:cacheprovider -q`. Target: all pass, 0 failures. Do not commit unless explicitly asked. Next methodological frontier after this is the deferred `test_falsifiable_hypothesis_example.py` / `test_resolution_vs_sample_size.py` in an offline window.
 
 (End of file)
