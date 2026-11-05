@@ -76,9 +76,14 @@ def estimate_optimal_block_size(
     acf[0] = 1.0
     for k in range(1, max_lag + 1):
         if k < n:
-            acf[k] = np.corrcoef(returns[:-k], returns[k:])[0, 1]
-            if np.isnan(acf[k]):
+            x = returns[:-k]
+            y = returns[k:]
+            if x.std(ddof=1) <= 0 or y.std(ddof=1) <= 0:
                 acf[k] = 0.0
+            else:
+                acf[k] = np.corrcoef(x, y)[0, 1]
+                if np.isnan(acf[k]):
+                    acf[k] = 0.0
         else:
             acf[k] = 0.0
 
