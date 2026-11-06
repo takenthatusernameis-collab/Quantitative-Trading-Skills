@@ -1,23 +1,25 @@
-# Handoff — cross_sectional_momentum AAPL/GOOGL pair four-guard family verified green
+# Handoff — deferred falsification suites executed; both green
 
 ## What changed (this session)
-- No source/test edits. Executed the handoff-assigned verification task for the cross-sectional momentum pair (AAPL/GOOGL) falsification guards.
-- Confirmed `skills/quantitative-backtesting/tests/test_cross_sectional_momentum_benchmark_aware_real_aapl_googl.py` exists (untracked, created by prior session) and is the final piece of the pair four-guard family alongside existing elevated-cost, param-sensitivity, and walk-forward guards.
+- No source or test edits. Working tree clean (verified via `git status`).
+- Executed the two deferred verification suites from the prior handoff in offline windows, committed fixtures only, no live network, no tuning to force SUPPORT.
 
 ## What was actually verified
-- Focused pair regression gate (offline, committed fixtures):
-  `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH; python3 -m pytest skills/quantitative-backtesting/tests/test_cross_sectional_momentum_benchmark_aware_real_aapl_googl.py skills/quantitative-backtesting/tests/test_cross_sectional_momentum_elevated_cost_real_aapl_googl.py skills/quantitative-backtesting/tests/test_cross_sectional_momentum_param_sensitivity_real_aapl_googl.py skills/quantitative-backtesting/tests/test_walk_forward_cross_sectional_momentum_real_pair_aapl_googl.py -p no:cacheprovider -q`
-  **6 passed in 67.38s** (0 failures).
-- Git state: clean tracked tree; only untracked `skills/quantitative-backtesting/tests/test_cross_sectional_momentum_benchmark_aware_real_aapl_googl.py`. Last commit `a7d52d5` touched only an unrelated RSI walk-forward benchmark-aware test file.
-- Environment: Python 3.12.3, pytest 9.2.0.
+- `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH; python3 -m pytest skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py -p no:cacheprovider -q`
+  -> **30 passed in 900.76s (0:15:00), EXIT_CODE=0**. Evidence: /home/runner/work/_temp/kilo-tmp/kilo/falsifiable_run.log
+- `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH; python3 -m pytest skills/quantitative-backtesting/tests/test_resolution_vs_sample_size.py -p no:cacheprovider -q`
+  -> **79 passed in 122.70s (0:02:02), EXIT_CODE=0**. Evidence: /home/runner/work/_temp/kilo-tmp/kilo/resolution_run.log
+  (2 pre-existing UserWarnings from data_loader.py:392 "Duplicate dates in index"; not failures.)
+- Cross-check: bollinger_bands elevated-cost + param-sensitivity guards referenced in HANDOFF_NEXT.md already exist:
+  `test_bollinger_bands_elevated_cost_real_aapl.py`, `test_bollinger_bands_param_sensitivity_real_aapl.py` (plus benchmark-aware variant). No new guard needed there.
 
 ## What remains unresolved
-- **Uncommitted new test**: `test_cross_sectional_momentum_benchmark_aware_real_aapl_googl.py` is untracked; committing was not requested. It passed focused verification.
-- **Deferred (offline, multi-minute)**: `skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py` (previously 16/30 reached within 500s) and `skills/quantitative-backtesting/tests/test_resolution_vs_sample_size.py` (not attempted).
-- **Full-suite regression gate** not re-run (>60 min historically; prior snapshot 1022 passed + 2 flaky now fixed). Focused gates remain the practical verification mode.
+- Full-suite regression gate not re-run (>60 min historically; prior snapshot 1022 passed + 2 flaky, now resolved via isolated re-runs; new tests added since). Focused gates green; full-suite green status pending a longer offline window.
 
 ## Approaches already tried / failed
-- None this session. Prior stale handoffs overstated missing pair guards; inspection + focused gates confirm cross_sectional_momentum AAPL/GOOGL pair four-guard family (benchmark-aware, elevated-cost, param-sensitivity, walk-forward) is complete and green.
+- None this session. Both deferred suites passed cleanly on the first run.
 
 ## One precise next task
-In an offline window, run the deferred falsification example suite to completion and capture evidence: `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH; python3 -m pytest skills/quantitative-backtesting/tests/test_falsifiable_hypothesis_example.py -p no:cacheprovider -q`. Record pass/fail counts, runtime, and any failing test names/trace summaries in a new handoff. If it passes cleanly, run `test_resolution_vs_sample_size.py` next with the same evidence capture. Do not tune tests to pass; treat failures as methodological/evidence findings. Do not commit unless explicitly asked.
+Re-run the full-suite regression gate in a longer offline window and record the pass/fail count, targeting **0 failures**:
+`export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH; python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q`
+from repo root. If any failure appears, investigate only the failing file; do not widen scope. Do not commit unless explicitly asked. Env: Python 3.12.3, pytest 9.2.0, committed fixtures only.
