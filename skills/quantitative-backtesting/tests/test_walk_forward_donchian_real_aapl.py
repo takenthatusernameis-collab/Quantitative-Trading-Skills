@@ -17,10 +17,10 @@ walk-forward re-optimization control complementary to the single 0.6/0.2/0.2
 split already covered by test_donchian_breakout_hypothesis.py.
 
 Verdicts are falsification outcomes, never profitability claims: the raw
-out-of-sample Sharpe is negative (-0.0907) and the total return is negative
-(-12.22%), and the Deflated Sharpe p-value (0.99997) is far above 0.10, so
-the honest verdict is NOT SUPPORTED. The test does not tune to force
-SUPPORTED.
+out-of-sample Sharpe is positive (+0.2629) and the total return is positive
+(+52.10%), but the Deflated Sharpe p-value (0.7311) is far above 0.10, so
+the multiple-testing-corrected criterion fails and the honest verdict is NOT
+SUPPORTED. The test does not tune to force SUPPORTED.
 
 Offline, committed fixtures only; no live network.
 """
@@ -108,9 +108,9 @@ def test_walk_forward_donchian_real_aapl_metrics_pinned():
     costs) so a silent change to the backtest numbers is caught. Relative
     tolerance only, never exact equality.
 
-    Honest outcome: the raw out-of-sample Sharpe is negative (-0.0907), the
-    total return is negative (-12.22%), and the Deflated Sharpe p-value
-    (0.99997) is far above 0.10, so the multiple-testing-corrected criterion
+    Honest outcome: the raw out-of-sample Sharpe is positive (+0.2629), the
+    total return is positive (+52.10%), and the Deflated Sharpe p-value
+    (0.7311) is far above 0.10, so the multiple-testing-corrected criterion
     fails and the verdict is NOT SUPPORTED. The test does not tune to force
     SUPPORT.
     """
