@@ -1,28 +1,27 @@
-# Handoff — all 12 strategies have CPCV guards; full suite green
+# Handoff — walk-forward guards added for volatility_targeting + kelly_criterion
 
 ## What changed (this session)
-- Full-suite regression gate run to completion: `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q` → **1057 passed, 0 failed** in 2455.39s. Only pre-existing CrossSectionalMomentum symmetric-quantile / pandas4 deprecation warnings; no failures.
-- Added three CPCV regression guards (each: `runs` test + metrics-pinned test, rel tol 1e-6, honest NOT SUPPORTED verdicts, offline + committed fixtures only):
-  - `test_cpcv_multi_pair_zscore_real_aapl_googl.py` (book pricing; oos_sharpe=0.2901, ret=+8.16%, DSR p=0.4812)
-  - `test_cpcv_volatility_targeting_real_aapl.py` (oos_sharpe=-1.6572, ret=-62.11%, DSR p=0.9980)
-  - `test_cpcv_kelly_criterion_real_aapl.py` (identical metrics to volatility_targeting; asserts the identity)
-- Probe scripts deleted after pinning. Pre-existing artifact churn restored via `git checkout`.
+- Probed and pinned real walk-forward outputs (committed AAPL fixture, offline) for the two overlay strategies that lacked WF guards:
+  - `volatility_targeting` (standalone, momentum fallback), grid `{target_vol:[0.15], lookback:[63]}`, 12/12/12 months, 2bps+1bps: 8/8 periods w/ position; OOS Sharpe -0.38617607871821996, ret -0.5921302782722866, vol 0.25847052397276044, DSR p=0.9932632277741321. **NOT SUPPORTED**.
+  - `kelly_criterion` (standalone), grid `{lookback:[63], fraction:[0.5], max_leverage:[2.0]}`: identical WF metrics to VT at lookback=63 (same momentum fallback) — pinned independently.
+- Added (uncommitted):
+  - `skills/quantitative-backtesting/tests/test_walk_forward_volatility_targeting_real_aapl.py`
+  - `skills/quantitative-backtesting/tests/test_walk_forward_kelly_criterion_real_aapl.py`
+  Each: `runs` + metrics-pinned (rel tol 1e-6), honest verdict, pre-registered grid, offline/committed fixtures only, no tuning.
+- Noted `multi_pair_zscore_mean_reversion` already has WF coverage (`test_walk_forward_zscore_pair_real_aapl_googl*.py`). CPCV coverage for all 12 strategies was green in Session 53 (1057 passed full suite).
 
 ## What was verified
-- Full suite: 1057 passed, 0 failed, EXIT 0, ~41 min, offline, committed fixtures only.
-- Focused gate (3 new + test_cpcv.py): 35 passed, 0 failed in 40.16s.
-- `py_compile` on all three new files → OK.
-- All 12 registered strategies in `strategy_builder.STRATEGY_REGISTRY` now have CPCV regression guards on committed fixtures.
+- `py_compile` on both new files → OK.
+- Focused gate: `test_walk_forward_volatility_targeting_real_aapl.py` + `test_walk_forward_kelly_criterion_real_aapl.py` + `test_walk_forward.py` → **199 passed, 314 warnings, 0 failed** in ~190s (pre-existing CrossSectionalMomentum warnings). Env: `PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`. Offline, committed fixtures only.
+- No engine/script/config changes. Uncommitted: 2 new test files + handoffs.
 
 ## What remains unresolved
-- Nothing blocking. Suite is green end-to-end.
+- WF coverage audit across all 12 `STRATEGY_REGISTRY` entries still needed; some base paths (e.g. `zscore_mean_reversion` single-asset AAPL factory) may or may not be pinned as a direct `build_strategy` WF guard — inspect before adding.
+- Full-suite gate not re-run (Session 53: 1057 passed). Run before merge.
+- Slow deferred tests (`test_falsifiable_hypothesis_example.py`, `test_resolution_vs_sample_size.py`) unaddressed.
 
 ## Approaches tried / failed
-- Full suite in a short session: ~41 min, exceeds a turn; ran as tracked background process and waited.
-- `multi_pair_zscore_mean_reversion` default `panel_pricing="net-exposure"`: market-neutral pair panel yields no selectable position / no pooled OOS metrics (same structural outcome as dual_momentum/zscore structural guards). Used `panel_pricing="book"` instead (matches the walk-forward multi-pair guard); pre-registered, not tuned to force SUPPORT.
-- Standalone overlay `base_strategy` param: not accepted by `build_strategy`; standalone fallback is the only CPCV-viable path, used as-is.
+- Initial VT probe pinned with `lookback=20` (wrong for CPCV-aligned grid); focused gate caught the mismatch (1 fail). Corrected to `lookback=63`, re-pinned from real output.
 
 ## One precise next task
-Add a **walk-forward regression guard for `multi_pair_zscore_mean_reversion`** mirroring `test_walk_forward_zscore_pair_real_aapl_googl.py` (which already pins walk-forward metrics for that strategy), filling the walk-forward gap for the multi-pair z-score path on committed fixtures. Probe first, pin OOS metrics/DSR with relative tolerance and the honest verdict, then run the focused gate: new file + `test_walk_forward.py`. Env: `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`. Offline + committed fixtures only. Do not commit unless explicitly asked.
-
-(End of file - total 27 lines)
+Audit WF coverage for all 12 registered strategies (grep `test_walk_forward*` for `build_strategy('<name>'` / factory usage per strategy). For the first uncovered base strategy (inspect `zscore_mean_reversion` on AAPL: confirm whether `test_walk_forward_zscore_real_aapl_msft.py` / `_aapl_googl.py` pin the single-asset/base factory path or only structural variants; if missing, add a pinned WF guard). Probe, pin honest metrics (rel tol 1e-6), verify with new file + `test_walk_forward.py`. Offline, committed fixtures only. Do not commit unless explicitly asked.
