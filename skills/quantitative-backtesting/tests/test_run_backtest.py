@@ -277,6 +277,33 @@ def _flip_strategy():
     return _FlipStrategy(StrategyConfig(name="flip", parameters={}))
 
 
+class _LookAheadStrategy:
+    """Strategy whose signal uses next-period close (genuine look-ahead bias).
+
+    signal[t] = 1 when close[t+1] > close[t], else 0 -- information unavailable
+    at decision time t. run_backtest's point-in-time screen must flag it.
+    """
+
+    def __init__(self, config):
+        self.config = config
+        self.name = config.name
+        self.parameters = config.parameters
+
+    def generate_signals(self, data):
+        s = pd.Series(0, index=data.index, dtype=int)
+        if len(data) > 1:
+            s.iloc[:-1] = (data["close"].shift(-1) > data["close"]).iloc[:-1].astype(int)
+        return s
+
+    def get_position_sizing(self, data, signals):
+        return signals.abs()
+
+
+def _look_ahead_strategy():
+    from strategy_builder import StrategyConfig
+    return _LookAheadStrategy(StrategyConfig(name="lookahead", parameters={}))
+
+
 def test_run_backtest_records_both_legs_of_direct_long_short_flip():
     """A direct +1 -> -1 flip must record two trades (long close + short open).
 
@@ -1082,6 +1109,30 @@ def test_run_backtest_point_in_time_detects_duplicate_timestamps():
     pit = results["point_in_time_validation"]
     assert pit["passed"] is False
     assert any("Duplicate timestamps" in v for v in pit["violations"])
+    assert len(results["trades"]) > 0, "non-strict run must still complete"
+
+
+def test_run_backtest_point_in_time_detects_lookahead_bias():
+    """A strategy whose signal uses next-period information must fail PIT.
+
+    Genuine look-ahead bias (signal[t] derived from close[t+1], unavailable at
+    decision time t) must be surfaced by run_backtest's point-in-time screen:
+    passed is False and a next-period / look-ahead violation is recorded.
+    The run still completes in non-strict mode so the violation is observable.
+
+    Positive control complementing test_run_backtest_point_in_time_validation_recorded
+    (the close[t]-based negative control).
+    """
+    data = _make_data()
+    strategy = _look_ahead_strategy()
+    results = run_backtest(data, strategy, _Args(validate_point_in_time=True))
+    pit = results["point_in_time_validation"]
+    assert pit["passed"] is False, (
+        f"look-ahead signal must fail PIT validation, got violations={pit['violations']}"
+    )
+    assert any("next-period returns" in v for v in pit["violations"]), (
+        f"expected a next-period look-ahead violation, got {pit['violations']}"
+    )
     assert len(results["trades"]) > 0, "non-strict run must still complete"
 
 
@@ -3819,6 +3870,7 @@ TEST_REGISTRY = [
     ("test_run_backtest_without_provenance_omits_key", test_run_backtest_without_provenance_omits_key),
     ("test_run_backtest_point_in_time_validation_recorded", test_run_backtest_point_in_time_validation_recorded),
     ("test_run_backtest_point_in_time_detects_duplicate_timestamps", test_run_backtest_point_in_time_detects_duplicate_timestamps),
+    ("test_run_backtest_point_in_time_detects_lookahead_bias", test_run_backtest_point_in_time_detects_lookahead_bias),
     ("test_handle_point_in_time_results_strictness_matrix", test_handle_point_in_time_results_strictness_matrix),
     ("test_run_backtest_point_in_time_panel_validates_each_symbol", test_run_backtest_point_in_time_panel_validates_each_symbol),
     ("test_parse_args_accepts_validation_and_multi_symbol_flags", test_parse_args_accepts_validation_and_multi_symbol_flags),
