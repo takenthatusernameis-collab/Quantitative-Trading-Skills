@@ -594,9 +594,14 @@ def detect_survivorship_bias(
 
     total_symbols = len(data_dict)
     if total_symbols > 0:
-        # Bias score: fraction of symbols with issues
-        n_issues = len(entered) + len(exited) + len(insufficient) + len(large_gaps)
-        bias_score = min(n_issues / total_symbols, 1.0)
+        # Bias score: fraction of symbols with any issue. A symbol may
+        # appear in multiple categories (e.g. insufficient data and a
+        # large gap); count each affected symbol once.
+        affected = set(insufficient)
+        affected.update(e["symbol"] for e in entered)
+        affected.update(e["symbol"] for e in exited)
+        affected.update(e["symbol"] for e in large_gaps)
+        bias_score = min(len(affected) / total_symbols, 1.0)
     else:
         bias_score = 0.0
 

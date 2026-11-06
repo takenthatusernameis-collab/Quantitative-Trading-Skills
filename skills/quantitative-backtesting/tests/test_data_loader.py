@@ -884,6 +884,22 @@ def test_main_registers_every_module_level_test():
 
 
 # Module-level registry of (label, callable) pairs.
+
+def test_detect_survivorship_bias_counts_symbol_once_across_issue_types():
+    """A symbol with multiple issues (insufficient data, large gap, early
+    exit) must contribute once to the bias score, not once per issue."""
+    dates = pd.date_range("2020-01-01", periods=50, freq="D")
+    base = pd.DataFrame({"open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}, index=dates)
+    # B is short (insufficient), ends early, and has a large internal gap.
+    b = base.iloc[:20].drop(base.index[5:15])
+    res = detect_survivorship_bias({"A": base, "B": b}, min_observations=15, max_gap_days=5)
+    assert "B" in res["insufficient_data"]
+    assert any(e["symbol"] == "B" for e in res["large_gaps"])
+    assert any(e["symbol"] == "B" for e in res["exited_symbols"])
+    # 1 of 2 symbols affected -> 0.5, not 1.5/2 clamped via multi-counting.
+    assert res["bias_score"] == 0.5
+
+
 TEST_REGISTRY = [
     ("test_load_data_unsupported_format_raises", test_load_data_unsupported_format_raises),
     ("test_load_data_missing_columns_raises", test_load_data_missing_columns_raises),
@@ -904,7 +920,7 @@ TEST_REGISTRY = [
     ("test_detect_survivorship_bias_entries_exits_insufficient", test_detect_survivorship_bias_entries_exits_insufficient),
     ("test_detect_survivorship_bias_empty", test_detect_survivorship_bias_empty),
     ("test_load_multi_symbol_provenance_complete", test_load_multi_symbol_provenance_complete),
-    ("test_compute_benchmark_total_return_with_dividends", test_compute_benchmark_total_return_with_dividends),
+        ("test_compute_benchmark_total_return_with_dividends", test_compute_benchmark_total_return_with_dividends),
     ("test_compute_benchmark_total_return_with_adj_close", test_compute_benchmark_total_return_with_adj_close),
     ("test_compute_benchmark_total_return_fallback_price_only", test_compute_benchmark_total_return_fallback_price_only),
     ("test_detect_benchmark_total_return_type", test_detect_benchmark_total_return_type),
@@ -921,6 +937,7 @@ TEST_REGISTRY = [
     ("test_fetch_ohlcv_yahoo_retries_on_429_and_succeeds", test_fetch_ohlcv_yahoo_retries_on_429_and_succeeds),
     ("test_fetch_ohlcv_yahoo_raises_runtimeerror_after_429_exhaustion", test_fetch_ohlcv_yahoo_raises_runtimeerror_after_429_exhaustion),
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
+    ("test_detect_survivorship_bias_counts_symbol_once_across_issue_types", test_detect_survivorship_bias_counts_symbol_once_across_issue_types),
 ]
 
 def main() -> int:
