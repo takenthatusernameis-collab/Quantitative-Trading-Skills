@@ -380,15 +380,11 @@ def test_cross_sectional_momentum_symmetric_quantiles_flat():
     top_quantile == bottom_quantile the long and short books are the
     same size every period, so (n_long - n_short) / n_assets is zero
     by construction and the strategy never takes a position. The
-    default parameters (0.2 / 0.2) hit this case.
+    explicit symmetric parameters (0.2 / 0.2) hit this case.
     """
     import warnings
 
     data_dict = _make_multi_asset_data(n=150, n_assets=6, seed=123)
-
-    # The published defaults are symmetric (0.2 / 0.2).
-    defaults = get_strategy_defaults("cross_sectional_momentum")
-    assert defaults["top_quantile"] == defaults["bottom_quantile"]
 
     strategy = build_strategy("cross_sectional_momentum",
                               '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}')
