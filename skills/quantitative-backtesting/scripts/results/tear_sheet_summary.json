@@ -37,7 +37,10 @@
     "capacity_book_trend": null,
     "book_diagnostic": null
   },
-  "plot_files": [],
+  "plot_files": [
+    "equity_curve.png",
+    "returns_distribution.png"
+  ],
   "panel_pricing": "net-exposure",
   "train_val_test_split": {
     "train_start": "2010-01-04 00:00:00",
