@@ -309,7 +309,12 @@ Risk Metrics:
   seed, and the fixture must be labelled as synthetic and carry no security
   identifier. The control checks the decision machinery, not any market. See
   `references/validation_methods.md`, "A positive control: the machinery can
-  say yes".
+  say yes". **Runtime (inherent, evidence-based):** cost-sensitivity sweep
+  tests dominate runtime because each sweep point executes one independent
+  `run_hypothesis_test` (~16s; a 5-level sweep ≈ 79s). This is honest
+  sensitivity analysis, not redundant computation; do not cache across sweep
+  points or weaken coverage/safety controls. Run offline on committed fixtures
+  only; expect the full suite to take tens of minutes.
 - `test_resolution_vs_sample_size.py` - Unit tests for the **resolution as a
   function of sample size**: the minimum confirmable annualized Sharpe falls
   as the sample grows and crosses below the framework's plausibility bound at
