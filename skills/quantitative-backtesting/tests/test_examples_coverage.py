@@ -38,6 +38,13 @@ _ZSCORE_MR_PATH = SKILLS_DIR / "examples" / "zscore_mean_reversion_hypothesis.py
 _REAL_DATA_PIPELINE_PATH = SKILLS_DIR / "examples" / "real_data_pipeline_example.py"
 _DUAL_MOMENTUM_PATH = SKILLS_DIR / "examples" / "dual_momentum_hypothesis.py"
 
+_BOLLINGER_PATH = SKILLS_DIR / "examples" / "bollinger_bands_hypothesis.py"
+_DONCHIAN_PATH = SKILLS_DIR / "examples" / "donchian_breakout_hypothesis.py"
+_EMA_CROSS_PATH = SKILLS_DIR / "examples" / "ema_cross_hypothesis.py"
+_MACD_PATH = SKILLS_DIR / "examples" / "macd_hypothesis.py"
+_WF_COMPARE_TRIPLE_PATH = SKILLS_DIR / "examples" / "walk_forward_compare_triple.py"
+_COMPARE_DUAL_CS_PATH = SKILLS_DIR / "examples" / "compare_dual_vs_cross_sectional_triple.py"
+
 _REAL_MARKET_DATA = SKILLS_DIR / "assets" / "example_data" / "real_market_data"
 
 
@@ -802,6 +809,195 @@ def test_real_data_pipeline_example_emits_deflated_alpha_outputs():
 
 
 # ---------------------------------------------------------------------------
+# bollinger_bands_hypothesis.py
+# ---------------------------------------------------------------------------
+
+
+def test_bollinger_bands_hypothesis_imports():
+    """bollinger_bands_hypothesis must import cleanly and expose its entry points."""
+    module = _import_module("bollinger_bands_hypothesis", _BOLLINGER_PATH)
+    assert hasattr(module, "run_hypothesis_test")
+    assert callable(module.run_hypothesis_test)
+    assert hasattr(module, "main")
+    assert callable(module.main)
+    assert hasattr(module, "HYPOTHESIS")
+    assert hasattr(module, "CRITERIA")
+
+
+def test_bollinger_bands_hypothesis_runs():
+    """bollinger_bands_hypothesis must run end-to-end and exit 0."""
+    data_path = _REAL_MARKET_DATA / "AAPL.csv"
+    assert data_path.exists()
+    result = subprocess.run(
+        [sys.executable, str(_BOLLINGER_PATH), "--data", str(data_path)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"bollinger_bands_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "FALSIFIABLE HYPOTHESIS TEST" in result.stdout
+    assert "VERDICT:" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# donchian_breakout_hypothesis.py
+# ---------------------------------------------------------------------------
+
+
+def test_donchian_breakout_hypothesis_imports():
+    """donchian_breakout_hypothesis must import cleanly and expose its entry points."""
+    module = _import_module("donchian_breakout_hypothesis", _DONCHIAN_PATH)
+    assert hasattr(module, "run_hypothesis_test")
+    assert callable(module.run_hypothesis_test)
+    assert hasattr(module, "main")
+    assert callable(module.main)
+    assert hasattr(module, "HYPOTHESIS")
+    assert hasattr(module, "CRITERIA")
+
+
+def test_donchian_breakout_hypothesis_runs():
+    """donchian_breakout_hypothesis must run end-to-end and exit 0."""
+    data_path = _REAL_MARKET_DATA / "AAPL.csv"
+    assert data_path.exists()
+    result = subprocess.run(
+        [sys.executable, str(_DONCHIAN_PATH), "--data", str(data_path)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"donchian_breakout_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "FALSIFIABLE HYPOTHESIS TEST" in result.stdout
+    assert "VERDICT:" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# ema_cross_hypothesis.py
+# ---------------------------------------------------------------------------
+
+
+def test_ema_cross_hypothesis_imports():
+    """ema_cross_hypothesis must import cleanly and expose its entry points."""
+    module = _import_module("ema_cross_hypothesis", _EMA_CROSS_PATH)
+    assert hasattr(module, "run_hypothesis_test")
+    assert callable(module.run_hypothesis_test)
+    assert hasattr(module, "main")
+    assert callable(module.main)
+    assert hasattr(module, "HYPOTHESIS")
+    assert hasattr(module, "CRITERIA")
+
+
+def test_ema_cross_hypothesis_runs():
+    """ema_cross_hypothesis must run end-to-end and exit 0."""
+    data_path = _REAL_MARKET_DATA / "AAPL.csv"
+    assert data_path.exists()
+    result = subprocess.run(
+        [sys.executable, str(_EMA_CROSS_PATH), "--data", str(data_path)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"ema_cross_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "FALSIFIABLE HYPOTHESIS TEST" in result.stdout
+    assert "VERDICT:" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# macd_hypothesis.py
+# ---------------------------------------------------------------------------
+
+
+def test_macd_hypothesis_imports():
+    """macd_hypothesis must import cleanly and expose its entry points."""
+    module = _import_module("macd_hypothesis", _MACD_PATH)
+    assert hasattr(module, "run_hypothesis_test")
+    assert callable(module.run_hypothesis_test)
+    assert hasattr(module, "main")
+    assert callable(module.main)
+    assert hasattr(module, "HYPOTHESIS")
+    assert hasattr(module, "CRITERIA")
+
+
+def test_macd_hypothesis_runs():
+    """macd_hypothesis must run end-to-end and exit 0."""
+    data_path = _REAL_MARKET_DATA / "AAPL.csv"
+    assert data_path.exists()
+    result = subprocess.run(
+        [sys.executable, str(_MACD_PATH), "--data", str(data_path)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"macd_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "FALSIFIABLE HYPOTHESIS TEST" in result.stdout
+    assert "VERDICT:" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# walk_forward_compare_triple.py
+# ---------------------------------------------------------------------------
+
+
+def test_walk_forward_compare_triple_imports():
+    """walk_forward_compare_triple must import cleanly and expose main."""
+    module = _import_module("walk_forward_compare_triple", _WF_COMPARE_TRIPLE_PATH)
+    assert hasattr(module, "main")
+    assert callable(module.main)
+
+
+def test_walk_forward_compare_triple_runs():
+    """walk_forward_compare_triple must run end-to-end and exit 0."""
+    for name in ("AAPL.csv", "MSFT.csv", "GOOGL.csv"):
+        assert (_REAL_MARKET_DATA / name).exists()
+    result = subprocess.run(
+        [sys.executable, str(_WF_COMPARE_TRIPLE_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"walk_forward_compare_triple exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "WALK-FORWARD COMPARISON" in result.stdout
+    assert "Honest verdicts" in result.stdout
+    for strategy in ("dual_momentum", "cross_sectional_momentum", "multi_pair_zscore_mean_reversion"):
+        assert strategy in result.stdout, f"strategy {strategy} missing from comparison output"
+
+
+# ---------------------------------------------------------------------------
+# compare_dual_vs_cross_sectional_triple.py
+# ---------------------------------------------------------------------------
+
+
+def test_compare_dual_vs_cross_sectional_triple_imports():
+    """compare_dual_vs_cross_sectional_triple must import cleanly and expose main."""
+    module = _import_module("compare_dual_vs_cross_sectional_triple", _COMPARE_DUAL_CS_PATH)
+    assert hasattr(module, "main")
+    assert callable(module.main)
+    assert hasattr(module, "build_triple")
+    assert callable(module.build_triple)
+
+
+def test_compare_dual_vs_cross_sectional_triple_runs():
+    """compare_dual_vs_cross_sectional_triple must run end-to-end and exit 0."""
+    for name in ("AAPL.csv", "MSFT.csv", "GOOGL.csv"):
+        assert (_REAL_MARKET_DATA / name).exists()
+    result = subprocess.run(
+        [sys.executable, str(_COMPARE_DUAL_CS_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"compare_dual_vs_cross_sectional_triple exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "Comparison (OOS test" in result.stdout
+    for strategy in ("dual_momentum", "cross_sectional_momentum"):
+        assert strategy in result.stdout, f"strategy {strategy} missing from comparison output"
+
+
+# ---------------------------------------------------------------------------
 # Test registry
 # ---------------------------------------------------------------------------
 # Test registry
@@ -864,6 +1060,18 @@ TEST_REGISTRY = [
     ("test_real_data_pipeline_example_imports", test_real_data_pipeline_example_imports),
     ("test_real_data_pipeline_example_runs", test_real_data_pipeline_example_runs),
     ("test_real_data_pipeline_example_emits_deflated_alpha_outputs", test_real_data_pipeline_example_emits_deflated_alpha_outputs),
+    ("test_bollinger_bands_hypothesis_imports", test_bollinger_bands_hypothesis_imports),
+    ("test_bollinger_bands_hypothesis_runs", test_bollinger_bands_hypothesis_runs),
+    ("test_donchian_breakout_hypothesis_imports", test_donchian_breakout_hypothesis_imports),
+    ("test_donchian_breakout_hypothesis_runs", test_donchian_breakout_hypothesis_runs),
+    ("test_ema_cross_hypothesis_imports", test_ema_cross_hypothesis_imports),
+    ("test_ema_cross_hypothesis_runs", test_ema_cross_hypothesis_runs),
+    ("test_macd_hypothesis_imports", test_macd_hypothesis_imports),
+    ("test_macd_hypothesis_runs", test_macd_hypothesis_runs),
+    ("test_walk_forward_compare_triple_imports", test_walk_forward_compare_triple_imports),
+    ("test_walk_forward_compare_triple_runs", test_walk_forward_compare_triple_runs),
+    ("test_compare_dual_vs_cross_sectional_triple_imports", test_compare_dual_vs_cross_sectional_triple_imports),
+    ("test_compare_dual_vs_cross_sectional_triple_runs", test_compare_dual_vs_cross_sectional_triple_runs),
     ("test_scripts_results_untouched_after_examples", test_scripts_results_untouched_after_examples),
 ]
 
