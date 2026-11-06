@@ -202,6 +202,28 @@ class _ConstantLongStrategy:
         return pd.Series(1.0, index=data.index)
 
 
+class _LookAheadStrategy:
+    """Strategy whose signal uses next-period close (genuine look-ahead bias).
+
+    signal[t] = 1 when close[t+1] > close[t], else 0 -- information unavailable
+    at decision time t. walk_forward_analysis's point-in-time screen must flag it.
+    """
+
+    def __init__(self, config=None):
+        self.config = config
+        self.name = getattr(config, "name", "lookahead") if config else "lookahead"
+        self.parameters = getattr(config, "parameters", {}) if config else {}
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+        s = pd.Series(0, index=data.index, dtype=int)
+        if len(data) > 1:
+            s.iloc[:-1] = (data["close"].shift(-1) > data["close"]).iloc[:-1].astype(int)
+        return s
+
+    def get_position_sizing(self, data, signals):
+        return signals.abs()
+
+
 def test_out_of_sample_validation_benchmark_cost_is_periodic():
     """Test that out_of_sample_validation correctly handles benchmark_cost_is_periodic flag."""
     # Create test data with sufficient periods for walk-forward windows
@@ -644,6 +666,53 @@ def test_out_of_sample_validation_validate_pit_detects_look_ahead():
     assert pit_clean is not None
     assert pit_clean["passed"] is True, f"Expected PIT to pass on clean data, got {pit_clean}"
     assert results_clean["summary"]["bias_controls_engaged"] is True
+
+
+def test_walk_forward_analysis_validate_pit_detects_look_ahead_signal():
+    """walk_forward_analysis with validate_pit=True must detect a signal that
+    uses next-period information (look-ahead bias), mirroring the run_backtest
+    positive control.
+
+    The signal column is injected into a copy of the full data and checked for
+    correlation with next-period returns; a genuine look-ahead signal must
+    produce point_in_time_validation.passed=False, a "next-period returns"
+    violation, and summary.bias_controls_engaged=True.
+    """
+    data = _make_ohlcv_data(periods=500, seed=42)
+
+    def factory(params):
+        from strategy_builder import StrategyConfig
+
+        return _LookAheadStrategy(
+            StrategyConfig(name="lookahead", parameters=params or {})
+        )
+
+    param_grid = {"fast_period": [3, 5], "slow_period": [8, 10]}
+
+    result = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        validate_pit=True,
+    )
+
+    pit = result.get("point_in_time_validation")
+    assert pit is not None, "point_in_time_validation should be recorded when validate_pit=True"
+    assert pit["passed"] is False, (
+        f"look-ahead signal must fail walk-forward PIT validation, got violations={pit['violations']}"
+    )
+    assert any("next-period returns" in v for v in pit["violations"]), (
+        f"expected a next-period look-ahead violation, got {pit['violations']}"
+    )
+    assert result["summary"]["bias_controls_engaged"] is True, (
+        "bias_controls_engaged should be True when PIT ran"
+    )
 
 
 def test_cli_out_of_sample_benchmark_cost_is_periodic_false():
