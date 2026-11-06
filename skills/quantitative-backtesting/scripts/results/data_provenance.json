@@ -1,6 +1,6 @@
 {
   "source_path": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/real_market_data/AAPL.csv",
-  "load_timestamp": "2026-11-06T11:37:22.259857Z",
+  "load_timestamp": "2026-11-06T18:03:40.692221Z",
   "file_format": ".csv",
   "file_size_bytes": 118482,
   "symbol_filter": "SPY",
