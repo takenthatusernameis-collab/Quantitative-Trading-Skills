@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "description": "Provenance for the committed real-market daily OHLCV fixtures used by the quantitative-backtesting worked examples and real-market tests. These fixtures back reproducibility of the real-market falsification tests; this manifest pins them so an undetected fixture swap is caught by tests/test_real_market_data_provenance.py.",
+  "canonical_schema": ["date", "open", "high", "low", "close", "volume"],
+  "index": "tz-naive DatetimeIndex, sorted ascending, date granularity",
+  "all_fixtures": {
+    "start_date": "2010-01-04",
+    "end_date": "2019-12-30",
+    "rows": 2515,
+    "frequency": "daily business days",
+    "raw_source_note": "Committed fixtures. The exact upstream source URL and fetch date are not independently re-verified in this session and are intentionally not asserted here -- do not fabricate them. They are treated as committed real-market fixtures whose consistency is pinned below."
+  },
+  "fixtures": {
+    "AAPL.csv": {
+      "symbol": "AAPL",
+      "role": "primary real-market strategy universe (also the `sample_ohlcv.csv` primary benchmark; byte-identical to it)",
+      "size_bytes": 118482,
+      "rows": 2515,
+      "start_date": "2010-01-04",
+      "end_date": "2019-12-30",
+      "sha256": "80e1bb8c758907f64645fb1c1f9238dde86066daf42008c8b30a611ea1a13bef"
+    },
+    "GOOGL.csv": {
+      "symbol": "GOOGL",
+      "role": "distinct real-market asset fixture (universe/benchmark)",
+      "size_bytes": 116399,
+      "rows": 2515,
+      "start_date": "2010-01-04",
+      "end_date": "2019-12-30",
+      "sha256": "b8905891f55b4a8696a61cafd81df8935563aab831e22c7adcbe9e1f6c43ea80"
+    },
+    "MSFT.csv": {
+      "symbol": "MSFT",
+      "role": "distinct real-market asset fixture (also the `sample_benchmark.csv` alternative buy-and-hold benchmark; byte-identical to it and to the untracked `AAPL.csv.bak`)",
+      "size_bytes": 120911,
+      "rows": 2515,
+      "start_date": "2010-01-04",
+      "end_date": "2019-12-30",
+      "sha256": "04b185d488936c002f651b84c727c761bedf1c783fbdb0880fb50b44a5fc0ffc"
+    },
+    "sample_ohlcv.csv": {
+      "symbol": "AAPL",
+      "role": "primary benchmark in falsifiable_hypothesis_example.py BENCHMARK_FILES; byte-identical to AAPL.csv (same universe as the AAPL strategy -- same-universe buy-and-hold comparison)",
+      "size_bytes": 118482,
+      "rows": 2515,
+      "start_date": "2010-01-04",
+      "end_date": "2019-12-30",
+      "sha256": "80e1bb8c758907f64645fb1c1f9238dde86066daf42008c8b30a611ea1a13bef"
+    },
+    "sample_benchmark.csv": {
+      "symbol": "MSFT",
+      "role": "alternative benchmark in falsifiable_hypothesis_example.py BENCHMARK_FILES; byte-identical to MSFT.csv (distinct-asset buy-and-hold comparison)",
+      "size_bytes": 120911,
+      "rows": 2515,
+      "start_date": "2010-01-04",
+      "end_date": "2019-12-30",
+      "sha256": "04b185d488936c002f651b84c727c761bedf1c783fbdb0880fb50b44a5fc0ffc"
+    }
+  },
+  "byte_identity": {
+    "AAPL.csv == sample_ohlcv.csv": true,
+    "MSFT.csv == sample_benchmark.csv == AAPL.csv.bak": true,
+    "note": "AAPL.csv.bak is an untracked, gitignored stray duplicate of MSFT.csv; it is not a committed fixture and is not referenced by any test."
+  }
+}
