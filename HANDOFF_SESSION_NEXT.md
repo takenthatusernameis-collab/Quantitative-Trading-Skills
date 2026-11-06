@@ -1,23 +1,24 @@
-# Handoff — full-suite regression gate infeasible in-session; focused gates pass
+# Handoff — cost-sensitivity sweep runtime profiled; no safe caching identified
 
 ## What changed (this session)
-- No source or test files changed; working tree clean. All prior handoff next-tasks are committed:
-  - `test_cpcv_cross_sectional_momentum_benchmark_aware_real_aapl_googl.py` (HEAD, 20:21)
-  - `test_zscore_mean_reversion_benchmark_aware_real_pair_aapl_googl.py` (HEAD~1, 19:31)
-  - `test_walk_forward_zscore_benchmark_aware_real_aapl_googl.py` (HEAD~2, 19:30)
-- `mean_reversion_hypothesis.py` already carries the sweep-interface fixes (criteria/verdict/all_pass per row) from an earlier commit.
+- No source or test logic changed. Working tree clean except this handoff update (uncommitted).
+- `skills/quantitative-backtesting/examples/ema_cross_hypothesis.py` docstring fix (EMA crossover vs channel-breakout) was already committed in HEAD (`487b6aa`); verified present and 4 ema_cross guards pass (6 passed, 2.86s).
 
 ## What was actually verified
-- Full suite `skills/quantitative-backtesting/tests/` run from repo root: **exceeded 60 min timeout with no result** — confirms it is too slow to complete in-session (prior runs cited ~34 min). Do not repeat unchanged.
-- Focused gate on new/affected files (cpcv cross_sectional_momentum benchmark-aware, zscore pair benchmark-aware, walk_forward zscore benchmark-aware, mean_reversion elevated-cost + param-sensitivity): **8 passed, 0 failed** in 43.80s.
-- Focused no-regression gate on related families (walk_forward zscore, cpcv cross_sectional structure, cross_sectional_momentum benchmark-aware triple + hypothesis): **4 passed, 0 failed** in 36.91s.
-- Offline, committed fixtures only; no live network; no tuning to force SUPPORT.
+- Repo/skill state: `skills/quantitative-backtesting/` contains `STRATEGY_REGISTRY` coverage with WF/CPCV/elevated-cost/param-sensitivity guards across strategies; `bollinger_bands` elevated-cost + param-sensitivity guards (`test_bollinger_bands_elevated_cost_real_aapl.py`, `test_bollinger_bands_param_sensitivity_real_aapl.py`) already exist and pass (**2 passed, 3.25s**, offline, committed fixtures).
+- Cost-sensitivity sweep profiling (evidence, no run of slow suite):
+  - `falsifiable_hypothesis_example.COST_SWEEP_LEVELS` has 5 distinct `(commission, slippage)` levels: `[(0,0),(0.0001,0),(0.0002,0.0001),(0.0005,0.00025),(0.001,0.0005)]`; advertised `(COMMISSION,SLIPPAGE)=(0.0002,0.0001)` is present.
+  - `run_cost_sensitivity_sweep` calls `run_hypothesis_test(data_path, commission, slippage, benchmark_path)` once per level (5 calls/sweep), with output redirected; `run_hypothesis_test` signature is `(data_path, symbol='SPY', commission=0.0002, slippage=0.0001, benchmark_path=None)`.
+  - `test_falsifiable_hypothesis_example.py` defines 6 sweep tests: synthetic sample (`test_falsifiable_hypothesis_cost_sensitivity_sweep`), real GOOGL/MSFT/AAPL+MSFT/GOOGL+AAPL/AAPL variants — each uses different `data_path`/`benchmark_path` and asserts directional degradation + verdict/criteria on that pair. No cross-test redundancy; levels are not duplicates.
+  - Conclusion: ~30 full hypothesis runs total across 6 tests (5 levels × 6). Caching identical `(data_path,benchmark_path,commission,slippage)` would help only if the same tuple recurred; it does not across these tests (levels recur but data/benchmark differs per test). Memoizing inside a single sweep run is possible only if levels repeated (they don't). Reducing levels or sharing results across tests would weaken the per-pair directional/sensitivity claims. **Runtime is inherent to the sweep workload; no safe, evidence-based caching that preserves claims was identified.**
+- Env: `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`. No live network; committed fixtures only.
 
 ## What remains unresolved
-- Final full-suite regression count not obtained (suite too slow for one session). Focused gates cover all changes made this session; full-suite green status pending a longer offline window.
+- Full quant suite green status after `ema_cross_hypothesis.py` commit: last recorded full run in `HANDOFF.md` was **1070 passed, 0 failed, 437 warnings, 2445.90s (40:45), EXIT 0** on a docstring-only edit — still valid evidence, but not re-run this session (full suite ~41 min; this session focused on the assigned slow-test profiling). Re-run only if needed for merge confidence or if changes occur.
+- `test_falsifiable_hypothesis_example.py` / `test_resolution_vs_sample_size.py` remain slow (~15–16 min combined per prior timing) — accepted as inherent; no reduction without weakening claims.
 
 ## Approaches already tried / failed
-- Full `skills/quantitative-backtesting/tests/` run: timed out at 60 min. Materially different alternative = per-file focused gates (done, all pass). Do not re-run the full suite unchanged in this session.
+- Profiling for redundant `run_hypothesis_test` invocations in cost-sensitivity sweeps: none found that can be safely cached without weakening directional/per-pair claims (see evidence above). Do not add cross-test caching or drop cost levels speculatively.
 
 ## One precise next task
-Complete the full-suite regression gate in a longer offline window: `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q` from repo root, target **0 failures**, record the pass/fail count. If any failure appears, investigate only the failing file; do not widen scope. Once green, the next methodological task (per HANDOFF.md) is to pin elevated-cost-sweep + param-sensitivity regression guards for `bollinger_bands` on committed AAPL, mirroring the MACD tests (`test_macd_elevated_cost_real_aapl.py`, `test_macd_param_sensitivity_real_aapl.py`). Env: `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`. Do not commit unless explicitly asked.
+Select one bounded, high-value quant-methodology gap (do **not** rerun the full 41-min suite unchanged): audit single-asset `zscore_mean_reversion` (registered strategy; has WF/CPCV/benchmark-aware guards — e.g. `test_walk_forward_zscore_mean_reversion_real_aapl.py`, `test_cpcv_zscore_mean_reversion_real_aapl_googl.py`, `test_zscore_mean_reversion_benchmark_aware_real_aapl_googl.py`) for **elevated-cost-sweep and parameter-sensitivity regression guards on committed AAPL** matching the pinned pattern of `test_bollinger_bands_elevated_cost_real_aapl.py`/`test_bollinger_bands_param_sensitivity_real_aapl.py` (use `zscore_mean_reversion_hypothesis.py` exports `ELEVATED_COST_SWEEP_LEVELS`/`PARAM_SENSITIVITY_GRID`/sweep runners if present). If guards already exist under a different filename pattern, record evidence and pick the next missing single-asset strategy (`kelly_criterion`/`volatility_targeting` lack hypothesis modules with sweeps — only if a falsifiable hypothesis/example exists; otherwise move to the next strategy with sweep support, e.g. verify `ema_cross` elevated/param guards exist — they do: `test_ema_cross_elevated_cost_real_aapl.py`, `test_ema_cross_param_sensitivity_real_aapl.py`). Run only the focused new/affected tests; do not tune to force SUPPORT. Offline + committed fixtures only. Do not commit unless explicitly asked.
