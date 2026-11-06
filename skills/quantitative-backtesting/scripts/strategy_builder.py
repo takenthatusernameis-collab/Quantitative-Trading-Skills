@@ -1516,7 +1516,7 @@ def get_strategy_defaults(strategy_type: str) -> Dict[str, Any]:
         "bollinger_bands": {"period": 20, "std_dev": 2.0},
         "rsi_mean_reversion": {"period": 14, "oversold": 30, "overbought": 70, "neutral": 50},
         "donchian_breakout": {"period": 20, "exit_period": 10},
-        "cross_sectional_momentum": {"lookback": 252, "top_quantile": 0.2, "bottom_quantile": 0.2},
+        "cross_sectional_momentum": {"lookback": 252, "top_quantile": 0.4, "bottom_quantile": 0.2},
         "dual_momentum": {"lookback": 252, "top_quantile": 0.2, "risk_free_rate": 0.0},
         "zscore_mean_reversion": {"period": 20, "entry_z": 2.0, "exit_z": 0.5, "spread_method": "log_ratio", "hedge_ratio": 1.0, "hedge_lookback": 30},
         "multi_pair_zscore_mean_reversion": {"period": 20, "entry_z": 2.0, "exit_z": 0.5, "spread_method": "log_ratio", "hedge_ratio": 1.0, "hedge_lookback": 30},
