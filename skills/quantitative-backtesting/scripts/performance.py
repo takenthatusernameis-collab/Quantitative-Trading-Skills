@@ -631,9 +631,9 @@ def calculate_metrics(
     # When the caller reports how many development trials (parameter
     # configurations) produced this backtest (e.g. the size of the
     # grid searched), deflate the final Sharpe for selection bias and
-    # for the non-normality of returns. `deflated_sharpe_ratio` lives
-    # in walk_forward, which imports this module, so it is imported
-    # lazily to avoid a circular import at module load time.
+    # for the non-normality of returns. `deflated_sharpe_ratio` and
+    # `_build_test_resolution` live in walk_forward, which imports this
+    # module, so they are imported lazily to avoid a circular import.
     n_trials = config.get("n_trials") if config else None
     # Optional cross-sectional record: when the caller also reports the
     # Sharpe ratios of every trial (e.g. the ranked rows of a parameter
@@ -669,6 +669,18 @@ def calculate_metrics(
             n_trials=int(n_trials),
             trial_sharpes=trial_sharpes,
         )
+
+    # --- Test Resolution (Minimum Detectable Effect) ---
+    # Report the smallest effect the run's significance statistics could
+    # have confirmed at the observed sample size (measured on the same
+    # return series as the Deflated Sharpe/Alpha). This is a measurement,
+    # not a correction: no verdict or p-value is changed. Lazy import
+    # mirrors the deflated_sharpe path to avoid a circular import.
+    try:
+        from walk_forward import _build_test_resolution  # noqa: E402
+    except ImportError:
+        from walk_forward import _build_test_resolution  # noqa: E402
+    metrics["test_resolution"] = _build_test_resolution(metrics, returns)
 
     # Store config metadata
     if config:
