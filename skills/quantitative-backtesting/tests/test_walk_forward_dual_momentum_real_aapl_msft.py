@@ -1,10 +1,26 @@
 #!/usr/bin/env python3
 """Walk-forward out-of-sample falsification test for dual momentum (absolute +
-relative momentum, long-only) on the committed pair panel (AAPL / MSFT)."""
+relative momentum, long-only) on the committed pair panel (AAPL / MSFT).
+
+Evaluates dual momentum across chronological walk-forward windows (train 12 /
+test 12 months, stepping 12 months) on committed fixtures only, with a
+pre-registered parameter grid and the Deflated Sharpe Ratio multiple-testing
+correction applied to the pooled out-of-sample record. This is the
+walk-forward re-optimization control complementary to the single
+0.6/0.2/0.2 split covered by test_dual_momentum_benchmark_aware_real_aapl_msft.py.
+
+Verdicts are falsification outcomes, never profitability claims: the raw
+out-of-sample Sharpe is positive (+0.0112) and total return is positive
+(+10.61%), but the Deflated Sharpe p-value (0.9029) is far above 0.10, so the
+honest verdict is NOT SUPPORTED. The test does not tune to force SUPPORT.
+
+Offline, committed fixtures only; no live network.
+"""
 import contextlib
 import io
 import json
 import sys
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -17,12 +33,24 @@ from strategy_builder import build_strategy
 
 SRC = SKILLS_DIR / "assets" / "example_data" / "real_market_data"
 
-COMMISSION = 0.0002
-SLIPPAGE = 0.0001
-PARAM_GRID = {"lookback": [189, 252], "top_quantile": [0.5], "risk_free_rate": [0.0]}
+COMMISSION = 0.0002   # 2 bps per trade
+SLIPPAGE = 0.0001     # 1 bps per trade
+
+# Pre-registered narrow grid around the advertised dual momentum settings
+# (lookback=252, top_quantile=0.5, risk_free_rate=0.0). Fixed before any
+# result is inspected; small enough to stay fast in CI.
+PARAM_GRID = {
+    "lookback": [189, 252],
+    "top_quantile": [0.5],
+    "risk_free_rate": [0.0],
+}
+
 TRAIN_MONTHS = 12
 TEST_MONTHS = 12
 STEP_MONTHS = 12
+
+# Falsification threshold, pre-registered.
+DSR_PVALUE_THRESHOLD = 0.10
 
 
 def _build_panel():
@@ -55,7 +83,37 @@ def _run_walk_forward():
     )
 
 
-def test_walk_forward_dual_momentum_pairs_real_aapl_msft_structure():
+def test_walk_forward_dual_momentum_runs_on_aapl_msft_pair_window():
+    for name in ("AAPL.csv", "MSFT.csv"):
+        assert (SRC / name).exists()
+
+    buffer = io.StringIO()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with contextlib.redirect_stdout(buffer):
+            result = _run_walk_forward()
+
+    assert isinstance(result, dict)
+    assert "periods" in result and "summary" in result
+    summary = result["summary"]
+    assert summary["n_periods"] == 8
+    assert summary["periods_with_position"] == 8
+    assert summary["bias_controls_engaged"] is True
+    out = buffer.getvalue()
+    assert "Point-in-time validation passed" in out
+
+
+def test_walk_forward_dual_momentum_metrics_pinned_on_aapl_msft_pair_window():
+    """Regression guard: the advertised walk-forward run on the committed
+    AAPL/MSFT pair must reproduce the pinned out-of-sample metrics (net of
+    costs) so a silent change to the backtest numbers is caught. Relative
+    tolerance only, never exact equality.
+
+    Honest outcome: the raw out-of-sample Sharpe is positive (+0.0112) and
+    total return is positive (+10.61%), but the Deflated Sharpe p-value
+    (0.9029) is far above 0.10, so the multiple-testing criterion fails and
+    the verdict is NOT SUPPORTED. The test does not tune to force SUPPORT.
+    """
     for name in ("AAPL.csv", "MSFT.csv"):
         assert (SRC / name).exists()
 
@@ -63,15 +121,46 @@ def test_walk_forward_dual_momentum_pairs_real_aapl_msft_structure():
     with contextlib.redirect_stdout(buffer):
         result = _run_walk_forward()
 
-    assert isinstance(result, dict)
-    assert "periods" in result and "summary" in result
     summary = result["summary"]
-    assert summary["n_periods"] >= 1
-    assert summary["bias_controls_engaged"] is True
-    out = buffer.getvalue()
-    assert "Point-in-time validation passed" in out
+
+    EXPECTED = {
+        "oos_sharpe": 0.011216237230298784,
+        "total_oos_return": 0.10605230306809355,
+        "deflated_sharpe_pvalue": 0.9029393024220382,
+        "deflated_sharpe_ratio": 0.09706069757796182,
+    }
+    REL_TOL = 1e-3
+    for key, exp in EXPECTED.items():
+        if key == "deflated_sharpe_pvalue":
+            got = summary["deflated_sharpe"]["p_value"]
+        elif key == "deflated_sharpe_ratio":
+            got = summary["deflated_sharpe"]["deflated_sharpe_ratio"]
+        else:
+            got = summary.get(key)
+        assert got is not None, f"missing {key}"
+        assert abs(got - exp) <= REL_TOL * max(abs(exp), 1e-9), (
+            f"{key} regression: got {got}, expected {exp}"
+        )
+
+    # Honest verdict: Sharpe > 0 and return > 0 pass, but Deflated Sharpe
+    # p-value >= 0.10 fails, so the hypothesis is NOT SUPPORTED.
+    sharpe = summary["oos_sharpe"]
+    ret = summary["total_oos_return"]
+    dsr_pvalue = summary["deflated_sharpe"]["p_value"]
+    passes = {
+        "oos_sharpe_gt_zero": bool(sharpe is not None and float(sharpe) > 0),
+        "oos_total_return_positive": bool(ret is not None and float(ret) > 0),
+        "deflated_sharpe_pvalue_lt_0.10": bool(
+            dsr_pvalue is not None and float(dsr_pvalue) < DSR_PVALUE_THRESHOLD
+        ),
+    }
+    assert passes["oos_sharpe_gt_zero"] is True
+    assert passes["oos_total_return_positive"] is True
+    assert passes["deflated_sharpe_pvalue_lt_0.10"] is False
+    assert all(passes.values()) is False
 
 
 if __name__ == "__main__":
-    test_walk_forward_dual_momentum_pairs_real_aapl_msft_structure()
+    test_walk_forward_dual_momentum_runs_on_aapl_msft_pair_window()
+    test_walk_forward_dual_momentum_metrics_pinned_on_aapl_msft_pair_window()
     print("OK")
