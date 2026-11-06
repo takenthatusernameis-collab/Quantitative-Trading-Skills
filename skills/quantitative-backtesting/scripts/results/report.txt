@@ -5,48 +5,37 @@ Symbol: SPY
 Strategy: sma_crossover
 
 --- Return Metrics ---
-Total Return:          -5.06%
-Annualized Return:     -12.15%
-Annualized Volatility: 15.26%
+Total Return:          62.36%
+Annualized Return:     27.54%
+Annualized Volatility: 18.85%
 
 --- Risk-Adjusted Returns ---
-Sharpe Ratio:          -0.90
-Sortino Ratio:         -1.19
-Calmar Ratio:          1.20
+Sharpe Ratio:          1.28
+Sortino Ratio:         1.75
+Calmar Ratio:          1.48
 
 --- Risk Metrics ---
-Max Drawdown:          -10.14%
-Avg Drawdown:          -5.47%
-VaR (95%):             -2.17%
-CVaR (95%):            -2.54%
-Skewness:              -0.15
-Kurtosis:              3.53
+Max Drawdown:          -18.66%
+Avg Drawdown:          -6.61%
+VaR (95%):             -1.78%
+CVaR (95%):            -2.78%
+VaR (99%):             -3.13%
+CVaR (99%):            -4.48%
+Skewness:              -0.07
+Kurtosis:              4.97
 
 --- Trade-Level Analytics ---
-Total Trades:          2
-Winning Trades:        0
-Losing Trades:         2
-Win Rate:              0.00%
-Avg Win:               0.00%
-Avg Loss:              4.67%
-Profit Factor:         0.00
-Expectancy:            -5.6320
+Total Trades:          5
+Winning Trades:        4
+Losing Trades:         1
+Win Rate:              80.00%
+Avg Win:               15.27%
+Avg Loss:              1.47%
+Profit Factor:         47.02
+Expectancy:            5.7068
 
 --- End-of-Sample Closes ---
 Trades Closed at End:      1
-% of Trades Closed at End: 50.00%
-
---- Benchmark Comparison ---
-Benchmark Total Return:      8.09%
-Benchmark Annualized Return: 21.41%
-Benchmark Return Type:       price
-Benchmark Commission:        0.0002
-Benchmark Slippage:          0.0001
-Correlation:                 -0.06
-Alpha:                       -10.63%
-Beta:                        -0.06
-Alpha t-stat:                -0.43817937822027164
-Alpha p-value:               0.6622108773159597
-R-squared:                   0.003638658999769784
+% of Trades Closed at End: 20.00%
 
 ============================================================
