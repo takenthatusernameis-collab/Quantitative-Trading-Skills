@@ -586,17 +586,39 @@ def walk_forward_analysis(
     pit_results = None
     if validate_pit:
         pit_results = validate_point_in_time(data)
-        if pit_results["violations"]:
+        try:
+            if not isinstance(data.columns, pd.MultiIndex):
+                try:
+                    if param_grid:
+                        first_params = {k: (v[0] if isinstance(v, list) and v else v) for k, v in param_grid.items()}
+                    else:
+                        first_params = {}
+                    strategy = strategy_factory(first_params)
+                    signals = strategy.generate_signals(data)
+                    check_df = data.copy()
+                    check_df["_pit_signal"] = signals
+                    sig_result = validate_point_in_time(check_df, signal_column="_pit_signal")
+                    sig_result["warnings"] = [w for w in sig_result["warnings"] if "_pit_signal" not in w]
+                    if sig_result.get("violations"):
+                        pit_results["violations"] = list(set(pit_results.get("violations", []) + sig_result["violations"]))
+                    if sig_result.get("warnings"):
+                        pit_results["warnings"] = list(set(pit_results.get("warnings", []) + sig_result["warnings"]))
+                    pit_results["passed"] = len(pit_results.get("violations", [])) == 0
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        if pit_results.get("violations"):
             print("Point-in-time validation violations:")
             for violation in pit_results["violations"]:
                 print(f"  - {violation}")
-        if pit_results["warnings"]:
+        if pit_results.get("warnings"):
             print("Point-in-time validation warnings:")
             for warning in pit_results["warnings"]:
                 print(f"  - {warning}")
-        if not pit_results["violations"] and not pit_results["warnings"]:
+        if not pit_results.get("violations") and not pit_results.get("warnings"):
             print("Point-in-time validation passed (no violations or warnings).")
-        elif not pit_results["violations"]:
+        elif not pit_results.get("violations"):
             print("Point-in-time validation passed (no violations).")
 
     start_date = data.index.min()
@@ -3300,17 +3322,39 @@ def cpcv_analysis(
     pit_results = None
     if validate_pit:
         pit_results = validate_point_in_time(data)
-        if pit_results["violations"]:
+        try:
+            if not isinstance(data.columns, pd.MultiIndex):
+                try:
+                    if param_grid:
+                        first_params = {k: (v[0] if isinstance(v, list) and v else v) for k, v in param_grid.items()}
+                    else:
+                        first_params = {}
+                    strategy = strategy_factory(first_params)
+                    signals = strategy.generate_signals(data)
+                    check_df = data.copy()
+                    check_df["_pit_signal"] = signals
+                    sig_result = validate_point_in_time(check_df, signal_column="_pit_signal")
+                    sig_result["warnings"] = [w for w in sig_result["warnings"] if "_pit_signal" not in w]
+                    if sig_result.get("violations"):
+                        pit_results["violations"] = list(set(pit_results.get("violations", []) + sig_result["violations"]))
+                    if sig_result.get("warnings"):
+                        pit_results["warnings"] = list(set(pit_results.get("warnings", []) + sig_result["warnings"]))
+                    pit_results["passed"] = len(pit_results.get("violations", [])) == 0
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        if pit_results.get("violations"):
             print("Point-in-time validation violations:")
             for violation in pit_results["violations"]:
                 print(f"  - {violation}")
-        if pit_results["warnings"]:
+        if pit_results.get("warnings"):
             print("Point-in-time validation warnings:")
             for warning in pit_results["warnings"]:
                 print(f"  - {warning}")
-        if not pit_results["violations"] and not pit_results["warnings"]:
+        if not pit_results.get("violations") and not pit_results.get("warnings"):
             print("Point-in-time validation passed (no violations or warnings).")
-        elif not pit_results["violations"]:
+        elif not pit_results.get("violations"):
             print("Point-in-time validation passed (no violations).")
 
     n_obs = len(data)
@@ -5504,17 +5548,39 @@ def out_of_sample_validation(
     pit_results = None
     if validate_pit:
         pit_results = validate_point_in_time(data)
-        if pit_results["violations"]:
+        try:
+            if not isinstance(data.columns, pd.MultiIndex):
+                try:
+                    if param_grid:
+                        first_params = {k: (v[0] if isinstance(v, list) and v else v) for k, v in param_grid.items()}
+                    else:
+                        first_params = {}
+                    strategy = strategy_factory(first_params)
+                    signals = strategy.generate_signals(data)
+                    check_df = data.copy()
+                    check_df["_pit_signal"] = signals
+                    sig_result = validate_point_in_time(check_df, signal_column="_pit_signal")
+                    sig_result["warnings"] = [w for w in sig_result["warnings"] if "_pit_signal" not in w]
+                    if sig_result.get("violations"):
+                        pit_results["violations"] = list(set(pit_results.get("violations", []) + sig_result["violations"]))
+                    if sig_result.get("warnings"):
+                        pit_results["warnings"] = list(set(pit_results.get("warnings", []) + sig_result["warnings"]))
+                    pit_results["passed"] = len(pit_results.get("violations", [])) == 0
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        if pit_results.get("violations"):
             print("Point-in-time validation violations:")
             for violation in pit_results["violations"]:
                 print(f"  - {violation}")
-        if pit_results["warnings"]:
+        if pit_results.get("warnings"):
             print("Point-in-time validation warnings:")
             for warning in pit_results["warnings"]:
                 print(f"  - {warning}")
-        if not pit_results["violations"] and not pit_results["warnings"]:
+        if not pit_results.get("violations") and not pit_results.get("warnings"):
             print("Point-in-time validation passed (no violations or warnings).")
-        elif not pit_results["violations"]:
+        elif not pit_results.get("violations"):
             print("Point-in-time validation passed (no violations).")
 
     # Split data chronologically
