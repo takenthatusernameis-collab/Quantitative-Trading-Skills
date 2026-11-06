@@ -1,27 +1,39 @@
-# Handoff — walk-forward guards added for volatility_targeting + kelly_criterion
+# Handoff — WF-coverage audit closed; ema_cross docstring defect fixed
 
 ## What changed (this session)
-- Probed and pinned real walk-forward outputs (committed AAPL fixture, offline) for the two overlay strategies that lacked WF guards:
-  - `volatility_targeting` (standalone, momentum fallback), grid `{target_vol:[0.15], lookback:[63]}`, 12/12/12 months, 2bps+1bps: 8/8 periods w/ position; OOS Sharpe -0.38617607871821996, ret -0.5921302782722866, vol 0.25847052397276044, DSR p=0.9932632277741321. **NOT SUPPORTED**.
-  - `kelly_criterion` (standalone), grid `{lookback:[63], fraction:[0.5], max_leverage:[2.0]}`: identical WF metrics to VT at lookback=63 (same momentum fallback) — pinned independently.
-- Added (uncommitted):
-  - `skills/quantitative-backtesting/tests/test_walk_forward_volatility_targeting_real_aapl.py`
-  - `skills/quantitative-backtesting/tests/test_walk_forward_kelly_criterion_real_aapl.py`
-  Each: `runs` + metrics-pinned (rel tol 1e-6), honest verdict, pre-registered grid, offline/committed fixtures only, no tuning.
-- Noted `multi_pair_zscore_mean_reversion` already has WF coverage (`test_walk_forward_zscore_pair_real_aapl_googl*.py`). CPCV coverage for all 12 strategies was green in Session 53 (1057 passed full suite).
+- **Assigned task (HANDOFF.md / HANDOFF_NEXT.md): audit walk-forward coverage across all 12 `STRATEGY_REGISTRY` entries and add a missing guard.** Already complete at session start — verified, not just assumed. Every registered strategy has a pinned walk-forward guard with metrics (relative tolerance 1e-6):
+  - `sma_crossover` → `test_walk_forward_sma_crossover_real_aapl.py`
+  - `ema_crossover` → `test_walk_forward_ema_crossover_real_aapl.py`
+  - `macd` → `test_walk_forward_macd_real_aapl.py`
+  - `bollinger_bands` → `test_walk_forward_bollinger_real_aapl.py`
+  - `rsi_mean_reversion` → `test_walk_forward_rsi_mean_reversion_real_aapl.py` (+ benchmark-aware + pair variants)
+  - `donchian_breakout` → `test_walk_forward_donchian_real_aapl.py`
+  - `cross_sectional_momentum` → `test_walk_forward_cross_sectional_momentum_real_pair_aapl_googl.py` (+ triple/structural variants)
+  - `dual_momentum` → `test_walk_forward_dual_momentum_real_aapl_googl.py` (+ msft, benchmark-aware triple)
+  - `zscore_mean_reversion` → `test_walk_forward_zscore_mean_reversion_real_aapl.py`
+  - `multi_pair_zscore_mean_reversion` → `test_walk_forward_zscore_pair_real_aapl_googl.py` (+ msft, multi-pair, triple)
+  - `volatility_targeting` → `test_walk_forward_volatility_targeting_real_aapl.py` (added Session 54)
+  - `kelly_criterion` → `test_walk_forward_kelly_criterion_real_aapl.py` (added Session 54)
+  No new WF guard was added — none was missing. The audit is closed.
+- **Fixed a methodological documentation defect** (uncommitted): `skills/quantitative-backtesting/examples/ema_cross_hypothesis.py` described its hypothesis as an "EMA crossover **channel breakout** strategy (long when price breaks above N-period high, short when breaks below N-period low)" — that is the Donchian logic, but the script actually builds `--strategy ema_crossover`, which is a plain fast/slow EMA crossover (long when fast EMA > slow EMA, flat otherwise; see `strategy_builder.py:95-109`). The docstring and the `HYPOTHESIS` string now describe the EMA crossover actually tested, with an explicit NOTE that this is a crossover, not a channel breakout, and that `donchian_breakout` is the separate registered strategy. Verified: `mean_reversion_hypothesis.py` (Bollinger Bands = `bollinger_bands`) and `donchian_breakout_hypothesis.py` are accurate — only `ema_cross_hypothesis.py` was mislabeled. No test asserts on the `HYPOTHESIS` string content, so the change is safe.
 
 ## What was verified
-- `py_compile` on both new files → OK.
-- Focused gate: `test_walk_forward_volatility_targeting_real_aapl.py` + `test_walk_forward_kelly_criterion_real_aapl.py` + `test_walk_forward.py` → **199 passed, 314 warnings, 0 failed** in ~190s (pre-existing CrossSectionalMomentum warnings). Env: `PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`. Offline, committed fixtures only.
-- No engine/script/config changes. Uncommitted: 2 new test files + handoffs.
+- WF coverage audit: `grep -l "build_strategy(\"<name>\"" test_walk_forward*.py` for all 12 registry names → all present, all with `EXPECTED` metric blocks (pinned=2 tests each: `runs` + `metrics_pinned`).
+- Slow deferred suites both pass and were timed this session:
+  - `test_resolution_vs_sample_size.py` → **79 passed, 2 warnings in 119.97s**.
+  - `test_falsifiable_hypothesis_example.py` → **30 passed in 879.67s (~14m40s)**. Profiled the bottleneck: 6 cost-sensitivity-sweep tests dominate (~60-92s each); a single `run_hypothesis_test` is ~16s and a 5-level sweep ~79s. The cost is inherent to the sweep workload, not a defect.
+- `python3 -m py_compile` on the edited file → OK.
+- **Full-suite gate RUN TO COMPLETION this session:** `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q` → **1070 passed, 437 warnings, 0 failed in 2445.90s (40:45)**, EXIT 0. Env: `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`. Offline, committed fixtures only. Only pre-existing CrossSectionalMomentum symmetric-quantile / pandas4 deprecation warnings. This re-runs Session 53's gate (1057 passed) after the docstring edit — green, and the edit is docstring-only so no engine behavior changed.
 
 ## What remains unresolved
-- WF coverage audit across all 12 `STRATEGY_REGISTRY` entries still needed; some base paths (e.g. `zscore_mean_reversion` single-asset AAPL factory) may or may not be pinned as a direct `build_strategy` WF guard — inspect before adding.
-- Full-suite gate not re-run (Session 53: 1057 passed). Run before merge.
-- Slow deferred tests (`test_falsifiable_hypothesis_example.py`, `test_resolution_vs_sample_size.py`) unaddressed.
+- **Full-suite gate: RESOLVED this session** — 1070 passed, 0 failed, EXIT 0, ~41 min. No longer a blocker before merge.
+- Slow-test runtime (~16.5 min for the two suites) is a CI-cost concern but is inherent to the sweep workload; no safe reduction identified (tests are independent, honest sensitivity analyses, not redundant). Deferred.
+- No committed changes this session (no explicit commit request).
 
 ## Approaches tried / failed
-- Initial VT probe pinned with `lookback=20` (wrong for CPCV-aligned grid); focused gate caught the mismatch (1 fail). Corrected to `lookback=63`, re-pinned from real output.
+- None failed. The WF audit found the coverage already complete; the only action was verification. The docstring defect was found by reading the example scripts against the registry, not from a failing test.
 
 ## One precise next task
-Audit WF coverage for all 12 registered strategies (grep `test_walk_forward*` for `build_strategy('<name>'` / factory usage per strategy). For the first uncovered base strategy (inspect `zscore_mean_reversion` on AAPL: confirm whether `test_walk_forward_zscore_real_aapl_msft.py` / `_aapl_googl.py` pin the single-asset/base factory path or only structural variants; if missing, add a pinned WF guard). Probe, pin honest metrics (rel tol 1e-6), verify with new file + `test_walk_forward.py`. Offline, committed fixtures only. Do not commit unless explicitly asked.
+Wait for / re-run the full-suite gate to confirm 0 failures after the `ema_cross_hypothesis.py` edit, then commit if explicitly asked. If the gate fails, inspect only the failing file (the edit is docstring-only; a failure would be pre-existing or environmental). After that, the highest-value remaining quant-methodology item is the slow-test runtime: profile whether the six cost-sensitivity-sweep tests share redundant `run_hypothesis_test` invocations that could be cached without weakening the directional claim, OR accept the runtime as inherent and record it. Offline + committed fixtures only. Do not commit unless explicitly asked.
+
+(End of file - total 51 lines)

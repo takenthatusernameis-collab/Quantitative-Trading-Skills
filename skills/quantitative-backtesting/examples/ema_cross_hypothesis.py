@@ -2,11 +2,16 @@
 """
 Falsifiable financial hypothesis test using run_backtest.py CLI.
 
-HYPOTHESIS: A EMA crossover channel breakout strategy (long when price breaks
-above N-period high, short when breaks below N-period low) on the committed
-single-asset panel (AAPL) produces positive out-of-sample risk-adjusted returns
-(Sharpe > 0) and positive out-of-sample total return, net of 3 bps round-trip
-trading costs, on the held-out test split.
+HYPOTHESIS: An EMA crossover strategy (long when the fast EMA crosses above
+the slow EMA, flat otherwise) on the committed single-asset panel (AAPL)
+produces positive out-of-sample risk-adjusted returns (Sharpe > 0) and
+positive out-of-sample total return, net of 3 bps round-trip trading costs,
+on the held-out test split.
+
+NOTE: this is a moving-average CROSSOVER (fast vs slow EMA of the same close
+series), not a channel breakout. The strategy is built with
+``--strategy ema_crossover``; the Donchian channel-breakout strategy is a
+separate registered strategy (`donchian_breakout`) and is not tested here.
 
 BENCHMARK-AWARE FALSIFICATION CRITERIA (hypothesis NOT SUPPORTED if ANY fails):
 1. Out-of-sample Sharpe ratio (net of costs) > 0
@@ -55,10 +60,11 @@ ELEVATED_COST_SWEEP_LEVELS = [
 ]
 
 HYPOTHESIS = (
-    "A EMA crossover channel breakout strategy on the committed single-asset panel "
-    "(AAPL) produces positive out-of-sample risk-adjusted returns (Sharpe > 0) "
-    "and positive out-of-sample total return, net of 3 bps round-trip trading "
-    "costs, on the held-out test split."
+    "An EMA crossover strategy (long when the fast EMA crosses above the slow "
+    "EMA, flat otherwise) on the committed single-asset panel (AAPL) produces "
+    "positive out-of-sample risk-adjusted returns (Sharpe > 0) and positive "
+    "out-of-sample total return, net of 3 bps round-trip trading costs, on the "
+    "held-out test split."
 )
 
 CRITERIA = [
