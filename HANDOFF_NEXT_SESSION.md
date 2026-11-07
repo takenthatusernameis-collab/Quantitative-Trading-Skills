@@ -1,23 +1,27 @@
-# Handoff — session
+# Handoff — next session
 
 ## What changed
-- Executed the previous handoff's next task: evaluated the previously untested dual momentum family on the committed three-asset panel (AAPL/MSFT/GOOGL). It is SUPPORTED at all tested cost levels (Sharpe 1.1677 → 0.7804, Return 40.83% → 26.73%, 2bp+1bp through 20bp+10bp), chronological disjoint split, PIT true, panel book pricing, net of costs.
-- Added two regression tests: `tests/test_dual_momentum_hypothesis_real_triple_aapl_msft_googl.py` and `tests/test_dual_momentum_elevated_cost_real_triple_aapl_msft_googl.py` (pinned metrics per cost level, relative tolerance 1e-3).
-- Verified no regression: prior z-score and cross-sectional-momentum elevated-cost triple guards still pass; `test_mean_reversion_hypothesis.py`, `test_rsi_mean_reversion_hypothesis.py`, `test_panel_reference_pinned.py`, `test_examples_coverage.py` — 52 passed.
-
-Then executed the next-next task (parameter sensitivity): added `run_param_sensitivity_sweep` + `PARAM_SENSITIVITY_GRID` to `examples/dual_momentum_hypothesis.py` and a third regression test `tests/test_dual_momentum_param_sensitivity_real_triple_aapl_msft_googl.py`. All six pre-registered settings (lookback 189/252/315, top_quantile 0.4/0.5/0.6, rf 0.0/0.02) are SUPPORTED, pinned per setting.
+- Added `skills/quantitative-backtesting/tests/test_volatility_targeting_hypothesis_real_aapl.py` (new, untracked, NOT committed). Completes the missing core falsifiable-hypothesis regression coverage for volatility targeting on the committed single-asset panel (AAPL). The example `examples/volatility_targeting_hypothesis.py` documents the hypothesis + 2 weak falsification criteria (oos_sharpe > 0, oos_total_return > 0, net of 3bp round-trip costs) but had no regression test pinning the observed metrics.
+- Two tests:
+  - `test_hypothesis_volatility_targeting_runs_on_aapl_real_window` — structural guards (verdict/all_pass/criteria names/Verdict output).
+  - `test_hypothesis_metrics_pinned_on_aapl_real_window` — pins verdict SUPPORTED and observed metrics (sharpe 0.7710596325955302, total_return 0.4736842323382433; benchmark fields None since no benchmark), rel tol 1e-3.
+- No existing files modified (additive only). Reports SUPPORTED honestly, consistent with the existing benchmark-aware NOT SUPPORTED test (weak-criterion support vs zero baseline != beating buy-and-hold).
 
 ## What was actually verified
-- New dual momentum tests: 3 passed in 23.31s.
-- Prior regression guards: 3 passed in 26.69s.
-- Fast existing groups (mean_reversion, rsi_mean_reversion, panel_reference_pinned, examples_coverage): 52 passed in 227.61s.
-- Offline, committed fixtures only; no live network.
+- `pytest tests/test_volatility_targeting_hypothesis_real_aapl.py tests/test_volatility_targeting_benchmark_aware_real_aapl.py tests/test_volatility_targeting_elevated_cost_real_aapl.py tests/test_volatility_targeting_param_sensitivity_real_aapl.py` → **6 passed in 10.81s** (offline, committed fixtures only, CLI subprocess).
+- Baseline fast subset (PIT + survivorship + dual momentum) → **12 passed in 19.93s**.
+- `py_compile` clean on the new file.
+- `git status`: clean except the new untracked test file.
 
 ## What remains unresolved
-- Dual momentum is the first family on the triple to pass pre-registered falsification criteria net of costs, survive the full elevated-cost sweep, AND remain SUPPORTED across a pre-registered parameter perturbation grid. However, multiple-testing correction (Deflated Sharpe Ratio) and benchmark (buy-and-hold) alpha comparison have not been applied; single-panel result on committed fixtures, not evidence about any market.
-- Full `test_falsifiable_hypothesis_example.py` suite remains slow (minutes per test); not re-run in full.
+- Full-suite regression gate NOT re-run this session after adding the new test. Last full green: 1092 passed, EXIT 0 (SESSION 57/58). The new test is additive/independent (subprocess, temp outputs, ~2s) with no shared-state impact, but the gate should be re-confirmed:
+  `export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH`
+  `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q`  (~38 min, offline, committed fixtures only; expect EXIT 0).
+- `AAPL.csv.bak` stray gitignored duplicate remains on disk (prior handoff, harmless).
+- Nothing else committed/pending.
+
+## Approaches already tried / failed
+- None failed this session.
 
 ## One precise next task
-Add benchmark comparison and, if multiple parameter settings are compared, the Deflated Sharpe Ratio multiple-testing correction to dual momentum on the same triple (AAPL/MSFT/GOOGL) using committed fixtures only, reusing the machinery already in `falsifiable_hypothesis_example.py` (`--benchmark`, `--n-trials`, `walk_forward` Deflated Sharpe Ratio). Pin observed strategy + benchmark metrics (net of costs) as regression guards with relative tolerance. Do not tune to force SUPPORT.
-
-(End of file)
+Re-run the full `skills/quantitative-backtesting/tests/` suite to confirm EXIT 0 (no regression from the new additive test). If green, the next bounded high-value item per the mission filter is to complete the missing falsification coverage for `kelly_criterion` (currently only cpcv + walk_forward tests; missing hypothesis/elevated_cost/param_sensitivity/benchmark_aware) using the same committed AAPL fixture and conventions, OR select another strategy gap. Do not commit unless explicitly asked.
