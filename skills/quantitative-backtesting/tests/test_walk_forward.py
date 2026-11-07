@@ -715,6 +715,49 @@ def test_walk_forward_analysis_validate_pit_detects_look_ahead_signal():
     )
 
 
+def test_walk_forward_analysis_validate_pit_passes_on_clean_data():
+    """walk_forward_analysis with validate_pit=True must pass on clean data,
+    mirroring the positive control but with the expected negative-control
+    outcome.
+
+    A legitimate close[t]-based signal (sma_crossover) injected into clean
+    OHLCV data must produce point_in_time_validation.passed=True, no
+    "next-period returns" violation, and summary.bias_controls_engaged=True.
+    This guards against clean data being falsely flagged as look-ahead.
+    """
+    data = _make_ohlcv_data(periods=500, seed=42)
+
+    def factory(params):
+        return build_strategy("sma_crossover", json.dumps(params or {}))
+
+    param_grid = {"fast_period": [3, 5], "slow_period": [8, 10]}
+
+    result = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        validate_pit=True,
+    )
+
+    pit = result.get("point_in_time_validation")
+    assert pit is not None, "point_in_time_validation should be recorded when validate_pit=True"
+    assert pit["passed"] is True, (
+        f"clean data must pass walk-forward PIT validation, got violations={pit['violations']}"
+    )
+    assert not any("next-period returns" in v for v in pit["violations"]), (
+        f"clean data must not produce a next-period look-ahead violation, got {pit['violations']}"
+    )
+    assert result["summary"]["bias_controls_engaged"] is True, (
+        "bias_controls_engaged should be True when PIT ran"
+    )
+
+
 def test_cli_out_of_sample_benchmark_cost_is_periodic_false():
     """CLI end-to-end test for out-of-sample without --benchmark-cost-is-periodic flag (default False).
 
