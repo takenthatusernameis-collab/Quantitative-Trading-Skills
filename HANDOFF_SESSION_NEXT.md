@@ -1,27 +1,35 @@
-# Handoff — Session 60: point-in-time strict abort-on-violation positive control
+# Handoff — CLI-level `--point-in-time-strict` abort positive control (complete)
 
 ## What changed
-- **Added** `skills/quantitative-backtesting/tests/test_point_in_time_strict_abort_on_violation.py` (untracked, not committed). Positive control for `--point-in-time-strict` enforcement: a strict flag that logs violations but does not abort provides false assurance. Complements `test_point_in_time_strict_real_aapl.py` (negative control: legitimate close[t]-based SMA on real AAPL passes strict mode).
-  - `test_validate_point_in_time_detects_lookahead_on_real_data`: deterministic look-ahead signal (next-period return via `shift(-1)`) on committed real AAPL is flagged as a PIT violation (correlation/look-ahead).
-  - `test_run_backtest_strict_handler_aborts_on_violation`: `run_backtest._handle_point_in_time_results` returns abort (`True`) in strict mode on the violation and `False` in warn-only mode.
-  - `test_run_backtest_strict_handler_passes_on_clean_real_data`: same gate does not abort on a legitimate SMA(10,30) signal on real AAPL.
-  - `test_walk_forward_out_of_sample_strict_aborts_on_lookahead_signal`: `walk_forward.out_of_sample_validation(..., validate_pit=True, pit_strict=True)` completes on clean real data and records `point_in_time_validation.passed==True`; the same enforcement function flags the look-ahead frame and strict handler aborts. Uses real committed `AAPL.csv`; offline, no live network. Audit of PIT control, not a profitability claim.
-- **No production code modified.** Note: CLI-level injection of a look-ahead signal is not feasible via `run_backtest` without a test-only strategy registry entry (signals come from strategies); enforcement is tested at the real programmatic gates the CLIs call. Duplicate-timestamp violations are caught by `validate_data`/loader before PIT in the CLIs, so look-ahead correlation is the correct PIT-specific positive control.
+- **`skills/quantitative-backtesting/scripts/walk_forward.py`** (+4 lines): threaded `validate_pit=getattr(args, "validate_point_in_time", True)` and `pit_strict=getattr(args, "point_in_time_strict", False)` into the two CLI single-run call sites that previously dropped them:
+  - `run_walk_forward` → `walk_forward_analysis(...)` (scripts/walk_forward.py:8366)
+  - `run_out_of_sample_validation` → `out_of_sample_validation(...)` (scripts/walk_forward.py:10096)
+  - Defect: `--point-in-time-strict` only aborted on structural load-time PIT violations (`_load_and_validate_data`), not on signal-level look-ahead detected inside `walk_forward_analysis`/`out_of_sample_validation` — so the strict flag gave false assurance. Now it propagates to the signal-level gate that raises `ValueError` on a look-ahead signal.
+- **`skills/quantitative-backtesting/tests/_cli_pit_lookahead.py`** (new, test-only): registers a `_PitLookaheadStrategy` (`signal[t] = sign(next-period return)`) into `strategy_builder.STRATEGY_REGISTRY` **only inside the test harness process**; not added to the production registry. Invokes `walk_forward.main()` with the remaining argv and surfaces a strict `ValueError` on stderr → non-zero exit.
+- **`skills/quantitative-backtesting/tests/test_point_in_time_strict_cli_walk_forward.py`** (new): CLI-level positive/negative controls via the real `walk_forward.py` entry point (committed AAPL.csv, offline, temp output dir so tracked `scripts/results/` fixtures are not touched):
+  - `test_out_of_sample_strict_aborts_on_lookahead` — look-ahead + `--point-in-time-strict` → non-zero exit + "correlates with next-period returns"/"strict mode" in output.
+  - `test_out_of_sample_strict_passes_on_clean_data` — clean sma_crossover + strict → exit 0, "point-in-time validation passed" in stdout.
+  - `test_out_of_sample_lookahead_non_strict_completes` — look-ahead without strict → exit 0 (warn only).
+  - `test_walk_forward_strict_passes_on_clean_data` — walk-forward subcommand, clean sma_crossover + strict → exit 0.
 
 ## What was actually verified
-- New test: `python -m pytest skills/quantitative-backtesting/tests/test_point_in_time_strict_abort_on_violation.py -v --tb=short` → **4 passed in 0.38s**.
-- Focused PIT/survivorship subset (13 tests): `test_point_in_time_strict_real_aapl.py`, `test_point_in_time_strict_abort_on_violation.py`, `test_multi_symbol_pit_survivorship_real_panel.py`, `test_survivorship_bias_positive_control_real_panel.py`, `test_survivorship_bias_insufficient_and_gaps_real_panel.py`, `test_survivorship_bias_positive_control_insufficient_gaps_real_panel.py`, `test_survivorship_bias_dropped_invalid_symbol_real_panel.py` → **13 passed in 12.59s** (CLI subprocesses, committed fixtures).
-- `run_backtest` PIT/multi-symbol subset: `pytest skills/quantitative-backtesting/tests/test_run_backtest.py -k "point_in_time or multi_symbol"` (see recorded result in this session).
-- `py_compile` clean on new test file.
+- `pytest tests/test_point_in_time_strict_cli_walk_forward.py` → **4 passed** (~3s).
+- Fast PIT strict suite (`test_point_in_time_strict_cli_walk_forward.py`, `test_point_in_time_strict_abort_on_violation.py`, `test_point_in_time_strict_real_aapl.py`) → **11 passed**.
+- `test_walk_forward.py` PIT CLI tests directly exercising the change: `test_load_and_validate_data_runs_pit_by_default`, `test_cli_point_in_time_validation_enabled_by_default`, `test_cli_point_in_time_validation_can_be_disabled`, `test_out_of_sample_validation_validate_pit_detects_look_ahead`, `test_walk_forward_analysis_validate_pit_detects_look_ahead_signal` → **5 passed**.
+- `py_compile` clean on `walk_forward.py` and both new test files.
+- `git status` clean except intended changes (`M walk_forward.py`, 2 new untracked test files). No tracked `scripts/results/` files dirtied.
 
 ## What remains unresolved
-- New test file is **untracked/not committed** (user did not request commit).
-- Full-suite gate last green per Session 57/58 (1092 passed, EXIT 0) with additive tests since; not re-run this session (additive, independent, focused regressions green). Re-run if a broad regression gate is needed.
-- `AAPL.csv.bak` stray gitignored duplicate remains on disk (prior handoffs).
-- The Session 59 handoff task ("survivorship-bias positive control for insufficient data and large gaps") was **already satisfied** by existing files `test_survivorship_bias_insufficient_and_gaps_real_panel.py` and `test_survivorship_bias_positive_control_insufficient_gaps_real_panel.py` (both pass). Handoff text in `HANDOFF_SESSION_NEXT.md` had not been updated.
+- **Full-suite gate not re-run with the `walk_forward.py` change** (last green per earlier sessions, ~992–1092 passed, EXIT 0). The change is localized (4 lines, two call sites) and the directly-affected CLI PIT tests pass, but the full `skills/quantitative-backtesting/tests/` gate should be re-confirmed before declaring the baseline green.
 
-## Approaches already tried / failed (this session)
-- Initial draft injected **duplicate timestamps** and expected `--point-in-time-strict` CLI to warn-only (exit 0) vs strict abort (exit != 0) via `run_backtest.py`. **Failed** because `validate_data` fails on duplicate dates and `run_backtest` aborts before/independently of PIT in that path (exit 1 in both modes). Switched to a look-ahead signal positive control tested at the real enforcement gates (detector + `_handle_point_in_time_results` + `walk_forward.out_of_sample_validation` strict path), which matches the PIT control’s actual scope.
+## Approaches already tried / failed
+- None. The programmatic strict-abort path (`walk_forward_analysis(..., pit_strict=True)` on a look-ahead factory) was already covered by `test_point_in_time_strict_abort_on_violation.py` (Session 60); this session closed the gap by making `--point-in-time-strict` actually enforce at the CLI and adding CLI-level positive/negative controls.
 
 ## One precise next task
-**Bounded, high-value:** add a **CLI-level `--point-in-time-strict` abort positive control for `walk_forward.py` subcommands** (not `run_backtest`, which lacks a test-only look-ahead strategy hook). Evidence: `walk_forward.py` exposes `--validate-point-in-time/--no-validate-point-in-time` and `--point-in-time-strict` (default PIT enabled) and threads `validate_pit`/`pit_strict` into `walk_forward_analysis`, `cpcv_analysis`, and `out_of_sample_validation` (grep `point_in_time_strict` shows `pit_strict` handling ~line 6920/7633/7700). Implement by adding a small **test-only strategy module/registration hook only in the test** (or a fixture strategy file loaded via the test harness) that emits a deterministic look-ahead signal on a real-data-derived frame, then run the relevant `walk_forward.py` CLI subcommand (`out-of-sample` or `walk-forward`) with `--point-in-time-strict` and assert **non-zero exit** and a PIT violation in output; also assert non-strict completes/warns as appropriate. Use committed `AAPL.csv`/sample data, temp output, offline. Verify with the new test plus `test_point_in_time_strict_abort_on_violation.py` and `-k "walk_forward and point_in_time"`. Do not commit unless explicitly asked. If no safe CLI hook exists without changing production strategy registry, record evidence and fall back to a programmatic `walk_forward_analysis(..., pit_strict=True)` path that raises on a crafted look-ahead-producing setup (document the limitation precisely).
+Re-run the full-suite gate to confirm EXIT 0 with the `walk_forward.py` change included:
+```
+export PATH=/home/runner/work/_temp/kilo-home/.local/bin:$PATH
+cd /home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills
+python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q
+```
+Expect EXIT 0 (offline, committed fixtures only; ~16 min for the two slow suites, but the PIT/walk-forward subset is seconds). If green, no assigned quant-research task remains — the next agent should select a new bounded task per the mission's high-value filter (testable hypothesis + falsification criteria + benchmark/DSR multiple-testing controls + reproducible evidence net of costs), e.g. extending benchmark comparison + Deflated Sharpe to dual momentum on the AAPL/MSFT/GOOGL triple (see prior HANDOFF_NEXT_SESSION.md), or a survivorship-bias/look-ahead audit. Do not commit unless explicitly asked.

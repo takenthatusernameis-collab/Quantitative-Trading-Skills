@@ -8363,6 +8363,8 @@ def run_walk_forward(args) -> int:
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
+        validate_pit=getattr(args, "validate_point_in_time", True),
+        pit_strict=getattr(args, "point_in_time_strict", False),
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
@@ -10091,6 +10093,8 @@ def run_out_of_sample_validation(args) -> int:
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
+        validate_pit=getattr(args, "validate_point_in_time", True),
+        pit_strict=getattr(args, "point_in_time_strict", False),
     )
 
     if pit_results is not None:
