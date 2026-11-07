@@ -6457,7 +6457,7 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         fill_rate = getattr(args, "fill_rate", 1.0)
     if fill_rate is None:
         fill_rate = 1.0
-if fill_rate <= 0 or fill_rate > 1:
+    if fill_rate <= 0 or fill_rate > 1:
         raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
     if pit_strict is None:
         pit_strict = bool(getattr(args, "point_in_time_strict", False))
