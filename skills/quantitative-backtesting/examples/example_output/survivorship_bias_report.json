@@ -14,5 +14,6 @@
     "ENTER"
   ],
   "large_gaps": [],
+  "invalid_data_dropped": [],
   "bias_score": 0.5
 }

@@ -62,5 +62,25 @@
   },
   "omega_ratio": 1.623426895506539,
   "tail_ratio": 0.9284182629637894,
+  "test_resolution": {
+    "n_test_observations": 504,
+    "n_parameter_trials": null,
+    "n_benchmarks": 2,
+    "target_p_value": 0.1,
+    "min_detectable_sharpe": null,
+    "min_detectable_alpha": 0.18488947387654323,
+    "observed_annualized_sharpe": null,
+    "observed_annualized_alpha": -0.09261244506834206,
+    "realized_annualized_volatility": 0.15874500418720602,
+    "sharpe_status": "not_applicable",
+    "alpha_status": "resolvable",
+    "sharpe_reason": null,
+    "alpha_reason": null,
+    "sharpe_beyond_plausible_bound": false,
+    "alpha_beyond_plausible_bound": true,
+    "plausible_max_annualized_sharpe": 2.0,
+    "plausible_max_annualized_alpha": 0.1,
+    "message": "With 504 test observation(s): the Deflated Alpha test can only confirm an annualized alpha of at least 18.49% (observed -9.26%). The Deflated Alpha threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+  },
   "initial_capital": null
 }

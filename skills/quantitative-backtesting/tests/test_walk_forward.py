@@ -6192,6 +6192,7 @@ TEST_REGISTRY = [
     ("test_cli_point_in_time_validation_enabled_by_default", test_cli_point_in_time_validation_enabled_by_default),
     ("test_cli_point_in_time_validation_can_be_disabled", test_cli_point_in_time_validation_can_be_disabled),
     ("test_out_of_sample_validation_validate_pit_detects_look_ahead", test_out_of_sample_validation_validate_pit_detects_look_ahead),
+    ("test_walk_forward_analysis_validate_pit_detects_look_ahead_signal", test_walk_forward_analysis_validate_pit_detects_look_ahead_signal),
     ("test_cli_out_of_sample_benchmark_cost_is_periodic_false", test_cli_out_of_sample_benchmark_cost_is_periodic_false),
     ("test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv", test_cli_out_of_sample_benchmark_cost_is_periodic_cpcv),
     ("test_benchmark_stats_with_splits_runs_without_error", test_benchmark_stats_with_splits_runs_without_error),

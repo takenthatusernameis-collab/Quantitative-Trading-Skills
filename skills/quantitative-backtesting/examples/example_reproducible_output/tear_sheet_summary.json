@@ -37,11 +37,14 @@
     "capacity_book_trend": null,
     "book_diagnostic": null
   },
-  "plot_files": [],
+  "plot_files": [
+    "equity_curve.png",
+    "returns_distribution.png"
+  ],
   "panel_pricing": "net-exposure",
   "data_provenance": {
     "source_path": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv",
-    "load_timestamp": "2026-11-06T18:03:40.693285Z",
+    "load_timestamp": "2026-11-07T00:00:22.539698Z",
     "file_format": ".csv",
     "file_size_bytes": 46812,
     "symbol_filter": "SPY",

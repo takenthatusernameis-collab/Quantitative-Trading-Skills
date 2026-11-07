@@ -30,5 +30,25 @@
   "r_squared": 0.4803270428383447,
   "omega_ratio": 1.623426895506539,
   "tail_ratio": 0.9284182629637894,
+  "test_resolution": {
+    "n_test_observations": null,
+    "n_parameter_trials": null,
+    "n_benchmarks": null,
+    "target_p_value": 0.1,
+    "min_detectable_sharpe": null,
+    "min_detectable_alpha": null,
+    "observed_annualized_sharpe": null,
+    "observed_annualized_alpha": null,
+    "realized_annualized_volatility": null,
+    "sharpe_status": "not_applicable",
+    "alpha_status": "not_applicable",
+    "sharpe_reason": null,
+    "alpha_reason": null,
+    "sharpe_beyond_plausible_bound": false,
+    "alpha_beyond_plausible_bound": false,
+    "plausible_max_annualized_sharpe": 2.0,
+    "plausible_max_annualized_alpha": 0.1,
+    "message": "No significance test was run on this record, so there is no test resolution to report."
+  },
   "initial_capital": null
 }
