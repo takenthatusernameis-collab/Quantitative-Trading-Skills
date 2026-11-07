@@ -481,6 +481,7 @@ def walk_forward_analysis(
     benchmark_expense_ratio: float = 0.0,
     benchmark_cost_is_periodic: bool = False,
     validate_pit: bool = True,
+    pit_strict: bool = False,
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     **kwargs,
@@ -620,6 +621,11 @@ def walk_forward_analysis(
             print("Point-in-time validation passed (no violations or warnings).")
         elif not pit_results.get("violations"):
             print("Point-in-time validation passed (no violations).")
+        if pit_strict and pit_results.get("passed") is False:
+            raise ValueError(
+                "Point-in-time validation failed in strict mode: "
+                + "; ".join(pit_results.get("violations", []))
+            )
 
     start_date = data.index.min()
     end_date = data.index.max()
@@ -3207,6 +3213,7 @@ def cpcv_analysis(
     benchmark_expense_ratio: float = 0.0,
     benchmark_cost_is_periodic: bool = False,
     validate_pit: bool = True,
+    pit_strict: bool = False,
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     **kwargs,
@@ -3356,6 +3363,11 @@ def cpcv_analysis(
             print("Point-in-time validation passed (no violations or warnings).")
         elif not pit_results.get("violations"):
             print("Point-in-time validation passed (no violations).")
+        if pit_strict and pit_results.get("passed") is False:
+            raise ValueError(
+                "Point-in-time validation failed in strict mode: "
+                + "; ".join(pit_results.get("violations", []))
+            )
 
     n_obs = len(data)
 
@@ -5434,6 +5446,7 @@ def out_of_sample_validation(
     benchmark_expense_ratio: float = 0.0,
     benchmark_cost_is_periodic: bool = False,
     validate_pit: bool = True,
+    pit_strict: bool = False,
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     **kwargs,
@@ -5582,6 +5595,11 @@ def out_of_sample_validation(
             print("Point-in-time validation passed (no violations or warnings).")
         elif not pit_results.get("violations"):
             print("Point-in-time validation passed (no violations).")
+        if pit_strict and pit_results.get("passed") is False:
+            raise ValueError(
+                "Point-in-time validation failed in strict mode: "
+                + "; ".join(pit_results.get("violations", []))
+            )
 
     # Split data chronologically
     train_data, val_data, test_data = _split_train_val_test(
@@ -5661,6 +5679,7 @@ def out_of_sample_validation(
             benchmark_slippage=benchmark_slippage,
             benchmark_expense_ratio=benchmark_expense_ratio,
             panel_pricing=panel_pricing,
+            pit_strict=pit_strict,
         )
     elif validation_method == "cpcv":
         validation_results = cpcv_analysis(
@@ -5682,6 +5701,7 @@ def out_of_sample_validation(
             fill_rate=fill_rate,
             apply_deflation=apply_deflation,
             panel_pricing=panel_pricing,
+            pit_strict=pit_strict,
         )
     else:
         raise ValueError(f"Unknown validation_method: {validation_method}. Use 'walk_forward' or 'cpcv'.")
@@ -6400,7 +6420,7 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
                                     bench_commission, bench_slippage, bench_expense_ratio,
                                     impact_coefficient, borrow_cost=None, funding_cost=None,
                                     commission=None, slippage=None, latency=None, fill_rate=None,
-                                    survivorship=None):
+                                    survivorship=None, pit_strict=None):
     """Run walk-forward for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -6437,8 +6457,10 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         fill_rate = getattr(args, "fill_rate", 1.0)
     if fill_rate is None:
         fill_rate = 1.0
-    if fill_rate <= 0 or fill_rate > 1:
+if fill_rate <= 0 or fill_rate > 1:
         raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
+    if pit_strict is None:
+        pit_strict = bool(getattr(args, "point_in_time_strict", False))
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -6447,7 +6469,7 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         strategy_factory=strategy_factory,
         param_grid=param_grid,
         train_months=args.train_months,
-        test_months=args.test_months,
+        test_months=args.train_months,
         step_months=args.step_months,
         initial_capital=args.initial_capital,
         commission=commission,
@@ -6467,6 +6489,7 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
+        pit_strict=pit_strict,
     )
     summary = results["summary"]
     dsr = summary.get("deflated_sharpe")
@@ -6651,7 +6674,7 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                            bench_commission, bench_slippage, bench_expense_ratio,
                            impact_coefficient, borrow_cost=None, funding_cost=None,
                            commission=None, slippage=None, latency=None, fill_rate=None,
-                           pit_results=None, survivorship=None):
+                           pit_results=None, survivorship=None, pit_strict=None):
     """Run out-of-sample validation for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
