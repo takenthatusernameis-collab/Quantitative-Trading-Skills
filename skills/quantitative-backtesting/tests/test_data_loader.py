@@ -294,6 +294,25 @@ def test_validate_point_in_time_lookback_windows():
     assert any("Invalid lookback" in v for v in res["violations"])
 
 
+def test_validate_point_in_time_flags_look_ahead_in_derived_column():
+    """A lookback window larger than the data history is flagged.
+
+    Check 4 validates that lookback windows are usable: a window exceeding
+    the data length cannot produce a valid rolling calculation, which would
+    otherwise silently produce NaN-heavy (forward-looking-invalid) signals.
+    """
+    dates = pd.date_range("2020-01-01", periods=10, freq="B")
+    df = pd.DataFrame({"close": range(1, 11)}, index=dates)
+    res = validate_point_in_time(df, lookback_windows=[5, 20])
+    assert res["passed"] is False, f"oversized lookback window not flagged: {res}"
+    assert any("exceeds data length" in v for v in res["violations"]), (
+        f"expected window-too-large violation, got {res['violations']}"
+    )
+    # A window within bounds is accepted.
+    res_ok = validate_point_in_time(df, lookback_windows=[5])
+    assert res_ok["passed"] is True, f"valid lookback window flagged: {res_ok}"
+
+
 def test_detect_survivorship_bias_survivors_only():
     """All symbols surviving full period gives low bias score."""
     dates = pd.date_range("2020-01-01", periods=300, freq="B")
@@ -916,6 +935,7 @@ TEST_REGISTRY = [
     ("test_validate_point_in_time_accepts_sma_crossover_signal", test_validate_point_in_time_accepts_sma_crossover_signal),
     ("test_validate_point_in_time_non_monotonic", test_validate_point_in_time_non_monotonic),
     ("test_validate_point_in_time_lookback_windows", test_validate_point_in_time_lookback_windows),
+    ("test_validate_point_in_time_flags_look_ahead_in_derived_column", test_validate_point_in_time_flags_look_ahead_in_derived_column),
     ("test_detect_survivorship_bias_survivors_only", test_detect_survivorship_bias_survivors_only),
     ("test_detect_survivorship_bias_entries_exits_insufficient", test_detect_survivorship_bias_entries_exits_insufficient),
     ("test_detect_survivorship_bias_empty", test_detect_survivorship_bias_empty),

@@ -453,11 +453,18 @@ def validate_point_in_time(
                         f"(corr={corr:.3f}); potential look-ahead bias"
                     )
 
-    # Check 4: Rolling window calculations - verify no forward-looking windows
+    # Check 4: Rolling window calculations - verify lookback windows are valid.
+    # Windows must be positive and not larger than the available history, since
+    # a window exceeding the data cannot produce a valid rolling calculation.
     if lookback_windows:
         for window in lookback_windows:
             if window <= 0:
                 violations.append(f"Invalid lookback window: {window} (must be positive)")
+            elif len(df) > 0 and window > len(df):
+                violations.append(
+                    f"Lookback window {window} exceeds data length {len(df)}; "
+                    "no valid rolling calculation is possible"
+                )
 
     # Check 5: Forward-filled data detection
     # If a column has long stretches of identical values, it might be forward-filled
