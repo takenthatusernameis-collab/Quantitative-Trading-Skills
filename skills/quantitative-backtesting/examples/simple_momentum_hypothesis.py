@@ -216,6 +216,20 @@ def _resolve_benchmark(benchmark_path):
     return ASSETS_DIR / "real_market_data" / p
 
 
+def _resolve_benchmark(benchmark_path):
+    """Resolve a benchmark name/path to a committed fixture path.
+
+    Relative names (e.g. "MSFT.csv") are resolved against the committed
+    ``assets/example_data/real_market_data/`` directory so the benchmark-aware
+    test is not dependent on the current working directory. Absolute paths are
+    returned unchanged.
+    """
+    p = Path(benchmark_path)
+    if p.is_absolute():
+        return p
+    return ASSETS_DIR / "real_market_data" / p
+
+
 def _resolve_benchmarks(data_path, benchmark_path=None):
     """Return the ordered, de-duplicated list of benchmark CSV paths.
 
@@ -247,7 +261,7 @@ def _resolve_benchmarks(data_path, benchmark_path=None):
     return result
 
 
-def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1, n_trials=None):
+def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1, n_trials=None, symbol="SPY"):
     # Try to find scripts dir relative to repo root or relative to skill dir
     script_dir = Path(__file__).resolve().parent
     # Check if we're in examples dir (under skill) or in root
@@ -270,7 +284,14 @@ def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1, 
             if candidate.exists():
                 data_path = candidate
                 break
-    bench_paths = _resolve_benchmarks(data_path, benchmark_path)
+    if benchmark_path is not None:
+        # An explicit benchmark is used as the sole buy-and-hold benchmark
+        # (not the strategy data itself), resolved against the committed
+        # real_market_data fixtures when given as a relative name.
+        resolved_benchmark = _resolve_benchmark(benchmark_path)
+        bench_paths = [resolved_benchmark] if resolved_benchmark.exists() else []
+    else:
+        bench_paths = _resolve_benchmarks(data_path, None)
     benchmark_path = bench_paths[0] if bench_paths else None
 
     print("=" * 80)
@@ -293,7 +314,7 @@ def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1, 
             str(scripts_dir / "run_backtest.py"),
             "--data", str(data_path),
             "--strategy", "sma_crossover",
-            "--symbol", "SPY",
+            "--symbol", symbol,
             "--params", '{"fast_period": 10, "slow_period": 30}',
             "--commission", str(COMMISSION),
             "--slippage", str(SLIPPAGE),
@@ -1109,7 +1130,7 @@ def _resolve_benchmark(benchmark_path):
 
 
 def run_benchmark_aware_hypothesis_test(data_path, benchmark_path=BENCHMARK_FILE,
-                                        n_trials=N_TRIALS):
+                                        n_trials=N_TRIALS, symbol="SPY"):
     """Run the benchmark-aware falsification test for simple momentum.
 
     Mirrors the single-asset benchmark-aware convention used by the MACD /
@@ -1122,10 +1143,12 @@ def run_benchmark_aware_hypothesis_test(data_path, benchmark_path=BENCHMARK_FILE
     buy-and-hold). Verdicts are falsification outcomes, never profitability
     claims.
     """
+    resolved_benchmark = _resolve_benchmark(benchmark_path)
     return run_hypothesis_test(
         data_path,
-        benchmark_path=benchmark_path,
+        benchmark_path=resolved_benchmark,
         n_trials=n_trials,
+        symbol=symbol,
     )
 
 
