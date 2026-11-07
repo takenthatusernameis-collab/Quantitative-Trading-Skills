@@ -1,22 +1,25 @@
-# Handoff — walk-forward PIT signal validation + look-ahead negative control test added; full gate still running
+# Handoff — full-suite regression gate in progress; focused changed-area tests green
 
 ## What changed (this session)
-- Added walk-forward-level look-ahead negative control test `test_walk_forward_analysis_validate_pit_detects_look_ahead_signal` to `skills/quantitative-backtesting/tests/test_walk_forward.py`, plus a `_LookAheadStrategy` stub class (`signal[t] = close[t+1] > close[t]`). Mirrors `test_run_backtest_point_in_time_detects_lookahead_bias`: runs `walk_forward_analysis(validate_pit=True)` with a next-period close signal and asserts `point_in_time_validation.passed=False`, a "next-period returns" violation, and `summary["bias_controls_engaged"]=True`.
-- No existing files modified other than `tests/test_walk_forward.py` (added class + test function).
+- No new commits. Working tree is clean at HEAD `d3d3f68` (survivorship-bias test `test_survivorship_bias_insufficient_large_gaps_real_panel.py`).
+- All handoff-described changes from prior sessions are committed: walk_forward PIT look-ahead positive + negative controls (`test_walk_forward.py`), `mean_reversion_hypothesis.py` sweep interface fixes (`criteria`/`VERDICT`/`all_pass`), `test_volatility_targeting_hypothesis_real_aapl.py`, sma_crossover/volatility-targeting/simple_momentum falsification coverage.
+- Verified working tree matches HEAD (`git status --short` empty).
 
 ## What was actually verified
-- `tests/test_walk_forward.py::test_walk_forward_analysis_validate_pit_detects_look_ahead_signal` → PASSED (0.67s).
-- `tests/test_run_backtest.py::test_run_backtest_point_in_time_detects_lookahead_bias` → PASSED (0.26s, run together with the new test).
-- Related PIT/walk-forward tests → PASSED: `test_out_of_sample_validation_validate_pit_detects_look_ahead`, `test_walk_forward_analysis_rejects_overlapping_oos_test_windows`, `test_walk_forward_analysis_oos_record_has_no_duplicated_bars` (3 passed).
-- `python3 -m py_compile` on `tests/test_walk_forward.py` → OK.
+- Focused changed-area tests → ALL PASSED, `EXIT_CODE=0`:
+  - `test_mean_reversion_elevated_cost_real_aapl.py` + `test_mean_reversion_param_sensitivity_real_aapl.py` + `test_volatility_targeting_hypothesis_real_aapl.py` → **4 passed in 9.03s**.
+  - `test_walk_forward.py -k "look_ahead or lookahead or pit_detects"` → **2 passed in 0.53s** (look-ahead positive control + clean-data negative control).
+- `python3 -m py_compile` on changed files → OK (prior sessions).
+- Offline, committed fixtures only; no live network.
 
 ## What remains unresolved
-- Full test suite gate (`skills/quantitative-backtesting/tests/ -q`) still running in background (PID 43609, log `/home/runner/work/_temp/kilo-tmp/kilo/full_suite_gate.log`); no EXIT_CODE observed yet. Earlier output showed tests passing (~6%+ progress); need to confirm `EXIT_CODE=0`.
+- Full test suite gate running in background: **pid 28001** (background id `bgp_1b6c0c6cb0010IzFNWE03hDHb8`), log `/home/runner/work/_temp/kilo-tmp/kilo/full_suite_gate2.log`. Command: `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q` from repo root (expects ~38–80 min; `EXIT_CODE` appended to log on completion).
+- No `EXIT_CODE` observed yet. Need to confirm `EXIT_CODE=0` and record the actual pass/fail count.
+- Old log `/home/runner/work/_temp/kilo-tmp/kilo/full_suite_gate.log` (pid 43609) only has ~20 dots, no EXIT_CODE; superseded by `full_suite_gate2.log`.
 
 ## Approaches tried / failed
-- None.
+- None. No approach failed this session.
 
 ## One precise next task
-1. Confirm full suite gate EXIT 0: check `/home/runner/work/_temp/kilo-tmp/kilo/full_suite_gate.log` for `EXIT_CODE=0`. If still running, wait for completion (expected ~16+ min total) or re-run `cd skills/quantitative-backtesting && PYTHONPATH=scripts:tests python3 -m pytest -q -p no:cacheprovider`.
-2. Add walk-forward-level PIT negative control test (clean data passes): `walk_forward_analysis(data, ..., validate_pit=True)` on clean `_make_ohlcv_data` should assert `point_in_time_validation.passed=True`, no "next-period returns" violation, and `summary["bias_controls_engaged"]=True`. This complements the positive control just added (mirroring the positive/negative pair in `test_out_of_sample_validation_validate_pit_detects_look_ahead`). Add to `tests/test_walk_forward.py`.
-3. If gate is green and negative control added, no assigned quant-research task remains — select a new bounded task per the mission's high-value filter (e.g., survivorship-bias audit, CPCV coverage gap, or a new strategy's falsification coverage). Do not commit unless explicitly asked.
+1. Wait for the background full suite (pid 28001) to finish, then confirm `EXIT_CODE=0` in `/home/runner/work/_temp/kilo-tmp/kilo/full_suite_gate2.log` and record the pass/fail count. If a failure appears, treat as pre-existing/environmental unless tied to a committed change; document it, do not widen scope.
+2. If gate is green, no assigned quant-research task remains. Next agent should select one bounded task per the mission's high-value filter (testable hypothesis + falsification criteria + benchmark/DSR/multiple-testing controls + reproducible evidence net of costs). Candidate gaps per prior handoffs: complete `kelly_criterion` falsification coverage (currently only cpcv + walk_forward tests; missing hypothesis/elevated_cost/param_sensitivity/benchmark_aware) using the committed AAPL fixture and existing conventions, OR a survivorship-bias / look-ahead audit using `run_backtest.py --validate-point-in-time` and `test_out_of_sample_window.py`/`test_test_window_observations.py`. Do not commit unless explicitly asked.
