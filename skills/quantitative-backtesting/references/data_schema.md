@@ -126,3 +126,37 @@ is split-adjusted before benchmark stats are computed, independent of whether
 costs are modeled as round-trip or periodic. `benchmark_cost_is_periodic` is
 forwarded unchanged to `_benchmark_stats`, so periodic or round-trip cost
 handling is preserved after split adjustment.
+
+## Multi-Symbol Survivorship Bias Report (`--multi-symbol`)
+
+When a panel is loaded with `--multi-symbol` (or when callers use
+`load_multi_symbol` plus `detect_survivorship_bias`), the framework emits a
+survivorship-bias audit. The CLI path prints a report and persists
+`survivorship_bias.json` in the output directory; `run_backtest` also threads
+`survivorship_bias` and `bias_controls_engaged=True` into the summary JSON/tear
+sheet metadata.
+
+`detect_survivorship_bias(data_dict, min_observations=252, max_gap_days=30)`
+(`scripts/data_loader.py`) compares each symbol's DatetimeIndex against the
+global sample start/end and returns:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `surviving_symbols` | `list[str]` | Symbols present throughout the global range (within `max_gap_days` tolerance of both boundaries). |
+| `entered_symbols` | `list[object]` | Symbols that start after `global_start + tolerance`; each entry has `symbol`, `start_date`, `days_after_global_start`. |
+| `exited_symbols` | `list[object]` | Symbols that end before `global_end - tolerance`; each entry has `symbol`, `end_date`, `days_before_global_end`. |
+| `insufficient_data` | `list[str]` | Symbols with fewer than `min_observations` rows, or with an empty/non-DatetimeIndex frame. |
+| `large_gaps` | `list[object]` | Symbols with an interior gap > `max_gap_days` calendar days; each entry has `symbol`, `max_gap_days`, `gap_date` (the gap boundary). |
+| `bias_score` | `float` | Fraction of symbols with any issue, in `[0, 1]`. A symbol that appears in multiple categories (e.g. `insufficient_data` and `large_gaps` and `exited_symbols`) is counted once. |
+
+`tolerance` is `pd.Timedelta(days=max_gap_days)`. A positive `bias_score` means
+the panel has survivorship, late-entry/IPO, delisting, coverage, or stale-gap
+risk; it is an audit signal, not a correction. The report does not make a panel
+safe for inference — it records what the panel contains so results can be read
+with the appropriate caveats.
+
+Per-symbol provenance (`load_multi_symbol(..., return_provenance=True)`) is
+separate from the survivorship report: it carries each symbol's checksum, date
+range, shape, and validation outcome. The `run_backtest --multi-symbol` CLI
+persists that provenance as `data_provenance.json` (keyed by symbol) alongside
+`survivorship_bias.json`.
