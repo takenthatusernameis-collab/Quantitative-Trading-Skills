@@ -254,6 +254,8 @@ def _print_survivorship_report(survivorship: Dict[str, Any]) -> None:
             f"  large data gap: {entry['symbol']} "
             f"(max {entry['max_gap_days']} days)"
         )
+    for symbol in survivorship.get("invalid_data_dropped", []):
+        print(f"  dropped (data validation failed): {symbol}")
 
 
 def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, survivorship=None):
@@ -1019,11 +1021,19 @@ def main():
     survivorship = None
     if getattr(args, "multi_symbol", False):
         print("Multi-symbol mode: loading the full symbol universe...")
-        data, provenance = load_multi_symbol(args.data, return_provenance=True)
+        data, provenance, dropped = load_multi_symbol(
+            args.data, return_provenance=True, return_dropped=True
+        )
+        if dropped:
+            print(
+                f"  WARNING: {len(dropped)} symbol(s) dropped due to data "
+                f"validation failures and excluded from the loaded universe: "
+                f"{dropped}"
+            )
         if not data:
             print("No symbols could be loaded from the multi-symbol file!")
             return 1
-        survivorship = detect_survivorship_bias(data)
+        survivorship = detect_survivorship_bias(data, dropped_symbols=dropped)
         _print_survivorship_report(survivorship)
         for sym, prov in provenance.items():
             print(

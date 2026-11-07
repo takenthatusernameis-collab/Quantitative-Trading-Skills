@@ -486,6 +486,7 @@ def detect_survivorship_bias(
     data_dict: Dict[str, pd.DataFrame],
     min_observations: int = 252,
     max_gap_days: int = 30,
+    dropped_symbols: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Detect potential survivorship bias in panel data.
@@ -495,11 +496,16 @@ def detect_survivorship_bias(
     2. Symbols with insufficient observations
     3. Large gaps in data that might indicate delisting/relisting
     4. Symbols only present in the latter part of the sample (IPO bias)
+    5. Symbols dropped during load due to data-validation failures (invalid
+       OHLC, duplicate timestamps, etc.) — universe-construction artifacts.
 
     Args:
         data_dict: Dictionary mapping symbol -> OHLCV DataFrame
         min_observations: Minimum observations required for a symbol
         max_gap_days: Maximum allowed gap in trading days before flagging
+        dropped_symbols: Optional list of symbol names excluded from
+            data_dict because they failed data validation at load time.
+            Reported as 'invalid_data_dropped' and counted in bias_score.
 
     Returns:
         Dictionary with detection results:
@@ -508,6 +514,7 @@ def detect_survivorship_bias(
         - 'exited_symbols': symbols that disappear before sample end
         - 'insufficient_data': symbols with too few observations
         - 'large_gaps': symbols with gaps exceeding max_gap_days
+        - 'invalid_data_dropped': symbols dropped due to validation failures
         - 'bias_score': float 0-1 indicating severity (higher = more bias)
     """
     if not data_dict:
@@ -540,6 +547,7 @@ def detect_survivorship_bias(
 
     global_start = min(all_starts)
     global_end = max(all_ends)
+    dropped = list(dropped_symbols or [])
 
     surviving = []
     entered = []
@@ -592,15 +600,17 @@ def detect_survivorship_bias(
                     "gap_date": str(diffs.idxmax()),
                 })
 
-    total_symbols = len(data_dict)
+    # Bias score: fraction of symbols with issues. Symbols dropped at load
+    # time due to validation failures are universe-construction artifacts and
+    # count as affected (the denominator is the full intended universe).
+    affected = set(insufficient)
+    affected.update(e["symbol"] for e in entered)
+    affected.update(e["symbol"] for e in exited)
+    affected.update(e["symbol"] for e in large_gaps)
+    affected.update(dropped)
+
+    total_symbols = len(data_dict) + len(dropped)
     if total_symbols > 0:
-        # Bias score: fraction of symbols with any issue. A symbol may
-        # appear in multiple categories (e.g. insufficient data and a
-        # large gap); count each affected symbol once.
-        affected = set(insufficient)
-        affected.update(e["symbol"] for e in entered)
-        affected.update(e["symbol"] for e in exited)
-        affected.update(e["symbol"] for e in large_gaps)
         bias_score = min(len(affected) / total_symbols, 1.0)
     else:
         bias_score = 0.0
@@ -611,6 +621,7 @@ def detect_survivorship_bias(
         "exited_symbols": exited,
         "insufficient_data": insufficient,
         "large_gaps": large_gaps,
+        "invalid_data_dropped": dropped,
         "bias_score": bias_score,
     }
 
@@ -620,8 +631,9 @@ def load_multi_symbol(
     symbols: Optional[List[str]] = None,
     return_provenance: bool = False,
     adjust_splits: bool = False,
+    return_dropped: bool = False,
     **kwargs
-) -> Union[dict, Tuple[dict, Dict[str, DataProvenance]]]:
+) -> Union[dict, Tuple[dict, Dict[str, DataProvenance]], Tuple]:
     """
     Load data for multiple symbols.
 
@@ -629,10 +641,19 @@ def load_multi_symbol(
         path: Path to multi-symbol data file
         symbols: Optional list of symbols to filter
         return_provenance: If True, return (dict, provenance_dict) tuple
+        adjust_splits: If True, adjust prices for splits
+        return_dropped: If True, include a list of symbols dropped due to
+            validation failures (data-integrity issues such as duplicate
+            timestamps or invalid OHLC). Dropped symbols are a survivorship/
+            universe-construction artifact and should be passed to
+            detect_survivorship_bias via dropped_symbols=.
         **kwargs: Additional arguments passed to load_data
 
     Returns:
-        Dictionary mapping symbol to DataFrame, or tuple with provenance dict
+        Dictionary mapping symbol to DataFrame. With return_provenance=True,
+        (data_dict, provenance_dict). With return_dropped=True, appends a
+        list of dropped symbol names (or dicts with symbol/reason) as the
+        final element.
     """
     # The stacked frame legitimately has duplicate timestamps (one
     # row per symbol per date); per-symbol validation below is the
@@ -652,6 +673,7 @@ def load_multi_symbol(
 
     result = {}
     provenance_dict = {}
+    dropped_symbols = []
     for sym in unique_symbols:
         sym_df = df[df[sym_col] == sym].drop(columns=[sym_col])
         if validate_data(sym_df):
@@ -682,9 +704,22 @@ def load_multi_symbol(
                         str(result[sym].index.min()), str(result[sym].index.max())
                     )
                 provenance_dict[sym] = prov
+        else:
+            dropped_symbols.append(sym)
 
+    if dropped_symbols:
+        warnings.warn(
+            f"load_multi_symbol dropped {len(dropped_symbols)} symbol(s) that "
+            f"failed data validation (excluded from the loaded universe; "
+            f"pass to survivorship screening): {dropped_symbols}"
+        )
+
+    if return_provenance and return_dropped:
+        return result, provenance_dict, dropped_symbols
     if return_provenance:
         return result, provenance_dict
+    if return_dropped:
+        return result, dropped_symbols
     return result
 
 

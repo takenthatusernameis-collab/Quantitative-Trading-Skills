@@ -7652,12 +7652,20 @@ def _load_and_validate_data(
     survivorship = None
     if multi_symbol:
         print("Multi-symbol mode: loading the full symbol universe...")
-        data = load_multi_symbol(data_path, return_provenance=False)
+        data, dropped = load_multi_symbol(
+            data_path, return_provenance=False, return_dropped=True
+        )
+        if dropped:
+            print(
+                f"  WARNING: {len(dropped)} symbol(s) dropped due to data "
+                f"validation failures and excluded from the loaded universe: "
+                f"{dropped}"
+            )
         if not data:
             raise ValueError(
                 "No symbols could be loaded from the multi-symbol file!"
             )
-        survivorship = detect_survivorship_bias(data)
+        survivorship = detect_survivorship_bias(data, dropped_symbols=dropped)
         _print_survivorship_report(survivorship)
     else:
         data = load_data(data_path, symbol=symbol, start=start, end=end)
@@ -7719,6 +7727,8 @@ def _print_survivorship_report(survivorship: Dict[str, Any]) -> None:
             f"  large data gap: {entry['symbol']} "
             f"(max {entry['max_gap_days']} days)"
         )
+    for symbol in survivorship.get("invalid_data_dropped", []):
+        print(f"  dropped (data validation failed): {symbol}")
 
 
 def _load_benchmark(benchmark_path: str, total_return_benchmark: bool = False) -> tuple[pd.DataFrame, Optional[Any]]:

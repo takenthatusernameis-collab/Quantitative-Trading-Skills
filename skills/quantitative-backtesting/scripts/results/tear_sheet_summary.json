@@ -37,7 +37,10 @@
     "capacity_book_trend": null,
     "book_diagnostic": null
   },
-  "plot_files": [],
+  "plot_files": [
+    "equity_curve.png",
+    "returns_distribution.png"
+  ],
   "panel_pricing": "net-exposure",
   "train_val_test_split": {
     "train_start": "2010-01-04 00:00:00",
@@ -69,7 +72,7 @@
   },
   "data_provenance": {
     "source_path": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/real_market_data/AAPL.csv",
-    "load_timestamp": "2026-11-06T18:03:40.692221Z",
+    "load_timestamp": "2026-11-07T00:00:22.537687Z",
     "file_format": ".csv",
     "file_size_bytes": 118482,
     "symbol_filter": "SPY",

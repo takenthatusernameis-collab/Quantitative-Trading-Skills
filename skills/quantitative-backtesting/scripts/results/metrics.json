@@ -27,12 +27,6 @@
   "avg_trade_duration": 95.4,
   "omega_ratio": 1.9922788126817164,
   "tail_ratio": 1.2419397984170986,
-  "initial_capital": 100000,
-  "capacity": null,
-  "capacity_trend": null,
-  "capacity_book": null,
-  "capacity_book_trend": null,
-  "book_diagnostic": null,
   "test_resolution": {
     "n_test_observations": null,
     "n_parameter_trials": null,
@@ -52,5 +46,11 @@
     "plausible_max_annualized_sharpe": 2.0,
     "plausible_max_annualized_alpha": 0.1,
     "message": "No significance test was run on this record, so there is no test resolution to report."
-  }
+  },
+  "initial_capital": 100000,
+  "capacity": null,
+  "capacity_trend": null,
+  "capacity_book": null,
+  "capacity_book_trend": null,
+  "book_diagnostic": null
 }
