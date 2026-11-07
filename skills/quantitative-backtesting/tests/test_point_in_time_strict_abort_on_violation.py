@@ -38,7 +38,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 from data_loader import validate_point_in_time  # noqa: E402
 from run_backtest import _handle_point_in_time_results  # noqa: E402
-from walk_forward import out_of_sample_validation  # noqa: E402
+from walk_forward import out_of_sample_validation, walk_forward_analysis  # noqa: E402
 from strategy_builder import build_strategy  # noqa: E402
 
 REAL_DATA = SKILLS_DIR / "assets" / "example_data" / "real_market_data" / "AAPL.csv"
@@ -159,3 +159,40 @@ if __name__ == "__main__":
     test_walk_forward_out_of_sample_strict_aborts_on_lookahead_signal()
     print("PASS  test_walk_forward_out_of_sample_strict_aborts_on_lookahead_signal")
     print("OK")
+
+
+class _LookaheadStrategy:
+    def __init__(self, config):
+        self.config = config
+        self.name = config.name
+        self.parameters = config.parameters
+
+    def generate_signals(self, data):
+        if isinstance(data, pd.DataFrame) and isinstance(data.columns, pd.MultiIndex):
+            close = data["close"].iloc[:, 0]
+        elif isinstance(data, pd.DataFrame):
+            close = data["close"]
+        else:
+            close = data["close"]
+        nxt = close.pct_change().shift(-1)
+        return (nxt > 0).astype(float).reindex(data.index).fillna(0.0)
+
+
+def _lookahead_factory(params):
+    from strategy_builder import StrategyConfig
+    return _LookaheadStrategy(StrategyConfig(name="lookahead", parameters=params or {}))
+
+
+def test_walk_forward_analysis_strict_aborts_on_lookahead():
+    df = _load_real()
+    with pytest.raises(ValueError):
+        walk_forward_analysis(
+            data=df,
+            strategy_factory=_lookahead_factory,
+            param_grid={"fast_period": [10]},
+            train_months=6,
+            test_months=3,
+            step_months=3,
+            validate_pit=True,
+            pit_strict=True,
+        )
