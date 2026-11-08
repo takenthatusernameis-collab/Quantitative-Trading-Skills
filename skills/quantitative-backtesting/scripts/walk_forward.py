@@ -58,6 +58,7 @@ from utils import (
 )
 from reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
+from regime_detection import add_regime_analysis_to_results, RegimeConfig
 
 
 # The outcome of ONE parameter combination inside ONE validation window.
@@ -1193,6 +1194,20 @@ def walk_forward_analysis(
     summary.update(
         execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency)
     )
+
+    # Add regime-dependent performance analysis to summary
+    try:
+        regime_results = add_regime_analysis_to_results(
+            {"returns": oos_returns},
+            data,
+            returns_key="returns",
+            close_key="close",
+            config=RegimeConfig(),
+        )
+        if regime_results.get("regime_analysis"):
+            summary["regime_analysis"] = regime_results["regime_analysis"]
+    except Exception:
+        pass
 
     return {
         "periods": periods,
