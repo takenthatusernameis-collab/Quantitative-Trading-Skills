@@ -1,15 +1,14 @@
-# Handoff — kelly_criterion falsification tests verified
+# Handoff — full quant test suite green
 
 ## What changed
-- No code changes this session. Verified the four previously-missing kelly_criterion falsification tests on committed AAPL fixture already exist and pass:
-  - test_kelly_criterion_hypothesis_real_aapl.py
-  - test_kelly_criterion_benchmark_aware_real_aapl.py
-  - test_kelly_criterion_elevated_cost_real_aapl.py
-  - test_kelly_criterion_param_sensitivity_real_aapl.py
-- Focused run: 6 passed in 26.13s (offline, committed fixtures).
+- No code changes this session. Ran `python3 -m pytest skills/quantitative-backtesting/tests -q -p no:cacheprovider` to completion.
+
+## What was verified
+- 1163 passed, 440 warnings, exit code 0, duration 3660.30s (1:01:00).
+- Survivorship early-return schema fix in data_loader.py (abd9329) is verified by the full gate.
 
 ## What remains unresolved
-- Full-suite gate not re-run this session (cost ~1h). Survivorship early-return schema fix in data_loader.py (abd9329) still needs full-gate confirmation per Session 64 handoff.
+- None blocking. Warnings are pre-existing (CrossSectionalMomentum symmetric quantiles, pandas deprecations, numpy edge cases).
 
 ## One precise next task
-Run `python3 -m pytest skills/quantitative-backtesting/tests -q -p no:cacheprovider` to completion; report passed/failed summary and exit code. If green, mark survivorship fix verified. If a failure appears, isolate with evidence and fix minimally.
+Pick a bounded quant-research task: add an out-of-sample walk-forward falsification test for a committed AAPL fixture strategy (e.g., elevated-cost or param-sensitivity) following the existing `test_*_real_aapl.py` pattern; verify it fails/passes with evidence. Use the walk_forward.py CLI and committed fixtures only.
