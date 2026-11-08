@@ -42,6 +42,7 @@ _BOLLINGER_PATH = SKILLS_DIR / "examples" / "bollinger_bands_hypothesis.py"
 _DONCHIAN_PATH = SKILLS_DIR / "examples" / "donchian_breakout_hypothesis.py"
 _EMA_CROSS_PATH = SKILLS_DIR / "examples" / "ema_cross_hypothesis.py"
 _MACD_PATH = SKILLS_DIR / "examples" / "macd_hypothesis.py"
+_KELLY_CRITERION_PATH = SKILLS_DIR / "examples" / "kelly_criterion_hypothesis.py"
 _WF_COMPARE_TRIPLE_PATH = SKILLS_DIR / "examples" / "walk_forward_compare_triple.py"
 _COMPARE_DUAL_CS_PATH = SKILLS_DIR / "examples" / "compare_dual_vs_cross_sectional_triple.py"
 
@@ -411,6 +412,76 @@ def test_simple_momentum_hypothesis_emits_falsification_verdict():
     # Criteria must include numeric values (Sharpe/returns) in numerically sane form
     assert "Sharpe" in result.stdout
     assert "Total Return" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# kelly_criterion_hypothesis.py
+# ---------------------------------------------------------------------------
+
+
+def test_kelly_criterion_hypothesis_imports():
+    """kelly_criterion_hypothesis must import cleanly and expose run_hypothesis_test."""
+    module = _import_module("kelly_criterion_hypothesis", _KELLY_CRITERION_PATH)
+    assert hasattr(module, "run_hypothesis_test")
+    assert callable(module.run_hypothesis_test)
+    assert hasattr(module, "run_benchmark_aware_hypothesis_test")
+    assert callable(module.run_benchmark_aware_hypothesis_test)
+    assert hasattr(module, "run_elevated_cost_sweep")
+    assert hasattr(module, "run_param_sensitivity_sweep")
+    assert hasattr(module, "BENCHMARK_CRITERIA")
+    assert hasattr(module, "CRITERIA")
+    assert hasattr(module, "N_TRIALS")
+    assert module.N_TRIALS == len(module.PARAM_SENSITIVITY_GRID)
+
+
+def test_kelly_criterion_hypothesis_runs():
+    """kelly_criterion_hypothesis must run end-to-end and exit 0."""
+    result = subprocess.run(
+        [sys.executable, str(_KELLY_CRITERION_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"kelly_criterion_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "FALSIFIABLE HYPOTHESIS TEST" in result.stdout
+    assert "VERDICT:" in result.stdout
+
+
+def test_kelly_criterion_hypothesis_emits_hypothesis_and_costs():
+    """kelly_criterion_hypothesis reports hypothesis, costs, and out-of-sample performance."""
+    result = subprocess.run(
+        [sys.executable, str(_KELLY_CRITERION_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"kelly_criterion_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "Kelly criterion position-sizing overlay" in result.stdout
+    assert "bps" in result.stdout
+    assert "OUT-OF-SAMPLE PERFORMANCE" in result.stdout
+    assert "Sharpe Ratio" in result.stdout
+    assert "Total Return" in result.stdout
+
+
+def test_kelly_criterion_hypothesis_emits_falsification_verdict():
+    """kelly_criterion_hypothesis emits the pre-registered benchmark criteria and verdict."""
+    result = subprocess.run(
+        [sys.executable, str(_KELLY_CRITERION_PATH)],
+        capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"kelly_criterion_hypothesis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-4000:]}\nstderr:\n{result.stderr[-4000:]}"
+    )
+    assert "FALSIFICATION CRITERIA" in result.stdout
+    assert re.search(r"\[(PASS|FAIL)\].*oos_sharpe_gt_zero", result.stdout)
+    assert re.search(r"\[(PASS|FAIL)\].*oos_total_return_gt_benchmark", result.stdout)
+    assert re.search(r"\[(PASS|FAIL)\].*deflated_sharpe_pvalue_lt_0.10", result.stdout)
+    assert re.search(r"\[(PASS|FAIL)\].*benchmark_alpha_pvalue_lt_0.05", result.stdout)
+    assert re.search(r"VERDICT:\s*(SUPPORTED|NOT SUPPORTED)", result.stdout)
+    assert "ELEVATED COST SENSITIVITY SWEEP" in result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -1038,6 +1109,10 @@ TEST_REGISTRY = [
     ("test_simple_momentum_hypothesis_emits_hypothesis_and_costs", test_simple_momentum_hypothesis_emits_hypothesis_and_costs),
     ("test_simple_momentum_hypothesis_uses_point_in_time_split", test_simple_momentum_hypothesis_uses_point_in_time_split),
     ("test_simple_momentum_hypothesis_emits_falsification_verdict", test_simple_momentum_hypothesis_emits_falsification_verdict),
+    ("test_kelly_criterion_hypothesis_imports", test_kelly_criterion_hypothesis_imports),
+    ("test_kelly_criterion_hypothesis_runs", test_kelly_criterion_hypothesis_runs),
+    ("test_kelly_criterion_hypothesis_emits_hypothesis_and_costs", test_kelly_criterion_hypothesis_emits_hypothesis_and_costs),
+    ("test_kelly_criterion_hypothesis_emits_falsification_verdict", test_kelly_criterion_hypothesis_emits_falsification_verdict),
     ("test_mean_reversion_hypothesis_imports", test_mean_reversion_hypothesis_imports),
     ("test_mean_reversion_hypothesis_runs", test_mean_reversion_hypothesis_runs),
     ("test_mean_reversion_hypothesis_emits_hypothesis_and_costs", test_mean_reversion_hypothesis_emits_hypothesis_and_costs),
