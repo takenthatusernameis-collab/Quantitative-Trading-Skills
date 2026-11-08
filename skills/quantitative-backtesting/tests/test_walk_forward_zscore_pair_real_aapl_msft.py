@@ -7,10 +7,16 @@ single pair and aggregates into a book). Evaluates across chronological
 walk-forward windows (train 12 / test 12 months, stepping 12 months) on
 committed fixtures only, with pre-registered parameters and the Deflated
 Sharpe Ratio multiple-testing correction applied to the pooled
-out-of-sample record.
+out-of-sample record. Pins the observed out-of-sample metrics (regression
+guard, relative tolerance, never exact equality) so a silent change to the
+backtest numbers is caught.
 
-Verdicts are falsification outcomes, never profitability claims. Offline,
-committed fixtures only; no live network.
+Verdicts are falsification outcomes, never profitability claims: the raw
+out-of-sample Sharpe is positive (+0.3071) and total return is positive
+(+37.17%), but the Deflated Sharpe p-value (0.6659) is far above 0.10, so the
+honest verdict is NOT SUPPORTED. The test does not tune to force SUPPORT.
+
+Offline, committed fixtures only; no live network.
 """
 import contextlib
 import io
@@ -42,6 +48,7 @@ TRAIN_MONTHS = 12
 TEST_MONTHS = 12
 STEP_MONTHS = 12
 
+# Falsification thresholds, pre-registered.
 DSR_PVALUE_THRESHOLD = 0.10
 
 
@@ -86,35 +93,68 @@ def test_walk_forward_zscore_pair_real_aapl_msft_runs():
     assert isinstance(result, dict)
     assert "periods" in result and "summary" in result
     summary = result["summary"]
-    assert summary["n_periods"] >= 1
+    assert summary["n_periods"] == 8
+    assert summary["periods_with_position"] == 8
     assert summary["bias_controls_engaged"] is True
     out = buffer.getvalue()
     assert "Point-in-time validation passed" in out
 
 
-def test_walk_forward_zscore_pair_real_aapl_msft_metrics_reported():
+def test_walk_forward_zscore_pair_real_aapl_msft_metrics_pinned():
+    """Regression guard: the advertised walk-forward run on the committed
+    AAPL/MSFT panel must reproduce the pinned out-of-sample metrics (net of
+    costs). Relative tolerance only, never exact equality.
+
+    Honest outcome: Sharpe > 0 and return > 0 pass, but the Deflated Sharpe
+    p-value (0.6659) >= 0.10 fails, so the hypothesis is NOT SUPPORTED.
+    """
+    for name in ("AAPL.csv", "MSFT.csv"):
+        assert (SRC / name).exists()
+
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         result = _run_walk_forward()
 
     summary = result["summary"]
-    # Metrics must be reported (values depend on data; no forced pass)
-    assert "oos_sharpe" in summary
-    # Different summary key names depending on implementation
-    ret_keys = [k for k in summary if "return" in k.lower() and "oos" in k.lower()]
-    assert ret_keys or any(k in summary for k in ("oos_total_return", "total_oos_return", "oos_return"))
-    # DSR may be reported under different keys
-    dsr = summary.get("dsr_pvalue")
-    if dsr is None:
-        dsr = summary.get("dsr_p")
-    if dsr is None:
-        # look for anything with dsr
-        for k in summary:
-            if "dsr" in k.lower() and "p" in k.lower():
-                dsr = summary[k]
-                break
-    if dsr is not None:
-        assert 0.0 <= float(dsr) <= 1.0
-        _ = float(dsr) < DSR_PVALUE_THRESHOLD
-    out = buffer.getvalue().lower()
-    assert "periods" in out or "walk" in out or "train" in out or "test" in out or "oos" in out or "sharpe" in out or "point-in-time" in out
+
+    EXPECTED = {
+        "oos_sharpe": 0.30714511853085896,
+        "total_oos_return": 0.37165393035802174,
+        "deflated_sharpe_pvalue": 0.6658756888004178,
+        "deflated_sharpe_ratio": 0.33412431119958225,
+    }
+    REL_TOL = 1e-6
+    for key, exp in EXPECTED.items():
+        if key == "deflated_sharpe_pvalue":
+            got = summary["deflated_sharpe"]["p_value"]
+        elif key == "deflated_sharpe_ratio":
+            got = summary["deflated_sharpe"]["deflated_sharpe_ratio"]
+        else:
+            got = summary.get(key)
+        assert got is not None, f"missing {key}"
+        assert abs(got - exp) <= REL_TOL * max(abs(exp), 1e-9), (
+            f"{key} regression: got {got}, expected {exp}"
+        )
+
+    # Honest verdict: Sharpe > 0 and return > 0 pass, but Deflated Sharpe
+    # p-value >= 0.10 fails, so the hypothesis is NOT SUPPORTED.
+    sharpe = summary["oos_sharpe"]
+    ret = summary["total_oos_return"]
+    dsr_pvalue = summary["deflated_sharpe"]["p_value"]
+    passes = {
+        "oos_sharpe_gt_zero": bool(sharpe is not None and float(sharpe) > 0),
+        "oos_total_return_positive": bool(ret is not None and float(ret) > 0),
+        "deflated_sharpe_pvalue_lt_0.10": bool(
+            dsr_pvalue is not None and float(dsr_pvalue) < DSR_PVALUE_THRESHOLD
+        ),
+    }
+    assert passes["oos_sharpe_gt_zero"] is True
+    assert passes["oos_total_return_positive"] is True
+    assert passes["deflated_sharpe_pvalue_lt_0.10"] is False
+    assert all(passes.values()) is False
+
+
+if __name__ == "__main__":
+    test_walk_forward_zscore_pair_real_aapl_msft_runs()
+    test_walk_forward_zscore_pair_real_aapl_msft_metrics_pinned()
+    print("OK")
