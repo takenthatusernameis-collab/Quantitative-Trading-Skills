@@ -6486,6 +6486,7 @@ TEST_REGISTRY.extend([
     ("test_estimate_capacity_scales_directly_with_max_impact", test_estimate_capacity_scales_directly_with_max_impact),
     ("test_estimate_capacity_missing_volume_not_estimable", test_estimate_capacity_missing_volume_not_estimable),
     ("test_verify_split_separation_non_chronological_disjoint_raises", test_verify_split_separation_non_chronological_disjoint_raises),
+    ("test_walk_forward_analysis_validate_pit_passes_on_clean_data", test_walk_forward_analysis_validate_pit_passes_on_clean_data),
 ])
 
 def test_walk_forward_analysis_surfaces_capacity_in_summary():

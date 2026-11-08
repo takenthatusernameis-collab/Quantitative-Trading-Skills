@@ -6469,7 +6469,7 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         strategy_factory=strategy_factory,
         param_grid=param_grid,
         train_months=args.train_months,
-        test_months=args.train_months,
+        test_months=args.test_months,
         step_months=args.step_months,
         initial_capital=args.initial_capital,
         commission=commission,

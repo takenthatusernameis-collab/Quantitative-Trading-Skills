@@ -3280,7 +3280,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "as that group's test set -- not of the sample -- so the "
             "effective out-of-sample fraction is test_size / n_splits. When "
             "set, the ladder is replaced by this sweep at the single --size "
-            "given; the shipped 5 splits / 20% configuration remains the "
+            "given; the shipped 5 splits / 20%% configuration remains the "
             "default and is unchanged. The sweep measures the synthetic "
             "control fixture by default; with --data it measures prefixes of "
             "a real history and resolves benchmarks from the file's "
