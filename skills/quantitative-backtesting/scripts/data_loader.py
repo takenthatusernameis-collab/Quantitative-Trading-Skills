@@ -531,6 +531,7 @@ def detect_survivorship_bias(
             "exited_symbols": [],
             "insufficient_data": [],
             "large_gaps": [],
+            "invalid_data_dropped": list(dropped_symbols or []),
             "bias_score": 0.0,
         }
 
@@ -549,6 +550,7 @@ def detect_survivorship_bias(
             "exited_symbols": [],
             "insufficient_data": [],
             "large_gaps": [],
+            "invalid_data_dropped": list(dropped_symbols or []),
             "bias_score": 0.0,
         }
 
