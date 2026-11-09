@@ -923,6 +923,13 @@ def generate_tear_sheet(
                 html_parts.append(f"<tr><td>{label}</td><td class='metric'>{display}</td></tr>")
             html_parts.append("</table>")
 
+        # Walk-Forward Regime Analysis: disclose regime-dependent performance
+        # for the walk-forward out-of-sample windows, so the aggregate OOS
+        # result is not read as a single number without regime context.
+        html_parts.extend(
+            regime_analysis_section(wf_summary.get("regime_analysis"))
+        )
+
     # Data provenance: surface source path, checksum, date range, filters,
     # transformations, and validation outcome so each tear sheet is
     # traceable to its input. Handles the single-asset (flat dict) and
@@ -1182,6 +1189,12 @@ def generate_tear_sheet(
                 html_parts.append(f"<tr><td>{label}</td><td class='metric'>{display}</td></tr>")
             html_parts.append("</table>")
 
+        # CPCV Regime Analysis: disclose regime-dependent performance for
+        # the CPCV out-of-sample folds.
+        html_parts.extend(
+            regime_analysis_section(cpcv_summary.get("regime_analysis"))
+        )
+
     mc_results = analysis.get("monte_carlo")
     if mc_results:
         html_parts.append("<h2>Monte Carlo Simulation</h2>")
@@ -1226,6 +1239,12 @@ def generate_tear_sheet(
                             cells.append("N/A")
                     html_parts.append(f"<tr><td>{metric}</td>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
             html_parts.append("</table>")
+
+        # Monte Carlo Regime Analysis: disclose regime-dependent performance
+        # for the base strategy returns used in the simulation.
+        html_parts.extend(
+            regime_analysis_section(mc_summary.get("regime_analysis"))
+        )
 
     # Generate plots if matplotlib is available
     plot_files = []
