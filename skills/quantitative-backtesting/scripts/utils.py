@@ -262,6 +262,8 @@ def market_impact_cost(
     adv_window=20,
     initial_capital=100000.0,
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
+    regimes=None,
+    regime_impact_coefficients=None,
 ):
     """Per-period market-impact cost, expressed as a fraction of the
     portfolio notional traded.
@@ -273,6 +275,16 @@ def market_impact_cost(
     with ``ADV_notional = rolling_mean(volume) * close`` and
     ``position_notional = |position_change| * equity``, the equity being
     approximated by ``initial_capital * cumprod(1 + raw_returns)``.
+
+    Regime-aware impact
+    -------------------
+    When ``regimes`` (a pd.Series of regime labels aligned with
+    ``position_changes``) and ``regime_impact_coefficients`` (a dict mapping
+    regime name to impact coefficient) are provided, the model uses the
+    regime-specific coefficient for each period. Regimes not in the dict
+    fall back to the base ``impact_coefficient``. This captures the
+    empirical fact that market impact varies across market regimes (e.g.,
+    higher impact in high-volatility/bear regimes due to lower liquidity).
 
     Panel convention
     ----------------
@@ -296,6 +308,8 @@ def market_impact_cost(
         volume: volumes, same shape as ``close``, or ``None``.
     is_panel: whether ``close``/``volume`` are per-asset frames.
     impact_coefficient: linear impact coefficient; ``0`` disables impact.
+        Used as the default/fallback when regime-specific coefficients
+        are not provided or for regimes not in ``regime_impact_coefficients``.
     adv_window: rolling window (in periods) for the ADV.
     initial_capital: starting portfolio value used to scale notional.
     impact_aggregation: ``"panel"`` (the default) charges the equal-weighted
@@ -304,8 +318,14 @@ def market_impact_cost(
         equity`` (the impact rate of each name applied to the notional
         traded in that name). Default ``"panel"`` keeps every published
         number unchanged.
+    regimes: Optional ``pd.Series`` of regime labels (e.g., 'bull_high_vol',
+        'bear_low_vol') aligned with ``position_changes`` index. When
+        provided along with ``regime_impact_coefficients``, enables
+        regime-aware impact modeling.
+    regime_impact_coefficients: Optional dict mapping regime name to impact
+        coefficient. Used with ``regimes`` to apply regime-specific impact.
 
-Returns:
+ Returns:
     ``pd.Series`` of impact cost per period, or ``None`` when impact is
     disabled (no volume, or a zero coefficient).
     """
@@ -321,6 +341,22 @@ Returns:
     equity = initial_capital * (1 + raw_returns).cumprod()
     position_notional = position_changes * equity
 
+    # Resolve per-period impact coefficients
+    use_regime_aware = (
+        regimes is not None
+        and regime_impact_coefficients is not None
+        and len(regime_impact_coefficients) > 0
+    )
+    if use_regime_aware:
+        # Align regimes to position_changes index
+        regimes_aligned = regimes.reindex(position_changes.index)
+        # Create per-period impact coefficient series
+        period_impact_coeff = regimes_aligned.map(regime_impact_coefficients)
+        # Fall back to base impact_coefficient for unknown regimes
+        period_impact_coeff = period_impact_coeff.fillna(impact_coefficient)
+    else:
+        period_impact_coeff = None
+
     if is_panel:
         n_assets = max(close.shape[1], 1)
         per_asset_notional = position_notional / n_assets
@@ -331,7 +367,12 @@ Returns:
         # than infinite; a zero ADV is treated as missing.
         traded = per_asset_notional.replace(0, np.nan)
         adv_denominator = adv_notional.replace(0, np.nan)
-        rate = adv_denominator.rdiv(traded, axis=0) * impact_coefficient
+        if use_regime_aware:
+            # Apply per-period regime-specific coefficient
+            # rate = (traded / adv_denominator) * period_impact_coeff (broadcasted across columns)
+            rate = adv_denominator.rdiv(traded, axis=0).mul(period_impact_coeff, axis=0)
+        else:
+            rate = adv_denominator.rdiv(traded, axis=0) * impact_coefficient
         rate = rate.fillna(0)
         if impact_aggregation == "notional-weighted":
             # Dollar-consistent: the impact rate of each name applied to the
@@ -347,9 +388,14 @@ Returns:
             market_impact = rate.mean(axis=1)
     else:
         # Market impact as fraction of notional traded
-        rate = (
-            position_notional / adv_notional.replace(0, np.nan)
-        ) * impact_coefficient
+        if use_regime_aware:
+            rate = (
+                position_notional / adv_notional.replace(0, np.nan)
+            ) * period_impact_coeff
+        else:
+            rate = (
+                position_notional / adv_notional.replace(0, np.nan)
+            ) * impact_coefficient
         rate = rate.fillna(0)
         if impact_aggregation == "notional-weighted":
             # Cost as a fraction of equity: the price concession rate times
@@ -549,6 +595,8 @@ def book_market_impact_cost(
     adv_window=20,
     initial_capital=100000.0,
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
+    regimes=None,
+    regime_impact_coefficients=None,
 ):
     """Per-period market-impact cost of trading a per-asset book.
 
@@ -561,6 +609,16 @@ def book_market_impact_cost(
     volume_i) * close_i``. The portfolio cost is the **equal-weighted mean
     of the per-asset impacts**, the same panel convention the net-exposure
     impact model uses, so the two pricing modes stay on the same scale.
+
+    Regime-aware impact
+    -------------------
+    When ``regimes`` (a pd.Series of regime labels aligned with
+    ``held_book`` index) and ``regime_impact_coefficients`` (a dict mapping
+    regime name to impact coefficient) are provided, the model uses the
+    regime-specific coefficient for each period. Regimes not in the dict
+    fall back to the base ``impact_coefficient``. This captures the
+    empirical fact that market impact varies across market regimes (e.g.,
+    higher impact in high-volatility/bear regimes due to lower liquidity).
 
     Two properties follow from the model and are asserted by the test suite:
 
@@ -581,6 +639,8 @@ def book_market_impact_cost(
         close: close prices -- ``pd.DataFrame`` with one column per asset.
         volume: volumes, same shape as ``close``, or ``None``.
         impact_coefficient: linear impact coefficient; ``0`` disables impact.
+            Used as the default/fallback when regime-specific coefficients
+            are not provided or for regimes not in ``regime_impact_coefficients``.
         adv_window: rolling window (in periods) for the ADV.
         initial_capital: starting portfolio value used to scale notional.
         impact_aggregation: ``"panel"`` (the default) charges the equal-weighted
@@ -589,6 +649,12 @@ def book_market_impact_cost(
             |dw_i|`` (the impact rate of each name applied to the weight
             change of that name). Default ``"panel"`` keeps every published
             number unchanged.
+        regimes: Optional ``pd.Series`` of regime labels (e.g., 'bull_high_vol',
+            'bear_low_vol') aligned with ``held_book`` index. When
+            provided along with ``regime_impact_coefficients``, enables
+            regime-aware impact modeling.
+        regime_impact_coefficients: Optional dict mapping regime name to impact
+            coefficient. Used with ``regimes`` to apply regime-specific impact.
 
     Returns:
         A ``pd.Series`` of impact cost per period, or ``None`` when impact is
@@ -615,7 +681,23 @@ def book_market_impact_cost(
     # than infinite; a zero ADV is treated as missing.
     traded = traded_notional.replace(0, np.nan)
     adv_denominator = adv_notional.replace(0, np.nan)
-    rate = adv_denominator.rdiv(traded, axis=0) * impact_coefficient
+
+    # Resolve per-period impact coefficients
+    use_regime_aware = (
+        regimes is not None
+        and regime_impact_coefficients is not None
+        and len(regime_impact_coefficients) > 0
+    )
+    if use_regime_aware:
+        # Align regimes to held_book index
+        regimes_aligned = regimes.reindex(held_book.index)
+        # Create per-period impact coefficient series
+        period_impact_coeff = regimes_aligned.map(regime_impact_coefficients)
+        # Fall back to base impact_coefficient for unknown regimes
+        period_impact_coeff = period_impact_coeff.fillna(impact_coefficient)
+        rate = adv_denominator.rdiv(traded, axis=0).mul(period_impact_coeff, axis=0)
+    else:
+        rate = adv_denominator.rdiv(traded, axis=0) * impact_coefficient
     rate = rate.fillna(0)
     if impact_aggregation == "notional-weighted":
         # Dollar-consistent: the impact rate of each name applied to the

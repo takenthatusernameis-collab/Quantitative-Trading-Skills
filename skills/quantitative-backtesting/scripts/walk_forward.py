@@ -58,7 +58,7 @@ from utils import (
 )
 from reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
-from regime_detection import add_regime_analysis_to_results, RegimeConfig
+from regime_detection import add_regime_analysis_to_results, RegimeConfig, detect_combined_regime
 
 
 # The outcome of ONE parameter combination inside ONE validation window.
@@ -485,6 +485,7 @@ def walk_forward_analysis(
     pit_strict: bool = False,
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
+    regime_impact_coefficients: Optional[Dict[str, float]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -543,6 +544,14 @@ def walk_forward_analysis(
             record the result in `results["point_in_time_validation"]` and
             `summary["bias_controls_engaged"]`. Default True on the programmatic
             API; default True (CLI parity, non-strict: warns, never aborts).
+        regime_impact_coefficients: Optional dict mapping regime name (e.g.,
+            'bull_high_vol', 'bear_low_vol') to impact coefficient. When
+            provided, market impact is modeled with regime-specific coefficients.
+            Regimes are detected on the market close prices using the combined
+            trend+volatility regime detection. Regimes not in the dict fall
+            back to the base `impact_coefficient`. This captures the empirical
+            fact that market impact varies across market regimes (e.g., higher
+            impact in high-volatility/bear regimes due to lower liquidity).
 
     Returns:
         Dictionary with walk-forward results including:
@@ -769,6 +778,7 @@ def walk_forward_analysis(
                         initial_capital=initial_capital,
                         panel_pricing=panel_pricing,
                         impact_aggregation=impact_aggregation,
+                        regime_impact_coefficients=regime_impact_coefficients,
                         book_weights=(
                             strategy_target_weights(strategy, train_data)
                             if panel_pricing == "book"
@@ -1241,6 +1251,7 @@ def parameter_optimization(
     benchmark_cost_is_periodic: bool = False,
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
+    regime_impact_coefficients: Optional[Dict[str, float]] = None,
     inert_grid_report: Optional[Dict[str, Any]] = None,
     **kwargs,
 ) -> List[Dict[str, Any]]:
@@ -1295,6 +1306,14 @@ def parameter_optimization(
         benchmark_commission: Commission per trade for benchmark (as decimal)
         benchmark_slippage: Slippage per trade for benchmark (as decimal)
         benchmark_expense_ratio: Annual expense ratio for benchmark (as decimal, e.g., 0.005 for 0.5%)
+        regime_impact_coefficients: Optional dict mapping regime name (e.g.,
+            'bull_high_vol', 'bear_low_vol') to impact coefficient. When
+            provided, market impact is modeled with regime-specific coefficients.
+            Regimes are detected on the market close prices using the combined
+            trend+volatility regime detection. Regimes not in the dict fall
+            back to the base `impact_coefficient`. This captures the empirical
+            fact that market impact varies across market regimes (e.g., higher
+            impact in high-volatility/bear regimes due to lower liquidity).
         inert_grid_report: Optional dict that receives the inert-grid
             measurement (``inert_grid_params``, ``strategy_parameters`` and
             ``message``) for the grid that was priced. A grid key whose
@@ -1381,15 +1400,16 @@ def parameter_optimization(
             ):
                 continue
 
-            returns = _calculate_strategy_returns(
+returns = _calculate_strategy_returns(
                 data, signals, commission, slippage,
                 impact_coefficient, adv_window, borrow_cost, funding_cost,
                 latency, fill_rate,
-                    initial_capital=initial_capital,
-                    panel_pricing=panel_pricing,
-                    impact_aggregation=impact_aggregation,
-                    book_weights=book_weights,
-                )
+                initial_capital=initial_capital,
+                panel_pricing=panel_pricing,
+                impact_aggregation=impact_aggregation,
+                regime_impact_coefficients=regime_impact_coefficients,
+                book_weights=book_weights,
+            )
 
             if len(returns) > 1:
                 ann_factor = _annualization_factor(returns.index)
@@ -2560,6 +2580,7 @@ def _calculate_strategy_returns(
     panel_pricing: str = "net-exposure",
     book_weights: Optional[pd.DataFrame] = None,
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
+    regime_impact_coefficients: Optional[Dict[str, float]] = None,
 ) -> pd.Series:
     """Calculate strategy returns from signals and market data.
 
@@ -2571,7 +2592,8 @@ def _calculate_strategy_returns(
         impact_coefficient: Market impact coefficient. Market impact is modeled as
             (position_notional / ADV) * impact_coefficient, where ADV is the
             average daily volume over `adv_window` periods. Set to 0 to disable.
-            Typical values: 0.1-1.0 for linear impact models.
+            Typical values: 0.1-1.0 for linear impact models. Used as the
+            default/fallback when regime-specific coefficients are not provided.
         adv_window: Rolling window for Average Daily Volume calculation. Default 20.
         borrow_cost: Annual borrow cost rate for short positions (as decimal,
             e.g., 0.03 = 3% per year). Applied per period on short exposure;
@@ -2621,6 +2643,14 @@ def _calculate_strategy_returns(
             mean of the per-asset impact rates; ``"notional-weighted"``
             charges the dollar-consistent aggregation. Default ``"panel"``
             keeps every published number unchanged.
+        regime_impact_coefficients: Optional dict mapping regime name (e.g.,
+            'bull_high_vol', 'bear_low_vol') to impact coefficient. When
+            provided, market impact is modeled with regime-specific coefficients.
+            Regimes are detected on the market close prices using the combined
+            trend+volatility regime detection. Regimes not in the dict fall
+            back to the base `impact_coefficient`. This captures the empirical
+            fact that market impact varies across market regimes (e.g., higher
+            impact in high-volatility/bear regimes due to lower liquidity).
     """
     if fill_rate is None:
         fill_rate = 1.0
@@ -2640,6 +2670,25 @@ def _calculate_strategy_returns(
     close = market["close"]
     volume = market["volume"]
     is_panel = market["is_panel"]
+
+    # Regime detection for regime-aware market impact modeling.
+    # Detect combined trend+volatility regimes on the market close prices.
+    # For panels, use the first asset's close prices.
+    regimes = None
+    if regime_impact_coefficients is not None and len(regime_impact_coefficients) > 0:
+        if is_panel:
+            # For panel data, use the first asset's close for regime detection
+            regime_close = close.iloc[:, 0] if isinstance(close, pd.DataFrame) and close.shape[1] > 0 else close
+        else:
+            regime_close = close
+        if isinstance(regime_close, pd.Series) and len(regime_close) > 0:
+            try:
+                regimes = detect_combined_regime(regime_close)
+                # Align regimes to raw_returns index (which is the same as position_changes/held_book index)
+                regimes = regimes.reindex(raw_returns.index)
+            except Exception:
+                # If regime detection fails, fall back to single impact_coefficient
+                regimes = None
 
     # Execution warmup: intentional two-bar warmup (see validation_methods.md,
     # "The Warmup Bars of a Window"). shift(1 + latency) leaves the first
@@ -2702,6 +2751,8 @@ def _calculate_strategy_returns(
             adv_window=adv_window,
             initial_capital=initial_capital,
             impact_aggregation=impact_aggregation,
+            regimes=regimes,
+            regime_impact_coefficients=regime_impact_coefficients,
         )
         if market_impact is not None:
             costs = costs + market_impact
@@ -2736,6 +2787,8 @@ def _calculate_strategy_returns(
             adv_window=adv_window,
             initial_capital=initial_capital,
             impact_aggregation=impact_aggregation,
+            regimes=regimes,
+            regime_impact_coefficients=regime_impact_coefficients,
         )
         if market_impact is not None:
             costs = costs + market_impact
@@ -3231,6 +3284,7 @@ def cpcv_analysis(
     pit_strict: bool = False,
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
+    regime_impact_coefficients: Optional[Dict[str, float]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -3298,6 +3352,14 @@ def cpcv_analysis(
             record the result in `results["point_in_time_validation"]` and
             `summary["bias_controls_engaged"]`. Default True on the programmatic
             API; default True (CLI parity, non-strict: warns, never aborts).
+        regime_impact_coefficients: Optional dict mapping regime name (e.g.,
+            'bull_high_vol', 'bear_low_vol') to impact coefficient. When
+            provided, market impact is modeled with regime-specific coefficients.
+            Regimes are detected on the market close prices using the combined
+            trend+volatility regime detection. Regimes not in the dict fall
+            back to the base `impact_coefficient`. This captures the empirical
+            fact that market impact varies across market regimes (e.g., higher
+            impact in high-volatility/bear regimes due to lower liquidity).
 
     Returns:
         Dictionary with CPCV results including:
@@ -3529,6 +3591,7 @@ def cpcv_analysis(
                         initial_capital=initial_capital,
                         panel_pricing=panel_pricing,
                         impact_aggregation=impact_aggregation,
+                        regime_impact_coefficients=regime_impact_coefficients,
                         book_weights=test_book_weights,
                     )
 
@@ -3540,6 +3603,7 @@ def cpcv_analysis(
                         initial_capital=initial_capital,
                         panel_pricing=panel_pricing,
                         impact_aggregation=impact_aggregation,
+                        regime_impact_coefficients=regime_impact_coefficients,
                         book_weights=(
                             strategy_target_weights(strategy, train_data)
                             if panel_pricing == "book"
@@ -5823,11 +5887,12 @@ def out_of_sample_validation(
         val_data, val_signals, commission, slippage,
         impact_coefficient, adv_window, borrow_cost, funding_cost,
         latency, fill_rate,
-                initial_capital=initial_capital,
-                panel_pricing=panel_pricing,
-                impact_aggregation=impact_aggregation,
-                book_weights=val_book_weights,
-            )
+        initial_capital=initial_capital,
+        panel_pricing=panel_pricing,
+        impact_aggregation=impact_aggregation,
+        regime_impact_coefficients=regime_impact_coefficients,
+        book_weights=val_book_weights,
+    )
 
     ann_factor = _annualization_factor(val_returns.index)
     excess = val_returns - 0.02 / ann_factor
@@ -5920,15 +5985,16 @@ def out_of_sample_validation(
         if panel_pricing == "book"
         else None
     )
-    test_returns = _calculate_strategy_returns(
-                    test_data, test_signals, commission, slippage,
-                    impact_coefficient, adv_window, borrow_cost, funding_cost,
-                    latency, fill_rate,
-                    initial_capital=initial_capital,
-                    panel_pricing=panel_pricing,
-                    impact_aggregation=impact_aggregation,
-                    book_weights=test_book_weights,
-                )
+test_returns = _calculate_strategy_returns(
+                        test_data, test_signals, commission, slippage,
+                        impact_coefficient, adv_window, borrow_cost, funding_cost,
+                        latency, fill_rate,
+                        initial_capital=initial_capital,
+                        panel_pricing=panel_pricing,
+                        impact_aggregation=impact_aggregation,
+                        regime_impact_coefficients=regime_impact_coefficients,
+                        book_weights=test_book_weights,
+                    )
 
     ann_factor_test = _annualization_factor(test_returns.index)
     excess_test = test_returns - 0.02 / ann_factor_test
