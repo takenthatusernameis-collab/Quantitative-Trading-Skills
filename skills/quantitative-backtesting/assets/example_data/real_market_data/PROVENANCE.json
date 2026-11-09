@@ -60,6 +60,6 @@
   "byte_identity": {
     "AAPL.csv == sample_ohlcv.csv": true,
     "MSFT.csv == sample_benchmark.csv == AAPL.csv.bak": true,
-    "note": "AAPL.csv.bak is an untracked, gitignored stray duplicate of MSFT.csv; it is not a committed fixture and is not referenced by any test."
+    "note": "AAPL.csv.bak is a tracked, committed duplicate of MSFT.csv (byte-identical to it and to sample_benchmark.csv); it is not part of the provenance fixtures index and is not referenced by any test."
   }
 }
