@@ -1673,6 +1673,83 @@ def test_real_market_fetch_save_and_run_path_is_offline_safe():
         httpd.server_close()
 
 
+def test_fetch_failure_surfaces_underlying_cause_offline():
+    """Fetch failures (e.g. HTTP 429 / network errors) must propagate their
+    underlying cause in ``_ensure_real_market_data(..., return_error=True)``
+    and ``_run_on_real_market`` so rate limiting is observable without blind
+    retries. Offline: uses a local HTTP server that always returns 429 with
+    Retry-After; writes are redirected to a temp dir. No full hypothesis run.
+    """
+    import http.server
+    import json
+    import threading
+    from pathlib import Path
+
+    from falsifiable_hypothesis_example import (
+        _ensure_real_market_data,
+        _run_on_real_market,
+    )
+
+    class _Always429(http.server.BaseHTTPRequestHandler):
+        attempts = 0
+
+        def log_message(self, *args, **kwargs):
+            pass
+
+        def do_GET(self):
+            _Always429.attempts += 1
+            body = json.dumps({"chart": {"error": {"code": "429", "description": "rate limited"}}}).encode("utf-8")
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Retry-After", "0")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Always429)
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            fixtures = Path(td) / "real_market_data"
+            fixtures.mkdir(parents=True, exist_ok=True)
+            path, err = _ensure_real_market_data(
+                symbol="RATELIMIT",
+                start="2023-01-01",
+                end="2023-03-31",
+                fixtures_dir=fixtures,
+                base_url=f"http://127.0.0.1:{port}",
+                return_error=True,
+            )
+            assert path is None, f"expected no cached path on 429 exhaustion, got {path}"
+            assert err is not None and isinstance(err, str) and err, "expected underlying error text"
+            assert "fetch failed" in err or "429" in err or "RuntimeError" in err, (
+                f"expected 429/fetch-failure context in error, got: {err}"
+            )
+            assert not (fixtures / "RATELIMIT.csv").exists(), "failed fetch must not write a fixture"
+
+            # _run_on_real_market must propagate the same underlying cause.
+            try:
+                _run_on_real_market(
+                    symbol="RATELIMIT",
+                    start="2023-01-01",
+                    end="2023-03-31",
+                    fixtures_dir=fixtures,
+                    base_url=f"http://127.0.0.1:{port}",
+                )
+                assert False, "expected RuntimeError on 429 exhaustion"
+            except RuntimeError as e:
+                msg = str(e)
+                assert "Could not obtain real market data for RATELIMIT" in msg
+                assert "fetch failed" in msg or "429" in msg, (
+                    f"expected underlying 429/fetch cause in RuntimeError, got: {msg}"
+                )
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
 def main() -> int:
     tests = TEST_REGISTRY
     failures = 0
@@ -1719,6 +1796,7 @@ TEST_REGISTRY = [
     ("test_real_market_cost_sensitivity_sweep_googl_aapl", test_real_market_cost_sensitivity_sweep_googl_aapl),
     ("test_real_market_machinery_separation_audit_longer_windows", test_real_market_machinery_separation_audit_longer_windows),
     ("test_real_market_fetch_save_and_run_path_is_offline_safe", test_real_market_fetch_save_and_run_path_is_offline_safe),
+    ("test_fetch_failure_surfaces_underlying_cause_offline", test_fetch_failure_surfaces_underlying_cause_offline),
 ]
 
 

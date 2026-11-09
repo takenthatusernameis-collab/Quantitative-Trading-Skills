@@ -124,12 +124,16 @@ CRITERIA = [
 ]
 
 def _ensure_real_market_data(symbol="AAPL", start="2020-01-01", end="2023-12-31",
-                             fixtures_dir=None, base_url=None):
+                             fixtures_dir=None, base_url=None, return_error=False):
     """Ensure committed real market data exists for symbol.
 
     If the expected CSV is missing, attempt to fetch from Yahoo Finance via
     data_loader.fetch_ohlcv_yahoo and save it to the committed fixtures
-    directory. Fetch is best-effort and offline-safe (returns None on failure).
+    directory. Fetch is best-effort and offline-safe: by default returns
+    ``None`` on failure (backward compatible). When ``return_error`` is True,
+    returns ``(path_or_none, error_or_none)`` so callers can report the
+    underlying cause (e.g. HTTP 429 / Retry-After exhaustion, network error)
+    without issuing a second fetch.
 
     ``fixtures_dir`` overrides the default committed directory (used by tests
     to redirect writes to a temp dir so the committed fixtures are never
@@ -145,22 +149,25 @@ def _ensure_real_market_data(symbol="AAPL", start="2020-01-01", end="2023-12-31"
     the cached fixture byte-for-byte compatible with load_data regardless of
     how the upstream API happens to label its columns or timezones.
     """
+    def _ret(path, err):
+        return (path, err) if return_error else path
+
     if fixtures_dir is None:
         fixtures_dir = Path(__file__).resolve().parent.parent / "assets" / "example_data" / "real_market_data"
     fixtures_dir = Path(fixtures_dir)
     fixtures_dir.mkdir(parents=True, exist_ok=True)
     path = fixtures_dir / f"{symbol}.csv"
     if path.exists():
-        return path
+        return _ret(path, None)
     if fetch_ohlcv_yahoo is None:
-        return None
+        return _ret(None, "fetch_ohlcv_yahoo unavailable (network fetch not supported in this environment)")
     try:
         fetch_kwargs = {}
         if base_url is not None:
             fetch_kwargs["base_url"] = base_url
         df = fetch_ohlcv_yahoo(symbol, start, end, **fetch_kwargs)
         if df is None or len(df) == 0:
-            return None
+            return _ret(None, f"fetch returned no rows for {symbol} ({start}..{end})")
         out = df.copy()
 
         # Locate the date column case-insensitively; fall back to resetting a
@@ -192,14 +199,16 @@ def _ensure_real_market_data(symbol="AAPL", start="2020-01-01", end="2023-12-31"
         required = ["date", "open", "high", "low", "close", "volume"]
         for c in required:
             if c not in out.columns:
-                return None
+                return _ret(None, f"fetched frame missing required column {c!r} for {symbol}")
         out = out[required]
         for c in required[1:]:
             out[c] = pd.to_numeric(out[c], errors="coerce")
         out.to_csv(path, index=False)
-        return path
-    except Exception:
-        return None
+        return _ret(path, None)
+    except Exception as e:
+        # Preserve the original exception text (includes 429/Retry-After context
+        # from fetch_ohlcv_yahoo when applicable) for callers that request it.
+        return _ret(None, f"{type(e).__name__}: {e}")
 
 COMMISSION = 0.0002   # 2 bps per trade
 SLIPPAGE = 0.0001     # 1 bps per trade
@@ -209,11 +218,18 @@ PARAM_GRID = {"fast_period": [10, 20], "slow_period": [30, 40]}
 def _run_on_real_market(symbol="AAPL", start="2020-01-01", end="2023-12-31",
                         commission=COMMISSION, slippage=SLIPPAGE, benchmark_path=None,
                         fixtures_dir=None, base_url=None):
-    """Run falsifiable hypothesis test on real market data (with optional fetch)."""
-    path = _ensure_real_market_data(symbol=symbol, start=start, end=end,
-                                    fixtures_dir=fixtures_dir, base_url=base_url)
+    """Run falsifiable hypothesis test on real market data (with optional fetch).
+
+    Fetch failures propagate as RuntimeError including the underlying cause
+    (e.g. HTTP 429 / Retry-After exhaustion) so rate limiting is observable
+    without blind retries.
+    """
+    path, err = _ensure_real_market_data(symbol=symbol, start=start, end=end,
+                                         fixtures_dir=fixtures_dir, base_url=base_url,
+                                         return_error=True)
     if path is None:
-        raise RuntimeError(f"Could not obtain real market data for {symbol}")
+        detail = f": {err}" if err else ""
+        raise RuntimeError(f"Could not obtain real market data for {symbol} ({start}..{end}){detail}")
     return run_hypothesis_test(str(path), symbol=symbol, commission=commission,
                                slippage=slippage, benchmark_path=benchmark_path)
 
