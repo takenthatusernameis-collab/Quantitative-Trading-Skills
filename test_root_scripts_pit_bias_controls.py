@@ -39,6 +39,24 @@ DATA = (
     / "example_data"
     / "sample_ohlcv.csv"
 )
+MSFT = (
+    ROOT
+    / "skills"
+    / "quantitative-backtesting"
+    / "assets"
+    / "example_data"
+    / "real_market_data"
+    / "MSFT.csv"
+)
+GOOGL = (
+    ROOT
+    / "skills"
+    / "quantitative-backtesting"
+    / "assets"
+    / "example_data"
+    / "real_market_data"
+    / "GOOGL.csv"
+)
 BENCH = (
     ROOT
     / "skills"
@@ -171,6 +189,58 @@ def test_advertised_costs_are_actually_applied():
     )
 
 
+def test_advertised_costs_are_actually_applied_msft():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        frictionless = smh._run_backtest_metrics(
+            MSFT, BENCH, 0.0, 0.0, tmpdir_path, impact_coefficient=IMPACT
+        )
+        costed = smh._run_backtest_metrics(
+            MSFT, BENCH, smh.COMMISSION, smh.SLIPPAGE,
+            tmpdir_path, impact_coefficient=IMPACT,
+        )
+
+    fs = frictionless.get("sharpe_ratio")
+    cs = costed.get("sharpe_ratio")
+    assert fs is not None and cs is not None
+    assert cs < fs, (
+        f"MSFT costed Sharpe {cs} must be below frictionless {fs}: costs not applied"
+    )
+
+    fr = frictionless.get("total_return")
+    cr = costed.get("total_return")
+    assert fr is not None and cr is not None
+    assert cr < fr, (
+        f"MSFT costed return {cr} must be below frictionless {fr}: costs not applied"
+    )
+
+
+def test_advertised_costs_are_actually_applied_googl():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        frictionless = smh._run_backtest_metrics(
+            GOOGL, BENCH, 0.0, 0.0, tmpdir_path, impact_coefficient=IMPACT
+        )
+        costed = smh._run_backtest_metrics(
+            GOOGL, BENCH, smh.COMMISSION, smh.SLIPPAGE,
+            tmpdir_path, impact_coefficient=IMPACT,
+        )
+
+    fs = frictionless.get("sharpe_ratio")
+    cs = costed.get("sharpe_ratio")
+    assert fs is not None and cs is not None
+    assert cs < fs, (
+        f"GOOGL costed Sharpe {cs} must be below frictionless {fs}: costs not applied"
+    )
+
+    fr = frictionless.get("total_return")
+    cr = costed.get("total_return")
+    assert fr is not None and cr is not None
+    assert cr < fr, (
+        f"GOOGL costed return {cr} must be below frictionless {fr}: costs not applied"
+    )
+
+
 TEST_REGISTRY = [
     ("test_pre_registered_criteria_are_present", test_pre_registered_criteria_are_present),
     ("test_advertised_costs_are_recorded", test_advertised_costs_are_recorded),
@@ -186,6 +256,10 @@ TEST_REGISTRY = [
      test_run_hypothesis_test_reports_methodology_controls),
     ("test_advertised_costs_are_actually_applied",
      test_advertised_costs_are_actually_applied),
+    ("test_advertised_costs_are_actually_applied_msft",
+     test_advertised_costs_are_actually_applied_msft),
+    ("test_advertised_costs_are_actually_applied_googl",
+     test_advertised_costs_are_actually_applied_googl),
 ]
 
 
