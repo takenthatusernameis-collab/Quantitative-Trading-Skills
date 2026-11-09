@@ -1498,6 +1498,14 @@ def main():
                 "book-based capacity."
             )
 
+    # Single-strategy Sharpe significance (Probabilistic Sharpe Ratio).
+    psr = metrics.get("probabilistic_sharpe")
+    if psr is not None:
+        print(
+            f"Probabilistic Sharpe Ratio: {psr['probabilistic_sharpe_ratio']:.4f} "
+            f"(p-value {psr['p_value']:.4f} vs SR*={psr.get('benchmark_sharpe', 0.0):.4f}, "
+            f"{psr['n_observations']} obs)"
+        )
     # Multiple-testing correction: when the number of development
     # trials was reported (--n-trials), echo the Deflated Sharpe
     # Ratio that calculate_metrics attached to the metrics.

@@ -627,6 +627,27 @@ def calculate_metrics(
         metrics["omega_ratio"] = 0.0
         metrics["tail_ratio"] = 0.0
 
+    # --- Single-Strategy Sharpe Significance (Probabilistic Sharpe Ratio) ---
+    # PSR answers "how confident are we in this Sharpe estimate given T
+    # observations and non-normal returns?", independent of multiple testing
+    # across trials. Computed whenever we have >= 2 return observations; the
+    # benchmark/reference Sharpe defaults to 0 (probability the true Sharpe
+    # exceeds zero) and can be overridden via config["benchmark_sharpe"].
+    if len(returns.dropna()) >= 2:
+        try:
+            from walk_forward import probabilistic_sharpe_ratio  # noqa: E402
+        except ImportError:
+            from walk_forward import probabilistic_sharpe_ratio  # noqa: E402
+        bench_sr = (config or {}).get("benchmark_sharpe", 0.0)
+        try:
+            metrics["probabilistic_sharpe"] = probabilistic_sharpe_ratio(
+                sharpe_ratio=metrics["sharpe_ratio"],
+                returns=returns,
+                benchmark_sharpe=float(bench_sr) if bench_sr is not None else 0.0,
+            )
+        except (ValueError, TypeError, ZeroDivisionError):
+            pass
+
     # --- Multiple-Testing Correction (Deflated Sharpe Ratio) ---
     # When the caller reports how many development trials (parameter
     # configurations) produced this backtest (e.g. the size of the
@@ -810,6 +831,23 @@ def generate_report(
                 f"% of Trades Closed at End: {metrics.get('pct_trades_closed_at_end', 0):.2%}",
                 "",
             ])
+
+    # Single-strategy Sharpe significance (Probabilistic Sharpe Ratio):
+    # surfaced whenever computed; unlike Deflated Sharpe, it does not require
+    # a trial count (it is not a multiple-testing correction).
+    psr = metrics.get("probabilistic_sharpe")
+    if psr is not None:
+        z_score = psr.get("z_score")
+        bench = psr.get("benchmark_sharpe", 0.0)
+        lines.extend([
+            "--- Sharpe Significance (Probabilistic Sharpe Ratio) ---",
+            f"Probabilistic Sharpe:  {psr.get('probabilistic_sharpe_ratio', 0):.4f}",
+            f"P-Value (vs SR*):      {psr.get('p_value', 0):.4f}",
+            f"Benchmark Sharpe (SR*):{bench: .4f}",
+            f"Z-Score:               {z_score:.4f}" if z_score is not None else "Z-Score:               N/A",
+            f"Observations:          {psr.get('n_observations', 0)}",
+            "",
+        ])
 
     # Multiple-testing correction: surfaced only when the backtest
     # reported the number of development trials behind it.

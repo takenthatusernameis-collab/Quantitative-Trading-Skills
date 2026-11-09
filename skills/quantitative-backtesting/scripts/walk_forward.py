@@ -1761,6 +1761,100 @@ def _selected_params_avg_test_sharpe(
     return float(np.mean(sharpes))
 
 
+def probabilistic_sharpe_ratio(
+    sharpe_ratio: float,
+    returns: pd.Series,
+    benchmark_sharpe: float = 0.0,
+) -> Dict[str, Any]:
+    """
+    Compute the Probabilistic Sharpe Ratio (Bailey & Lopez de Prado, 2012).
+
+    The observed Sharpe ratio is a noisy estimate: with a short track record
+    or non-normal returns it can look attractive by chance. The Probabilistic
+    Sharpe Ratio (PSR) is the probability that the strategy's *true* Sharpe
+    exceeds a benchmark Sharpe, accounting for the return distribution's
+    skewness and kurtosis and for the number of observations.
+
+    Unlike the Deflated Sharpe Ratio, PSR does not correct for multiple
+    testing across strategy trials; it answers "how confident are we in this
+    single Sharpe estimate?" rather than "how much of this Sharpe is
+    selection bias?". Use both when a grid search produced the result.
+
+    Formula (all Sharpe quantities in per-period, non-annualized units):
+
+        PSR(SR*) = Phi( (SR_hat - SR*) * sqrt(T - 1)
+                         / sqrt(1 - gamma3 * SR_hat + ((gamma4 - 1) / 4) * SR_hat^2) )
+
+    where SR_hat is the per-period estimated Sharpe, SR* the per-period
+    benchmark Sharpe, T the number of return observations, gamma3 the
+    return skewness, gamma4 the return kurtosis (not excess), and Phi the
+    standard normal CDF. The variance term matches the DSR (same non-normal
+    Sharpe standard error, Lo 2002 / Mertens 2002).
+
+    Args:
+        sharpe_ratio: Annualized Sharpe ratio of the strategy being evaluated.
+        returns: Per-period return series behind `sharpe_ratio`.
+        benchmark_sharpe: Annualized benchmark/reference Sharpe ratio (SR*).
+            Defaults to 0.0 (probability the true Sharpe exceeds zero).
+
+    Returns:
+        Dictionary with:
+            - 'probabilistic_sharpe_ratio': PSR in [0, 1]; the probability
+              that the strategy's true Sharpe exceeds `benchmark_sharpe`
+            - 'p_value': 1 - PSR (one-sided against the benchmark)
+            - 'sharpe_ratio': input annualized Sharpe ratio
+            - 'benchmark_sharpe': input annualized benchmark Sharpe ratio
+            - 'z_score': standardized distance passed to Phi
+            - 'n_observations': T
+            - 'skewness', 'kurtosis': return moments used in the correction
+    """
+    returns = returns.dropna()
+    if len(returns) < 2:
+        raise ValueError("Need at least 2 return observations for Probabilistic Sharpe Ratio")
+
+    ann_factor = _annualization_factor(returns.index)
+    t_obs = len(returns)
+    sr = float(sharpe_ratio) / np.sqrt(ann_factor)
+    sr_star = float(benchmark_sharpe) / np.sqrt(ann_factor)
+
+    # Variance of the Sharpe estimator under non-normality (skew/kurt are
+    # invariant to constant shifts, so raw-return moments are valid for a
+    # Sharpe computed on excess returns).
+    skew = float(returns.skew())
+    kurt = float(returns.kurtosis()) + 3.0  # pandas reports excess kurtosis
+    if not np.isfinite(skew):
+        skew = 0.0
+    if not np.isfinite(kurt):
+        kurt = 3.0
+
+    variance_term = 1.0 - skew * sr + ((kurt - 1.0) / 4.0) * sr * sr
+    if not np.isfinite(variance_term) or variance_term <= 0.0:
+        variance_term = np.finfo(float).tiny
+    denom = np.sqrt(variance_term)
+
+    if _is_constant_returns(returns):
+        # Degenerate (constant) returns carry no information about skill.
+        z = -np.inf
+    elif float(returns.std()) > 0:
+        z = (sr - sr_star) * np.sqrt(t_obs - 1) / denom
+    else:
+        z = -np.inf
+
+    psr = float(NormalDist().cdf(z))
+    psr = float(min(max(psr, 0.0), 1.0))
+
+    return {
+        "probabilistic_sharpe_ratio": psr,
+        "p_value": 1.0 - psr,
+        "sharpe_ratio": float(sharpe_ratio),
+        "benchmark_sharpe": float(benchmark_sharpe),
+        "z_score": float(z) if np.isfinite(z) else None,
+        "n_observations": int(t_obs),
+        "skewness": float(skew),
+        "kurtosis": float(kurt),
+    }
+
+
 def deflated_sharpe_ratio(
     sharpe_ratio: float,
     returns: pd.Series,

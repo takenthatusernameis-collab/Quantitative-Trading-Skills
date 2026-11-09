@@ -1439,6 +1439,10 @@ def generate_tear_sheet(
     # the scalar-only `metrics` field above; surface it explicitly.
     if "deflated_sharpe" in metrics:
         summary["deflated_sharpe"] = metrics["deflated_sharpe"]
+    # Probabilistic Sharpe Ratio is a dict (single-strategy Sharpe
+    # significance, not a multiple-testing correction); surface explicitly.
+    if "probabilistic_sharpe" in metrics:
+        summary["probabilistic_sharpe"] = _json_safe(metrics["probabilistic_sharpe"])
     # The aggregate Deflated Alpha Ratio (multiple-benchmark correction) is a
     # dict, so it is likewise filtered out of the scalar-only `metrics` field;
     # surface it explicitly so the run_backtest CLI tear sheet carries the same
