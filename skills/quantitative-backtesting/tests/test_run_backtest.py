@@ -154,6 +154,27 @@ def test_run_backtest_active_strategy_succeeds():
     assert results["equity_curve"].std() > 0
 
 
+def test_run_backtest_records_regime_analysis():
+    """run_backtest discloses regime-dependent performance in results.
+
+    The single-backtest path should surface regime analysis (mirroring
+    walk_forward.py) so a consumer can see whether returns are concentrated
+    in one market regime rather than relying on a single overall Sharpe.
+    """
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    results = run_backtest(data, strategy, _Args())
+
+    assert "regime_analysis" in results
+    ra = results["regime_analysis"]
+    assert isinstance(ra, dict)
+    assert "trend_regime_performance" in ra
+    assert "volatility_regime_performance" in ra
+    assert "combined_regime_performance" in ra
+    assert "regime_periods" in ra
+    assert "regime_distribution" in ra
+
+
 def test_run_backtest_trade_analytics_populated():
     """Trade-level metrics are computed when the strategy trades."""
     data = _make_data()
@@ -3834,6 +3855,7 @@ TEST_REGISTRY = [
     ("test_run_backtest_flat_strategy_raises", test_run_backtest_flat_strategy_raises),
     ("test_run_backtest_flat_long_lookback_raises", test_run_backtest_flat_long_lookback_raises),
     ("test_run_backtest_active_strategy_succeeds", test_run_backtest_active_strategy_succeeds),
+    ("test_run_backtest_records_regime_analysis", test_run_backtest_records_regime_analysis),
     ("test_run_backtest_trade_analytics_populated", test_run_backtest_trade_analytics_populated),
     ("test_run_backtest_n_trials_surfaces_deflated_sharpe", test_run_backtest_n_trials_surfaces_deflated_sharpe),
     ("test_run_backtest_without_n_trials_omits_deflated_sharpe", test_run_backtest_without_n_trials_omits_deflated_sharpe),

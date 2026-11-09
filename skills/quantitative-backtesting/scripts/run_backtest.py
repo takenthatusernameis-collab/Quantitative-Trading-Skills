@@ -58,6 +58,7 @@ from walk_forward import (
     _split_train_val_test,
     _verify_split_separation,
 )
+from regime_detection import add_regime_analysis_to_results, RegimeConfig
 
 
 def parse_args():
@@ -855,6 +856,18 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             results["capacity_book_trend"] = None
             results["capacity_notional_weighted"] = None
             results["capacity_notional_weighted_trend"] = None
+
+    try:
+        _regime_results = add_regime_analysis_to_results(
+            {"returns": strategy_returns},
+            data,
+            returns_key="returns",
+            close_key="close",
+            config=RegimeConfig(),
+        )
+        results["regime_analysis"] = _regime_results.get("regime_analysis")
+    except Exception:
+        results["regime_analysis"] = None
 
     # Optional buy-and-hold benchmark baseline(s).
     # The benchmark return for period t is the close-to-close return
