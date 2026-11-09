@@ -1400,7 +1400,7 @@ def parameter_optimization(
             ):
                 continue
 
-returns = _calculate_strategy_returns(
+            returns = _calculate_strategy_returns(
                 data, signals, commission, slippage,
                 impact_coefficient, adv_window, borrow_cost, funding_cost,
                 latency, fill_rate,
@@ -5985,7 +5985,7 @@ def out_of_sample_validation(
         if panel_pricing == "book"
         else None
     )
-test_returns = _calculate_strategy_returns(
+    test_returns = _calculate_strategy_returns(
                         test_data, test_signals, commission, slippage,
                         impact_coefficient, adv_window, borrow_cost, funding_cost,
                         latency, fill_rate,
@@ -6515,7 +6515,8 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
                                     bench_commission, bench_slippage, bench_expense_ratio,
                                     impact_coefficient, borrow_cost=None, funding_cost=None,
                                     commission=None, slippage=None, latency=None, fill_rate=None,
-                                    survivorship=None, pit_strict=None):
+                                    survivorship=None, pit_strict=None,
+                                    regime_impact_coefficients: Optional[Dict[str, float]] = None):
     """Run walk-forward for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -6533,6 +6534,9 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
     `survivorship` carries the survivorship-bias detection report from the
     caller so the sweep artifact records the same bias-controls signal as the
     single-run walk-forward summary.
+
+    `regime_impact_coefficients` carries the regime-aware impact coefficients
+    from the caller so the sweep uses the same regime-aware modeling.
     """
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
@@ -6585,6 +6589,7 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         pit_strict=pit_strict,
+        regime_impact_coefficients=regime_impact_coefficients,
     )
     summary = results["summary"]
     dsr = summary.get("deflated_sharpe")
@@ -6642,7 +6647,8 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                                 bench_commission, bench_slippage, bench_expense_ratio,
                                 impact_coefficient, borrow_cost=None, funding_cost=None,
                                 commission=None, slippage=None, latency=None, fill_rate=None,
-                                pit_results=None, survivorship=None):
+                                pit_results=None, survivorship=None,
+                                regime_impact_coefficients: Optional[Dict[str, float]] = None):
     """Run parameter optimization for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -6666,6 +6672,9 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
     `survivorship` carries the survivorship-bias detection report from the
     caller so the sweep artifact records the same bias-controls signal as the
     single-run JSON.
+
+    `regime_impact_coefficients` carries the regime-aware impact coefficients
+    from the caller so the sweep uses the same regime-aware modeling.
     """
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
@@ -6716,6 +6725,7 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         inert_grid_report=inert_report,
+        regime_impact_coefficients=regime_impact_coefficients,
     )
     top = results[0] if results else None
     dsr = top.get("deflated_sharpe") if isinstance(top, dict) else None
@@ -6904,7 +6914,8 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                             bench_commission, bench_slippage, bench_expense_ratio,
                             impact_coefficient, borrow_cost=None, funding_cost=None,
                             commission=None, slippage=None, latency=None, fill_rate=None,
-                            survivorship=None):
+                            survivorship=None,
+                            regime_impact_coefficients: Optional[Dict[str, float]] = None):
     """Run CPCV for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -6925,6 +6936,9 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
     `survivorship` carries the survivorship-bias detection report from the
     caller so the sweep artifact records the same bias-controls signal as the
     single-run CPCV summary.
+
+    `regime_impact_coefficients` carries the regime-aware impact coefficients
+    from the caller so the sweep uses the same regime-aware modeling.
     """
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
@@ -6974,6 +6988,7 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
+        regime_impact_coefficients=regime_impact_coefficients,
     )
     summary = results["summary"]
     dsr = summary.get("deflated_sharpe")
@@ -7062,6 +7077,10 @@ def run_cpcv(args) -> int:
     latency, fill_rate = _resolve_latency_fill_rate(args)
     min_position_fraction = _resolve_min_position_fraction(args)
 
+    param_grid = _parse_param_grid(args.param_grid)
+    regime_impact_coefficients = _parse_regime_impact_coefficients(getattr(args, "regime_impact_coefficients", None))
+    strategy_factory = _make_strategy_factory(args.strategy)
+
     impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
 
     # Capacity / market-impact sensitivity sweep for CPCV: re-run the CPCV
@@ -7076,6 +7095,7 @@ def run_cpcv(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
                 survivorship=survivorship,
+                regime_impact_coefficients=regime_impact_coefficients,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "cpcv_impact_sweep.json"
@@ -8178,6 +8198,30 @@ def _parse_param_grid(param_grid_str: str) -> Dict[str, List[Any]]:
         raise ValueError(f"Invalid JSON for param_grid: {e}")
 
 
+def _parse_regime_impact_coefficients(regime_impact_str: Optional[str]) -> Optional[Dict[str, float]]:
+    """Parse regime impact coefficients from JSON string.
+
+    Args:
+        regime_impact_str: JSON string mapping regime names to impact coefficients
+            (e.g., '{"bull_high_vol": 0.5, "bear_high_vol": 1.0}')
+
+    Returns:
+        Dict mapping regime names to float coefficients, or None if not provided.
+    """
+    if regime_impact_str is None:
+        return None
+    try:
+        coefficients = json.loads(regime_impact_str)
+        # Validate that all values are numeric
+        for k, v in coefficients.items():
+            if not isinstance(v, (int, float)):
+                raise ValueError(f"Regime impact coefficient for '{k}' must be a number, got {type(v).__name__}")
+            coefficients[k] = float(v)
+        return coefficients
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON for regime_impact_coefficients: {e}")
+
+
 def run_walk_forward(args) -> int:
     """Run walk-forward analysis from CLI args."""
     print(f"Loading data from {args.data}...")
@@ -8212,6 +8256,7 @@ def run_walk_forward(args) -> int:
     min_position_fraction = _resolve_min_position_fraction(args)
 
     param_grid = _parse_param_grid(args.param_grid)
+    regime_impact_coefficients = _parse_regime_impact_coefficients(getattr(args, "regime_impact_coefficients", None))
     strategy_factory = _make_strategy_factory(args.strategy)
 
     print(f"Running walk-forward analysis with {args.strategy}...")
@@ -8232,6 +8277,7 @@ def run_walk_forward(args) -> int:
             args.impact_coefficient, borrow_cost=args.borrow_cost,
             funding_cost=args.funding_cost, **{key: v},
             survivorship=survivorship,
+            regime_impact_coefficients=regime_impact_coefficients,
         ),
         latency_values=latencies,
         fill_rate_values=fill_rates,
@@ -8261,6 +8307,7 @@ def run_walk_forward(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
                 survivorship=survivorship,
+                regime_impact_coefficients=regime_impact_coefficients,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "walk_forward_impact_sweep.json"
@@ -8460,6 +8507,7 @@ def run_walk_forward(args) -> int:
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
+        regime_impact_coefficients=regime_impact_coefficients,
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
@@ -8746,6 +8794,10 @@ def run_parameter_optimization(args) -> int:
 
     latency, fill_rate = _resolve_latency_fill_rate(args)
 
+    param_grid = _parse_param_grid(args.param_grid)
+    regime_impact_coefficients = _parse_regime_impact_coefficients(getattr(args, "regime_impact_coefficients", None))
+    strategy_factory = _make_strategy_factory(args.strategy)
+
     impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
     borrow_costs = [float(c) for c in (args.borrow_costs or [args.borrow_cost])]
     funding_costs = [float(c) for c in (args.funding_costs or [args.funding_cost])]
@@ -8763,6 +8815,7 @@ def run_parameter_optimization(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
                 survivorship=survivorship,
                 pit_results=pit_results,
+                regime_impact_coefficients=regime_impact_coefficients,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_impact_sweep.json"
@@ -8797,6 +8850,7 @@ def run_parameter_optimization(args) -> int:
                 args.impact_coefficient, borrow_cost=cost, funding_cost=args.funding_cost,
                 pit_results=pit_results,
                 survivorship=survivorship,
+                regime_impact_coefficients=regime_impact_coefficients,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_borrow_sweep.json"
@@ -8831,6 +8885,7 @@ def run_parameter_optimization(args) -> int:
                 args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
                 pit_results=pit_results,
                 survivorship=survivorship,
+                regime_impact_coefficients=regime_impact_coefficients,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_funding_sweep.json"
@@ -8868,6 +8923,7 @@ def run_parameter_optimization(args) -> int:
             args.impact_coefficient, borrow_cost=args.borrow_cost,
             funding_cost=args.funding_cost, **{key: v},
             pit_results=pit_results, survivorship=survivorship,
+            regime_impact_coefficients=regime_impact_coefficients,
         ),
         latency_values=latencies,
         fill_rate_values=fill_rates,
@@ -8903,6 +8959,7 @@ def run_parameter_optimization(args) -> int:
                 funding_cost=args.funding_cost, commission=cost,
                 pit_results=pit_results,
                 survivorship=survivorship,
+                regime_impact_coefficients=regime_impact_coefficients,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_commission_sweep.json"
@@ -8942,6 +8999,7 @@ def run_parameter_optimization(args) -> int:
                 funding_cost=args.funding_cost, slippage=cost,
                 pit_results=pit_results,
                 survivorship=survivorship,
+                regime_impact_coefficients=regime_impact_coefficients,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_slippage_sweep.json"
@@ -8966,6 +9024,7 @@ def run_parameter_optimization(args) -> int:
         return 0
 
     param_grid = _parse_param_grid(args.param_grid)
+    regime_impact_coefficients = _parse_regime_impact_coefficients(getattr(args, "regime_impact_coefficients", None))
     strategy_factory = _make_strategy_factory(args.strategy)
 
     print(f"Running parameter optimization with {args.strategy}...")
@@ -8994,6 +9053,7 @@ def run_parameter_optimization(args) -> int:
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         inert_grid_report=inert_report,
+        regime_impact_coefficients=regime_impact_coefficients,
     )
 
     if not results:
@@ -9150,10 +9210,11 @@ def run_parameter_optimization(args) -> int:
 
 
 def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark,
-                                    bench_commission, bench_slippage, bench_expense_ratio,
-                                    impact_coefficient, borrow_cost=None, funding_cost=None,
-                                    commission=None, slippage=None, latency=None, fill_rate=None,
-                                    pit_results=None, survivorship=None):
+                                     bench_commission, bench_slippage, bench_expense_ratio,
+                                     impact_coefficient, borrow_cost=None, funding_cost=None,
+                                     commission=None, slippage=None, latency=None, fill_rate=None,
+                                     regime_impact_coefficients=None,
+                                     pit_results=None, survivorship=None):
     """Run the Monte Carlo pipeline for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -9178,6 +9239,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     `survivorship` carries the survivorship-bias detection report from the
     caller so the sweep artifact records the same bias-controls signal as the
     single-run Monte Carlo JSON.
+    `regime_impact_coefficients` maps regime names to impact coefficients for
+    regime-aware market impact modeling.
     """
     if borrow_cost is None:
         borrow_cost = args.borrow_cost
@@ -9248,6 +9311,7 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
                                           latency=latency, fill_rate=fill_rate,
                                           initial_capital=args.initial_capital,
                                           panel_pricing=panel_pricing,
+                                          regime_impact_coefficients=regime_impact_coefficients,
                                           book_weights=book_weights)
 
     dsr = None
@@ -9384,6 +9448,7 @@ def run_monte_carlo(args) -> int:
             row = _monte_carlo_sweep_coefficient(
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
+                regime_impact_coefficients=args.regime_impact_coefficients,
                 survivorship=survivorship,
             )
             sweep_rows.append(row)
@@ -10597,6 +10662,7 @@ def main():
     common_parser.add_argument("--slippages", type=float, nargs="+", default=None, help="List of slippages to sweep (overrides --slippage)")
     common_parser.add_argument("--impact-coefficient", type=float, default=0.0, help="Market impact coefficient (position_notional/ADV * coefficient). 0 to disable.")
     common_parser.add_argument("--impact-aggregation", type=str, default="panel", choices=["panel", "notional-weighted"], help="Market-impact aggregation convention. 'panel' (default) charges the equal-weighted mean of the per-asset impact rates; 'notional-weighted' charges the dollar-consistent aggregation. Default unchanged so no published number moves.")
+    common_parser.add_argument("--regime-impact-coefficients", type=str, default=None, help="JSON mapping of regime names to impact coefficients for regime-aware impact modeling (e.g., '{\"bull_high_vol\": 0.5, \"bear_high_vol\": 1.0}'). Regimes not in the mapping fall back to --impact-coefficient.")
     common_parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
     common_parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3%% per year)")
     common_parser.add_argument("--funding-cost", type=float, default=0.0, help="Annual funding cost rate for leveraged positions (as decimal, e.g., 0.02 = 2%% per year)")
