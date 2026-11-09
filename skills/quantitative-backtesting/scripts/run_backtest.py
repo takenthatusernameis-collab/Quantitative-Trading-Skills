@@ -1035,7 +1035,10 @@ def main():
     if getattr(args, "multi_symbol", False):
         print("Multi-symbol mode: loading the full symbol universe...")
         data, provenance, dropped = load_multi_symbol(
-            args.data, return_provenance=True, return_dropped=True
+            args.data,
+            return_provenance=True,
+            return_dropped=True,
+            adjust_splits=getattr(args, "adjust_splits", False),
         )
         if dropped:
             print(

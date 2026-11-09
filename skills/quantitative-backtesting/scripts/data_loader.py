@@ -706,7 +706,7 @@ def load_multi_symbol(
                     total_return_type=_detect_benchmark_total_return_type(sym_df),
                     transformations_applied=[]
                 )
-                if adjust_splits and "splits" in result[sym].columns and result[sym].get("splits_adjusted", False) if "splits_adjusted" in result[sym] else False:
+                if adjust_splits and "splits" in result[sym].columns:
                     prov.transformations_applied.append("split_adjustment_applied")
                 if isinstance(result[sym].index, pd.DatetimeIndex) and len(result[sym]) > 0:
                     prov.date_range_final = (

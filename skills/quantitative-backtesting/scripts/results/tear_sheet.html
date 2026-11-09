@@ -45,6 +45,44 @@
 <tr><td>Panel Pricing Mode</td><td class='metric'>net-exposure</td></tr>
 </table>
 <p><em>The reported P&amp;L is net_exposure x mean(asset returns), and the costs are charged on the net exposure. A long/short book is not representable by that scalar: see the panel book diagnostic above.</em></p>
+<h2>Regime Analysis</h2>
+<h3>Regime Distribution</h3>
+<table><tr><th>Regime</th><th>Bars</th></tr>
+<tr><td>unknown</td><td class='metric'>199</td></tr>
+<tr><td>bull_low</td><td class='metric'>163</td></tr>
+<tr><td>bear_high</td><td class='metric'>82</td></tr>
+<tr><td>bull_high</td><td class='metric'>37</td></tr>
+<tr><td>sideways_low</td><td class='metric'>12</td></tr>
+<tr><td>sideways_high</td><td class='metric'>9</td></tr>
+</table>
+<h3>Trend Regime Performance</h3>
+<table><tr><th>Regime</th><th>Obs</th><th>Ann. Return</th><th>Ann. Vol</th><th>Sharpe</th><th>Max Drawdown</th><th>Win Rate</th></tr>
+<tr><td>bull</td><td class='metric'>200</td><td class='metric'>44.27%</td><td class='metric'>20.14%</td><td class='metric'>2.20</td><td class='metric'>-14.01%</td><td class='metric'>40.00%</td></tr>
+<tr><td>sideways</td><td class='metric'>21</td><td class='metric'>-58.37%</td><td class='metric'>31.43%</td><td class='metric'>-1.86</td><td class='metric'>-11.95%</td><td class='metric'>28.57%</td></tr>
+<tr><td>bear</td><td class='metric'>82</td><td class='metric'>75.51%</td><td class='metric'>13.38%</td><td class='metric'>5.65</td><td class='metric'>-4.25%</td><td class='metric'>41.46%</td></tr>
+</table>
+<h3>Volatility Regime Performance</h3>
+<table><tr><th>Regime</th><th>Obs</th><th>Ann. Return</th><th>Ann. Vol</th><th>Sharpe</th><th>Max Drawdown</th><th>Win Rate</th></tr>
+<tr><td>high</td><td class='metric'>155</td><td class='metric'>22.61%</td><td class='metric'>12.81%</td><td class='metric'>1.77</td><td class='metric'>-5.58%</td><td class='metric'>26.45%</td></tr>
+<tr><td>low</td><td class='metric'>283</td><td class='metric'>43.69%</td><td class='metric'>22.20%</td><td class='metric'>1.97</td><td class='metric'>-18.66%</td><td class='metric'>48.41%</td></tr>
+</table>
+<h3>Combined Regime Performance</h3>
+<table><tr><th>Regime</th><th>Obs</th><th>Ann. Return</th><th>Ann. Vol</th><th>Sharpe</th><th>Max Drawdown</th><th>Win Rate</th></tr>
+<tr><td>bull_low</td><td class='metric'>163</td><td class='metric'>69.00%</td><td class='metric'>21.41%</td><td class='metric'>3.22</td><td class='metric'>-9.73%</td><td class='metric'>48.47%</td></tr>
+<tr><td>bull_high</td><td class='metric'>37</td><td class='metric'>-28.15%</td><td class='metric'>12.42%</td><td class='metric'>-2.27</td><td class='metric'>-3.47%</td><td class='metric'>2.70%</td></tr>
+<tr><td>bear_high</td><td class='metric'>82</td><td class='metric'>75.51%</td><td class='metric'>13.38%</td><td class='metric'>5.65</td><td class='metric'>-4.25%</td><td class='metric'>41.46%</td></tr>
+</table>
+<h3>Regime Periods</h3>
+<table><tr><th>Regime</th><th>Start</th><th>End</th><th>Length</th></tr>
+<tr><td>unknown</td><td>2018-01-02T00:00:00</td><td>2018-10-15T00:00:00</td><td class='metric'>199</td></tr>
+<tr><td>bull_low</td><td>2018-10-16T00:00:00</td><td>2018-10-23T00:00:00</td><td class='metric'>6</td></tr>
+<tr><td>bull_high</td><td>2018-10-24T00:00:00</td><td>2018-12-17T00:00:00</td><td class='metric'>37</td></tr>
+<tr><td>sideways_high</td><td>2018-12-18T00:00:00</td><td>2018-12-26T00:00:00</td><td class='metric'>6</td></tr>
+<tr><td>bear_high</td><td>2018-12-27T00:00:00</td><td>2019-04-25T00:00:00</td><td class='metric'>82</td></tr>
+<tr><td>sideways_high</td><td>2019-04-26T00:00:00</td><td>2019-04-30T00:00:00</td><td class='metric'>3</td></tr>
+<tr><td>sideways_low</td><td>2019-05-01T00:00:00</td><td>2019-05-16T00:00:00</td><td class='metric'>12</td></tr>
+<tr><td>bull_low</td><td>2019-05-17T00:00:00</td><td>2019-12-30T00:00:00</td><td class='metric'>157</td></tr>
+</table>
 <h2>Trade Analytics</h2>
 <table><tr><th>Metric</th><th>Value</th></tr>
 <tr><td>Total Trades</td><td class='metric'>5.00</td></tr>
@@ -61,7 +99,7 @@
 <h2>Data Provenance</h2>
 <table><tr><th>Field</th><th>Value</th></tr>
 <tr><td>source_path</td><td class='metric'>/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/real_market_data/AAPL.csv</td></tr>
-<tr><td>load_timestamp</td><td class='metric'>2026-11-08T17:28:39.122874Z</td></tr>
+<tr><td>load_timestamp</td><td class='metric'>2026-11-09T13:02:08.763484Z</td></tr>
 <tr><td>file_format</td><td class='metric'>.csv</td></tr>
 <tr><td>file_size_bytes</td><td class='metric'>118482</td></tr>
 <tr><td>symbol_filter</td><td class='metric'>SPY</td></tr>
