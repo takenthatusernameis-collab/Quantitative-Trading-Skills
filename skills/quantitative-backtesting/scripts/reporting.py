@@ -704,6 +704,30 @@ def generate_tear_sheet(
             html_parts.append(f"<tr><td>{label}</td><td class='metric'>{display}</td></tr>")
         html_parts.append("</table>")
 
+    # Single-strategy Sharpe significance (Probabilistic Sharpe Ratio):
+    # surfaced whenever computed; unlike Deflated Sharpe, it does not require
+    # a trial count (it is not a multiple-testing correction). Rendered next
+    # to the DSR so the tear sheet carries the same single-strategy Sharpe
+    # significance the CLI prints and the JSON summary carries.
+    psr = metrics.get("probabilistic_sharpe")
+    if psr is not None:
+        html_parts.append("<h2>Sharpe Significance (Probabilistic Sharpe Ratio)</h2>")
+        html_parts.append("<table><tr><th>Metric</th><th>Value</th></tr>")
+        psr_z = psr.get("z_score")
+        psr_rows = [
+            ("Probabilistic Sharpe Ratio", psr.get("probabilistic_sharpe_ratio"), lambda v: f"{v:.4f}"),
+            ("P-Value (vs SR*)", psr.get("p_value"), lambda v: f"{v:.4f}"),
+            ("Benchmark Sharpe (SR*)", psr.get("benchmark_sharpe"), lambda v: f"{v:.4f}"),
+            ("Z-Score", psr_z, lambda v: f"{v:.4f}"),
+            ("Observations", psr.get("n_observations"), lambda v: str(int(v))),
+            ("Skewness", psr.get("skewness"), lambda v: f"{v:.4f}"),
+            ("Kurtosis", psr.get("kurtosis"), lambda v: f"{v:.4f}"),
+        ]
+        for label, val, fmt in psr_rows:
+            display = fmt(val) if val is not None else "N/A"
+            html_parts.append(f"<tr><td>{label}</td><td class='metric'>{display}</td></tr>")
+        html_parts.append("</table>")
+
     # Benchmark comparison
     if "benchmark_total_return" in metrics:
         html_parts.append("<h2>Benchmark Comparison</h2>")
