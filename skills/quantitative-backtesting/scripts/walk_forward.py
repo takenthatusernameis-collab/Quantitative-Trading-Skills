@@ -5542,6 +5542,7 @@ def out_of_sample_validation(
     pit_strict: bool = False,
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
+    regime_impact_coefficients: Optional[Dict[str, float]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
