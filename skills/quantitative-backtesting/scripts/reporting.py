@@ -498,6 +498,76 @@ def generate_tear_sheet(
             )
         return out
 
+    def regime_analysis_section(ra):
+        """Render regime-dependent performance analysis.
+
+        Discloses how strategy performance varies across market regimes
+        (trend, volatility, combined) so a backtest result is never read as
+        a single number without its regime context. Omitted entirely when
+        results carry no regime_analysis.
+        """
+        if not isinstance(ra, dict):
+            return []
+        out = ["<h2>Regime Analysis</h2>"]
+        dist = ra.get("regime_distribution")
+        if isinstance(dist, dict) and dist:
+            out.append("<h3>Regime Distribution</h3>")
+            out.append("<table><tr><th>Regime</th><th>Bars</th></tr>")
+            for regime, count in dist.items():
+                out.append(
+                    f"<tr><td>{regime}</td><td class='metric'>{count}</td></tr>"
+                )
+            out.append("</table>")
+        perf_headings = [
+            ("Trend Regime Performance", "trend_regime_performance"),
+            ("Volatility Regime Performance", "volatility_regime_performance"),
+            ("Combined Regime Performance", "combined_regime_performance"),
+        ]
+        for heading, key in perf_headings:
+            perf = ra.get(key)
+            if not isinstance(perf, dict) or not perf:
+                continue
+            out.append(f"<h3>{heading}</h3>")
+            out.append(
+                "<table><tr><th>Regime</th><th>Obs</th><th>Ann. Return</th>"
+                "<th>Ann. Vol</th><th>Sharpe</th><th>Max Drawdown</th>"
+                "<th>Win Rate</th></tr>"
+            )
+            for regime, m in perf.items():
+                if not isinstance(m, dict):
+                    continue
+                ann_ret = m.get("annualized_return")
+                ann_vol = m.get("annualized_volatility")
+                sharpe = m.get("sharpe_ratio")
+                mdd = m.get("max_drawdown")
+                win = m.get("win_rate")
+                out.append(
+                    f"<tr><td>{regime}</td>"
+                    f"<td class='metric'>{m.get('n_observations', 'N/A')}</td>"
+                    f"<td class='metric'>{fmt_pct(ann_ret) if isinstance(ann_ret, (int, float)) else 'N/A'}</td>"
+                    f"<td class='metric'>{fmt_pct(ann_vol) if isinstance(ann_vol, (int, float)) else 'N/A'}</td>"
+                    f"<td class='metric'>{fmt_num(sharpe) if isinstance(sharpe, (int, float)) else 'N/A'}</td>"
+                    f"<td class='metric'>{fmt_pct(mdd) if isinstance(mdd, (int, float)) else 'N/A'}</td>"
+                    f"<td class='metric'>{fmt_pct(win) if isinstance(win, (int, float)) else 'N/A'}</td></tr>"
+                )
+            out.append("</table>")
+        periods = ra.get("regime_periods")
+        if isinstance(periods, list) and periods:
+            out.append("<h3>Regime Periods</h3>")
+            out.append("<table><tr><th>Regime</th><th>Start</th><th>End</th><th>Length</th></tr>")
+            for p in periods:
+                if not isinstance(p, dict):
+                    continue
+                out.append(
+                    f"<tr><td>{p.get('regime', 'N/A')}</td>"
+                    f"<td>{p.get('start_date', 'N/A')}</td>"
+                    f"<td>{p.get('end_date', 'N/A')}</td>"
+                    f"<td class='metric'>{p.get('length', 'N/A')}</td></tr>"
+                )
+            out.append("</table>")
+        return out
+
+
     summary_metrics = [
         ("Total Return", "total_return", fmt_pct),
         ("Annualized Return", "annualized_return", fmt_pct),
@@ -587,6 +657,11 @@ def generate_tear_sheet(
     # without it (the net-exposure and book conventions can differ by more
     # than the transaction costs).
     html_parts.extend(panel_pricing_section(_pricing))
+
+    # Regime-dependent performance: how the strategy behaves across market
+    # regimes (trend, volatility, combined), so a backtest is never read as
+    # a single number without its regime context. Omitted when absent.
+    html_parts.extend(regime_analysis_section(results.get("regime_analysis")))
 
     # Trade analytics
     if "total_trades" in metrics:
@@ -1467,6 +1542,11 @@ def generate_tear_sheet(
     # selection risk. Omitted when absent (backward compatible).
     if results.get("survivorship_bias"):
         summary["survivorship_bias"] = _json_safe(results["survivorship_bias"])
+    # Surface regime-dependent performance analysis so the tear-sheet JSON
+    # carries the same regime disclosure as the HTML section. Omitted when
+    # absent (backward compatible).
+    if results.get("regime_analysis"):
+        summary["regime_analysis"] = _json_safe(results["regime_analysis"])
     # Bias-controls engagement flag (PIT + deflation controls). Mirrors the
     # walk-forward / CPCV / Monte Carlo summaries so the tear-sheet JSON is
     # traceable to the same signal; omitted when absent (backward compatible).

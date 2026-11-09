@@ -1519,6 +1519,152 @@ class TestTearSheet(unittest.TestCase):
                 "cpcv_equity_curve.png should NOT be created for empty oos_returns",
             )
 
+    def _make_regime_analysis(self) -> dict:
+        """Build a regime_analysis dict matching regime_performance_summary output."""
+        return {
+            "config": {
+                "trend_ma_short": 50,
+                "trend_ma_long": 200,
+                "trend_threshold": 0.02,
+                "vol_window": 63,
+                "vol_quantile_high": 0.75,
+                "vol_quantile_low": 0.25,
+                "min_regime_length": 21,
+            },
+            "trend_regime_performance": {
+                "bull": {
+                    "n_observations": 120,
+                    "total_return": 0.18,
+                    "annualized_return": 0.24,
+                    "annualized_volatility": 0.14,
+                    "sharpe_ratio": 1.71,
+                    "max_drawdown": -0.06,
+                    "win_rate": 0.62,
+                    "skewness": 0.1,
+                    "kurtosis": 3.0,
+                },
+                "bear": {
+                    "n_observations": 90,
+                    "total_return": -0.10,
+                    "annualized_return": -0.14,
+                    "annualized_volatility": 0.22,
+                    "sharpe_ratio": -0.64,
+                    "max_drawdown": -0.18,
+                    "win_rate": 0.40,
+                    "skewness": -0.5,
+                    "kurtosis": 4.2,
+                },
+            },
+            "volatility_regime_performance": {
+                "high": {
+                    "n_observations": 80,
+                    "annualized_return": -0.04,
+                    "annualized_volatility": 0.28,
+                    "sharpe_ratio": -0.14,
+                    "max_drawdown": -0.14,
+                    "win_rate": 0.48,
+                },
+                "low": {
+                    "n_observations": 130,
+                    "annualized_return": 0.16,
+                    "annualized_volatility": 0.10,
+                    "sharpe_ratio": 1.60,
+                    "max_drawdown": -0.04,
+                    "win_rate": 0.60,
+                },
+            },
+            "combined_regime_performance": {
+                "bull_low_vol": {
+                    "n_observations": 70,
+                    "annualized_return": 0.28,
+                    "annualized_volatility": 0.09,
+                    "sharpe_ratio": 3.11,
+                    "max_drawdown": -0.03,
+                    "win_rate": 0.66,
+                },
+                "bear_high_vol": {
+                    "n_observations": 55,
+                    "annualized_return": -0.22,
+                    "annualized_volatility": 0.30,
+                    "sharpe_ratio": -0.73,
+                    "max_drawdown": -0.24,
+                    "win_rate": 0.33,
+                },
+            },
+            "regime_periods": [
+                {
+                    "regime": "bull_low_vol",
+                    "start_date": "2020-01-01",
+                    "end_date": "2020-03-31",
+                    "length": 62,
+                    "metrics": {},
+                },
+                {
+                    "regime": "bear_high_vol",
+                    "start_date": "2020-04-01",
+                    "end_date": "2020-06-30",
+                    "length": 59,
+                    "metrics": {},
+                },
+            ],
+            "regime_distribution": {"bull_low_vol": 62, "bear_high_vol": 59},
+        }
+
+    def test_tear_sheet_includes_regime_analysis_section(self):
+        """The tear sheet renders the Regime Analysis section (distribution,
+        per-regime performance, and regime periods) when results carry a
+        regime_analysis dict, and surfaces it in the JSON summary."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            results["regime_analysis"] = self._make_regime_analysis()
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertIn("Regime Analysis", html)
+            self.assertIn("Regime Distribution", html)
+            self.assertIn("Trend Regime Performance", html)
+            self.assertIn("Volatility Regime Performance", html)
+            self.assertIn("Combined Regime Performance", html)
+            self.assertIn("Regime Periods", html)
+            self.assertIn("bull", html)
+            self.assertIn("bear", html)
+            self.assertIn("62", html)
+            self.assertIn("59", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("regime_analysis", summary)
+            self.assertEqual(
+                summary["regime_analysis"]["regime_distribution"],
+                {"bull_low_vol": 62, "bear_high_vol": 59},
+            )
+            self.assertEqual(
+                summary["regime_analysis"]["combined_regime_performance"][
+                    "bull_low_vol"
+                ]["sharpe_ratio"],
+                3.11,
+            )
+
+    def test_tear_sheet_omits_regime_analysis_when_absent(self):
+        """Without results['regime_analysis'], the section and summary key
+        are omitted entirely (backward compatible)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA", save_plots=False,
+            )
+            with open(html_path) as f:
+                html = f.read()
+            self.assertNotIn("Regime Analysis", html)
+            self.assertNotIn("Regime Distribution", html)
+            self.assertNotIn("Trend Regime Performance", html)
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertNotIn("regime_analysis", summary)
+
 
 class TestParameterHeatmap(unittest.TestCase):
     """Tests for generate_parameter_heatmap function."""
