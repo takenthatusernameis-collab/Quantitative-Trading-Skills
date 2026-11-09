@@ -1,23 +1,32 @@
 # Handoff — next session
 
-## What changed
-- No committed code changes. Working tree clean at HEAD `c72973d` (single commit on `main`, 2588 tracked files including all 70 `HANDOFF_*.md`).
-- An attempted full quant gate run was aborted (shell timeout at ~70 min, no exit code captured) and regenerated tracked timestamped artifacts under `skills/quantitative-backtesting/examples/example_output/`, `skills/quantitative-backtesting/examples/example_reproducible_output/`, and `skills/quantitative-backtesting/scripts/results/` (pure `load_timestamp` changes). All 10 files reverted via `git checkout -- .`; no source or test files modified.
+## What changed (this session)
+- `skills/quantitative-backtesting/scripts/walk_forward.py`: Added regime-dependent performance analysis (`regime_analysis`) computation to **two previously uncovered analysis paths**, reusing the existing `add_regime_analysis_to_results` / `RegimeConfig` machinery (already imported at line 61) and the same try/except pattern used by `run_backtest` (line 861) and `walk_forward_analysis` (line 1200):
+  - **CPCV** — `cpcv_analysis`: after `_calculate_cpcv_summary(...)`, sets `summary["regime_analysis"]` from the pooled out-of-sample returns (`walk_forward.py:3747`).
+  - **Monte Carlo single-run** — `run_monte_carlo`: after `monte_carlo_simulation(...)`, sets `mc_results["summary"]["regime_analysis"]` (`walk_forward.py:9712`).
+  - **Monte Carlo sweep helper** — `_monte_carlo_sweep_coefficient`: same addition so sweep rows carry regime analysis (`walk_forward.py:9223`).
+- Rendering was already in place in `reporting.py` (lines 930/1195/1246) and gracefully handles `None`/absent regime_analysis, so CPCV and Monte Carlo tear sheets and `tear_sheet_summary.json` now surface regime-dependent performance when the path computes it.
+- 1 file changed, 42 insertions, 0 deletions. Working tree has this single uncommitted change; nothing else modified, no generated artifacts dirtied.
 
 ## What was actually verified
-- `pytest 9.2.0`, `Python 3.14.4`. Fast subsets green:
-  - `test_data_loader.py` + `test_loader_normalizes_structural_pit_violations.py` + `test_kelly_criterion_hypothesis_real_aapl.py` + `test_volatility_targeting_hypothesis_real_aapl.py` → **44 passed in 24.23s** (offline, committed fixtures only).
-- All prior-agent work is committed and passing: kelly_criterion four falsification tests (hypothesis / benchmark-aware / elevated-cost / param-sensitivity on AAPL), volatility_targeting hypothesis test, survivorship-schema early-return fix in `scripts/data_loader.py:527-555`. Full gate was previously claimed green (1157 passed, EXIT 0) in HANDOFF_NEXT.md but not independently re-verified this session.
+- `python3 -m py_compile scripts/walk_forward.py` → OK.
+- `test_regime_detection.py` + regime/tear-sheet subset of `test_reporting.py` → **73 passed** (7.18s).
+- `test_run_backtest.py::test_run_backtest_records_regime_analysis` → **1 passed**.
+- `test_cpcv.py` + `test_monte_carlo.py` → **53 passed** (95.3s). CPCV/Monte Carlo use subset assertions on summary keys, so the new `regime_analysis` key causes no regressions.
+- Smoke test: `cpcv_analysis` on non-empty OOS returns now yields `summary["regime_analysis"]` with keys `config`, `trend_regime_performance`, `volatility_regime_performance`, `combined_regime_performance`, `regime_periods`, `regime_distribution`. (Empty-OOS case correctly yields no regime_analysis — graceful.)
 
 ## What remains unresolved
-- Full quant gate **could not complete in this session**: times out at ~70 min; SESSIONS 64/65 estimate ~6h and attribute slowness to slow/network-dependent real-panel tests — an environmental blocker, not a code failure. Needs CI or an adequate time budget.
-- Command: `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q` (~38–60+ min, offline, committed fixtures only).
-- Caveat: a full run dirties timestamped generated artifacts (`examples/example_output/*`, `scripts/results/*`) — revert afterward with `git checkout -- .` so `git status` stays clean; do not commit generated outputs.
+- Full quant gate `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q` (~1163 tests, ~60+ min) still **cannot complete in-session**: serial run times out at ~70 min (environmental blocker, not a code defect) and dirties timestamped artifacts under `examples/example_output/*` and `scripts/results/*`. Revert with `git checkout -- .` after any run; do not commit generated outputs.
+- CPCV/Monte Carlo regime_analysis not yet exercised end-to-end through the CLI tear-sheet path (only via direct `cpcv_analysis` smoke test and the shared rendering code).
+- pytest-xdist is installed but not pinned in any requirements file.
 
 ## Approaches already tried / failed
-- Full gate as a single blocking run in this session: timed out at ~70 min with no exit code. Not a code defect; do not repeat unchanged.
+- Full quant gate as a single blocking serial run in this session: timed out at ~70 min, no exit code. Do not repeat unchanged; use CI / adequate budget with `-n 4` instead.
 
 ## One precise next task
 Run the full quant gate in CI / an environment with adequate budget:
-  `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q`
-Report the `passed`/failed summary and exit code. If green (EXIT 0), baseline confirmed — then select the next bounded methodological gap (coverage is already extensive across hypotheses, PIT/survivorship, costs, sensitivity, walk-forward, CPCV, deflated alpha). If a test fails, isolate with evidence, fix minimally, rerun focused tests, then re-attempt the full gate. Do not commit unless explicitly asked. Do not run the full gate in this session (times out + dirties timestamped artifacts).
+  `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4`
+then `git checkout -- .` to restore artifacts and keep `git status` clean.
+- If green (EXIT 0): baseline confirmed — my uncommitted `walk_forward.py` change is the pending diff to evaluate/commit, then select the next bounded methodological gap (coverage is already extensive; look for a genuinely new methodological improvement, not another strategy falsification test).
+- If a test fails: isolate with evidence, fix minimally, rerun focused tests, then re-attempt the full gate.
+- Do not commit unless explicitly asked. Do not run the full gate in this session (times out + dirties artifacts).

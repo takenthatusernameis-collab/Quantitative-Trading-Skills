@@ -3744,6 +3744,20 @@ def cpcv_analysis(
         oos_returns, folds, param_stability, folds_with_position=len(oos_returns_list)
     )
 
+    # Add regime-dependent performance analysis to summary
+    try:
+        regime_results = add_regime_analysis_to_results(
+            {"returns": oos_returns},
+            data,
+            returns_key="returns",
+            close_key="close",
+            config=RegimeConfig(),
+        )
+        if regime_results.get("regime_analysis"):
+            summary["regime_analysis"] = regime_results["regime_analysis"]
+    except Exception:
+        pass
+
     # Aggregate multiple-testing correction on the combined out-of-sample
     # returns. The conservative interpretation: the OOS record was produced
     # by a search that evaluated total_evaluated_trials configurations, so
@@ -9206,6 +9220,20 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         seed=args.seed if args.seed is not None else 0,
     )
 
+    # Add regime-dependent performance analysis to the Monte Carlo summary
+    try:
+        regime_results = add_regime_analysis_to_results(
+            {"returns": returns},
+            data,
+            returns_key="returns",
+            close_key="close",
+            config=RegimeConfig(),
+        )
+        if regime_results.get("regime_analysis"):
+            mc_results["summary"]["regime_analysis"] = regime_results["regime_analysis"]
+    except Exception:
+        pass
+
     sm = mc_results["summary"]
     mc_sharpe = float(sm.get("sharpe_ratio", {}).get("mean", 0.0))
     # The Monte Carlo point's Deflated Sharpe was computed on `returns`
@@ -9680,6 +9708,20 @@ def run_monte_carlo(args) -> int:
         block_size=args.block_size,
         seed=args.seed if args.seed is not None else 0,
     )
+
+    # Add regime-dependent performance analysis to the Monte Carlo summary
+    try:
+        regime_results = add_regime_analysis_to_results(
+            {"returns": returns},
+            data,
+            returns_key="returns",
+            close_key="close",
+            config=RegimeConfig(),
+        )
+        if regime_results.get("regime_analysis"):
+            mc_results["summary"]["regime_analysis"] = regime_results["regime_analysis"]
+    except Exception:
+        pass
 
     print(f"Probability of Ruin (>50% drawdown): {mc_results['probability_of_ruin']:.2%}")
 
