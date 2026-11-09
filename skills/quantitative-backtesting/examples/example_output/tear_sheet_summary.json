@@ -38,5 +38,15 @@
   "plot_files": [
     "equity_curve.png",
     "returns_distribution.png"
-  ]
+  ],
+  "probabilistic_sharpe": {
+    "probabilistic_sharpe_ratio": 0.2838881860488361,
+    "p_value": 0.716111813951164,
+    "sharpe_ratio": -0.40374136211094325,
+    "benchmark_sharpe": 0.0,
+    "z_score": -0.5713294060077252,
+    "n_observations": 504,
+    "skewness": -0.15623515693551013,
+    "kurtosis": 5.680703676093893
+  }
 }

@@ -4150,6 +4150,23 @@ def cpcv_analysis(
         execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency)
     )
 
+    # Regime-dependent performance disclosure for the CPCV path: reports how
+    # the pooled out-of-sample returns are distributed across detected market
+    # regimes (bull/bear/sideways) so the out-of-sample verdict is not read as
+    # a single regime's result. Gracefully degrades to None when the returns
+    # series cannot be aligned with the price data (e.g. no fold traded).
+    try:
+        _cpcv_regime_payload = add_regime_analysis_to_results(
+            {"returns": oos_returns},
+            data,
+            returns_key="returns",
+            close_key="close",
+            config=RegimeConfig(),
+        )
+        summary["regime_analysis"] = _cpcv_regime_payload.get("regime_analysis")
+    except Exception:
+        summary["regime_analysis"] = None
+
     return {
         "folds": folds,
         "best_params_per_fold": best_params_per_fold,

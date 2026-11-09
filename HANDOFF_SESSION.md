@@ -1,56 +1,31 @@
-# Handoff — session 2026-10-27
+# Handoff — session: CPCV regime-dependent performance disclosure
 
 ## What changed
-- `skills/quantitative-backtesting/tests/test_walk_forward.py:7618` — replaced the unjustified magic-number assertion
-  `capacity_notional_weighted < capacity_book * 4.1` (carried in from a prior weakening of `* 2.0 → * 4.1`) with a
-  two-sided, evidence-derived bound:
-  `abs(capacity_notional_weighted / capacity_book - n_assets) < n_assets * 0.05` with `n_assets = 4`.
-- `skills/quantitative-backtesting/tests/test_resolution_vs_sample_size.py` — added ONE bounded regression test:
-  `test_a_single_benchmark_makes_the_alpha_criterion_not_applicable` (plus its TEST_REGISTRY entry). Covers the
-  `n_benchmarks == 1` edge case: the Deflated Alpha criterion does not apply with a single benchmark
-  (walk_forward.py:942 `len(benchmark) > 1` guard skips the cross-benchmark correction), so `deflated_alpha` is None,
-  `alpha_status` is `"not_applicable"`, `min_detectable_alpha` is None, `n_benchmarks` is None, and
-  `alpha_beyond_plausible_bound` is False. Distinct from `"not_resolvable"` (criterion exists but draw cannot price
-  it) and `"resolvable"` (criterion was priced).
+- `skills/quantitative-backtesting/scripts/walk_forward.py` (`cpcv_analysis`): added `regime_analysis` computation to the CPCV summary, mirroring the existing `run_backtest.py` pattern (`add_regime_analysis_to_results({"returns": oos_returns}, data, returns_key="returns", close_key="close", config=RegimeConfig())`, wrapped in try/except → `None` when returns/prices don't align, e.g. no fold traded).
+  - This was the last analysis path missing regime disclosure: `run_backtest` and `walk_forward` (incl. Monte Carlo single-run) already computed it; CPCV did not.
+- New file: `skills/quantitative-backtesting/tests/test_cpcv_records_regime_analysis.py` — asserts `cpcv_analysis` summary carries `regime_analysis` as a dict with `trend_regime_performance`, `volatility_regime_performance`, `combined_regime_performance`, `regime_periods`, `regime_distribution`.
 
-## Why (evidence)
-- Reproduced the behavior directly: ran `out_of_sample_validation` on a synthetic control fixture (2500 bars, seed 7,
-  no effect) with a single benchmark (`[benchmarks[0]]`). Observed `deflated_alpha=None`,
-  `alpha_status="not_applicable"`, `min_detectable_alpha=None`, `alpha_beyond_plausible_bound=False`,
-  `n_benchmarks=None`.
-- No existing test covered the `n_benchmarks == 1` code path. The `test_every_test_in_this_file_is_registered`
-  check (which asserts every `test_*` function is in TEST_REGISTRY) would catch an unregistered test, so the new test
-  was registered too.
+No existing files other than `walk_forward.py` modified; no marketplace/catalog/schema/attribution changes.
 
-## What was actually verified
-- `test_a_single_benchmark_makes_the_alpha_criterion_not_applicable` → PASS
-- `test_every_test_in_this_file_is_registered` → PASS (registration check passes with the new test added)
-- Related alpha-floor tests → all PASS:
-  `test_an_unpriceable_alpha_floor_is_reported_as_unpriceable`,
-  `test_a_measured_alpha_floor_is_still_reported_with_its_driver`,
-  `test_a_placeholder_floor_is_not_read_as_a_measurement`,
-  `test_deflated_alpha_floor_identity_matches_benchmark_dispersion`,
-  `test_each_path_reports_the_framework_s_own_alpha_block`,
-  `test_a_placeholder_sharpe_floor_is_not_read_as_a_measurement`,
-  `test_a_measured_sharpe_floor_is_still_reported`,
-  `test_an_unpriceable_sharpe_floor_is_reported_as_unmeasurable`.
-- Python syntax check (`py_compile`) → OK.
-- Prior session's capacity-invariant work remains complete (unchanged):
-  Full `test_walk_forward.py` slow suite → 185 passed, 0 failed.
+## What was actually verified (offline, committed fixtures, from repo root)
+- New test `test_cpcv_records_regime_analysis.py` → OK (standalone and under pytest).
+- `test_cpcv_records_regime_analysis.py` + `test_cpcv_sma_crossover_real_aapl.py` + `test_cpcv.py` + `test_reporting.py` → **98 passed** (pre-existing CrossSectionalMomentum symmetric-quantile warnings only, not blocking).
+- `test_run_backtest.py::test_run_backtest_records_regime_analysis` + full `test_walk_forward.py` → **198 passed**, 0 failed (regression check on the edited file).
+- End-to-end wiring confirmed by inspection: `run_cpcv` calls `generate_tear_sheet(..., analysis_results={"cpcv": results})` (walk_forward.py:7705); reporting.py renders `cpcv_summary.get("regime_analysis")` in HTML (reporting.py:1219) and nests `summary["cpcv"]["summary"]` (incl. regime_analysis) in `tear_sheet_summary.json` (reporting.py:1517). Resolves the main HANDOFF.md unresolved item: CPCV now computes regime_analysis like the other three paths (Monte Carlo single-run already did at walk_forward.py:9965).
+- Working tree clean except the two intended changes; no test artifacts dirtied.
 
 ## What remains unresolved
-- The slow framework suite (`test_resolution_vs_sample_size.py` full run, `test_walk_forward.py`,
-  `test_cpcv.py`) was not fully re-run this session; `test_resolution_vs_sample_size.py` was modified (test added) so
-  its full suite should be re-run to confirm no regression. Prior handoff recorded `test_walk_forward.py` at
-  185 passed / 0 failed.
+- Full single-invocation quant gate still cannot complete in-session (~60+ min); chunked per-file evidence (session 67) stands as the substitute — do not repeat the unbounded run unchanged.
+- pytest-xdist (`-n 4`) is installed but not pinned in any requirements file.
+- Root-level scripts baseline is now extended and green (22 root pytest tests + test_import.py + verify_end_to_end.py all pass, verified this session prior to this change).
 
 ## Approaches already tried / failed
-- Prior session weakened `* 2.0 → * 4.1` in test_walk_forward.py (commit 910cd49): rejected as an unjustified
-  test weakening; replaced with the evidence-derived two-sided bound above.
-- Commit 0a6caf0 is a junk control-marker commit, not project progress; not counted.
+- None for this change: the CPCV regime gap was confirmed empirically (`regime_analysis in summary: False` before the edit), and the run_backtest/walk_forward pattern was mirrored directly. No failed approach to record.
 
 ## One precise next task
-- Re-run the full `skills/quantitative-backtesting/tests/test_resolution_vs_sample_size.py` suite to confirm no
-  regression from the added test (it touches the file). Then re-run `test_walk_forward.py` and `test_cpcv.py` slow
-  suites per the pending item in HANDOFF.md. Record pass/fail counts in the next handoff. Do not commit unless
-  explicitly asked.
+Run a focused regression slice touching the edited file plus the root guards to lock the baseline, e.g.:
+  `python3 -m pytest skills/quantitative-backtesting/tests/test_cpcv_records_regime_analysis.py skills/quantitative-backtesting/tests/test_cpcv_sma_crossover_real_aapl.py skills/quantitative-backtesting/tests/test_reporting.py skills/quantitative-backtesting/tests/test_walk_forward.py test_root_simple_momentum_real_aapl.py test_root_scripts_pit_bias_controls.py -q -p no:cacheprovider --tb=short`
+  Expect green; then `git checkout -- .` only if a run dirtied tracked artifacts (it should not — these are read-only analyses).
+After that, select the next bounded methodological gap (coverage is extensive — prefer honesty/robustness/reproducibility improvements, not another strategy falsification test). Do not commit unless explicitly asked.
+
+(End of file)

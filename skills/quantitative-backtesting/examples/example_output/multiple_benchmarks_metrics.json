@@ -35,7 +35,7 @@
   "benchmark_1_benchmark_slippage": 0.0001,
   "benchmark_1_benchmark_expense_ratio": 0.0,
   "benchmark_1_benchmark_cost_is_periodic": false,
-  "benchmark_1_correlation_with_benchmark": 0.028661310913714533,
+  "benchmark_1_correlation_with_benchmark": 0.02866131091371453,
   "benchmark_1_alpha": -0.04502443687082482,
   "benchmark_1_beta": 0.028639282442357757,
   "benchmark_1_tracking_error": 0.22156412120316737,
@@ -62,6 +62,16 @@
   },
   "omega_ratio": 1.623426895506539,
   "tail_ratio": 0.9284182629637894,
+  "probabilistic_sharpe": {
+    "probabilistic_sharpe_ratio": 0.2838881860488361,
+    "p_value": 0.716111813951164,
+    "sharpe_ratio": -0.40374136211094325,
+    "benchmark_sharpe": 0.0,
+    "z_score": -0.5713294060077252,
+    "n_observations": 504,
+    "skewness": -0.15623515693551013,
+    "kurtosis": 5.680703676093893
+  },
   "test_resolution": {
     "n_test_observations": 504,
     "n_parameter_trials": null,

@@ -24,6 +24,13 @@ CVaR (99%):            -3.26%
 Skewness:              -0.16
 Kurtosis:              2.68
 
+--- Sharpe Significance (Probabilistic Sharpe Ratio) ---
+Probabilistic Sharpe:  0.2839
+P-Value (vs SR*):      0.7161
+Benchmark Sharpe (SR*): 0.0000
+Z-Score:               -0.5713
+Observations:          504
+
 --- Benchmark Comparison ---
 Benchmark Total Return:      16.07%
 Benchmark Annualized Return: 7.75%
