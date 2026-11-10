@@ -6501,6 +6501,27 @@ def out_of_sample_validation(
         execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency)
     )
 
+    # Regime-dependent performance disclosure for the out-of-sample path:
+    # reports how the held-out test returns are distributed across detected
+    # market regimes (bull/bear/sideways) so the out-of-sample verdict is not
+    # read as a single regime's result. Mirrors the walk-forward, CPCV and
+    # Monte Carlo paths. Gracefully degrades to None when the returns series
+    # cannot be aligned with the price data (e.g. no test observations).
+    try:
+        _oos_regime_payload = add_regime_analysis_to_results(
+            {"returns": test_returns},
+            data,
+            returns_key="returns",
+            close_key="close",
+            config=RegimeConfig(),
+        )
+        if _oos_regime_payload.get("regime_analysis"):
+            summary["regime_analysis"] = _oos_regime_payload["regime_analysis"]
+        else:
+            summary["regime_analysis"] = None
+    except Exception:
+        summary["regime_analysis"] = None
+
     return {
         "train_val_test_split": split_info,
         "validation_results": validation_results,
