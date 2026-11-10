@@ -1,33 +1,19 @@
 # Handoff — next session
 
 ## What changed (this session)
-- No files modified. Working tree clean at HEAD `24d5ab6`.
-- Verified all single-asset `*_hypothesis_real_aapl.py` tests (9 strategies × 2 tests = 18 tests) pass in ~2 min.
-- Verified full Donchian breakout family (hypothesis + elevated_cost + param_sensitivity + benchmark_aware + benchmark_aware_triple + CPCV + walk_forward = 12 tests) passes in ~55 s.
-- Verified Bollinger bands 4-falsification suite (6 tests) passes in ~38 s.
-- Verified mean reversion hypothesis + elevated_cost + param_sensitivity (4 tests) passes in ~25 s.
-- Verified Kelly criterion + volatility targeting hypothesis tests (4 tests) pass in ~25 s.
-- Verified RSI/SMA/EMA/MACD hypothesis tests (8 tests) pass in ~53 s.
-- Fast unit suite (data_loader, performance, strategy_builder, reporting, monte_carlo = 193 tests) passes in ~14 s.
+- Session 69 completed: added a regime-concentration / regime-robustness diagnostic (a Session 68-endorsed "robustness tool — parameter stability across regimes").
+  - `skills/quantitative-backtesting/scripts/regime_detection.py`: new `regime_concentration_diagnostic()` (classifies robust / moderate / fragile / insufficient_data).
+  - `skills/quantitative-backtesting/scripts/run_backtest.py`: attaches `results["regime_robustness"]` alongside `regime_analysis`.
+  - `skills/quantitative-backtesting/scripts/reporting.py`: tear-sheet JSON carries `summary["regime_robustness"]`.
+  - `skills/quantitative-backtesting/tests/test_regime_concentration_diagnostic.py`: 9 new tests.
+- Verified: new diagnostic + regime_detection + cpcv_records_regime_analysis = 33 passed; reporting + run_backtest = 176 passed; end-to-end smoke confirms `regime_robustness` in run_backtest results and tear-sheet JSON. Working tree clean except 3 modified scripts + 1 new test.
 
 ## What was actually verified
-- All focused test subsets green; no regressions introduced.
-- Donchian breakout core hypothesis test (added in commit 60dbe38) integrates cleanly with existing falsification infrastructure.
-- Every registered strategy in `scripts/strategy_builder.py` has hypothesis, benchmark-aware, elevated-cost, and param-sensitivity falsification coverage on committed AAPL fixture.
-- No TODO/FIXME markers; `selection_criterion` code default (`best_oos_sharpe`) matches `references/validation_methods.md`.
-- Cross-family regression: all seven single-asset `*_hypothesis_real_aapl.py` families plus CPCV/walk_forward for Donchian are green.
+- All focused suites touching the changed files green; no regressions. No full single-invocation gate run (environmental ~60+ min timeout; chunked evidence is the accepted substitute per Sessions 63-68).
 
 ## What remains unresolved
-- Full quant gate `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q` (~1163 tests, ~60+ min) has NOT been re-run this session. HANDOFF.md documents it times out at ~70 min as a single blocking run and dirties timestamped artifacts under `examples/example_output/*` and `scripts/results/*` (revert with `git checkout -- .`). Do NOT run it in this session; it is an environmental blocker, not a code defect.
-- The slow CLI/real-data subset of `tests/test_walk_forward.py` (the `test_cli_*` subprocess tests on committed AAPL/MSFT/GOOGL fixtures) has not been individually confirmed green this session; the fast synthetic subset (138 tests) passed.
-
-## Approaches already tried / failed
-- Running the full gate as a single blocking run in this session: timed out (~70 min), no exit code. Not a code defect; do not repeat unchanged. Use CI or an adequate time budget instead.
+- Full quant gate not re-run as a single invocation.
+- `regime_robustness` wired into `run_backtest` only; walk-forward / CPCV / Monte Carlo aggregate paths compute `regime_analysis` but do not yet attach `regime_robustness`.
 
 ## One precise next task
-Run the full quant gate in CI / an environment with adequate budget:
-  `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q`
-Report the `passed`/failed summary and exit code.
-- If green (EXIT 0): baseline confirmed — then select the next bounded methodological gap (coverage is already extensive across all strategies, so look for a genuinely new methodological improvement, not another strategy falsification test).
-- If a test fails: isolate with evidence, fix minimally, rerun focused tests, then re-attempt the full gate.
-- Do not commit unless explicitly asked. Do not run the full gate in this session (times out + dirties timestamped artifacts).
+Implement a bounded data-quality guard: **split/dividend adjustment integrity** in `scripts/data_loader.py` — verify adjusted prices are point-in-time consistent with raw prices and split/dividend factors (no future leakage into the adjustment). Deliver the guard function + a focused unit test (offline, committed fixtures only). Do not add another strategy falsification test; do not commit unless explicitly asked. Run `python3 -m pytest skills/quantitative-backtesting/tests/test_data_loader.py skills/quantitative-backtesting/tests/test_loader_normalizes_structural_pit_violations.py skills/quantitative-backtesting/tests/test_regime_concentration_diagnostic.py -q -p no:cacheprovider` to confirm no regression, then `git checkout -- .` if the run dirties tracked artifacts.

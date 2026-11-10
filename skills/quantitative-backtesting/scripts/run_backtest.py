@@ -58,7 +58,7 @@ from walk_forward import (
     _split_train_val_test,
     _verify_split_separation,
 )
-from regime_detection import add_regime_analysis_to_results, RegimeConfig
+from regime_detection import add_regime_analysis_to_results, RegimeConfig, regime_concentration_diagnostic
 
 
 def parse_args():
@@ -868,6 +868,16 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
         results["regime_analysis"] = _regime_results.get("regime_analysis")
     except Exception:
         results["regime_analysis"] = None
+
+    # Regime-concentration robustness diagnostic: whether the strategy's edge
+    # is diversified across regimes or concentrated in a single one. A
+    # measurement only; it changes no return, cost, impact or capacity number.
+    try:
+        results["regime_robustness"] = regime_concentration_diagnostic(
+            results.get("regime_analysis") or {},
+        )
+    except Exception:
+        results["regime_robustness"] = None
 
     # Optional buy-and-hold benchmark baseline(s).
     # The benchmark return for period t is the close-to-close return

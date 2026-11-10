@@ -426,6 +426,134 @@ def add_regime_analysis_to_results(
     return results
 
 
+def regime_concentration_diagnostic(
+    regime_analysis: Dict,
+    min_regime_length: int = 21,
+    min_sharpe: float = 0.0,
+    sharpe_spread_threshold: float = 1.0,
+) -> Dict:
+    """
+    Assess whether a strategy's edge is concentrated in a single market regime.
+
+    A strategy whose Sharpe is positive in only one regime (and flat or
+    negative in the others) is regime-dependent: its apparent edge may not
+    survive a regime change. This is a measurement only -- it changes no
+    return, cost, impact or capacity number.
+
+    Args:
+        regime_analysis: Output of ``regime_performance_summary``.
+        min_regime_length: Minimum observations for a regime to count as traded.
+        min_sharpe: Sharpe threshold above which a regime counts as positive.
+        sharpe_spread_threshold: Sharpe spread beyond which multi-regime
+            performance is treated as inconsistent ("moderate").
+
+    Returns:
+        Dict with the robustness classification, per-regime Sharpe ratios,
+        and a human-readable message. ``regime_robustness`` is one of
+        ``robust``, ``moderate``, ``fragile``, ``insufficient_data``.
+    """
+    combined = (regime_analysis or {}).get("combined_regime_performance") or {}
+
+    per_regime = {}
+    for regime, metrics in combined.items():
+        if not isinstance(metrics, dict):
+            continue
+        if regime == "unknown":
+            continue
+        n_observations = int(metrics.get("n_observations", 0) or 0)
+        sharpe_ratio = float(metrics.get("sharpe_ratio", 0.0) or 0.0)
+        per_regime[regime] = {
+            "sharpe_ratio": sharpe_ratio,
+            "n_observations": n_observations,
+        }
+
+    traded = {
+        regime: values
+        for regime, values in per_regime.items()
+        if values["n_observations"] >= min_regime_length
+    }
+
+    n_traded = len(traded)
+    result = {
+        "regime_robustness": "insufficient_data",
+        "is_regime_concentrated": False,
+        "n_regimes_traded": n_traded,
+        "n_regimes_positive": 0,
+        "n_regimes_negative": 0,
+        "best_regime": None,
+        "best_sharpe": None,
+        "worst_regime": None,
+        "worst_sharpe": None,
+        "sharpe_spread": 0.0,
+        "regime_sharpes": {},
+        "regime_observations": {},
+        "dominant_regime": None,
+        "message": "Fewer than two regimes have enough observations to classify regime dependence.",
+    }
+
+    if n_traded < 2:
+        return result
+
+    sharpes = {regime: values["sharpe_ratio"] for regime, values in traded.items()}
+    observations = {regime: values["n_observations"] for regime, values in traded.items()}
+
+    positive = [regime for regime, sharpe in sharpes.items() if sharpe > min_sharpe]
+    negative = [regime for regime, sharpe in sharpes.items() if sharpe < -min_sharpe]
+
+    best_regime = max(sharpes, key=sharpes.get)
+    worst_regime = min(sharpes, key=sharpes.get)
+    best_sharpe = sharpes[best_regime]
+    worst_sharpe = sharpes[worst_regime]
+    sharpe_spread = best_sharpe - worst_sharpe
+    dominant_regime = max(observations, key=observations.get)
+
+    result.update({
+        "regime_sharpes": sharpes,
+        "regime_observations": observations,
+        "best_regime": best_regime,
+        "best_sharpe": best_sharpe,
+        "worst_regime": worst_regime,
+        "worst_sharpe": worst_sharpe,
+        "sharpe_spread": sharpe_spread,
+        "dominant_regime": dominant_regime,
+        "n_regimes_positive": len(positive),
+        "n_regimes_negative": len(negative),
+    })
+
+    if len(positive) == 0:
+        result["regime_robustness"] = "fragile"
+        result["is_regime_concentrated"] = True
+        result["message"] = (
+            "No regime produces a positive Sharpe; the strategy has no "
+            "regime-diversified edge."
+        )
+    elif len(positive) == 1:
+        result["regime_robustness"] = "fragile"
+        result["is_regime_concentrated"] = True
+        result["message"] = (
+            "The edge is concentrated in a single regime "
+            f"({best_regime}); performance is regime-dependent and may not "
+            "survive a regime change."
+        )
+    elif sharpe_spread >= sharpe_spread_threshold:
+        result["regime_robustness"] = "moderate"
+        result["is_regime_concentrated"] = False
+        result["message"] = (
+            "Multiple regimes produce a positive Sharpe, but the spread "
+            "between the best and worst regime is wide; performance is "
+            "inconsistent across regimes."
+        )
+    else:
+        result["regime_robustness"] = "robust"
+        result["is_regime_concentrated"] = False
+        result["message"] = (
+            "Multiple regimes produce a positive Sharpe with a narrow "
+            "spread; the edge is diversified across regimes."
+        )
+
+    return result
+
+
 if __name__ == "__main__":
     # Demo
     import tempfile

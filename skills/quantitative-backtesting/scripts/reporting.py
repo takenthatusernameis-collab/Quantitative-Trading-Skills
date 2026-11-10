@@ -1594,6 +1594,8 @@ def generate_tear_sheet(
     # absent (backward compatible).
     if results.get("regime_analysis"):
         summary["regime_analysis"] = _json_safe(results["regime_analysis"])
+    if results.get("regime_robustness") is not None:
+        summary["regime_robustness"] = _json_safe(results["regime_robustness"])
     # Bias-controls engagement flag (PIT + deflation controls). Mirrors the
     # walk-forward / CPCV / Monte Carlo summaries so the tear-sheet JSON is
     # traceable to the same signal; omitted when absent (backward compatible).
