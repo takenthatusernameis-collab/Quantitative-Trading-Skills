@@ -201,6 +201,18 @@ def adjustment_integrity_guard(df: pd.DataFrame) -> Dict[str, Any]:
     if len(df) == 0:
         return {"passed": True, "violations": [], "warnings": [], "details": {"reason": "empty frame"}}
 
+    # Duplicate timestamps make per-date split/adjustment factors ambiguous
+    # (e.g. stacked multi-symbol frames). The guard cannot verify point-in-time
+    # consistency without a unique timeline, so fail closed rather than
+    # mis-attributing or crashing on duplicate-index lookups.
+    if df.index.duplicated().any():
+        return {
+            "passed": False,
+            "violations": ["duplicate timestamps in index; adjustment integrity cannot be verified"],
+            "warnings": warnings_list,
+            "details": {"reason": "duplicate timestamps"},
+        }
+
     close = df["close"].astype(float)
     adj = df["adj_close"].astype(float)
 
@@ -217,8 +229,9 @@ def adjustment_integrity_guard(df: pd.DataFrame) -> Dict[str, Any]:
     if "splits" in df.columns:
         splits = df["splits"].astype(float).fillna(1.0)
         split_mask = splits.notna() & (splits != 0) & (splits != 1.0)
-        for idx in sorted(df[split_mask].index):
-            ratio = float(df.at[idx, "splits"])
+        for idx in sorted(df.index[split_mask].unique()):
+            ratio_val = df.loc[idx, "splits"]
+            ratio = float(np.asarray(ratio_val).reshape(-1)[0])
             cum[df.index < idx] *= ratio
 
     expected = close / cum
@@ -832,6 +845,7 @@ def load_multi_symbol(
                     prov.date_range_final = (
                         str(result[sym].index.min()), str(result[sym].index.max())
                     )
+                prov.adjustment_integrity = adjustment_integrity_guard(result[sym])
                 provenance_dict[sym] = prov
         else:
             dropped_symbols.append(sym)
