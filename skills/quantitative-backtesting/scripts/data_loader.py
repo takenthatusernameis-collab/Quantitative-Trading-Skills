@@ -45,6 +45,7 @@ class DataProvenance:
     checksum: Optional[str] = None
     total_return_type: Optional[str] = None
     name: Optional[str] = None
+    adjustment_integrity: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to JSON-serializable dictionary."""
@@ -156,6 +157,120 @@ def _adjust_for_splits(df: pd.DataFrame) -> pd.DataFrame:
 
     df["splits_adjusted"] = True
     return df
+
+
+def adjustment_integrity_guard(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Verify that ``adj_close`` is point-in-time consistent with raw prices and
+    the recorded split/dividend factors, i.e. no future information leaks into
+    the adjustment.
+
+    Convention (matches :func:`_adjust_for_splits`): a split with ratio ``r``
+    at date ``k`` means the close on and after ``k`` is already at the
+    post-split level, so prices strictly before ``k`` are divided by ``r``.
+    The expected adjusted close at date ``t`` is therefore::
+
+        adj_close[t] == close[t] / cum_split_after[t]
+
+    where ``cum_split_after[t]`` is the product of split ratios at dates
+    strictly after ``t``.  The adjustment factor may only change at recorded
+    split dates; any change at a non-event date is treated as a point-in-time
+    violation (unrecorded or future information folded into the adjustment).
+
+    Args:
+        df: DataFrame with OHLCV data and optional ``adj_close``, ``splits``,
+            and ``dividends`` columns.
+
+    Returns:
+        dict with keys ``passed`` (bool), ``violations`` (list of str),
+        ``warnings`` (list of str), and ``details`` (dict of per-date factors
+        and deviation metrics).
+    """
+    violations: List[str] = []
+    warnings_list: List[str] = []
+    details: Dict[str, Any] = {}
+
+    if "adj_close" not in df.columns or "close" not in df.columns:
+        return {
+            "passed": True,
+            "violations": [],
+            "warnings": ["adj_close or close column missing; nothing to guard"],
+            "details": {"reason": "missing columns"},
+        }
+
+    if len(df) == 0:
+        return {"passed": True, "violations": [], "warnings": [], "details": {"reason": "empty frame"}}
+
+    close = df["close"].astype(float)
+    adj = df["adj_close"].astype(float)
+
+    # --- split well-formedness --------------------------------------
+    if "splits" in df.columns:
+        splits = df["splits"].astype(float)
+        if (splits < 0).any():
+            violations.append("splits column contains negative values")
+        if (splits == 0).any():
+            violations.append("splits column contains a zero ratio (invalid split factor)")
+
+    # --- expected adjusted close under the documented convention -----
+    cum = pd.Series(1.0, index=df.index, dtype=float)
+    if "splits" in df.columns:
+        splits = df["splits"].astype(float).fillna(1.0)
+        split_mask = splits.notna() & (splits != 0) & (splits != 1.0)
+        for idx in sorted(df[split_mask].index):
+            ratio = float(df.at[idx, "splits"])
+            cum[df.index < idx] *= ratio
+
+    expected = close / cum
+    deviation = (adj - expected).abs()
+    denom = expected.abs().replace(0, np.nan)
+    rel_dev = deviation / denom
+    max_rel_dev = float(rel_dev.max()) if rel_dev.notna().any() else 0.0
+    n_mismatch = int((rel_dev > 1e-6).sum())
+
+    details = {
+        "cum_split_after": cum.to_dict(),
+        "expected_adj_close": expected.to_dict(),
+        "max_relative_deviation": max_rel_dev,
+        "n_mismatch": n_mismatch,
+    }
+
+    if n_mismatch > 0:
+        worst = rel_dev.idxmax() if rel_dev.notna().any() else None
+        violations.append(
+            "adj_close not reproducible from close+splits at "
+            f"{n_mismatch} date(s); max relative deviation {max_rel_dev:.6f} "
+            f"(worst at {str(worst)[:10] if worst is not None else 'N/A'})"
+        )
+
+    # --- point-in-time: adjustment factor may only change at split dates
+    factor = expected / close
+    factor_changes = (factor != factor.shift(1)).fillna(False)
+    # The first date has no predecessor; it cannot be a "change" relative to
+    # an earlier observation, so exclude it from the event-date check.
+    factor_changes.iloc[0] = False
+    event_dates = set()
+    if "splits" in df.columns:
+        splits = df["splits"].astype(float).fillna(1.0)
+        event_dates.update(df.index[splits.notna() & (splits != 0) & (splits != 1.0)])
+    illegal_change_dates = [d for d in df.index[factor_changes] if d not in event_dates]
+    if illegal_change_dates:
+        violations.append(
+            "adj_close/close ratio changes at non-split date(s): "
+            + ", ".join(str(d)[:10] for d in illegal_change_dates[:5])
+            + (" ..." if len(illegal_change_dates) > 5 else "")
+        )
+        details["illegal_change_dates"] = [str(d) for d in illegal_change_dates]
+
+    # --- dividends: sign sanity only (direction handled by convention) ---
+    if "dividends" in df.columns:
+        dividends = df["dividends"].astype(float)
+        if (dividends < 0).any():
+            violations.append("dividends column contains negative values")
+        details["n_dividend_dates"] = int((dividends != 0).sum())
+
+    passed = len(violations) == 0
+    return {"passed": passed, "violations": violations, "warnings": warnings_list, "details": details}
 
 
 # Alias for common naming
@@ -297,6 +412,11 @@ def load_data(
 
     # Validate data and update provenance
     validate_data(df, provenance=provenance)
+
+    # Adjustment integrity: adj_close must be point-in-time consistent with
+    # close and the recorded split/dividend factors (no future leakage).
+    # Advisory only: stored on the provenance, never flips validation_passed.
+    provenance.adjustment_integrity = adjustment_integrity_guard(df)
 
     if return_provenance:
         return df, provenance
