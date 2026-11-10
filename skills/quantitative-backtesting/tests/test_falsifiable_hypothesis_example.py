@@ -902,8 +902,93 @@ def test_falsifiable_machinery_on_independent_real_market_data():
     assert result["verdict"] == ("SUPPORTED" if result["all_pass"] else "NOT SUPPORTED")
 
 
-def test_falsifiable_machinery_on_googl_real_market_data():
-    """Real-market machinery check on GOOGL primary, MSFT benchmark."""
+def test_falsifiable_machinery_on_googl_real_market_data_alt_benchmark():
+    """Real-market machinery check on GOOGL primary, AAPL benchmark."""
+    import contextlib
+    import io
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    src_dir = SKILLS_DIR / "assets" / "example_data" / "real_market_data"
+    assert (src_dir / "GOOGL.csv").exists()
+    assert (src_dir / "AAPL.csv").exists()
+
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        shutil.copyfile(src_dir / "GOOGL.csv", d / "sample_ohlcv.csv")
+        shutil.copyfile(src_dir / "AAPL.csv", d / "sample_benchmark.csv")
+        data_path = d / "sample_ohlcv.csv"
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            result = run_hypothesis_test(data_path)
+
+    assert isinstance(result, dict)
+    assert result["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+    assert result["pit_passed"] is True
+    assert result["bias_controls_engaged"] is True
+    obs = result["observed"]
+    assert obs["test_n_observations"] and obs["test_n_observations"] > 0
+    assert obs["n_benchmarks"] and obs["n_benchmarks"] >= 2
+    assert len(result["criteria"]) == 5
+    sep = result["separation_check"]
+    assert sep.get("disjoint") is True
+    assert sep.get("chronological") is True
+    for overlap in ("train_val_overlap", "val_test_overlap", "train_test_overlap"):
+        assert sep.get(overlap) == 0
+    res = result["resolution"]
+    for key in ("n_test_observations", "n_parameter_trials", "n_benchmarks",
+                "min_detectable_sharpe", "min_detectable_alpha",
+                "min_detectable_benchmark_alpha"):
+        assert key in res
+    assert result["all_pass"] == all(c["passed"] for c in result["criteria"])
+    assert result["verdict"] == ("SUPPORTED" if result["all_pass"] else "NOT SUPPORTED")
+
+
+def test_falsifiable_machinery_on_aapl_real_market_data_alt_benchmark():
+    """Real-market machinery check on AAPL primary, GOOGL benchmark."""
+    import contextlib
+    import io
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    src_dir = SKILLS_DIR / "assets" / "example_data" / "real_market_data"
+    assert (src_dir / "AAPL.csv").exists()
+    assert (src_dir / "GOOGL.csv").exists()
+
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        shutil.copyfile(src_dir / "AAPL.csv", d / "sample_ohlcv.csv")
+        shutil.copyfile(src_dir / "GOOGL.csv", d / "sample_benchmark.csv")
+        data_path = d / "sample_ohlcv.csv"
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            result = run_hypothesis_test(data_path)
+
+    assert isinstance(result, dict)
+    assert result["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+    assert result["pit_passed"] is True
+    assert result["bias_controls_engaged"] is True
+    obs = result["observed"]
+    assert obs["test_n_observations"] and obs["test_n_observations"] > 0
+    assert obs["n_benchmarks"] and obs["n_benchmarks"] >= 2
+    assert len(result["criteria"]) == 5
+    sep = result["separation_check"]
+    assert sep.get("disjoint") is True
+    assert sep.get("chronological") is True
+    for overlap in ("train_val_overlap", "val_test_overlap", "train_test_overlap"):
+        assert sep.get(overlap) == 0
+    res = result["resolution"]
+    for key in ("n_test_observations", "n_parameter_trials", "n_benchmarks",
+                "min_detectable_sharpe", "min_detectable_alpha",
+                "min_detectable_benchmark_alpha"):
+        assert key in res
+    assert result["all_pass"] == all(c["passed"] for c in result["criteria"])
+    assert result["verdict"] == ("SUPPORTED" if result["all_pass"] else "NOT SUPPORTED")
+
     import contextlib
     import io
     import shutil
@@ -1786,7 +1871,8 @@ TEST_REGISTRY = [
     ("test_the_selection_criterion_is_oos_aware", test_the_selection_criterion_is_oos_aware),
     ("test_falsifiable_machinery_on_independent_out_of_sample_fixture", test_falsifiable_machinery_on_independent_out_of_sample_fixture),
     ("test_falsifiable_machinery_on_independent_real_market_data", test_falsifiable_machinery_on_independent_real_market_data),
-    ("test_falsifiable_machinery_on_googl_real_market_data", test_falsifiable_machinery_on_googl_real_market_data),
+    ("test_falsifiable_machinery_on_googl_real_market_data_alt_benchmark", test_falsifiable_machinery_on_googl_real_market_data_alt_benchmark),
+    ("test_falsifiable_machinery_on_aapl_real_market_data_alt_benchmark", test_falsifiable_machinery_on_aapl_real_market_data_alt_benchmark),
     ("test_falsifiable_machinery_on_aapl_real_market_data", test_falsifiable_machinery_on_aapl_real_market_data),
     ("test_falsifiable_machinery_on_msft_real_market_data", test_falsifiable_machinery_on_msft_real_market_data),
     ("test_real_market_cost_sensitivity_sweep", test_real_market_cost_sensitivity_sweep),

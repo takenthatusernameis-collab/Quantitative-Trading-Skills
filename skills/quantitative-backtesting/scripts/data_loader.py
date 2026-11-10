@@ -861,16 +861,60 @@ def fetch_ohlcv_yahoo(symbol: str, start: str, end: str, max_retries: int = 3,
     raise RuntimeError(f"fetch failed for {symbol}: {last_err}")
 
 
-if __name__ == "__main__":
-    # Quick test
-    import tempfile
+def _build_parser():
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Load, validate, or fetch OHLCV data for quantitative backtesting."
+    )
+    parser.add_argument("--fetch-yahoo", metavar="SYMBOL",
+                        help="Fetch daily OHLCV from Yahoo Finance (bounded, honors 429/Retry-After).")
+    parser.add_argument("--start", help="Start date YYYY-MM-DD (required with --fetch-yahoo).")
+    parser.add_argument("--end", help="End date YYYY-MM-DD (required with --fetch-yahoo).")
+    parser.add_argument("--output", "-o", help="Output CSV path for fetched data.")
+    parser.add_argument("--max-retries", type=int, default=3)
+    parser.add_argument("--timeout", type=int, default=20)
+    parser.add_argument("--validate", metavar="PATH", help="Validate an existing OHLCV file.")
+    return parser
 
-    # Create sample data
+
+if __name__ == "__main__":
+    import sys
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    if args.fetch_yahoo:
+        if not args.start or not args.end or not args.output:
+            parser.error("--fetch-yahoo requires --start, --end, and --output")
+        try:
+            df = fetch_ohlcv_yahoo(
+                args.fetch_yahoo, args.start, args.end,
+                max_retries=args.max_retries, timeout=args.timeout,
+            )
+        except Exception as e:
+            print(f"FETCH FAILED ({type(e).__name__}): {e}", file=sys.stderr)
+            print("Limitation: real-market fetch is network-dependent; record URL/schema and retry later with bounded backoff.", file=sys.stderr)
+            sys.exit(2)
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(out, index=False)
+        print(f"Saved {len(df)} rows to {out}")
+        print(f"Columns: {list(df.columns)}")
+        print(f"Date range: {df['date'].min()} -> {df['date'].max()}")
+        sys.exit(0)
+
+    if args.validate:
+        loaded = load_data(args.validate)
+        ok = validate_data(loaded)
+        print(f"Loaded shape: {loaded.shape}")
+        print(f"Validation: {ok}")
+        sys.exit(0 if ok else 1)
+
+    # Default quick self-test (no args)
+    import tempfile
     dates = pd.date_range("2020-01-01", periods=100, freq="B")
     np.random.seed(42)
     returns = np.random.normal(0.0005, 0.015, 100)
     prices = 100 * np.exp(np.cumsum(returns))
-
     df = pd.DataFrame({
         "date": dates,
         "open": prices * np.random.uniform(0.995, 1.005, 100),
@@ -879,7 +923,6 @@ if __name__ == "__main__":
         "close": prices,
         "volume": np.random.randint(1000000, 10000000, 100)
     })
-
     with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as f:
         df.to_csv(f.name, index=False)
         print(f"Test file: {f.name}")
