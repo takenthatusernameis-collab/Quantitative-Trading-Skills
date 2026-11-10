@@ -567,6 +567,88 @@ def generate_tear_sheet(
             out.append("</table>")
         return out
 
+    def regime_robustness_section(rr):
+        """Render the regime-concentration / regime-robustness diagnostic.
+
+        ``regime_concentration_diagnostic`` classifies whether a strategy's
+        edge is diversified across regimes or concentrated in a single one
+        (``robust`` / ``moderate`` / ``fragile`` / ``insufficient_data``).
+        It is the decision-relevant summary of the Regime Analysis above:
+        a reader can see at a glance whether the per-regime Sharpe table
+        supports a robust edge or a regime-dependent one. Omitted entirely
+        when results carry no ``regime_robustness`` dict (backward
+        compatible).
+        """
+        if not isinstance(rr, dict):
+            return []
+        classification = rr.get("regime_robustness")
+        if classification is None:
+            return []
+        out = ["<h3>Regime Robustness</h3>"]
+        out.append("<table><tr><th>Metric</th><th>Value</th></tr>")
+        # The classification is the headline; colour it by severity so the
+        # verdict is legible without reading the per-regime table.
+        cls = {
+            "robust": "positive",
+            "moderate": "",
+            "fragile": "negative",
+            "insufficient_data": "",
+        }.get(classification, "")
+        out.append(
+            f"<tr><td>Regime Robustness</td>"
+            f"<td class='metric {cls}'>{classification}</td></tr>"
+        )
+        out.append(
+            f"<tr><td>Edge Concentrated in One Regime</td>"
+            f"<td class='metric'>{bool(rr.get('is_regime_concentrated'))}</td></tr>"
+        )
+        out.append(
+            f"<tr><td>Regimes Traded</td>"
+            f"<td class='metric'>{fmt_num(rr.get('n_regimes_traded'))}</td></tr>"
+        )
+        out.append(
+            f"<tr><td>Positive-Sharpe Regimes</td>"
+            f"<td class='metric'>{fmt_num(rr.get('n_regimes_positive'))}</td></tr>"
+        )
+        out.append(
+            f"<tr><td>Negative-Sharpe Regimes</td>"
+            f"<td class='metric'>{fmt_num(rr.get('n_regimes_negative'))}</td></tr>"
+        )
+        out.append(
+            f"<tr><td>Best Regime</td>"
+            f"<td class='metric'>{rr.get('best_regime', 'N/A')}</td></tr>"
+        )
+        best_sharpe = rr.get("best_sharpe")
+        out.append(
+            f"<tr><td>Best Regime Sharpe</td>"
+            f"<td class='metric'>{fmt_num(best_sharpe) if isinstance(best_sharpe, (int, float)) else 'N/A'}</td></tr>"
+        )
+        out.append(
+            f"<tr><td>Worst Regime</td>"
+            f"<td class='metric'>{rr.get('worst_regime', 'N/A')}</td></tr>"
+        )
+        worst_sharpe = rr.get("worst_sharpe")
+        out.append(
+            f"<tr><td>Worst Regime Sharpe</td>"
+            f"<td class='metric'>{fmt_num(worst_sharpe) if isinstance(worst_sharpe, (int, float)) else 'N/A'}</td></tr>"
+        )
+        spread = rr.get("sharpe_spread")
+        out.append(
+            f"<tr><td>Sharpe Spread (Best - Worst)</td>"
+            f"<td class='metric'>{fmt_num(spread) if isinstance(spread, (int, float)) else 'N/A'}</td></tr>"
+        )
+        out.append(
+            f"<tr><td>Dominant Regime (Most Obs)</td>"
+            f"<td class='metric'>{rr.get('dominant_regime', 'N/A')}</td></tr>"
+        )
+        message = rr.get("message")
+        if message:
+            out.append(
+                f"<tr><td>Interpretation</td><td class='metric'>{message}</td></tr>"
+            )
+        out.append("</table>")
+        return out
+
 
     summary_metrics = [
         ("Total Return", "total_return", fmt_pct),
@@ -662,6 +744,11 @@ def generate_tear_sheet(
     # regimes (trend, volatility, combined), so a backtest is never read as
     # a single number without its regime context. Omitted when absent.
     html_parts.extend(regime_analysis_section(results.get("regime_analysis")))
+    # Regime robustness: the classification of whether the per-regime edge
+    # is diversified or concentrated. Rendered next to the Regime Analysis
+    # so the verdict is legible without reading the per-regime table; the
+    # same dict is already carried by the JSON summary. Omitted when absent.
+    html_parts.extend(regime_robustness_section(results.get("regime_robustness")))
 
     # Trade analytics
     if "total_trades" in metrics:
@@ -953,6 +1040,13 @@ def generate_tear_sheet(
         html_parts.extend(
             regime_analysis_section(wf_summary.get("regime_analysis"))
         )
+        # Walk-Forward Regime Robustness: the classification of whether the
+        # OOS edge is diversified or concentrated, rendered next to the
+        # Regime Analysis so the verdict is legible without reading the
+        # per-regime table. Omitted when absent.
+        html_parts.extend(
+            regime_robustness_section(wf_summary.get("regime_robustness"))
+        )
 
     # Data provenance: surface source path, checksum, date range, filters,
     # transformations, and validation outcome so each tear sheet is
@@ -1218,6 +1312,12 @@ def generate_tear_sheet(
         html_parts.extend(
             regime_analysis_section(cpcv_summary.get("regime_analysis"))
         )
+        # CPCV Regime Robustness: the classification of whether the OOS
+        # edge is diversified or concentrated, rendered next to the
+        # Regime Analysis. Omitted when absent.
+        html_parts.extend(
+            regime_robustness_section(cpcv_summary.get("regime_robustness"))
+        )
 
     mc_results = analysis.get("monte_carlo")
     if mc_results:
@@ -1268,6 +1368,12 @@ def generate_tear_sheet(
         # for the base strategy returns used in the simulation.
         html_parts.extend(
             regime_analysis_section(mc_summary.get("regime_analysis"))
+        )
+        # Monte Carlo Regime Robustness: the classification of whether the
+        # base edge is diversified or concentrated, rendered next to the
+        # Regime Analysis. Omitted when absent.
+        html_parts.extend(
+            regime_robustness_section(mc_summary.get("regime_robustness"))
         )
 
     # Generate plots if matplotlib is available
