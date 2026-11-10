@@ -175,6 +175,31 @@ def test_run_backtest_records_regime_analysis():
     assert "regime_distribution" in ra
 
 
+def test_run_backtest_records_regime_robustness():
+    """run_backtest discloses regime-concentration robustness in results.
+
+    The single-backtest path should surface regime_robustness (the
+    regime-concentration diagnostic) next to regime_analysis, so a consumer
+    can see whether the edge is diversified across regimes or concentrated
+    in a single one. A measurement only; it changes no return, cost, impact
+    or capacity number.
+    """
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+    results = run_backtest(data, strategy, _Args())
+
+    assert "regime_robustness" in results, "run_backtest results must carry regime_robustness"
+    rr = results["regime_robustness"]
+    assert isinstance(rr, dict), f"regime_robustness must be a dict, got {type(rr)}"
+    assert "regime_robustness" in rr, "regime_robustness dict missing classification key"
+    assert rr["regime_robustness"] in (
+        "robust",
+        "moderate",
+        "fragile",
+        "insufficient_data",
+    ), f"unexpected classification {rr['regime_robustness']!r}"
+
+
 def test_run_backtest_trade_analytics_populated():
     """Trade-level metrics are computed when the strategy trades."""
     data = _make_data()
@@ -3856,6 +3881,7 @@ TEST_REGISTRY = [
     ("test_run_backtest_flat_long_lookback_raises", test_run_backtest_flat_long_lookback_raises),
     ("test_run_backtest_active_strategy_succeeds", test_run_backtest_active_strategy_succeeds),
     ("test_run_backtest_records_regime_analysis", test_run_backtest_records_regime_analysis),
+    ("test_run_backtest_records_regime_robustness", test_run_backtest_records_regime_robustness),
     ("test_run_backtest_trade_analytics_populated", test_run_backtest_trade_analytics_populated),
     ("test_run_backtest_n_trials_surfaces_deflated_sharpe", test_run_backtest_n_trials_surfaces_deflated_sharpe),
     ("test_run_backtest_without_n_trials_omits_deflated_sharpe", test_run_backtest_without_n_trials_omits_deflated_sharpe),
