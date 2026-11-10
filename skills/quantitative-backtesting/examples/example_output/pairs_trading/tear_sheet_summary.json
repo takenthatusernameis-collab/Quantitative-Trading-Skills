@@ -32,10 +32,7 @@
     "tail_ratio": Infinity,
     "initial_capital": 100000
   },
-  "plot_files": [
-    "equity_curve.png",
-    "returns_distribution.png"
-  ],
+  "plot_files": [],
   "probabilistic_sharpe": {
     "probabilistic_sharpe_ratio": 0.9999998934282214,
     "p_value": 1.0657177862416489e-07,

@@ -35,10 +35,7 @@
     "tail_ratio": 0.9284182629637894,
     "initial_capital": null
   },
-  "plot_files": [
-    "equity_curve.png",
-    "returns_distribution.png"
-  ],
+  "plot_files": [],
   "probabilistic_sharpe": {
     "probabilistic_sharpe_ratio": 0.2838881860488361,
     "p_value": 0.716111813951164,
