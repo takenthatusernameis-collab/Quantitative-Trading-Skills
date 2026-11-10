@@ -45,6 +45,7 @@ _MACD_PATH = SKILLS_DIR / "examples" / "macd_hypothesis.py"
 _KELLY_CRITERION_PATH = SKILLS_DIR / "examples" / "kelly_criterion_hypothesis.py"
 _WF_COMPARE_TRIPLE_PATH = SKILLS_DIR / "examples" / "walk_forward_compare_triple.py"
 _COMPARE_DUAL_CS_PATH = SKILLS_DIR / "examples" / "compare_dual_vs_cross_sectional_triple.py"
+_HRP_ALLOC_PATH = SKILLS_DIR / "examples" / "hrp_portfolio_allocation_example.py"
 
 _REAL_MARKET_DATA = SKILLS_DIR / "assets" / "example_data" / "real_market_data"
 
@@ -60,7 +61,6 @@ def _build_triple_csv(dest: Path) -> Path:
     out = dest / "aapl_msft_googl_triple.csv"
     combined.to_csv(out, index=False)
     return out
-_DUAL_MOMENTUM_PATH = SKILLS_DIR / "examples" / "dual_momentum_hypothesis.py"
 
 
 def _import_module(name, path):
@@ -1181,3 +1181,31 @@ def test_scripts_results_untouched_after_examples():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ---------------------------------------------------------------------------
+# hrp_portfolio_allocation_example.py
+# ---------------------------------------------------------------------------
+
+def test_hrp_portfolio_allocation_example_imports():
+    module = _import_module("hrp_portfolio_allocation_example", _HRP_ALLOC_PATH)
+    assert hasattr(module, "main")
+    assert callable(module.main)
+
+
+def test_hrp_portfolio_allocation_example_runs():
+    result = subprocess.run(
+        [sys.executable, str(_HRP_ALLOC_PATH)],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == 0, (
+        f"hrp_portfolio_allocation_example exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-3000:]}\nstderr:\n{result.stderr[-3000:]}"
+    )
+    assert "HRP PORTFOLIO ALLOCATION EXAMPLE" in result.stdout
+    assert "EXAMPLE COMPLETE" in result.stdout
+    assert "Weights:" in result.stdout
+    # Must report HRP alongside baseline allocators on the committed panel.
+    assert "hrp:" in result.stdout
+    assert "equal_weight:" in result.stdout
+    assert "inverse_volatility:" in result.stdout
