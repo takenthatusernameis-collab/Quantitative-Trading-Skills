@@ -8,6 +8,12 @@ import numpy as np
 import pandas as pd
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from scipy.cluster.hierarchy import dendrogram, linkage
+    from scipy.spatial.distance import squareform
+except ImportError:  # pragma: no cover - optional dependency
+    dendrogram = linkage = squareform = None
+
 
 # Panel pricing modes.
 #
@@ -1945,6 +1951,183 @@ def _sweep_resolution_fields(result: Dict[str, Any]) -> Tuple[str, str]:
     except (TypeError, ValueError):
         return "n/a", "n/a"
     return threshold_text, ("below resolution" if below else "resolvable")
+
+
+def hierarchical_risk_parity(
+    returns: pd.DataFrame,
+    min_weight: float = 0.0,
+    max_weight: float = 1.0,
+    linkage_method: str = "single",
+) -> pd.Series:
+    """
+    Hierarchical Risk Parity (HRP) portfolio allocation.
+
+    Implements the algorithm from Lopez de Prado (2016): builds a hierarchical
+    clustering of assets based on their correlation structure, then recursively
+    allocates capital using inverse-variance weighting within each cluster.
+    This produces diversified portfolios that are more robust to estimation
+    error than mean-variance optimization.
+
+    Steps:
+    1. Compute correlation matrix from returns.
+    2. Convert to distance matrix: d[i,j] = sqrt((1 - corr[i,j]) / 2).
+    3. Hierarchical clustering (single linkage by default) on the distance matrix.
+    4. Quasi-diagonalize the correlation matrix by reordering assets along the
+       dendrogram leaves.
+    5. Recursive bisection: at each split, allocate capital between the two
+       sub-clusters in proportion to their inverse variance (using cluster
+       variance with equal weights inside each cluster).
+
+    Args:
+        returns: DataFrame of asset returns (rows = dates, columns = symbols).
+            Must have at least 2 assets and sufficient observations for a
+            stable correlation estimate.
+        min_weight: Minimum weight per asset (default 0.0, no shorting).
+        max_weight: Maximum weight per asset (default 1.0).
+        linkage_method: Hierarchical clustering linkage method. Options:
+            'single', 'complete', 'average', 'ward'. Default 'single' matches
+            the original HRP paper.
+
+    Returns:
+        Series of portfolio weights indexed by asset symbol, summing to 1.0
+        (within numerical tolerance). Weights are clipped to [min_weight, max_weight]
+        and renormalized.
+
+    Raises:
+        ValueError: If returns has fewer than 2 assets, insufficient observations,
+            or if the correlation matrix is not positive definite.
+    """
+    if dendrogram is None or linkage is None or squareform is None:
+        raise ImportError(
+            "hierarchical_risk_parity requires scipy. "
+            "Install with: pip install scipy"
+        )
+    if not isinstance(returns, pd.DataFrame):
+        raise TypeError("returns must be a pandas DataFrame")
+    if returns.shape[1] < 2:
+        raise ValueError("HRP requires at least 2 assets")
+    if returns.shape[0] < 2:
+        raise ValueError("Insufficient observations for correlation estimation")
+
+    # Check for any all-NaN columns in the original data
+    all_nan_cols = returns.columns[returns.isna().all()].tolist()
+    if all_nan_cols:
+        raise ValueError(f"Assets with all-NaN returns not allowed: {all_nan_cols}")
+
+    # Clean returns: fill NaN with column mean (handles leading/trailing NaN)
+    clean_returns = returns.fillna(returns.mean())
+    if clean_returns.isna().any().any():
+        raise ValueError("Returns contain NaN values that could not be filled")
+
+    # --- Step 1: Correlation matrix ---
+    corr = clean_returns.corr()
+    if not np.allclose(corr.values, corr.values.T):
+        raise ValueError("Correlation matrix is not symmetric")
+    if (np.diag(corr.values) <= 0).any():
+        raise ValueError("Correlation matrix has non-positive diagonal")
+
+    # Regularize correlation matrix to avoid zero distances (perfect correlation)
+    # Add small diagonal ridge for numerical stability
+    n = corr.shape[0]
+    corr_reg = corr.values + np.eye(n) * 1e-10
+    # Re-normalize to ensure diagonal is exactly 1
+    d = np.sqrt(np.diag(corr_reg))
+    corr_reg = corr_reg / np.outer(d, d)
+
+    # Check positive definiteness (allow small numerical tolerance)
+    eigvals = np.linalg.eigvalsh(corr_reg)
+    if eigvals.min() < -1e-10:
+        raise ValueError("Correlation matrix is not positive definite")
+
+    # --- Step 2: Distance matrix ---
+    # d[i,j] = sqrt((1 - corr[i,j]) / 2)  -- metric on correlation space
+    dist = np.sqrt((1 - corr_reg) / 2)
+    np.fill_diagonal(dist, 0.0)
+
+    # --- Step 3: Hierarchical clustering ---
+    # Convert to condensed distance vector for linkage
+    dist_condensed = squareform(dist, checks=False)
+    link = linkage(dist_condensed, method=linkage_method)
+
+    # --- Step 4: Quasi-diagonalization (get leaf order) ---
+    dendro = dendrogram(link, no_plot=True)
+    leaf_order = dendro["leaves"]
+    ordered_assets = [clean_returns.columns[i] for i in leaf_order]
+
+    # --- Step 5: Recursive bisection with inverse-variance allocation ---
+    # Build a tree from the linkage matrix for proper top-down traversal.
+    # Linkage matrix rows: [cluster1, cluster2, distance, count]
+    # Original observations: indices 0 to n-1
+    # Merged clusters: indices n to 2n-2
+    n_assets = len(ordered_assets)
+    # Map from cluster index (in linkage) to list of asset indices (in ordered_assets)
+    cluster_members = {i: [i] for i in range(n_assets)}
+    for i, row in enumerate(link):
+        c1, c2 = int(row[0]), int(row[1])
+        new_idx = n_assets + i
+        cluster_members[new_idx] = cluster_members[c1] + cluster_members[c2]
+    root_cluster = 2 * n_assets - 2
+
+    def _cluster_variance(asset_indices: List[int]) -> float:
+        """Variance of an equal-weighted portfolio of the given asset indices."""
+        if not asset_indices:
+            return 0.0
+        if len(asset_indices) == 1:
+            return float(clean_returns.iloc[:, asset_indices[0]].var())
+        sub_ret = clean_returns.iloc[:, asset_indices]
+        w = np.ones(len(asset_indices)) / len(asset_indices)
+        cov = sub_ret.cov().values
+        return float(w @ cov @ w)
+
+    def _recursive_bisection(cluster_idx: int, weight: float = 1.0) -> Dict[str, float]:
+        """Recursively bisect the dendrogram tree from the top down."""
+        if cluster_idx < n_assets:
+            # Leaf node: single asset
+            return {ordered_assets[cluster_idx]: weight}
+
+        # Internal node: find its two children in the linkage matrix
+        # The linkage matrix rows correspond to clusters n_assets to 2n_assets-2
+        link_row_idx = cluster_idx - n_assets
+        if link_row_idx < 0 or link_row_idx >= len(link):
+            # Should not happen for valid cluster_idx
+            return {}
+
+        c1 = int(link[link_row_idx, 0])
+        c2 = int(link[link_row_idx, 1])
+
+        # Get asset indices for each child cluster
+        left_indices = cluster_members[c1]
+        right_indices = cluster_members[c2]
+
+        # Compute cluster variances
+        var_left = _cluster_variance(left_indices)
+        var_right = _cluster_variance(right_indices)
+
+        # Inverse-variance allocation
+        total_var = var_left + var_right
+        if total_var == 0:
+            alpha = 0.5
+        else:
+            alpha = var_right / total_var  # weight to left cluster
+
+        weights = {}
+        weights.update(_recursive_bisection(c1, weight * alpha))
+        weights.update(_recursive_bisection(c2, weight * (1 - alpha)))
+        return weights
+
+    raw_weights = _recursive_bisection(root_cluster)
+
+    # Apply bounds and renormalize
+    weights_series = pd.Series(raw_weights)
+    weights_series = weights_series.clip(lower=min_weight, upper=max_weight)
+    total = weights_series.sum()
+    if total > 0:
+        weights_series = weights_series / total
+    else:
+        # Fallback: equal weight
+        weights_series = pd.Series(1.0 / len(weights_series), index=weights_series.index)
+
+    return weights_series
 
 
 def _print_sweep_resolution_note(results: List[Dict[str, Any]]) -> None:
