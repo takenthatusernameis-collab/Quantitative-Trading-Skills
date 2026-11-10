@@ -11,6 +11,9 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Generated backtest/report artifacts (examples write here; not source)
+skills/quantitative-backtesting/scripts/results/
+
 # Kilo agent runtime and generated caches
 .venv/
 venv/
