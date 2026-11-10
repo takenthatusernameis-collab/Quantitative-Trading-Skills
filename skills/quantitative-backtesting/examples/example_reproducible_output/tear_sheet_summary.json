@@ -41,10 +41,20 @@
     "equity_curve.png",
     "returns_distribution.png"
   ],
+  "probabilistic_sharpe": {
+    "probabilistic_sharpe_ratio": 0.28400914784607617,
+    "p_value": 0.7159908521539238,
+    "sharpe_ratio": -0.4038915961932067,
+    "benchmark_sharpe": 0.0,
+    "z_score": -0.5709724830306722,
+    "n_observations": 503,
+    "skewness": -0.15597649893308005,
+    "kurtosis": 5.669458537098913
+  },
   "panel_pricing": "net-exposure",
   "data_provenance": {
     "source_path": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv",
-    "load_timestamp": "2026-11-08T17:28:39.125788Z",
+    "load_timestamp": "2026-11-10T04:53:59.172535Z",
     "file_format": ".csv",
     "file_size_bytes": 46812,
     "symbol_filter": "SPY",
@@ -88,12 +98,240 @@
     ],
     "checksum": "9a66ca5364695907",
     "total_return_type": "price",
-    "name": null
+    "name": null,
+    "adjustment_integrity": {
+      "passed": true,
+      "violations": [],
+      "warnings": [
+        "adj_close or close column missing; nothing to guard"
+      ],
+      "details": {
+        "reason": "missing columns"
+      }
+    }
   },
   "point_in_time_validation": {
     "passed": true,
     "violations": [],
     "warnings": []
+  },
+  "regime_analysis": {
+    "config": {
+      "trend_ma_short": 50,
+      "trend_ma_long": 200,
+      "trend_threshold": 0.02,
+      "vol_window": 63,
+      "vol_quantile_high": 0.75,
+      "vol_quantile_low": 0.25,
+      "min_regime_length": 21
+    },
+    "trend_regime_performance": {
+      "sideways": {
+        "n_observations": 131,
+        "total_return": -0.08654737879446894,
+        "annualized_return": -0.15981849058607367,
+        "annualized_volatility": 0.17127064435783051,
+        "sharpe_ratio": -0.9331341701043046,
+        "max_drawdown": -0.17685973656400505,
+        "win_rate": 0.25190839694656486,
+        "skewness": -0.036096702364235275,
+        "kurtosis": 3.2490058030640556
+      },
+      "bull": {
+        "n_observations": 155,
+        "total_return": 0.05476772833981847,
+        "annualized_return": 0.09055740136503854,
+        "annualized_volatility": 0.1945405583564228,
+        "sharpe_ratio": 0.46549368486506537,
+        "max_drawdown": -0.11018589765596247,
+        "win_rate": 0.3741935483870968,
+        "skewness": -0.32121543127638313,
+        "kurtosis": 0.8739115704275917
+      }
+    },
+    "volatility_regime_performance": {
+      "high": {
+        "n_observations": 366,
+        "total_return": 0.0985838575698581,
+        "annualized_return": 0.06687778323633142,
+        "annualized_volatility": 0.16698469392933962,
+        "sharpe_ratio": 0.4005024751827319,
+        "max_drawdown": -0.16991684927284262,
+        "win_rate": 0.2786885245901639,
+        "skewness": -0.06179560421793316,
+        "kurtosis": 2.4110846423576593
+      },
+      "low": {
+        "n_observations": 73,
+        "total_return": -0.17847446075867324,
+        "annualized_return": -0.4926972081415616,
+        "annualized_volatility": 0.15538968227498018,
+        "sharpe_ratio": -3.1707202236869008,
+        "max_drawdown": -0.18237517073839277,
+        "win_rate": 0.1780821917808219,
+        "skewness": -0.7991788925578067,
+        "kurtosis": 1.2922843067507983
+      }
+    },
+    "combined_regime_performance": {
+      "sideways_high": {
+        "n_observations": 118,
+        "total_return": -0.0030621798426653246,
+        "annualized_return": -0.006528201765453545,
+        "annualized_volatility": 0.16899188517821095,
+        "sharpe_ratio": -0.0386302677111934,
+        "max_drawdown": -0.1272553160733727,
+        "win_rate": 0.2711864406779661,
+        "skewness": 0.0716041867629529,
+        "kurtosis": 3.5632320693060016
+      },
+      "bull_high": {
+        "n_observations": 137,
+        "total_return": 0.12282218793960142,
+        "annualized_return": 0.23749324143394568,
+        "annualized_volatility": 0.19005381224793252,
+        "sharpe_ratio": 1.2496105109647924,
+        "max_drawdown": -0.11018589765596247,
+        "win_rate": 0.39416058394160586,
+        "skewness": -0.28467839729073463,
+        "kurtosis": 1.123989029401405
+      }
+    },
+    "regime_periods": [
+      {
+        "regime": "unknown",
+        "start_date": "2018-01-02T00:00:00",
+        "end_date": "2018-10-05T00:00:00",
+        "length": 199,
+        "metrics": {}
+      },
+      {
+        "regime": "bear_high",
+        "start_date": "2018-10-08T00:00:00",
+        "end_date": "2018-10-31T00:00:00",
+        "length": 18,
+        "metrics": {}
+      },
+      {
+        "regime": "sideways_high",
+        "start_date": "2018-11-01T00:00:00",
+        "end_date": "2019-03-13T00:00:00",
+        "length": 95,
+        "metrics": {
+          "n_observations": 118,
+          "total_return": -0.0030621798426653246,
+          "annualized_return": -0.006528201765453545,
+          "annualized_volatility": 0.16899188517821095,
+          "sharpe_ratio": -0.0386302677111934,
+          "max_drawdown": -0.1272553160733727,
+          "win_rate": 0.2711864406779661,
+          "skewness": 0.0716041867629529,
+          "kurtosis": 3.5632320693060016
+        }
+      },
+      {
+        "regime": "bull_high",
+        "start_date": "2019-03-14T00:00:00",
+        "end_date": "2019-09-17T00:00:00",
+        "length": 134,
+        "metrics": {
+          "n_observations": 137,
+          "total_return": 0.12282218793960142,
+          "annualized_return": 0.23749324143394568,
+          "annualized_volatility": 0.19005381224793252,
+          "sharpe_ratio": 1.2496105109647924,
+          "max_drawdown": -0.11018589765596247,
+          "win_rate": 0.39416058394160586,
+          "skewness": -0.28467839729073463,
+          "kurtosis": 1.123989029401405
+        }
+      },
+      {
+        "regime": "bull_low",
+        "start_date": "2019-09-18T00:00:00",
+        "end_date": "2019-09-26T00:00:00",
+        "length": 7,
+        "metrics": {}
+      },
+      {
+        "regime": "sideways_low",
+        "start_date": "2019-09-27T00:00:00",
+        "end_date": "2019-10-15T00:00:00",
+        "length": 13,
+        "metrics": {}
+      },
+      {
+        "regime": "sideways_high",
+        "start_date": "2019-10-16T00:00:00",
+        "end_date": "2019-11-15T00:00:00",
+        "length": 23,
+        "metrics": {
+          "n_observations": 118,
+          "total_return": -0.0030621798426653246,
+          "annualized_return": -0.006528201765453545,
+          "annualized_volatility": 0.16899188517821095,
+          "sharpe_ratio": -0.0386302677111934,
+          "max_drawdown": -0.1272553160733727,
+          "win_rate": 0.2711864406779661,
+          "skewness": 0.0716041867629529,
+          "kurtosis": 3.5632320693060016
+        }
+      },
+      {
+        "regime": "bull_high",
+        "start_date": "2019-11-18T00:00:00",
+        "end_date": "2019-11-20T00:00:00",
+        "length": 3,
+        "metrics": {
+          "n_observations": 137,
+          "total_return": 0.12282218793960142,
+          "annualized_return": 0.23749324143394568,
+          "annualized_volatility": 0.19005381224793252,
+          "sharpe_ratio": 1.2496105109647924,
+          "max_drawdown": -0.11018589765596247,
+          "win_rate": 0.39416058394160586,
+          "skewness": -0.28467839729073463,
+          "kurtosis": 1.123989029401405
+        }
+      },
+      {
+        "regime": "bull_low",
+        "start_date": "2019-11-21T00:00:00",
+        "end_date": "2019-12-05T00:00:00",
+        "length": 11,
+        "metrics": {}
+      }
+    ],
+    "regime_distribution": {
+      "unknown": 199,
+      "bull_high": 137,
+      "sideways_high": 118,
+      "bear_high": 18,
+      "bull_low": 18,
+      "sideways_low": 13
+    }
+  },
+  "regime_robustness": {
+    "regime_robustness": "fragile",
+    "is_regime_concentrated": true,
+    "n_regimes_traded": 2,
+    "n_regimes_positive": 1,
+    "n_regimes_negative": 1,
+    "best_regime": "bull_high",
+    "best_sharpe": 1.2496105109647924,
+    "worst_regime": "sideways_high",
+    "worst_sharpe": -0.0386302677111934,
+    "sharpe_spread": 1.2882407786759857,
+    "regime_sharpes": {
+      "sideways_high": -0.0386302677111934,
+      "bull_high": 1.2496105109647924
+    },
+    "regime_observations": {
+      "sideways_high": 118,
+      "bull_high": 137
+    },
+    "dominant_regime": "bull_high",
+    "message": "The edge is concentrated in a single regime (bull_high); performance is regime-dependent and may not survive a regime change."
   },
   "bias_controls_engaged": true
 }

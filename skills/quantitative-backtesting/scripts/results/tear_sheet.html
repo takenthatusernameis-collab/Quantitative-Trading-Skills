@@ -83,6 +83,21 @@
 <tr><td>sideways_low</td><td>2019-05-01T00:00:00</td><td>2019-05-16T00:00:00</td><td class='metric'>12</td></tr>
 <tr><td>bull_low</td><td>2019-05-17T00:00:00</td><td>2019-12-30T00:00:00</td><td class='metric'>157</td></tr>
 </table>
+<h3>Regime Robustness</h3>
+<table><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Regime Robustness</td><td class='metric '>moderate</td></tr>
+<tr><td>Edge Concentrated in One Regime</td><td class='metric'>False</td></tr>
+<tr><td>Regimes Traded</td><td class='metric'>3.00</td></tr>
+<tr><td>Positive-Sharpe Regimes</td><td class='metric'>2.00</td></tr>
+<tr><td>Negative-Sharpe Regimes</td><td class='metric'>1.00</td></tr>
+<tr><td>Best Regime</td><td class='metric'>bear_high</td></tr>
+<tr><td>Best Regime Sharpe</td><td class='metric'>5.65</td></tr>
+<tr><td>Worst Regime</td><td class='metric'>bull_high</td></tr>
+<tr><td>Worst Regime Sharpe</td><td class='metric'>-2.27</td></tr>
+<tr><td>Sharpe Spread (Best - Worst)</td><td class='metric'>7.91</td></tr>
+<tr><td>Dominant Regime (Most Obs)</td><td class='metric'>bull_low</td></tr>
+<tr><td>Interpretation</td><td class='metric'>Multiple regimes produce a positive Sharpe, but the spread between the best and worst regime is wide; performance is inconsistent across regimes.</td></tr>
+</table>
 <h2>Trade Analytics</h2>
 <table><tr><th>Metric</th><th>Value</th></tr>
 <tr><td>Total Trades</td><td class='metric'>5.00</td></tr>
@@ -96,10 +111,20 @@
 <tr><td>Trades Closed at End</td><td class='metric'>1.00</td></tr>
 <tr><td>% of Trades Closed at End</td><td class='metric'>20.00%</td></tr>
 </table>
+<h2>Sharpe Significance (Probabilistic Sharpe Ratio)</h2>
+<table><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Probabilistic Sharpe Ratio</td><td class='metric'>0.9632</td></tr>
+<tr><td>P-Value (vs SR*)</td><td class='metric'>0.0368</td></tr>
+<tr><td>Benchmark Sharpe (SR*)</td><td class='metric'>0.0000</td></tr>
+<tr><td>Z-Score</td><td class='metric'>1.7886</td></tr>
+<tr><td>Observations</td><td class='metric'>502</td></tr>
+<tr><td>Skewness</td><td class='metric'>-0.0729</td></tr>
+<tr><td>Kurtosis</td><td class='metric'>7.9675</td></tr>
+</table>
 <h2>Data Provenance</h2>
 <table><tr><th>Field</th><th>Value</th></tr>
 <tr><td>source_path</td><td class='metric'>/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/real_market_data/AAPL.csv</td></tr>
-<tr><td>load_timestamp</td><td class='metric'>2026-11-09T13:02:08.763484Z</td></tr>
+<tr><td>load_timestamp</td><td class='metric'>2026-11-10T04:53:59.169648Z</td></tr>
 <tr><td>file_format</td><td class='metric'>.csv</td></tr>
 <tr><td>file_size_bytes</td><td class='metric'>118482</td></tr>
 <tr><td>symbol_filter</td><td class='metric'>SPY</td></tr>

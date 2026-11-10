@@ -61,6 +61,66 @@
 <tr><td>Panel Pricing Mode</td><td class='metric'>net-exposure</td></tr>
 </table>
 <p><em>The reported P&amp;L is net_exposure x mean(asset returns), and the costs are charged on the net exposure. A long/short book is not representable by that scalar: see the panel book diagnostic above.</em></p>
+<h2>Regime Analysis</h2>
+<h3>Regime Distribution</h3>
+<table><tr><th>Regime</th><th>Bars</th></tr>
+<tr><td>sideways_low</td><td class='metric'>302</td></tr>
+<tr><td>unknown</td><td class='metric'>199</td></tr>
+<tr><td>sideways_high</td><td class='metric'>119</td></tr>
+<tr><td>bull_low</td><td class='metric'>100</td></tr>
+<tr><td>bull_high</td><td class='metric'>35</td></tr>
+</table>
+<h3>Trend Regime Performance</h3>
+<table><tr><th>Regime</th><th>Obs</th><th>Ann. Return</th><th>Ann. Vol</th><th>Sharpe</th><th>Max Drawdown</th><th>Win Rate</th></tr>
+<tr><td>sideways</td><td class='metric'>421</td><td class='metric'>8.58%</td><td class='metric'>2.99%</td><td class='metric'>2.87</td><td class='metric'>-0.03%</td><td class='metric'>3.80%</td></tr>
+<tr><td>bull</td><td class='metric'>135</td><td class='metric'>8.59%</td><td class='metric'>2.84%</td><td class='metric'>3.02</td><td class='metric'>-0.03%</td><td class='metric'>3.70%</td></tr>
+</table>
+<h3>Volatility Regime Performance</h3>
+<table><tr><th>Regime</th><th>Obs</th><th>Ann. Return</th><th>Ann. Vol</th><th>Sharpe</th><th>Max Drawdown</th><th>Win Rate</th></tr>
+<tr><td>high</td><td class='metric'>164</td><td class='metric'>9.67%</td><td class='metric'>3.26%</td><td class='metric'>2.96</td><td class='metric'>-0.03%</td><td class='metric'>4.27%</td></tr>
+<tr><td>low</td><td class='metric'>527</td><td class='metric'>7.72%</td><td class='metric'>2.70%</td><td class='metric'>2.86</td><td class='metric'>-0.38%</td><td class='metric'>3.80%</td></tr>
+</table>
+<h3>Combined Regime Performance</h3>
+<table><tr><th>Regime</th><th>Obs</th><th>Ann. Return</th><th>Ann. Vol</th><th>Sharpe</th><th>Max Drawdown</th><th>Win Rate</th></tr>
+<tr><td>sideways_low</td><td class='metric'>302</td><td class='metric'>7.45%</td><td class='metric'>2.72%</td><td class='metric'>2.74</td><td class='metric'>-0.03%</td><td class='metric'>3.31%</td></tr>
+<tr><td>sideways_high</td><td class='metric'>119</td><td class='metric'>11.51%</td><td class='metric'>3.60%</td><td class='metric'>3.19</td><td class='metric'>-0.03%</td><td class='metric'>5.04%</td></tr>
+<tr><td>bull_low</td><td class='metric'>100</td><td class='metric'>9.36%</td><td class='metric'>2.99%</td><td class='metric'>3.13</td><td class='metric'>-0.03%</td><td class='metric'>4.00%</td></tr>
+<tr><td>bull_high</td><td class='metric'>35</td><td class='metric'>6.41%</td><td class='metric'>2.41%</td><td class='metric'>2.66</td><td class='metric'>-0.03%</td><td class='metric'>2.86%</td></tr>
+</table>
+<h3>Regime Periods</h3>
+<table><tr><th>Regime</th><th>Start</th><th>End</th><th>Length</th></tr>
+<tr><td>unknown</td><td>2020-01-02T00:00:00</td><td>2020-10-06T00:00:00</td><td class='metric'>199</td></tr>
+<tr><td>sideways_low</td><td>2020-10-07T00:00:00</td><td>2021-04-16T00:00:00</td><td class='metric'>138</td></tr>
+<tr><td>sideways_high</td><td>2021-04-19T00:00:00</td><td>2021-09-30T00:00:00</td><td class='metric'>119</td></tr>
+<tr><td>sideways_low</td><td>2021-10-01T00:00:00</td><td>2022-03-30T00:00:00</td><td class='metric'>129</td></tr>
+<tr><td>bull_low</td><td>2022-03-31T00:00:00</td><td>2022-04-04T00:00:00</td><td class='metric'>3</td></tr>
+<tr><td>sideways_low</td><td>2022-04-05T00:00:00</td><td>2022-04-11T00:00:00</td><td class='metric'>5</td></tr>
+<tr><td>bull_low</td><td>2022-04-12T00:00:00</td><td>2022-08-01T00:00:00</td><td class='metric'>80</td></tr>
+<tr><td>sideways_low</td><td>2022-08-02T00:00:00</td><td>2022-08-10T00:00:00</td><td class='metric'>7</td></tr>
+<tr><td>bull_low</td><td>2022-08-11T00:00:00</td><td>2022-08-16T00:00:00</td><td class='metric'>4</td></tr>
+<tr><td>sideways_low</td><td>2022-08-17T00:00:00</td><td>2022-08-18T00:00:00</td><td class='metric'>2</td></tr>
+<tr><td>bull_low</td><td>2022-08-19T00:00:00</td><td>2022-08-22T00:00:00</td><td class='metric'>2</td></tr>
+<tr><td>sideways_low</td><td>2022-08-23T00:00:00</td><td>2022-09-19T00:00:00</td><td class='metric'>20</td></tr>
+<tr><td>bull_low</td><td>2022-09-20T00:00:00</td><td>2022-09-20T00:00:00</td><td class='metric'>1</td></tr>
+<tr><td>sideways_low</td><td>2022-09-21T00:00:00</td><td>2022-09-21T00:00:00</td><td class='metric'>1</td></tr>
+<tr><td>bull_low</td><td>2022-09-22T00:00:00</td><td>2022-10-05T00:00:00</td><td class='metric'>10</td></tr>
+<tr><td>bull_high</td><td>2022-10-06T00:00:00</td><td>2022-11-23T00:00:00</td><td class='metric'>35</td></tr>
+</table>
+<h3>Regime Robustness</h3>
+<table><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Regime Robustness</td><td class='metric positive'>robust</td></tr>
+<tr><td>Edge Concentrated in One Regime</td><td class='metric'>False</td></tr>
+<tr><td>Regimes Traded</td><td class='metric'>4.00</td></tr>
+<tr><td>Positive-Sharpe Regimes</td><td class='metric'>4.00</td></tr>
+<tr><td>Negative-Sharpe Regimes</td><td class='metric'>0.00</td></tr>
+<tr><td>Best Regime</td><td class='metric'>sideways_high</td></tr>
+<tr><td>Best Regime Sharpe</td><td class='metric'>3.19</td></tr>
+<tr><td>Worst Regime</td><td class='metric'>bull_high</td></tr>
+<tr><td>Worst Regime Sharpe</td><td class='metric'>2.66</td></tr>
+<tr><td>Sharpe Spread (Best - Worst)</td><td class='metric'>0.54</td></tr>
+<tr><td>Dominant Regime (Most Obs)</td><td class='metric'>sideways_low</td></tr>
+<tr><td>Interpretation</td><td class='metric'>Multiple regimes produce a positive Sharpe with a narrow spread; the edge is diversified across regimes.</td></tr>
+</table>
 <h2>Trade Analytics</h2>
 <table><tr><th>Metric</th><th>Value</th></tr>
 <tr><td>Total Trades</td><td class='metric'>23.00</td></tr>
@@ -73,6 +133,16 @@
 <tr><td>Expectancy</td><td class='metric'>-0.0836</td></tr>
 <tr><td>Trades Closed at End</td><td class='metric'>0.00</td></tr>
 <tr><td>% of Trades Closed at End</td><td class='metric'>0.00%</td></tr>
+</table>
+<h2>Sharpe Significance (Probabilistic Sharpe Ratio)</h2>
+<table><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Probabilistic Sharpe Ratio</td><td class='metric'>1.0000</td></tr>
+<tr><td>P-Value (vs SR*)</td><td class='metric'>0.0000</td></tr>
+<tr><td>Benchmark Sharpe (SR*)</td><td class='metric'>0.0000</td></tr>
+<tr><td>Z-Score</td><td class='metric'>5.1875</td></tr>
+<tr><td>Observations</td><td class='metric'>755</td></tr>
+<tr><td>Skewness</td><td class='metric'>6.1338</td></tr>
+<tr><td>Kurtosis</td><td class='metric'>42.7025</td></tr>
 </table>
 <div class='chart'><img src='equity_curve.png' alt='equity_curve'></div>
 <div class='chart'><img src='returns_distribution.png' alt='returns_distribution'></div>

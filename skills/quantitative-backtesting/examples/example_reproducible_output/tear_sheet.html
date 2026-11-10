@@ -45,6 +45,58 @@
 <tr><td>Panel Pricing Mode</td><td class='metric'>net-exposure</td></tr>
 </table>
 <p><em>The reported P&amp;L is net_exposure x mean(asset returns), and the costs are charged on the net exposure. A long/short book is not representable by that scalar: see the panel book diagnostic above.</em></p>
+<h2>Regime Analysis</h2>
+<h3>Regime Distribution</h3>
+<table><tr><th>Regime</th><th>Bars</th></tr>
+<tr><td>unknown</td><td class='metric'>199</td></tr>
+<tr><td>bull_high</td><td class='metric'>137</td></tr>
+<tr><td>sideways_high</td><td class='metric'>118</td></tr>
+<tr><td>bear_high</td><td class='metric'>18</td></tr>
+<tr><td>bull_low</td><td class='metric'>18</td></tr>
+<tr><td>sideways_low</td><td class='metric'>13</td></tr>
+</table>
+<h3>Trend Regime Performance</h3>
+<table><tr><th>Regime</th><th>Obs</th><th>Ann. Return</th><th>Ann. Vol</th><th>Sharpe</th><th>Max Drawdown</th><th>Win Rate</th></tr>
+<tr><td>sideways</td><td class='metric'>131</td><td class='metric'>-15.98%</td><td class='metric'>17.13%</td><td class='metric'>-0.93</td><td class='metric'>-17.69%</td><td class='metric'>25.19%</td></tr>
+<tr><td>bull</td><td class='metric'>155</td><td class='metric'>9.06%</td><td class='metric'>19.45%</td><td class='metric'>0.47</td><td class='metric'>-11.02%</td><td class='metric'>37.42%</td></tr>
+</table>
+<h3>Volatility Regime Performance</h3>
+<table><tr><th>Regime</th><th>Obs</th><th>Ann. Return</th><th>Ann. Vol</th><th>Sharpe</th><th>Max Drawdown</th><th>Win Rate</th></tr>
+<tr><td>high</td><td class='metric'>366</td><td class='metric'>6.69%</td><td class='metric'>16.70%</td><td class='metric'>0.40</td><td class='metric'>-16.99%</td><td class='metric'>27.87%</td></tr>
+<tr><td>low</td><td class='metric'>73</td><td class='metric'>-49.27%</td><td class='metric'>15.54%</td><td class='metric'>-3.17</td><td class='metric'>-18.24%</td><td class='metric'>17.81%</td></tr>
+</table>
+<h3>Combined Regime Performance</h3>
+<table><tr><th>Regime</th><th>Obs</th><th>Ann. Return</th><th>Ann. Vol</th><th>Sharpe</th><th>Max Drawdown</th><th>Win Rate</th></tr>
+<tr><td>sideways_high</td><td class='metric'>118</td><td class='metric'>-0.65%</td><td class='metric'>16.90%</td><td class='metric'>-0.04</td><td class='metric'>-12.73%</td><td class='metric'>27.12%</td></tr>
+<tr><td>bull_high</td><td class='metric'>137</td><td class='metric'>23.75%</td><td class='metric'>19.01%</td><td class='metric'>1.25</td><td class='metric'>-11.02%</td><td class='metric'>39.42%</td></tr>
+</table>
+<h3>Regime Periods</h3>
+<table><tr><th>Regime</th><th>Start</th><th>End</th><th>Length</th></tr>
+<tr><td>unknown</td><td>2018-01-02T00:00:00</td><td>2018-10-05T00:00:00</td><td class='metric'>199</td></tr>
+<tr><td>bear_high</td><td>2018-10-08T00:00:00</td><td>2018-10-31T00:00:00</td><td class='metric'>18</td></tr>
+<tr><td>sideways_high</td><td>2018-11-01T00:00:00</td><td>2019-03-13T00:00:00</td><td class='metric'>95</td></tr>
+<tr><td>bull_high</td><td>2019-03-14T00:00:00</td><td>2019-09-17T00:00:00</td><td class='metric'>134</td></tr>
+<tr><td>bull_low</td><td>2019-09-18T00:00:00</td><td>2019-09-26T00:00:00</td><td class='metric'>7</td></tr>
+<tr><td>sideways_low</td><td>2019-09-27T00:00:00</td><td>2019-10-15T00:00:00</td><td class='metric'>13</td></tr>
+<tr><td>sideways_high</td><td>2019-10-16T00:00:00</td><td>2019-11-15T00:00:00</td><td class='metric'>23</td></tr>
+<tr><td>bull_high</td><td>2019-11-18T00:00:00</td><td>2019-11-20T00:00:00</td><td class='metric'>3</td></tr>
+<tr><td>bull_low</td><td>2019-11-21T00:00:00</td><td>2019-12-05T00:00:00</td><td class='metric'>11</td></tr>
+</table>
+<h3>Regime Robustness</h3>
+<table><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Regime Robustness</td><td class='metric negative'>fragile</td></tr>
+<tr><td>Edge Concentrated in One Regime</td><td class='metric'>True</td></tr>
+<tr><td>Regimes Traded</td><td class='metric'>2.00</td></tr>
+<tr><td>Positive-Sharpe Regimes</td><td class='metric'>1.00</td></tr>
+<tr><td>Negative-Sharpe Regimes</td><td class='metric'>1.00</td></tr>
+<tr><td>Best Regime</td><td class='metric'>bull_high</td></tr>
+<tr><td>Best Regime Sharpe</td><td class='metric'>1.25</td></tr>
+<tr><td>Worst Regime</td><td class='metric'>sideways_high</td></tr>
+<tr><td>Worst Regime Sharpe</td><td class='metric'>-0.04</td></tr>
+<tr><td>Sharpe Spread (Best - Worst)</td><td class='metric'>1.29</td></tr>
+<tr><td>Dominant Regime (Most Obs)</td><td class='metric'>bull_high</td></tr>
+<tr><td>Interpretation</td><td class='metric'>The edge is concentrated in a single regime (bull_high); performance is regime-dependent and may not survive a regime change.</td></tr>
+</table>
 <h2>Trade Analytics</h2>
 <table><tr><th>Metric</th><th>Value</th></tr>
 <tr><td>Total Trades</td><td class='metric'>8.00</td></tr>
@@ -58,10 +110,20 @@
 <tr><td>Trades Closed at End</td><td class='metric'>1.00</td></tr>
 <tr><td>% of Trades Closed at End</td><td class='metric'>12.50%</td></tr>
 </table>
+<h2>Sharpe Significance (Probabilistic Sharpe Ratio)</h2>
+<table><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Probabilistic Sharpe Ratio</td><td class='metric'>0.2840</td></tr>
+<tr><td>P-Value (vs SR*)</td><td class='metric'>0.7160</td></tr>
+<tr><td>Benchmark Sharpe (SR*)</td><td class='metric'>0.0000</td></tr>
+<tr><td>Z-Score</td><td class='metric'>-0.5710</td></tr>
+<tr><td>Observations</td><td class='metric'>503</td></tr>
+<tr><td>Skewness</td><td class='metric'>-0.1560</td></tr>
+<tr><td>Kurtosis</td><td class='metric'>5.6695</td></tr>
+</table>
 <h2>Data Provenance</h2>
 <table><tr><th>Field</th><th>Value</th></tr>
 <tr><td>source_path</td><td class='metric'>/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv</td></tr>
-<tr><td>load_timestamp</td><td class='metric'>2026-11-08T17:28:39.125788Z</td></tr>
+<tr><td>load_timestamp</td><td class='metric'>2026-11-10T04:53:59.172535Z</td></tr>
 <tr><td>file_format</td><td class='metric'>.csv</td></tr>
 <tr><td>file_size_bytes</td><td class='metric'>46812</td></tr>
 <tr><td>symbol_filter</td><td class='metric'>SPY</td></tr>

@@ -38,4 +38,11 @@ Expectancy:            -0.9210
 Trades Closed at End:      1
 % of Trades Closed at End: 12.50%
 
+--- Sharpe Significance (Probabilistic Sharpe Ratio) ---
+Probabilistic Sharpe:  0.2840
+P-Value (vs SR*):      0.7160
+Benchmark Sharpe (SR*): 0.0000
+Z-Score:               -0.5710
+Observations:          503
+
 ============================================================

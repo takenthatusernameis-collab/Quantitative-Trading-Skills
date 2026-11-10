@@ -27,6 +27,16 @@
   "avg_trade_duration": 42.5,
   "omega_ratio": 1.623426895506539,
   "tail_ratio": 0.9295054408615616,
+  "probabilistic_sharpe": {
+    "probabilistic_sharpe_ratio": 0.28400914784607617,
+    "p_value": 0.7159908521539238,
+    "sharpe_ratio": -0.4038915961932067,
+    "benchmark_sharpe": 0.0,
+    "z_score": -0.5709724830306722,
+    "n_observations": 503,
+    "skewness": -0.15597649893308005,
+    "kurtosis": 5.669458537098913
+  },
   "test_resolution": {
     "n_test_observations": null,
     "n_parameter_trials": null,

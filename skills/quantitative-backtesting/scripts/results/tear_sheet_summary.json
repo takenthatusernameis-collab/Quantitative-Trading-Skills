@@ -41,6 +41,16 @@
     "equity_curve.png",
     "returns_distribution.png"
   ],
+  "probabilistic_sharpe": {
+    "probabilistic_sharpe_ratio": 0.9631640798275868,
+    "p_value": 0.03683592017241322,
+    "sharpe_ratio": 1.2793992909383751,
+    "benchmark_sharpe": 0.0,
+    "z_score": 1.7886460267625066,
+    "n_observations": 502,
+    "skewness": -0.07286147235361576,
+    "kurtosis": 7.96746656547497
+  },
   "panel_pricing": "net-exposure",
   "train_val_test_split": {
     "train_start": "2010-01-04 00:00:00",
@@ -72,7 +82,7 @@
   },
   "data_provenance": {
     "source_path": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/real_market_data/AAPL.csv",
-    "load_timestamp": "2026-11-09T13:02:08.763484Z",
+    "load_timestamp": "2026-11-10T04:53:59.169648Z",
     "file_format": ".csv",
     "file_size_bytes": 118482,
     "symbol_filter": "SPY",
@@ -116,7 +126,17 @@
     ],
     "checksum": "3a4067b48208db2b",
     "total_return_type": "price",
-    "name": null
+    "name": null,
+    "adjustment_integrity": {
+      "passed": true,
+      "violations": [],
+      "warnings": [
+        "adj_close or close column missing; nothing to guard"
+      ],
+      "details": {
+        "reason": "missing columns"
+      }
+    }
   },
   "point_in_time_validation": {
     "passed": true,
@@ -333,6 +353,30 @@
       "sideways_low": 12,
       "sideways_high": 9
     }
+  },
+  "regime_robustness": {
+    "regime_robustness": "moderate",
+    "is_regime_concentrated": false,
+    "n_regimes_traded": 3,
+    "n_regimes_positive": 2,
+    "n_regimes_negative": 1,
+    "best_regime": "bear_high",
+    "best_sharpe": 5.645159199815517,
+    "worst_regime": "bull_high",
+    "worst_sharpe": -2.266948116940388,
+    "sharpe_spread": 7.912107316755904,
+    "regime_sharpes": {
+      "bull_low": 3.2229255118727926,
+      "bull_high": -2.266948116940388,
+      "bear_high": 5.645159199815517
+    },
+    "regime_observations": {
+      "bull_low": 163,
+      "bull_high": 37,
+      "bear_high": 82
+    },
+    "dominant_regime": "bull_low",
+    "message": "Multiple regimes produce a positive Sharpe, but the spread between the best and worst regime is wide; performance is inconsistent across regimes."
   },
   "bias_controls_engaged": true
 }
