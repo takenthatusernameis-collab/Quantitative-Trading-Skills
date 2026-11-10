@@ -11,6 +11,7 @@ import tempfile
 import traceback
 import warnings
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -18,7 +19,7 @@ import pandas as pd
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
-from data_loader import load_data, validate_data, load_multi_symbol, DataProvenance, validate_point_in_time, detect_survivorship_bias, _compute_benchmark_total_return, _detect_benchmark_total_return_type, adjust_for_splits  # noqa: E402
+from data_loader import load_data, validate_data, load_multi_symbol, DataProvenance, validate_point_in_time, detect_survivorship_bias, _compute_benchmark_total_return, _detect_benchmark_total_return_type, adjust_for_splits, adjustment_integrity_guard  # noqa: E402
 
 
 def _make_data(periods: int = 100, seed: int = 42) -> pd.DataFrame:
@@ -919,6 +920,206 @@ def test_detect_survivorship_bias_counts_symbol_once_across_issue_types():
     assert res["bias_score"] == 0.5
 
 
+# ---------------------------------------------------------------------------
+# adjustment_integrity_guard tests
+# ---------------------------------------------------------------------------
+
+def _make_adj_close_data(periods: int = 20, seed: int = 42, split_at: Optional[int] = None, ratio: float = 2.0) -> pd.DataFrame:
+    """Build OHLCV data with adj_close consistent with close and splits.
+
+    Convention: close on and after split date is at post-split level.
+    adj_close is continuous at post-split level for ALL dates.
+    """
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    trend = np.linspace(0, 0.1, periods)
+    noise = rng.normal(0, 0.005, periods)
+    base_prices = 100 * np.exp(np.cumsum(trend / periods + noise))
+
+    close = base_prices.copy()
+    splits = np.ones(periods)
+    adj_close = base_prices.copy()
+
+    if split_at is not None:
+        # Post-split close is at post-split level
+        close[split_at:] = close[split_at:] / ratio
+        splits[split_at] = ratio
+        # adj_close is continuous at post-split level for ALL dates
+        adj_close[:] = base_prices / ratio
+
+    return pd.DataFrame(
+        {
+            "open": close * rng.uniform(0.995, 1.005, periods),
+            "high": close * rng.uniform(1.005, 1.02, periods),
+            "low": close * rng.uniform(0.98, 0.995, periods),
+            "close": close,
+            "adj_close": adj_close,
+            "volume": rng.integers(1_000_000, 10_000_000, periods),
+            "splits": splits,
+        },
+        index=dates,
+    )
+
+
+def test_adjustment_integrity_guard_passes_clean_data():
+    """Clean data with adj_close consistent with close+splits passes."""
+    df = _make_adj_close_data(periods=20, split_at=10, ratio=2.0)
+    res = adjustment_integrity_guard(df)
+    assert res["passed"] is True
+    assert res["violations"] == []
+    assert res["details"]["n_mismatch"] == 0
+    assert res["details"]["max_relative_deviation"] < 1e-10
+
+
+def test_adjustment_integrity_guard_passes_no_splits():
+    """Data without splits passes when adj_close == close."""
+    df = _make_adj_close_data(periods=20, split_at=None)
+    res = adjustment_integrity_guard(df)
+    assert res["passed"] is True
+    assert res["violations"] == []
+
+
+def test_adjustment_integrity_guard_fails_adj_close_mismatch():
+    """adj_close that deviates from expected (close/cum_split_after) fails."""
+    df = _make_adj_close_data(periods=20, split_at=10, ratio=2.0)
+    # Corrupt adj_close by adding 1% error on pre-split dates
+    df.loc[df.index[:10], "adj_close"] *= 1.01
+    res = adjustment_integrity_guard(df)
+    assert res["passed"] is False
+    assert any("adj_close not reproducible" in v for v in res["violations"])
+    assert res["details"]["n_mismatch"] > 0
+    assert res["details"]["max_relative_deviation"] > 0.009
+
+
+def test_adjustment_integrity_guard_fails_adj_close_tampering():
+    """Tampering with adj_close at a non-split date triggers mismatch violation."""
+    df = _make_adj_close_data(periods=20, split_at=10, ratio=2.0)
+    # Introduce an artificial deviation at a non-split date (index 5)
+    df.loc[df.index[5], "adj_close"] *= 0.99  # 1% deviation not at split date
+    res = adjustment_integrity_guard(df)
+    assert res["passed"] is False
+    # The primary violation is the adj_close mismatch
+    assert any("adj_close not reproducible" in v for v in res["violations"])
+    assert res["details"]["n_mismatch"] == 1
+    # The worst mismatch should be at the tampered date
+    worst_date = str(df.index[5])[:10]
+    assert worst_date in res["violations"][0]
+
+
+def test_adjustment_integrity_guard_fails_negative_splits():
+    """Negative split ratios are flagged as violations."""
+    df = _make_adj_close_data(periods=20, split_at=10, ratio=2.0)
+    df.loc[df.index[10], "splits"] = -2.0
+    res = adjustment_integrity_guard(df)
+    assert res["passed"] is False
+    assert any("negative values" in v for v in res["violations"])
+
+
+def test_adjustment_integrity_guard_fails_zero_split_ratio():
+    """Zero split ratio is flagged as invalid."""
+    df = _make_adj_close_data(periods=20, split_at=10, ratio=2.0)
+    df.loc[df.index[10], "splits"] = 0.0
+    res = adjustment_integrity_guard(df)
+    assert res["passed"] is False
+    assert any("zero ratio" in v for v in res["violations"])
+
+
+def test_adjustment_integrity_guard_fails_negative_dividends():
+    """Negative dividends are flagged as violations."""
+    df = _make_adj_close_data(periods=20, split_at=10, ratio=2.0)
+    df["dividends"] = 0.0
+    df.loc[df.index[5], "dividends"] = -0.5
+    res = adjustment_integrity_guard(df)
+    assert res["passed"] is False
+    assert any("dividends column contains negative values" in v for v in res["violations"])
+
+
+def test_adjustment_integrity_guard_fails_duplicate_timestamps():
+    """Duplicate timestamps cause the guard to fail closed."""
+    df = _make_adj_close_data(periods=20, split_at=10, ratio=2.0)
+    # Duplicate the first row
+    df = pd.concat([df, df.iloc[[0]]])
+    res = adjustment_integrity_guard(df)
+    assert res["passed"] is False
+    assert any("duplicate timestamps" in v for v in res["violations"])
+    assert res["details"]["reason"] == "duplicate timestamps"
+
+
+def test_adjustment_integrity_guard_passes_missing_adj_close():
+    """Missing adj_close column passes with a warning (nothing to guard)."""
+    df = _make_adj_close_data(periods=20, split_at=10, ratio=2.0)
+    df = df.drop(columns=["adj_close"])
+    res = adjustment_integrity_guard(df)
+    assert res["passed"] is True
+    assert res["violations"] == []
+    assert any("missing" in w.lower() for w in res["warnings"])
+    assert res["details"]["reason"] == "missing columns"
+
+
+def test_adjustment_integrity_guard_passes_empty_frame():
+    """Empty DataFrame passes with no violations."""
+    df = pd.DataFrame(columns=["close", "adj_close"])
+    df.index = pd.DatetimeIndex([])
+    res = adjustment_integrity_guard(df)
+    assert res["passed"] is True
+    assert res["violations"] == []
+    assert res["details"]["reason"] == "empty frame"
+
+
+def test_adjustment_integrity_guard_multiple_splits():
+    """Multiple splits accumulate correctly in the expected adj_close."""
+    dates = pd.date_range("2020-01-01", periods=15, freq="B")
+    # 2-for-1 at index 5, then 3-for-1 at index 10
+    close = pd.Series([300.0]*5 + [150.0]*5 + [50.0]*5, index=dates)
+    adj_close = pd.Series([50.0]*5 + [50.0]*5 + [50.0]*5, index=dates)
+    splits = pd.Series([1.0]*5 + [2.0] + [1.0]*4 + [3.0] + [1.0]*4, index=dates)
+    df = pd.DataFrame(
+        {
+            "open": close,
+            "high": close * 1.01,
+            "low": close * 0.99,
+            "close": close,
+            "adj_close": adj_close,
+            "volume": 1000,
+            "splits": splits,
+        },
+        index=dates,
+    )
+    res = adjustment_integrity_guard(df)
+    assert res["passed"] is True
+    assert res["violations"] == []
+
+
+def test_adjustment_integrity_guard_splits_only_no_adj_close_mismatch():
+    """When only splits column exists (no adj_close), passes with warning."""
+    df = _make_adj_close_data(periods=20, split_at=10, ratio=2.0)
+    df = df.drop(columns=["adj_close"])
+    res = adjustment_integrity_guard(df)
+    assert res["passed"] is True
+    assert any("missing" in w.lower() for w in res["warnings"])
+
+
+def test_adjustment_integrity_guard_details_populated():
+    """Details dict contains cum_split_after, expected_adj_close, deviation metrics."""
+    df = _make_adj_close_data(periods=10, split_at=5, ratio=2.0)
+    res = adjustment_integrity_guard(df)
+    details = res["details"]
+    assert "cum_split_after" in details
+    assert "expected_adj_close" in details
+    assert "max_relative_deviation" in details
+    assert "n_mismatch" in details
+    assert isinstance(details["cum_split_after"], dict)
+    assert len(details["cum_split_after"]) == 10
+    # Before split (indices 0-4), cum_split_after should be 2.0
+    for i in range(5):
+        key = df.index[i]
+        assert abs(details["cum_split_after"][key] - 2.0) < 0.1
+    # After split (indices 5-9), cum_split_after should be 1.0
+    for i in range(5, 10):
+        key = df.index[i]
+        assert abs(details["cum_split_after"][key] - 1.0) < 0.1
+
+
 TEST_REGISTRY = [
     ("test_load_data_unsupported_format_raises", test_load_data_unsupported_format_raises),
     ("test_load_data_missing_columns_raises", test_load_data_missing_columns_raises),
@@ -958,6 +1159,19 @@ TEST_REGISTRY = [
     ("test_fetch_ohlcv_yahoo_raises_runtimeerror_after_429_exhaustion", test_fetch_ohlcv_yahoo_raises_runtimeerror_after_429_exhaustion),
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
     ("test_detect_survivorship_bias_counts_symbol_once_across_issue_types", test_detect_survivorship_bias_counts_symbol_once_across_issue_types),
+    ("test_adjustment_integrity_guard_passes_clean_data", test_adjustment_integrity_guard_passes_clean_data),
+    ("test_adjustment_integrity_guard_passes_no_splits", test_adjustment_integrity_guard_passes_no_splits),
+    ("test_adjustment_integrity_guard_fails_adj_close_mismatch", test_adjustment_integrity_guard_fails_adj_close_mismatch),
+    ("test_adjustment_integrity_guard_fails_adj_close_tampering", test_adjustment_integrity_guard_fails_adj_close_tampering),
+    ("test_adjustment_integrity_guard_fails_negative_splits", test_adjustment_integrity_guard_fails_negative_splits),
+    ("test_adjustment_integrity_guard_fails_zero_split_ratio", test_adjustment_integrity_guard_fails_zero_split_ratio),
+    ("test_adjustment_integrity_guard_fails_negative_dividends", test_adjustment_integrity_guard_fails_negative_dividends),
+    ("test_adjustment_integrity_guard_fails_duplicate_timestamps", test_adjustment_integrity_guard_fails_duplicate_timestamps),
+    ("test_adjustment_integrity_guard_passes_missing_adj_close", test_adjustment_integrity_guard_passes_missing_adj_close),
+    ("test_adjustment_integrity_guard_passes_empty_frame", test_adjustment_integrity_guard_passes_empty_frame),
+    ("test_adjustment_integrity_guard_multiple_splits", test_adjustment_integrity_guard_multiple_splits),
+    ("test_adjustment_integrity_guard_splits_only_no_adj_close_mismatch", test_adjustment_integrity_guard_splits_only_no_adj_close_mismatch),
+    ("test_adjustment_integrity_guard_details_populated", test_adjustment_integrity_guard_details_populated),
 ]
 
 def main() -> int:
