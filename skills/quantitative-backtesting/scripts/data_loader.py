@@ -256,8 +256,8 @@ def adjustment_integrity_guard(df: pd.DataFrame) -> Dict[str, Any]:
             f"(worst at {str(worst)[:10] if worst is not None else 'N/A'})"
         )
 
-    # --- point-in-time: adjustment factor may only change at split dates
-    factor = expected / close
+    # --- point-in-time: adjustment factor may only change at split/dividend dates
+    factor = adj / close
     factor_changes = (factor != factor.shift(1)).fillna(False)
     # The first date has no predecessor; it cannot be a "change" relative to
     # an earlier observation, so exclude it from the event-date check.
@@ -266,6 +266,9 @@ def adjustment_integrity_guard(df: pd.DataFrame) -> Dict[str, Any]:
     if "splits" in df.columns:
         splits = df["splits"].astype(float).fillna(1.0)
         event_dates.update(df.index[splits.notna() & (splits != 0) & (splits != 1.0)])
+    if "dividends" in df.columns:
+        dividends = df["dividends"].astype(float)
+        event_dates.update(df.index[dividends.notna() & (dividends != 0)])
     illegal_change_dates = [d for d in df.index[factor_changes] if d not in event_dates]
     if illegal_change_dates:
         violations.append(
