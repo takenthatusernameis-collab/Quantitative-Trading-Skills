@@ -58,7 +58,7 @@ from utils import (
 )
 from reporting import generate_tear_sheet
 from monte_carlo import monte_carlo_simulation
-from regime_detection import add_regime_analysis_to_results, RegimeConfig, detect_combined_regime
+from regime_detection import add_regime_analysis_to_results, RegimeConfig, detect_combined_regime, regime_concentration_diagnostic
 
 
 # The outcome of ONE parameter combination inside ONE validation window.
@@ -1218,6 +1218,16 @@ def walk_forward_analysis(
             summary["regime_analysis"] = regime_results["regime_analysis"]
     except Exception:
         pass
+
+    # Regime-concentration robustness diagnostic: whether the edge is
+    # diversified across regimes or concentrated in a single one. A
+    # measurement only; it changes no return, cost, impact or capacity number.
+    try:
+        summary["regime_robustness"] = regime_concentration_diagnostic(
+            summary.get("regime_analysis") or {},
+        )
+    except Exception:
+        summary["regime_robustness"] = None
 
     return {
         "periods": periods,
@@ -3916,6 +3926,16 @@ def cpcv_analysis(
     except Exception:
         pass
 
+    # Regime-concentration robustness diagnostic: whether the edge is
+    # diversified across regimes or concentrated in a single one. A
+    # measurement only; it changes no return, cost, impact or capacity number.
+    try:
+        summary["regime_robustness"] = regime_concentration_diagnostic(
+            summary.get("regime_analysis") or {},
+        )
+    except Exception:
+        summary["regime_robustness"] = None
+
     # Aggregate multiple-testing correction on the combined out-of-sample
     # returns. The conservative interpretation: the OOS record was produced
     # by a search that evaluated total_evaluated_trials configurations, so
@@ -4166,6 +4186,16 @@ def cpcv_analysis(
         summary["regime_analysis"] = _cpcv_regime_payload.get("regime_analysis")
     except Exception:
         summary["regime_analysis"] = None
+
+    # Regime-concentration robustness diagnostic: whether the edge is
+    # diversified across regimes or concentrated in a single one. A
+    # measurement only; it changes no return, cost, impact or capacity number.
+    try:
+        summary["regime_robustness"] = regime_concentration_diagnostic(
+            summary.get("regime_analysis") or {},
+        )
+    except Exception:
+        summary["regime_robustness"] = None
 
     return {
         "folds": folds,
@@ -6521,6 +6551,16 @@ def out_of_sample_validation(
             summary["regime_analysis"] = None
     except Exception:
         summary["regime_analysis"] = None
+
+    # Regime-concentration robustness diagnostic: whether the edge is
+    # diversified across regimes or concentrated in a single one. A
+    # measurement only; it changes no return, cost, impact or capacity number.
+    try:
+        summary["regime_robustness"] = regime_concentration_diagnostic(
+            summary.get("regime_analysis") or {},
+        )
+    except Exception:
+        summary["regime_robustness"] = None
 
     return {
         "train_val_test_split": split_info,
@@ -9497,6 +9537,16 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     except Exception:
         pass
 
+    # Regime-concentration robustness diagnostic: whether the edge is
+    # diversified across regimes or concentrated in a single one. A
+    # measurement only; it changes no return, cost, impact or capacity number.
+    try:
+        mc_results["summary"]["regime_robustness"] = regime_concentration_diagnostic(
+            mc_results["summary"].get("regime_analysis") or {},
+        )
+    except Exception:
+        mc_results["summary"]["regime_robustness"] = None
+
     sm = mc_results["summary"]
     mc_sharpe = float(sm.get("sharpe_ratio", {}).get("mean", 0.0))
     # The Monte Carlo point's Deflated Sharpe was computed on `returns`
@@ -9986,6 +10036,16 @@ def run_monte_carlo(args) -> int:
             mc_results["summary"]["regime_analysis"] = regime_results["regime_analysis"]
     except Exception:
         pass
+
+    # Regime-concentration robustness diagnostic: whether the edge is
+    # diversified across regimes or concentrated in a single one. A
+    # measurement only; it changes no return, cost, impact or capacity number.
+    try:
+        mc_results["summary"]["regime_robustness"] = regime_concentration_diagnostic(
+            mc_results["summary"].get("regime_analysis") or {},
+        )
+    except Exception:
+        mc_results["summary"]["regime_robustness"] = None
 
     print(f"Probability of Ruin (>50% drawdown): {mc_results['probability_of_ruin']:.2%}")
 
