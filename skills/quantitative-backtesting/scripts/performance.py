@@ -897,6 +897,32 @@ def generate_report(
             "",
         ])
 
+    # Test resolution (minimum detectable effect): what the significance
+    # statistics could have confirmed at the available sample size. A
+    # measurement, not a correction — no p-value, verdict, or other metric
+    # changes. Mirrors the CLI/summary block so durable reports are not
+    # silent about unfalsifiable samples.
+    tr = metrics.get("test_resolution")
+    if isinstance(tr, dict):
+        lines.extend([
+            "--- Test Resolution (Minimum Detectable Effect) ---",
+            f"Test Observations:           {tr.get('n_test_observations', 'N/A')}",
+            f"Parameter Trials:            {tr.get('n_parameter_trials', 'N/A')}",
+            f"Benchmarks:                  {tr.get('n_benchmarks', 'N/A')}",
+            f"Sharpe Status:               {tr.get('sharpe_status', 'N/A')}",
+            f"Min Detectable Sharpe:       {fmt_num(tr.get('min_detectable_sharpe'))}",
+            f"Observed Ann. Sharpe:        {fmt_num(tr.get('observed_annualized_sharpe'))}",
+            f"Sharpe Beyond Plausible:     {tr.get('sharpe_beyond_plausible_bound', 'N/A')}",
+            f"Alpha Status:                {tr.get('alpha_status', 'N/A')}",
+            f"Min Detectable Alpha:        {fmt_pct(tr.get('min_detectable_alpha')) if isinstance(tr.get('min_detectable_alpha'), (int, float)) else 'N/A'}",
+            f"Observed Ann. Alpha:         {fmt_pct(tr.get('observed_annualized_alpha')) if isinstance(tr.get('observed_annualized_alpha'), (int, float)) else 'N/A'}",
+            f"Alpha Beyond Plausible:      {tr.get('alpha_beyond_plausible_bound', 'N/A')}",
+            f"Realized Ann. Volatility:    {fmt_pct(tr.get('realized_annualized_volatility')) if isinstance(tr.get('realized_annualized_volatility'), (int, float)) else 'N/A'}",
+        ])
+        if tr.get("message"):
+            lines.append(f"Interpretation:              {tr.get('message')}")
+        lines.append("")
+
     # Per-benchmark detail for the multi-benchmark (run_backtest CLI) path.
     # ``calculate_metrics`` emits per-benchmark stats as ``benchmark_{i}_*``
     # prefixed scalar keys; reconstruct one row per benchmark here so the text

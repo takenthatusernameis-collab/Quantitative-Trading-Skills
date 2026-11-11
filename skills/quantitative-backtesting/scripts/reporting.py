@@ -902,6 +902,34 @@ def generate_tear_sheet(
                 )
             html_parts.append("</table>")
 
+    # Test resolution (minimum detectable effect): what the significance
+    # statistics could have confirmed at the available sample size. A
+    # measurement, not a correction — it changes no p-value and no verdict.
+    tr = metrics.get("test_resolution")
+    if isinstance(tr, dict):
+        html_parts.append("<h2>Test Resolution (Minimum Detectable Effect)</h2>")
+        html_parts.append("<table><tr><th>Metric</th><th>Value</th></tr>")
+        tr_rows = [
+            ("Test Observations", tr.get("n_test_observations"), str),
+            ("Parameter Trials", tr.get("n_parameter_trials"), str),
+            ("Benchmarks", tr.get("n_benchmarks"), str),
+            ("Sharpe Status", tr.get("sharpe_status"), str),
+            ("Min Detectable Sharpe", tr.get("min_detectable_sharpe"), fmt_num),
+            ("Observed Ann. Sharpe", tr.get("observed_annualized_sharpe"), fmt_num),
+            ("Sharpe Beyond Plausible Bound", tr.get("sharpe_beyond_plausible_bound"), str),
+            ("Alpha Status", tr.get("alpha_status"), str),
+            ("Min Detectable Alpha", tr.get("min_detectable_alpha"), fmt_pct),
+            ("Observed Ann. Alpha", tr.get("observed_annualized_alpha"), fmt_pct),
+            ("Alpha Beyond Plausible Bound", tr.get("alpha_beyond_plausible_bound"), str),
+            ("Realized Ann. Volatility", tr.get("realized_annualized_volatility"), fmt_pct),
+        ]
+        for label, val, fmt in tr_rows:
+            display = fmt(val) if val is not None else "N/A"
+            html_parts.append(f"<tr><td>{label}</td><td class='metric'>{display}</td></tr>")
+        if tr.get("message"):
+            html_parts.append(f"<tr><td>Interpretation</td><td class='metric'>{tr.get('message')}</td></tr>")
+        html_parts.append("</table>")
+
     # Analysis results: walk-forward, CPCV, Monte Carlo
     analysis = analysis_results or {}
 
