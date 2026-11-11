@@ -9703,6 +9703,11 @@ def run_monte_carlo(args) -> int:
 
     latency, fill_rate = _resolve_latency_fill_rate(args)
 
+    # Parse regime_impact_coefficients for regime-aware market impact modeling.
+    # This mirrors the parsing in run_walk_forward so both entry points
+    # handle the CLI argument identically.
+    regime_impact_coefficients = _parse_regime_impact_coefficients(getattr(args, "regime_impact_coefficients", None))
+
     impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
 
     # Capacity / market-impact sensitivity sweep: re-run the pipeline for
@@ -9716,7 +9721,7 @@ def run_monte_carlo(args) -> int:
             row = _monte_carlo_sweep_coefficient(
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
-                regime_impact_coefficients=args.regime_impact_coefficients,
+                regime_impact_coefficients=regime_impact_coefficients,
                 survivorship=survivorship,
             )
             sweep_rows.append(row)
@@ -9756,6 +9761,7 @@ def run_monte_carlo(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=cost, funding_cost=args.funding_cost,
+                regime_impact_coefficients=regime_impact_coefficients,
                 survivorship=survivorship,
             )
             sweep_rows.append(row)
@@ -9792,6 +9798,7 @@ def run_monte_carlo(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
+                regime_impact_coefficients=regime_impact_coefficients,
                 survivorship=survivorship,
             )
             sweep_rows.append(row)
@@ -9828,6 +9835,7 @@ def run_monte_carlo(args) -> int:
             bench_commission, bench_slippage, bench_expense_ratio,
             args.impact_coefficient, borrow_cost=args.borrow_cost,
             funding_cost=args.funding_cost, **{key: v},
+            regime_impact_coefficients=regime_impact_coefficients,
             survivorship=survivorship,
         ),
         latency_values=latencies,
@@ -9863,6 +9871,7 @@ def run_monte_carlo(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, commission=cost,
+                regime_impact_coefficients=regime_impact_coefficients,
                 survivorship=survivorship,
             )
             sweep_rows.append(row)
@@ -9900,6 +9909,7 @@ def run_monte_carlo(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, slippage=cost,
+                regime_impact_coefficients=regime_impact_coefficients,
                 survivorship=survivorship,
             )
             sweep_rows.append(row)
@@ -9980,6 +9990,7 @@ def run_monte_carlo(args) -> int:
                                           latency=latency, fill_rate=fill_rate,
                                           initial_capital=args.initial_capital,
                                           panel_pricing=panel_pricing,
+                                          regime_impact_coefficients=regime_impact_coefficients,
                                           book_weights=book_weights)
     # The warmup convention of the series the Monte Carlo resamples.
     _print_execution_warmup(
