@@ -9600,6 +9600,9 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     resolution = (
         _build_test_resolution({"deflated_sharpe": dsr}, returns) if dsr is not None else None
     )
+    # Basket-based capacity (the equal-weight 1/n basket the strategy does not
+    # necessarily trade under book pricing). Computed unconditionally so the
+    # sweep rows stay comparable to the net-exposure path.
     try:
         _capacity = estimate_capacity(data, impact_coefficient, adv_window=args.adv_window)
         _capacity_point = _capacity.get("estimated_capacity")
@@ -9607,6 +9610,33 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     except Exception:
         _capacity_point = None
         _capacity_trend = None
+    # Book-based capacity: the capacity implied by the strategy's own
+    # rebalance pattern under book pricing. Mirrors walk_forward_analysis /
+    # cpcv_analysis so a panel_pricing="book" Monte Carlo run reports the
+    # capacity convention consistent with the P&L it actually priced.
+    # Measurement only -- changes no return, cost, impact or simulation
+    # number. None unless panel_pricing="book" and the strategy exposes a
+    # book with estimable volume.
+    _capacity_book_point = None
+    _capacity_book_trend = None
+    if panel_pricing == "book":
+        try:
+            _book_cap = _window_book_capacity(
+                strategy_factory,
+                best_params,
+                data,
+                impact_coefficient=impact_coefficient,
+                adv_window=args.adv_window,
+                latency=latency,
+                fill_rate=fill_rate,
+                impact_aggregation=getattr(args, "impact_aggregation", DEFAULT_IMPACT_AGGREGATION),
+            )
+            if _book_cap is not None:
+                _capacity_book_point = _book_cap.get("estimated_capacity")
+                _capacity_book_trend = _book_cap.get("capacity_trend")
+        except Exception:
+            _capacity_book_point = None
+            _capacity_book_trend = None
     return {
         "impact_coefficient": float(impact_coefficient),
         "borrow_cost": float(borrow_cost),
@@ -9628,6 +9658,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         "sharpe_below_resolution": _sweep_sharpe_below_resolution(mc_sharpe, resolution),
         "capacity": _capacity_point,
         "capacity_trend": _capacity_trend,
+        "capacity_book": _capacity_book_point,
+        "capacity_book_trend": _capacity_book_trend,
         # Bias-controls engagement flag (point-in-time validation + multiple-
         # testing deflation). Propagated from the CLI args so the sweep artifact
         # is traceable to the same signal as the single-run Monte Carlo JSON.
@@ -10113,6 +10145,29 @@ def run_monte_carlo(args) -> int:
     except Exception:
         mc_results["summary"]["capacity"] = None
         mc_results["summary"]["capacity_trend"] = None
+    # Book-based capacity under book pricing: consistent with the P&L the
+    # Monte Carlo path actually priced, mirroring walk_forward_analysis /
+    # cpcv_analysis. Measurement only -- changes no return, cost, impact or
+    # simulation number. None unless panel_pricing="book" and the strategy
+    # exposes a book with estimable volume.
+    if panel_pricing == "book":
+        try:
+            _book_cap = _window_book_capacity(
+                strategy_factory,
+                best_params,
+                data,
+                impact_coefficient=args.impact_coefficient,
+                adv_window=args.adv_window,
+                latency=latency,
+                fill_rate=fill_rate,
+                impact_aggregation=args.impact_aggregation,
+            )
+            if _book_cap is not None:
+                mc_results["summary"]["capacity_book"] = _book_cap.get("estimated_capacity")
+                mc_results["summary"]["capacity_book_trend"] = _book_cap.get("capacity_trend")
+        except Exception:
+            mc_results["summary"]["capacity_book"] = None
+            mc_results["summary"]["capacity_book_trend"] = None
 
     print(f"Probability of Ruin (>50% drawdown): {mc_results['probability_of_ruin']:.2%}")
 
