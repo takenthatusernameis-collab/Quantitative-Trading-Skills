@@ -50,6 +50,8 @@ from utils import (
     resolve_panel_pricing,
     strategy_target_weights,
     DEFAULT_IMPACT_AGGREGATION,
+    DEFAULT_IMPACT_MODEL,
+    IMPACT_MODEL_TYPES,
     EXECUTION_WARMUP_BARS,
     WARMUP_CONVENTION_WALK_FORWARD,
     _print_sweep_resolution_note,
