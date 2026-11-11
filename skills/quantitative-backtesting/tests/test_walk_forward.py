@@ -3069,6 +3069,128 @@ def test_cli_monte_carlo_impact_sweep():
         )
 
 
+def test_cli_monte_carlo_surfaces_capacity_in_summary():
+    """CLI monte_carlo writes summary.capacity / capacity_trend consistently
+    with the run_backtest / walk-forward / CPCV / out-of-sample paths.
+
+    Capacity is a measurement-only execution-side control: it must be present
+    and positive when market impact is enabled, and None when impact is
+    disabled (impact_coefficient == 0). cross-checks the reported capacity
+    against a direct estimate_capacity call on the same frame.
+    """
+    from walk_forward import estimate_capacity  # noqa: E402
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=800)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "monte-carlo",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--n-simulations", "50",
+            "--impact-coefficient", "0.5",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI monte_carlo should exit 0, got {rc}"
+        results_path = os.path.join(out_dir, "monte_carlo_results.json")
+        assert os.path.exists(results_path), "monte_carlo_results.json not written"
+        with open(results_path) as f:
+            payload = json.load(f)
+
+        assert "summary" in payload, "summary missing from monte_carlo_results.json"
+        summary = payload["summary"]
+        assert "capacity" in summary, (
+            f"monte_carlo summary missing capacity. Keys: {sorted(summary.keys())}"
+        )
+        assert summary["capacity"] is not None, "capacity must be estimable with impact enabled"
+        assert summary["capacity"] > 0, f"capacity must be positive, got {summary['capacity']}"
+        assert isinstance(summary.get("capacity_trend"), dict), (
+            f"capacity_trend must be a dict, got {type(summary.get('capacity_trend'))}"
+        )
+        trend = summary["capacity_trend"]
+        assert trend["min_capacity"] > 0, f"capacity trend min must be positive: {trend}"
+        assert trend["last_capacity"] == summary["capacity"], (
+            "capacity_trend last_capacity must equal summary capacity"
+        )
+
+        # Cross-check against a direct estimate_capacity call on the same frame.
+        data = load_data(csv_path)
+        direct = estimate_capacity(data, 0.5, adv_window=20)
+        assert abs(summary["capacity"] - direct["estimated_capacity"]) < 1e-9, (
+            f"monte_carlo capacity {summary['capacity']} != direct "
+            f"{direct['estimated_capacity']}"
+        )
+
+
+def test_cli_monte_carlo_impact_sweep_records_capacity():
+    """CLI monte-carlo --impact-coefficients writes a sweep artifact whose
+    every row carries capacity and capacity_trend, with capacity degrading as
+    market impact rises and None when impact is disabled.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "monte-carlo",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--output", out_dir,
+            "--n-simulations", "50",
+            "--impact-coefficients", "0", "2", "5",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+
+        assert rc == 0, f"CLI monte_carlo impact sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "monte_carlo_impact_sweep.json")
+        assert os.path.exists(sweep_path), "monte_carlo_impact_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+
+        assert payload["impact_coefficients"] == [0.0, 2.0, 5.0]
+        assert len(payload["results"]) == 3
+        for row in payload["results"]:
+            assert "capacity" in row, f"sweep row missing capacity: {row}"
+            assert "capacity_trend" in row, f"sweep row missing capacity_trend: {row}"
+        # Impact disabled (first row) must report capacity None and no trend.
+        assert payload["results"][0]["capacity"] is None, (
+            f"impact-disabled sweep row must report capacity=None, got "
+            f"{payload['results'][0]['capacity']}"
+        )
+        assert payload["results"][0]["capacity_trend"] is None
+        # Impact enabled rows must report positive capacity and a trend dict.
+        enabled = [r for r in payload["results"] if r["impact_coefficient"] > 0]
+        assert len(enabled) == 2
+        for r in enabled:
+            assert r["capacity"] is not None and r["capacity"] > 0, (
+                f"impact-enabled row must report positive capacity: {r}"
+            )
+            assert isinstance(r["capacity_trend"], dict), (
+                f"capacity_trend must be a dict, got {type(r.get('capacity_trend'))}"
+            )
+            assert r["capacity_trend"]["min_capacity"] > 0, (
+                f"capacity trend min must be positive: {r['capacity_trend']}"
+            )
+        # Capacity degrades as market impact rises.
+        caps = [r["capacity"] for r in payload["results"][1:]]
+        assert caps[1] < caps[0], (
+            f"capacity must fall as impact rises: {caps}"
+        )
+
+
+
+
 
 def test_monte_carlo_n_trials_uses_evaluated_combo_count():
     """run_monte_carlo with --n-trials and a param grid must deflate using
@@ -6276,6 +6398,8 @@ TEST_REGISTRY = [
     ("test_cli_optimize_multiple_benchmarks", test_cli_optimize_multiple_benchmarks),
     ("test_cli_monte_carlo_multiple_benchmarks", test_cli_monte_carlo_multiple_benchmarks),
     ("test_cli_monte_carlo_impact_sweep", test_cli_monte_carlo_impact_sweep),
+    ("test_cli_monte_carlo_surfaces_capacity_in_summary", test_cli_monte_carlo_surfaces_capacity_in_summary),
+    ("test_cli_monte_carlo_impact_sweep_records_capacity", test_cli_monte_carlo_impact_sweep_records_capacity),
     ("test_monte_carlo_n_trials_uses_evaluated_combo_count", test_monte_carlo_n_trials_uses_evaluated_combo_count),
     ("test_cli_cpcv_impact_sweep", test_cli_cpcv_impact_sweep),
     ("test_cli_monte_carlo_borrow_sweep", test_cli_monte_carlo_borrow_sweep),
