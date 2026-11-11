@@ -1362,6 +1362,36 @@ class TestTearSheet(unittest.TestCase):
             self.assertEqual(summary["monte_carlo"]["n_simulations"], 3)
             self.assertAlmostEqual(summary["monte_carlo"]["probability_of_ruin"], 0.03)
 
+    def test_generate_tear_sheet_surfaces_capacity_in_monte_carlo(self):
+        """The Monte Carlo tear-sheet JSON summary surfaces the
+        market-impact capacity estimate (capacity / capacity_trend) carried
+        in the Monte Carlo summary, matching the walk-forward / CPCV paths."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            mc = self._make_monte_carlo_results()
+            mc["summary"]["capacity"] = 4_250_000.0
+            mc["summary"]["capacity_trend"] = {
+                "min_capacity": 900_000.0,
+                "median_capacity": 3_000_000.0,
+                "max_capacity": 4_250_000.0,
+                "last_capacity": 4_250_000.0,
+            }
+            html_path = generate_tear_sheet(
+                results, {"total_return": 0.1}, tmpdir,
+                symbol="SPY", strategy_name="SMA",
+                analysis_results={"monte_carlo": mc}, save_plots=False,
+            )
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("monte_carlo", summary)
+            self.assertEqual(
+                summary["monte_carlo"]["summary"]["capacity"], 4_250_000.0
+            )
+            self.assertEqual(
+                summary["monte_carlo"]["summary"]["capacity_trend"]["min_capacity"],
+                900_000.0,
+            )
+
     def test_tear_sheet_omits_monte_carlo_when_absent(self):
         """Without Monte Carlo analysis, the section is omitted."""
         with tempfile.TemporaryDirectory() as tmpdir:
