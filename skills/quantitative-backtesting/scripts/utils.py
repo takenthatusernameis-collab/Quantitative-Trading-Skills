@@ -1914,10 +1914,12 @@ def book_capacity_estimate(
     )
 
     # Notional-weighted rule (linear model only): capacity_i = max_impact * ADV_i /
-    # (coefficient * dw_i^2).
+    # (coefficient * dw_i^2). Reported for the linear model regardless of the
+    # impact_aggregation flag (which selects the cost charged, not the capacity
+    # rules reported); it is None only for the square-root model.
     per_asset_capacity_nw = None
     capacity_series_nw = None
-    if impact_model == "linear" and impact_aggregation == "notional-weighted":
+    if impact_model == "linear":
         per_asset_capacity_nw = (
             (max_impact * adv_notional) / (traded * traded * float(impact_coefficient))
         )
