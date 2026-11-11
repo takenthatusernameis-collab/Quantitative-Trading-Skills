@@ -58,7 +58,7 @@ from walk_forward import (
     _split_train_val_test,
     _verify_split_separation,
 )
-from regime_detection import add_regime_analysis_to_results, RegimeConfig, regime_concentration_diagnostic
+from regime_detection import add_regime_analysis_to_results, RegimeConfig, regime_concentration_diagnostic, detect_combined_regime
 
 
 def parse_args():
@@ -76,6 +76,7 @@ def parse_args():
     parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="List of market impact coefficients to sweep (overrides --impact-coefficient).")
     parser.add_argument("--impact-model", type=str, default="linear", choices=["linear", "sqrt"], help="Market impact model: 'linear' (default) or 'sqrt' (coefficient * sqrt(participation rate)).")
     parser.add_argument("--impact-aggregation", type=str, default="panel", choices=["panel", "notional-weighted"], help="Market-impact aggregation convention. 'panel' (default) charges the equal-weighted mean of the per-asset impact rates -- the convention every published number was produced under. 'notional-weighted' charges the dollar-consistent aggregation (the impact rate of each name applied to the notional traded in that name); default unchanged so no published number moves.")
+    parser.add_argument("--regime-impact-coefficients", type=str, default=None, help="JSON dict mapping regime name (e.g. 'bull_high_vol') to a regime-specific market impact coefficient. When provided, market impact uses the regime-specific coefficient for each detected regime; regimes not in the dict fall back to --impact-coefficient. Disabled by default so no published number moves.")
     parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
     parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3%% per year)")
     parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="List of annual borrow costs to sweep (overrides --borrow-cost).")
@@ -347,6 +348,28 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     price = market["price"]
     is_panel = market["is_panel"]
 
+    # Regime detection for regime-aware market impact modeling.
+    # Detect combined trend+volatility regimes on the market close prices.
+    # For panels, use the first asset's close for regime detection. Mirrors
+    # walk_forward.py's `_calculate_strategy_returns` so both entry points
+    # charge the same regime-specific impact for the same panel.
+    regimes = None
+    _regime_impact_coefficients = getattr(args, "regime_impact_coefficients", None)
+    if _regime_impact_coefficients is not None:
+        try:
+            _regime_impact_coefficients = json.loads(_regime_impact_coefficients)
+        except (TypeError, ValueError):
+            _regime_impact_coefficients = None
+    if _regime_impact_coefficients:
+        regime_close = close.iloc[:, 0] if (is_panel and isinstance(close, pd.DataFrame) and close.shape[1] > 0) else close
+        if isinstance(regime_close, pd.Series) and len(regime_close) > 0:
+            try:
+                regimes = detect_combined_regime(regime_close)
+                # Align regimes to raw_returns index (same as position_changes/held_book index)
+                regimes = regimes.reindex(raw_returns.index)
+            except Exception:
+                regimes = None
+
     # Trade at next period's open (avoid look-ahead bias)
     # Account for execution latency if specified (delay position execution by latency periods)
     latency = getattr(args, 'latency', 0) or 0
@@ -507,6 +530,8 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             initial_capital=args.initial_capital,
             impact_aggregation=impact_aggregation,
             impact_model=getattr(args, "impact_model", "linear"),
+            regimes=regimes,
+            regime_impact_coefficients=_regime_impact_coefficients,
         )
         if market_impact is not None:
             costs = costs + market_impact
@@ -537,6 +562,8 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             initial_capital=args.initial_capital,
             impact_aggregation=impact_aggregation,
             impact_model=getattr(args, "impact_model", "linear"),
+            regimes=regimes,
+            regime_impact_coefficients=_regime_impact_coefficients,
         )
         if market_impact is not None:
             costs = costs + market_impact
