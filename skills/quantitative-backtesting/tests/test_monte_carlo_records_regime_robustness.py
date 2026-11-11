@@ -78,6 +78,12 @@ def test_monte_carlo_records_regime_robustness():
         )
         _assert_regime_robustness(summary["regime_robustness"], "monte_carlo")
 
+        # Session 74: Monte Carlo single-run summary must carry the same
+        # market-impact capacity estimate metadata as run_backtest/walk-forward/
+        # CPCV/out-of-sample paths (measurement only; None when impact/ADV not estimable).
+        assert "capacity" in summary, "monte_carlo summary must carry capacity"
+        assert "capacity_trend" in summary, "monte_carlo summary must carry capacity_trend"
+
 
 if __name__ == "__main__":
     for name in sorted(globals()):
