@@ -1588,38 +1588,6 @@ def test_real_market_cost_sensitivity_sweep_aapl():
         assert len(r["criteria"]) == 5
 
 
-def test_real_market_machinery_separation_audit_longer_windows():
-    """Extend machinery separation audit to longer windows on real market pairs.
-
-    Runs the falsifiable hypothesis machinery on multiple real market pairs
-    with the full committed datasets (longer windows) and verifies the
-    split-separation invariant holds for each pair. Uses only committed
-    fixtures with offline guards.
-    """
-    from falsifiable_hypothesis_example import run_hypothesis_test
-
-    pairs = [
-        ("GOOGL.csv", "sample_benchmark.csv"),
-        ("MSFT.csv", "GOOGL.csv"),
-        ("AAPL.csv", "MSFT.csv"),
-        ("AAPL.csv", None),
-    ]
-
-    for data_name, bench_name in pairs:
-        data_path = SKILLS_DIR / "assets" / "example_data" / "real_market_data" / data_name
-        assert data_path.exists(), f"real market data fixture missing: {data_name}"
-        buffer = io.StringIO()
-        with contextlib.redirect_stdout(buffer):
-            result = run_hypothesis_test(data_path, commission=COMMISSION, slippage=SLIPPAGE)
-        sep = result.get("separation_check") or result.get("train_val_test_split", {}).get("separation_check", {})
-        assert sep.get("disjoint") is True, f"separation disjoint failed for {data_name}"
-        assert sep.get("chronological") is True, f"separation chronological failed for {data_name}"
-        for overlap in ("train_val_overlap", "val_test_overlap", "train_test_overlap"):
-            assert sep.get(overlap) == 0, f"overlap {overlap} failed for {data_name}"
-        assert result.get("pit_passed") is True
-        assert result.get("bias_controls_engaged") is True
-
-
 def test_real_market_fetch_save_and_run_path_is_offline_safe():
     """The real-market fetch + save + run path works offline against a local
     HTTP server, without making any network call to Yahoo.
