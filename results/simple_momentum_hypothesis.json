@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "kind": "falsifiable_hypothesis_record",
+  "generated_at": "2026-11-11T18:40:31Z",
+  "generator": "simple_momentum_hypothesis.py",
+  "generator_path": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/simple_momentum_hypothesis.py",
+  "engine": "skills/quantitative-backtesting/scripts/run_backtest.py",
+  "reproducible": true,
+  "regeneration_command": "python3 simple_momentum_hypothesis.py",
+  "data": {
+    "path": "skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv",
+    "note": "bundled synthetic OHLCV fixture (504 bars); NOT evidence about any real security or market"
+  },
+  "benchmarks": [
+    "skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv",
+    "skills/quantitative-backtesting/assets/example_data/sample_benchmark.csv"
+  ],
+  "n_benchmarks": 2,
+  "methodology_controls": {
+    "split": "train/val/test = 0.6/0.2/0.2 (test split only; held-out)",
+    "train_val_test_sizes": [302, 100, 102],
+    "split_chronological": true,
+    "split_disjoint": true,
+    "point_in_time_validation": true,
+    "commission": 0.0002,
+    "slippage": 0.0001,
+    "impact_coefficient": 0.1,
+    "initial_capital": 100000.0
+  },
+  "hypothesis": "An SMA-crossover trend-following strategy produces positive out-of-sample risk-adjusted returns (Sharpe > 0) net of 3 bps round-trip trading costs on the held-out test set.",
+  "verdict": "NOT SUPPORTED",
+  "all_pass": false,
+  "criteria": [
+    {
+      "name": "oos_sharpe_gt_zero",
+      "description": "oos_sharpe > 0 (net of costs)",
+      "passed": false,
+      "observed": -0.904976225884366,
+      "threshold": 0.0
+    },
+    {
+      "name": "oos_total_return_positive",
+      "description": "oos_total_return > 0 (net of costs)",
+      "passed": false,
+      "observed": -0.050644487913191094,
+      "threshold": 0.0
+    },
+    {
+      "name": "deflated_alpha_ratio_gt_threshold",
+      "description": "deflated_alpha_ratio > 0.5 (multiple-benchmark deflated alpha)",
+      "passed": false,
+      "observed": 0.3313627670065071,
+      "threshold": 0.5,
+      "p_value": 0.6686372329934929,
+      "expected_max_alpha": 0.0047268294336604245,
+      "z_score": -0.4361532641954263,
+      "n_observations": 101,
+      "skewness": -0.14718696552603422,
+      "kurtosis": 6.526133907977517
+    },
+    {
+      "name": "capacity_gt_initial_capital",
+      "description": "strategy capacity (notional) > initial capital at advertised impact level",
+      "passed": true,
+      "observed": 3103463.787202133,
+      "threshold": 100000.0
+    }
+  ],
+  "metrics": {
+    "sharpe_ratio": -0.904976225884366,
+    "total_return": -0.050644487913191094,
+    "annualized_return": -0.12161698574390267,
+    "max_drawdown": -0.1014432704839165,
+    "alpha_primary_benchmark": -0.10072694540064961,
+    "benchmark_0_total_return": -0.028715918907532778,
+    "benchmark_1_total_return": 0.08085897435279055,
+    "deflated_alpha": {
+      "deflated_alpha_ratio": 0.3313627670065071,
+      "p_value": 0.6686372329934929,
+      "alpha": -0.10072694540064961,
+      "expected_max_alpha": 0.0047268294336604245,
+      "z_score": -0.4361532641954263,
+      "n_benchmarks": 2,
+      "n_observations": 101,
+      "skewness": -0.14718696552603422,
+      "kurtosis": 6.526133907977517
+    },
+    "capacity": 3103463.787202133,
+    "capacity_trend": {
+      "n_periods": 102,
+      "min_capacity": 2501822.940510243,
+      "median_capacity": 3140516.9837063774,
+      "max_capacity": 5672530.448989018,
+      "last_capacity": 3103463.787202133,
+      "min_to_median_ratio": 0.7966277378820732,
+      "last_to_median_ratio": 0.9882015614956123
+    },
+    "test_resolution": {
+      "n_test_observations": 101,
+      "n_benchmarks": 2,
+      "target_p_value": 0.1,
+      "min_detectable_alpha": 0.321911783100584,
+      "observed_annualized_alpha": -0.10072694540064961,
+      "realized_annualized_volatility": 0.15259297927669505,
+      "alpha_status": "resolvable",
+      "alpha_beyond_plausible_bound": true,
+      "plausible_max_annualized_alpha": 0.1,
+      "message": "With 101 test observation(s): the Deflated Alpha test can only confirm an annualized alpha of at least 32.19% (observed -10.07%). The Deflated Alpha threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+    }
+  },
+  "verdict_notes": [
+    "NOT SUPPORTED: at least one falsification criterion failed; the hypothesis is falsified on this fixture.",
+    "This is a falsification exercise, not a claim of profitability. Do not describe the result as profitable, robust, or production-ready.",
+    "The fixture is synthetic (bundled sample data), not market evidence; it says nothing about any real security.",
+    "Criterion 3 (Deflated Alpha) is resolvable but its threshold (32.19% annualized alpha) exceeds the plausibility bound (10%), so at this sample size the criterion outcome measures sample size, not the strategy.",
+    "All internal regression guards (cost sweep, cost-sensitivity sweep, capacity sweep, capacity-sensitivity sweep) passed; the script exited 0."
+  ]
+}
