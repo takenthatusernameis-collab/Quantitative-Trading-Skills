@@ -489,6 +489,7 @@ def walk_forward_analysis(
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     impact_model=DEFAULT_IMPACT_MODEL,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
+    max_impact: Optional[float] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -560,6 +561,13 @@ def walk_forward_analysis(
             of ``coefficient * participation_rate``. The square-root model is
             more empirically supported for large orders (Almgren-Chriss, Kyle).
             The default is "linear" so no published number moves.
+        max_impact: Optional maximum acceptable market impact per trade (as
+            decimal, e.g., 0.0005 = 5 bps). When provided and impact_coefficient
+            > 0, the target position is scaled so that the estimated market
+            impact of each trade stays below this threshold. This implements a
+            capacity-aware position cap: if a trade would exceed max_impact,
+            the position is proportionally reduced. Opt-in; when None (default),
+            no capacity-aware scaling is applied.
 
     Returns:
         Dictionary with walk-forward results including:
@@ -777,6 +785,7 @@ def walk_forward_analysis(
                         initial_capital=initial_capital,
                         panel_pricing=panel_pricing,
                         impact_aggregation=impact_aggregation,
+                        max_impact=max_impact,
                         book_weights=test_book_weights,
                     )
 
@@ -789,6 +798,7 @@ def walk_forward_analysis(
                         panel_pricing=panel_pricing,
                         impact_aggregation=impact_aggregation,
                         regime_impact_coefficients=regime_impact_coefficients,
+                        max_impact=max_impact,
                         book_weights=(
                             strategy_target_weights(strategy, train_data)
                             if panel_pricing == "book"
@@ -1272,6 +1282,7 @@ def parameter_optimization(
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
+    max_impact: Optional[float] = None,
     inert_grid_report: Optional[Dict[str, Any]] = None,
     **kwargs,
 ) -> List[Dict[str, Any]]:
@@ -1334,6 +1345,13 @@ def parameter_optimization(
             back to the base `impact_coefficient`. This captures the empirical
             fact that market impact varies across market regimes (e.g., higher
             impact in high-volatility/bear regimes due to lower liquidity).
+        max_impact: Optional maximum acceptable market impact per trade (as
+            decimal, e.g., 0.0005 = 5 bps). When provided and impact_coefficient
+            > 0, the target position is scaled so that the estimated market
+            impact of each trade stays below this threshold. This implements a
+            capacity-aware position cap: if a trade would exceed max_impact,
+            the position is proportionally reduced. Opt-in; when None (default),
+            no capacity-aware scaling is applied.
         inert_grid_report: Optional dict that receives the inert-grid
             measurement (``inert_grid_params``, ``strategy_parameters`` and
             ``message``) for the grid that was priced. A grid key whose
@@ -1428,6 +1446,7 @@ def parameter_optimization(
                 panel_pricing=panel_pricing,
                 impact_aggregation=impact_aggregation,
                 regime_impact_coefficients=regime_impact_coefficients,
+                max_impact=max_impact,
                 book_weights=book_weights,
             )
 
@@ -2696,6 +2715,7 @@ def _calculate_strategy_returns(
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     impact_model=DEFAULT_IMPACT_MODEL,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
+    max_impact: Optional[float] = None,
 ) -> pd.Series:
     """Calculate strategy returns from signals and market data.
 
@@ -2771,6 +2791,13 @@ def _calculate_strategy_returns(
             back to the base `impact_coefficient`. This captures the empirical
             fact that market impact varies across market regimes (e.g., higher
             impact in high-volatility/bear regimes due to lower liquidity).
+        max_impact: Optional maximum acceptable market impact per trade (as
+            decimal, e.g., 0.0005 = 5 bps). When provided and impact_coefficient
+            > 0, the target position is scaled so that the estimated market
+            impact of each trade stays below this threshold. This implements a
+            capacity-aware position cap: if a trade would exceed max_impact,
+            the position is proportionally reduced. Opt-in; when None (default),
+            no capacity-aware scaling is applied.
     """
     if fill_rate is None:
         fill_rate = 1.0
@@ -2782,6 +2809,11 @@ def _calculate_strategy_returns(
         latency = 0
     if impact_model not in IMPACT_MODEL_TYPES:
         raise ValueError(f"impact_model must be one of {IMPACT_MODEL_TYPES}, got {impact_model}")
+    if max_impact is not None:
+        if max_impact <= 0:
+            raise ValueError(f"max_impact must be positive, got {max_impact}")
+        if impact_coefficient <= 0:
+            raise ValueError("max_impact requires impact_coefficient > 0")
     panel_pricing = resolve_panel_pricing(panel_pricing)
     # Shared market model: the single definition of how a single asset, a
     # MultiIndex panel and a dict panel are priced. It is shared with
@@ -2818,7 +2850,63 @@ def _calculate_strategy_returns(
     # the following bar, so both bars are non-tradable and dropped. The
     # constant is shared with run_backtest.py through utils.py so the
     # convention has a single definition.
-    positions = signals.shift(1 + latency) * fill_rate  # Trade at next period's open, delayed by execution latency; the achieved position is fill_rate * target (a position-scale limit, not a partial-fill model)
+    target_positions = signals.shift(1 + latency) * fill_rate  # Trade at next period's open, delayed by execution latency; the achieved position is fill_rate * target (a position-scale limit, not a partial-fill model)
+
+    # Capacity-aware position scaling: if max_impact is set and impact_coefficient > 0,
+    # scale target positions so estimated market impact per trade <= max_impact.
+    if max_impact is not None and impact_coefficient > 0 and volume is not None:
+        # Equity value of the position at risk, scaled by initial_capital
+        equity = initial_capital * (1 + raw_returns).cumprod()
+        # ADV in notional (shares * price)
+        adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
+        adv_notional = adv_shares * close
+        # We need to scale position *changes*, not absolute positions.
+        # The market impact is charged on position_changes = target_positions.diff().abs()
+        # So we compute the max allowed position change per period.
+        # For linear model: impact = (|position_change| * equity / ADV_notional) * impact_coefficient
+        # For sqrt model: impact = impact_coefficient * sqrt(|position_change| * equity / ADV_notional)
+        # Solving for max |position_change|:
+        # linear: |position_change| <= max_impact * ADV_notional / (equity * impact_coefficient)
+        # sqrt: |position_change| <= (max_impact / impact_coefficient)^2 * ADV_notional / equity
+        # We apply the scaling to the target_positions series directly by computing
+        # a per-period scale factor based on the position change that would result.
+        # To avoid circular dependency (scale factor depends on position change which
+        # depends on scale factor), we compute the scale factor from the *unscaled*
+        # position changes, then apply it to the target positions.
+        unscaled_changes = target_positions.diff().abs()
+        if impact_model == "sqrt":
+            max_change = ((max_impact / float(impact_coefficient)) ** 2) * adv_notional / equity
+        else:
+            max_change = (max_impact * adv_notional) / (equity * float(impact_coefficient))
+        # For panels, adv_notional is a DataFrame; take the mean across assets
+        # since target_positions is a scalar (net exposure) in panel mode.
+        if is_panel:
+            max_change = max_change.mean(axis=1)
+        # Scale factor: min(1, max_change / |proposed_change|)
+        # Where proposed_change is the change from the previous scaled position.
+        # We compute this iteratively: start with the first position, then for each
+        # subsequent period, compute the max allowed change and scale the target.
+        # This is more accurate but complex. Simpler approach: scale the position
+        # changes directly, then reconstruct positions.
+        # Actually, the simplest and most common approach: compute a per-period
+        # scale factor on the position change, then reconstruct the position series.
+        scale_factor = (max_change / unscaled_changes).clip(upper=1.0)
+        # NaN where no change proposed -> 1.0 (no scaling needed)
+        scale_factor = scale_factor.fillna(1.0)
+        # Apply scaling to position changes
+        scaled_changes = unscaled_changes * scale_factor
+        # Reconstruct positions from scaled changes (cumulative sum from first position)
+        first_pos = target_positions.iloc[0]
+        positions = pd.Series(index=target_positions.index, dtype=float)
+        positions.iloc[0] = first_pos
+        for i in range(1, len(target_positions)):
+            # The direction of the change is preserved from the unscaled change
+            direction = np.sign(target_positions.diff().iloc[i])
+            if pd.isna(direction):
+                direction = 0.0
+            positions.iloc[i] = positions.iloc[i-1] + direction * scaled_changes.iloc[i]
+    else:
+        positions = target_positions
 
     # Borrow and funding costs are annualized rates applied per period.
     # The per-period rate divides by the number of periods per year inferred
@@ -6777,6 +6865,7 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
     if pit_strict is None:
         pit_strict = bool(getattr(args, "point_in_time_strict", False))
+    max_impact = getattr(args, "max_impact", None)
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -6807,6 +6896,7 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         pit_strict=pit_strict,
         regime_impact_coefficients=regime_impact_coefficients,
+        max_impact=max_impact,
     )
     summary = results["summary"]
     dsr = summary.get("deflated_sharpe")
@@ -6913,6 +7003,7 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         fill_rate = 1.0
     if fill_rate <= 0 or fill_rate > 1:
         raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
+    max_impact = getattr(args, "max_impact", None)
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -6943,6 +7034,7 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         inert_grid_report=inert_report,
         regime_impact_coefficients=regime_impact_coefficients,
+        max_impact=max_impact,
     )
     top = results[0] if results else None
     dsr = top.get("deflated_sharpe") if isinstance(top, dict) else None
@@ -8471,6 +8563,7 @@ def run_walk_forward(args) -> int:
 
     latency, fill_rate = _resolve_latency_fill_rate(args)
     min_position_fraction = _resolve_min_position_fraction(args)
+    max_impact = getattr(args, "max_impact", None)
 
     param_grid = _parse_param_grid(args.param_grid)
     regime_impact_coefficients = _parse_regime_impact_coefficients(getattr(args, "regime_impact_coefficients", None))
@@ -8725,6 +8818,7 @@ def run_walk_forward(args) -> int:
         validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
         regime_impact_coefficients=regime_impact_coefficients,
+        max_impact=max_impact,
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
@@ -11011,6 +11105,7 @@ def main():
     common_parser.add_argument("--fill-rates", type=float, nargs="+", default=None, help="List of fill rates to sweep (overrides --fill-rate).")
     common_parser.add_argument("--latencies", type=int, nargs="+", default=None, help="List of execution latencies (in periods) to sweep (overrides --latency). Delays position execution by each latency after signal generation.")
     common_parser.add_argument("--min-position-fraction", type=float, default=None, help="Reject a run whose verdict rests on windows the strategy held a position for less than this fraction of each window's executable bars (after warmup). Opt-in: unset means the run is never rejected on this basis.")
+    common_parser.add_argument("--max-impact", type=float, default=None, help="Maximum acceptable market impact per trade (as decimal, e.g., 0.0005 = 5 bps). When set, positions are scaled so the estimated market impact of each trade stays below this threshold. Opt-in: unset means no capacity-aware scaling.")
     common_parser.add_argument(
         "--panel-pricing",
         type=str,
