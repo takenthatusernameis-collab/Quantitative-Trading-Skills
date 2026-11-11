@@ -534,3 +534,41 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_market_impact_sqrt_model_differs_from_linear_single_asset():
+    """Square-root impact must be selectable and produce a different net
+    return than linear impact for the same coefficient on a traded series.
+
+    The square-root model (impact = coeff * sqrt(participation)) is more
+    empirically supported for large orders than linear impact. This guards
+    the core model selection so cost/impact sensitivity studies can choose
+    the model explicitly instead of being limited to linear.
+    """
+    data = _make_market()
+    # A toggling long/flat signal generates repeated position changes with
+    # stable ADV, so participation is well-defined and the two models differ.
+    sig = pd.Series([1.0 if i % 10 < 5 else 0.0 for i in range(PERIODS)], index=data.index)
+    linear = _calculate_strategy_returns(
+        data, sig, commission=0.0, slippage=0.0,
+        impact_coefficient=0.8, impact_model="linear",
+    )
+    sqrt = _calculate_strategy_returns(
+        data, sig, commission=0.0, slippage=0.0,
+        impact_coefficient=0.8, impact_model="sqrt",
+    )
+    assert not np.allclose(linear.values, sqrt.values), (
+        "sqrt impact model must produce different per-period returns than linear"
+    )
+    assert float((1 + sqrt).prod() - 1) != float((1 + linear).prod() - 1), (
+        "sqrt and linear impact totals must differ for the same coefficient"
+    )
+    # Both models must still impose non-negative impact drag relative to no
+    # impact on this long-only, always-positive-return construction? Not
+    # guaranteed for signed raw returns; assert they differ from zero-impact.
+    no_impact = _calculate_strategy_returns(
+        data, sig, commission=0.0, slippage=0.0,
+        impact_coefficient=0.0, impact_model="linear",
+    )
+    assert not np.allclose(linear.values, no_impact.values)
+    assert not np.allclose(sqrt.values, no_impact.values)

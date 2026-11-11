@@ -72,8 +72,9 @@ def parse_args():
     parser.add_argument("--commissions", type=float, nargs="+", default=None, help="List of commissions to sweep (overrides --commission)")
     parser.add_argument("--slippage", type=float, default=0.0001, help="Slippage per trade (as decimal)")
     parser.add_argument("--slippages", type=float, nargs="+", default=None, help="List of slippages to sweep (overrides --slippage)")
-    parser.add_argument("--impact-coefficient", type=float, default=0.0, help="Market impact coefficient (position_notional/ADV * coefficient). 0 to disable.")
+    parser.add_argument("--impact-coefficient", type=float, default=0.0, help="Market impact coefficient. Linear: (position_notional/ADV * coefficient). Square-root: coefficient * sqrt(position_notional/ADV). 0 to disable.")
     parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="List of market impact coefficients to sweep (overrides --impact-coefficient).")
+    parser.add_argument("--impact-model", type=str, default="linear", choices=["linear", "sqrt"], help="Market impact model: 'linear' (default) or 'sqrt' (coefficient * sqrt(participation rate)).")
     parser.add_argument("--impact-aggregation", type=str, default="panel", choices=["panel", "notional-weighted"], help="Market-impact aggregation convention. 'panel' (default) charges the equal-weighted mean of the per-asset impact rates -- the convention every published number was produced under. 'notional-weighted' charges the dollar-consistent aggregation (the impact rate of each name applied to the notional traded in that name); default unchanged so no published number moves.")
     parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
     parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3%% per year)")
@@ -505,6 +506,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             adv_window=args.adv_window,
             initial_capital=args.initial_capital,
             impact_aggregation=impact_aggregation,
+            impact_model=getattr(args, "impact_model", "linear"),
         )
         if market_impact is not None:
             costs = costs + market_impact
@@ -534,6 +536,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             adv_window=args.adv_window,
             initial_capital=args.initial_capital,
             impact_aggregation=impact_aggregation,
+            impact_model=getattr(args, "impact_model", "linear"),
         )
         if market_impact is not None:
             costs = costs + market_impact
@@ -714,6 +717,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             "commission": args.commission,
             "slippage": args.slippage,
             "impact_coefficient": args.impact_coefficient,
+            "impact_model": getattr(args, "impact_model", "linear"),
             "impact_aggregation": impact_aggregation,
             "adv_window": args.adv_window,
             "borrow_cost": args.borrow_cost,
