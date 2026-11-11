@@ -9600,6 +9600,13 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     resolution = (
         _build_test_resolution({"deflated_sharpe": dsr}, returns) if dsr is not None else None
     )
+    try:
+        _capacity = estimate_capacity(data, impact_coefficient, adv_window=args.adv_window)
+        _capacity_point = _capacity.get("estimated_capacity")
+        _capacity_trend = _capacity.get("capacity_trend")
+    except Exception:
+        _capacity_point = None
+        _capacity_trend = None
     return {
         "impact_coefficient": float(impact_coefficient),
         "borrow_cost": float(borrow_cost),
@@ -9619,6 +9626,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         "n_simulations": int(mc_results["n_simulations"]),
         "test_resolution": resolution,
         "sharpe_below_resolution": _sweep_sharpe_below_resolution(mc_sharpe, resolution),
+        "capacity": _capacity_point,
+        "capacity_trend": _capacity_trend,
         # Bias-controls engagement flag (point-in-time validation + multiple-
         # testing deflation). Propagated from the CLI args so the sweep artifact
         # is traceable to the same signal as the single-run Monte Carlo JSON.
@@ -10090,6 +10099,20 @@ def run_monte_carlo(args) -> int:
         )
     except Exception:
         mc_results["summary"]["regime_robustness"] = None
+
+    # Surface market-impact capacity estimate in the Monte Carlo summary so
+    # the path reports capacity consistently with run_backtest/walk-forward/
+    # CPCV/out-of-sample paths. A measurement only; it changes no return,
+    # cost, impact, or simulation number.
+    try:
+        _capacity = estimate_capacity(
+            data, args.impact_coefficient, adv_window=args.adv_window
+        )
+        mc_results["summary"]["capacity"] = _capacity.get("estimated_capacity")
+        mc_results["summary"]["capacity_trend"] = _capacity.get("capacity_trend")
+    except Exception:
+        mc_results["summary"]["capacity"] = None
+        mc_results["summary"]["capacity_trend"] = None
 
     print(f"Probability of Ruin (>50% drawdown): {mc_results['probability_of_ruin']:.2%}")
 
