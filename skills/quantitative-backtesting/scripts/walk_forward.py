@@ -485,6 +485,7 @@ def walk_forward_analysis(
     pit_strict: bool = False,
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
+    impact_model=DEFAULT_IMPACT_MODEL,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
@@ -552,6 +553,11 @@ def walk_forward_analysis(
             back to the base `impact_coefficient`. This captures the empirical
             fact that market impact varies across market regimes (e.g., higher
             impact in high-volatility/bear regimes due to lower liquidity).
+        impact_model: ``"linear"`` (default) or ``"sqrt"``. The square-root model
+            computes impact as ``coefficient * sqrt(participation_rate)`` instead
+            of ``coefficient * participation_rate``. The square-root model is
+            more empirically supported for large orders (Almgren-Chriss, Kyle).
+            The default is "linear" so no published number moves.
 
     Returns:
         Dictionary with walk-forward results including:
@@ -570,6 +576,8 @@ def walk_forward_analysis(
         latency = 0
     if latency < 0:
         latency = 0
+    if impact_model not in IMPACT_MODEL_TYPES:
+        raise ValueError(f"impact_model must be one of {IMPACT_MODEL_TYPES}, got {impact_model}")
     panel_pricing = resolve_panel_pricing(panel_pricing)
 
     if isinstance(data, dict):
@@ -2684,6 +2692,7 @@ def _calculate_strategy_returns(
     panel_pricing: str = "net-exposure",
     book_weights: Optional[pd.DataFrame] = None,
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
+    impact_model=DEFAULT_IMPACT_MODEL,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
 ) -> pd.Series:
     """Calculate strategy returns from signals and market data.
@@ -2747,6 +2756,11 @@ def _calculate_strategy_returns(
             mean of the per-asset impact rates; ``"notional-weighted"``
             charges the dollar-consistent aggregation. Default ``"panel"``
             keeps every published number unchanged.
+        impact_model: ``"linear"`` (default) or ``"sqrt"``. The square-root model
+            computes impact as ``coefficient * sqrt(participation_rate)`` instead
+            of ``coefficient * participation_rate``. The square-root model is
+            more empirically supported for large orders (Almgren-Chriss, Kyle).
+            The default is "linear" so no published number moves.
         regime_impact_coefficients: Optional dict mapping regime name (e.g.,
             'bull_high_vol', 'bear_low_vol') to impact coefficient. When
             provided, market impact is modeled with regime-specific coefficients.
@@ -2764,6 +2778,8 @@ def _calculate_strategy_returns(
         latency = 0
     if latency < 0:
         latency = 0
+    if impact_model not in IMPACT_MODEL_TYPES:
+        raise ValueError(f"impact_model must be one of {IMPACT_MODEL_TYPES}, got {impact_model}")
     panel_pricing = resolve_panel_pricing(panel_pricing)
     # Shared market model: the single definition of how a single asset, a
     # MultiIndex panel and a dict panel are priced. It is shared with
@@ -2855,6 +2871,7 @@ def _calculate_strategy_returns(
             adv_window=adv_window,
             initial_capital=initial_capital,
             impact_aggregation=impact_aggregation,
+            impact_model=impact_model,
             regimes=regimes,
             regime_impact_coefficients=regime_impact_coefficients,
         )
@@ -2891,6 +2908,7 @@ def _calculate_strategy_returns(
             adv_window=adv_window,
             initial_capital=initial_capital,
             impact_aggregation=impact_aggregation,
+            impact_model=impact_model,
             regimes=regimes,
             regime_impact_coefficients=regime_impact_coefficients,
         )
@@ -2947,15 +2965,19 @@ def estimate_capacity(
     impact_coefficient: float,
     max_impact: float = 0.0005,
     adv_window: int = 20,
+    impact_model: str = DEFAULT_IMPACT_MODEL,
 ) -> Dict[str, Any]:
     """
     Estimate strategy capacity from the market-impact cost model.
 
     Market impact of trading notional ``N`` is:
-        impact = (N / ADV_notional) * impact_coefficient
+        Linear (default):  impact = (N / ADV_notional) * impact_coefficient
+        Square-root:       impact = impact_coefficient * sqrt(N / ADV_notional)
+
     Solving for the maximum tradable notional at a target impact gives the
     per-trade capacity:
-        capacity_notional = max_impact * ADV_notional / impact_coefficient
+        Linear (default):  capacity_notional = max_impact * ADV_notional / impact_coefficient
+        Square-root:       capacity_notional = (max_impact / impact_coefficient)^2 * ADV_notional
 
     A strategy that rebalances its full position each period can therefore
     hold roughly ``capacity_notional`` of notional exposure without exceeding
@@ -2967,7 +2989,8 @@ def estimate_capacity(
     the portfolio notional, so the *least liquid* constituent sets the
     portfolio capacity:
 
-        capacity = n_assets * max_impact * min_i(ADV_notional_i) / impact_coefficient
+        Linear (default):  capacity = n_assets * max_impact * min_i(ADV_notional_i) / impact_coefficient
+        Square-root:       capacity = n_assets * (max_impact / impact_coefficient)^2 * min_i(ADV_notional_i)
 
     This is the binding constraint: a basket can only grow until its least
     liquid member exceeds the impact threshold. For a panel the reported
@@ -2986,15 +3009,18 @@ def estimate_capacity(
         data: OHLCV DataFrame (must contain ``close`` and ``volume``). For a
             multi-asset panel the columns are a MultiIndex whose levels carry
             the field names and the symbols (either order is accepted).
-        impact_coefficient: Linear market-impact coefficient. A value of 0
+        impact_coefficient: Market impact coefficient. A value of 0
             means impact is disabled and capacity is unconstrained.
         max_impact: Maximum acceptable market impact per trade, as a fraction
             of notional traded (default 0.0005 = 5 bps).
         adv_window: Rolling window (in periods) for the ADV calculation.
+        impact_model: ``"linear"`` (default) or ``"sqrt"``. The square-root model
+            computes impact as ``coefficient * sqrt(participation_rate)`` instead
+            of ``coefficient * participation_rate``.
 
     Returns:
         Dictionary with keys: impact_coefficient, max_impact, adv_window,
-        price, adv_shares, adv_notional, periods_per_year,
+        impact_model, price, adv_shares, adv_notional, periods_per_year,
         max_notional_per_trade, estimated_capacity, unconstrained, estimable,
         n_assets, binding_asset, capacity_trend.
         ``unconstrained`` is True when impact is disabled. ``estimable`` is
@@ -3007,6 +3033,7 @@ def estimate_capacity(
         "impact_coefficient": float(impact_coefficient),
         "max_impact": float(max_impact),
         "adv_window": int(adv_window),
+        "impact_model": impact_model,
         "price": None,
         "adv_shares": None,
         "adv_notional": None,
@@ -3023,6 +3050,9 @@ def estimate_capacity(
     if impact_coefficient <= 0:
         result["unconstrained"] = True
         return result
+
+    if impact_model not in IMPACT_MODEL_TYPES:
+        raise ValueError(f"impact_model must be one of {IMPACT_MODEL_TYPES}, got {impact_model}")
 
     is_panel = isinstance(data.columns, pd.MultiIndex)
     if is_panel:
@@ -3069,9 +3099,11 @@ def estimate_capacity(
         binding_adv_notional = float(valid.min())
         binding_adv_shares = float(adv_shares.iloc[-1][binding_asset])
         binding_price = float(close.iloc[-1][binding_asset])
-        per_asset_capacity = (
-            max_impact * binding_adv_notional / float(impact_coefficient)
-        )
+
+        if impact_model == "sqrt":
+            per_asset_capacity = (max_impact / float(impact_coefficient)) ** 2 * binding_adv_notional
+        else:
+            per_asset_capacity = max_impact * binding_adv_notional / float(impact_coefficient)
         portfolio_capacity = n_assets * per_asset_capacity
 
         # Capacity trend: the per-period portfolio capacity series, so a
@@ -3082,9 +3114,10 @@ def estimate_capacity(
             np.isfinite(adv_notional) & (adv_notional > 0)
         )
         _row_min_adv = _valid_adv_notional.min(axis=1, skipna=True)
-        _capacity_series = (
-            n_assets * max_impact * _row_min_adv / float(impact_coefficient)
-        )
+        if impact_model == "sqrt":
+            _capacity_series = n_assets * (max_impact / float(impact_coefficient)) ** 2 * _row_min_adv
+        else:
+            _capacity_series = n_assets * max_impact * _row_min_adv / float(impact_coefficient)
 
         result.update(
             price=binding_price,
@@ -3108,13 +3141,19 @@ def estimate_capacity(
     if not np.isfinite(last_adv_notional) or last_adv_notional <= 0:
         return result
 
-    max_notional_per_trade = max_impact * last_adv_notional / float(impact_coefficient)
+    if impact_model == "sqrt":
+        max_notional_per_trade = (max_impact / float(impact_coefficient)) ** 2 * last_adv_notional
+    else:
+        max_notional_per_trade = max_impact * last_adv_notional / float(impact_coefficient)
 
     # Capacity trend: the per-period capacity series across the window.
     _valid_adv = adv_notional.where(
         np.isfinite(adv_notional) & (adv_notional > 0)
     )
-    _capacity_series = max_impact * _valid_adv / float(impact_coefficient)
+    if impact_model == "sqrt":
+        _capacity_series = (max_impact / float(impact_coefficient)) ** 2 * _valid_adv
+    else:
+        _capacity_series = max_impact * _valid_adv / float(impact_coefficient)
 
     result.update(
         price=price,
@@ -3177,6 +3216,7 @@ def _window_book_capacity(
     fill_rate: float = 1.0,
     max_impact: float = 0.0005,
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
+    impact_model=DEFAULT_IMPACT_MODEL,
 ) -> Optional[Dict[str, Any]]:
     """The capacity implied by the book's own rebalance pattern in a window.
 
@@ -3189,7 +3229,8 @@ def _window_book_capacity(
     Two book-based capacities are returned: the "|dw|" rule (the capacity
     consistent with the panel impact charge) and the "notional-weighted"
     ("dw^2") rule (the capacity consistent with the dollar-consistent
-    impact charge).
+    impact charge). The notional-weighted rule is available for the linear
+    model only.
 
     Returns ``None`` when the window has no book, when the panel carries no
     volume, or when impact is disabled.
@@ -3214,6 +3255,7 @@ def _window_book_capacity(
         max_impact=max_impact,
         adv_window=adv_window,
         impact_aggregation=impact_aggregation,
+        impact_model=impact_model,
     )
 
 
