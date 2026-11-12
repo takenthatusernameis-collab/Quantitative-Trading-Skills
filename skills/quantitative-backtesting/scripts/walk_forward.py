@@ -2896,15 +2896,27 @@ def _calculate_strategy_returns(
         # Apply scaling to position changes
         scaled_changes = unscaled_changes * scale_factor
         # Reconstruct positions from scaled changes (cumulative sum from first position)
-        first_pos = target_positions.iloc[0]
-        positions = pd.Series(index=target_positions.index, dtype=float)
-        positions.iloc[0] = first_pos
-        for i in range(1, len(target_positions)):
-            # The direction of the change is preserved from the unscaled change
-            direction = np.sign(target_positions.diff().iloc[i])
-            if pd.isna(direction):
-                direction = 0.0
-            positions.iloc[i] = positions.iloc[i-1] + direction * scaled_changes.iloc[i]
+        #
+        # `target_positions = signals.shift(1 + latency)` leaves the first
+        # `1 + latency` bars NaN (the execution warmup). Seeding the
+        # reconstruction at `iloc[0]` therefore propagates that NaN through the
+        # whole series (NaN + 0 == NaN), emptying the return series whenever the
+        # signal is flat at the warmup bar -- which is exactly the case for a
+        # market-neutral book whose net-exposure signal is identically zero.
+        # Seed from the first *defined* position and leave the warmup bars NaN,
+        # matching the un-scaled convention (`positions = target_positions`).
+        positions = target_positions.copy()
+        first_valid = target_positions.first_valid_index()
+        if first_valid is not None:
+            first_loc = target_positions.index.get_loc(first_valid)
+            for i in range(first_loc + 1, len(target_positions)):
+                # The direction of the change is preserved from the unscaled change
+                direction = np.sign(target_positions.diff().iloc[i])
+                if pd.isna(direction):
+                    direction = 0.0
+                positions.iloc[i] = (
+                    positions.iloc[i - 1] + direction * scaled_changes.iloc[i]
+                )
     else:
         positions = target_positions
 

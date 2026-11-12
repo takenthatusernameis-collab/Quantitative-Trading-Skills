@@ -7893,6 +7893,48 @@ def test_walk_forward_reports_notional_weighted_capacity_in_book_mode():
             assert p.get("capacity_notional_weighted_trend") is not None
 
 
+def test_walk_forward_book_pricing_with_max_impact_cap_keeps_returns():
+    """Book-mode returns survive capacity-aware sizing on a flat net signal.
+
+    The `max_impact` cap rebuilds the executed position series from scaled
+    position *changes*. `target_positions = signals.shift(1 + latency)` leaves
+    the first `1 + latency` bars NaN (execution warmup), so seeding that
+    rebuild at `iloc[0]` propagated NaN through every bar (NaN + 0 == NaN) and
+    emptied the return series whenever the net-exposure signal was flat at the
+    warmup bar -- exactly a market-neutral book with symmetric quantiles. The
+    grid search then found no eligible combo, `best_params` stayed None, and
+    `capacity_book` was None. This pins the regression: with the cap active in
+    book mode the strategy still produces returns and a selected combo.
+    """
+    data = _make_multiasset_panel(periods=900, n_assets=4, seed=11)
+    factory = lambda params: build_strategy(
+        "cross_sectional_momentum", json.dumps(params)
+    )
+    # Symmetric quantiles: the net-exposure signal is identically zero, so only
+    # the book is a real position. This is the configuration that used to fail.
+    param_grid = {"lookback": [20], "top_quantile": [0.2], "bottom_quantile": [0.2]}
+    res = walk_forward_analysis(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=8,
+        test_months=3,
+        step_months=3,
+        impact_coefficient=0.5,
+        max_impact=0.0005,
+        adv_window=20,
+        panel_pricing="book",
+    )
+    summary = res["summary"]
+    # The cap no longer empties the book-mode return series, so the grid search
+    # selects a combo and book capacity is measurable.
+    assert summary["capacity_book"] is not None
+    assert summary["capacity_notional_weighted"] is not None
+    for p in res["periods"]:
+        assert p.get("best_params") is not None, p
+        assert len(p["test_returns"]) > 0, p
+
+
 def test_cpcv_reports_notional_weighted_capacity():
     """CPCV reports notional-weighted capacity in book mode."""
     data = _make_multiasset_panel(periods=900, n_assets=4, seed=11)
@@ -8053,6 +8095,10 @@ TEST_REGISTRY.append(
 TEST_REGISTRY.append(
     ("test_walk_forward_reports_notional_weighted_capacity_in_book_mode",
      test_walk_forward_reports_notional_weighted_capacity_in_book_mode)
+)
+TEST_REGISTRY.append(
+    ("test_walk_forward_book_pricing_with_max_impact_cap_keeps_returns",
+     test_walk_forward_book_pricing_with_max_impact_cap_keeps_returns)
 )
 TEST_REGISTRY.append(
     ("test_cpcv_reports_notional_weighted_capacity",
