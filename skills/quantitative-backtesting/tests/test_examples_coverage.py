@@ -48,6 +48,7 @@ _COMPARE_DUAL_CS_PATH = SKILLS_DIR / "examples" / "compare_dual_vs_cross_section
 _HRP_ALLOC_PATH = SKILLS_DIR / "examples" / "hrp_portfolio_allocation_example.py"
 
 _REAL_MARKET_DATA = SKILLS_DIR / "assets" / "example_data" / "real_market_data"
+_REALITY_CHECK_FAMILY_PATH = SKILLS_DIR / "examples" / "reality_check_family_example.py"
 
 
 def _build_triple_csv(dest: Path) -> Path:
@@ -1069,6 +1070,42 @@ def test_compare_dual_vs_cross_sectional_triple_runs():
 
 
 # ---------------------------------------------------------------------------
+# reality_check_family_example.py
+# ---------------------------------------------------------------------------
+
+
+def test_reality_check_family_example_imports():
+    """reality_check_family_example must import cleanly and expose entry points."""
+    module = _import_module("reality_check_family_example", _REALITY_CHECK_FAMILY_PATH)
+    assert hasattr(module, "run_reality_check_family_example")
+    assert callable(module.run_reality_check_family_example)
+    assert hasattr(module, "run_reality_check_family_example_benchmark_subtracted")
+    assert callable(module.run_reality_check_family_example_benchmark_subtracted)
+    assert hasattr(module, "main")
+    assert callable(module.main)
+
+
+def test_reality_check_family_example_runs():
+    """reality_check_family_example must run end-to-end and exit 0."""
+    result = subprocess.run(
+        [sys.executable, str(_REALITY_CHECK_FAMILY_PATH)],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == 0, (
+        f"reality_check_family_example exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-3000:]}\nstderr:\n{result.stderr[-3000:]}"
+    )
+    assert "EXAMPLE COMPLETE" in result.stdout
+    assert "Reality Check Family Example" in result.stdout
+    assert "Benchmark-subtracted" in result.stdout
+    # Must report the key Reality Check outputs
+    assert "p-value:" in result.stdout
+    assert "Test statistic:" in result.stdout
+    assert "Family size:" in result.stdout
+    assert "Observations:" in result.stdout
+
+
+# ---------------------------------------------------------------------------
 # Test registry
 # ---------------------------------------------------------------------------
 # Test registry
@@ -1146,6 +1183,8 @@ TEST_REGISTRY = [
     ("test_walk_forward_compare_triple_runs", test_walk_forward_compare_triple_runs),
     ("test_compare_dual_vs_cross_sectional_triple_imports", test_compare_dual_vs_cross_sectional_triple_imports),
     ("test_compare_dual_vs_cross_sectional_triple_runs", test_compare_dual_vs_cross_sectional_triple_runs),
+    ("test_reality_check_family_example_imports", test_reality_check_family_example_imports),
+    ("test_reality_check_family_example_runs", test_reality_check_family_example_runs),
     ("test_scripts_results_untouched_after_examples", test_scripts_results_untouched_after_examples),
 ]
 
