@@ -46,6 +46,8 @@ from utils import (
     format_impact_dilution_lines,
     held_book_weights,
     market_impact_cost,
+    reality_check_test,
+    romano_wolf_stepdown,
     resolve_impact_aggregation,
     resolve_panel_pricing,
     strategy_target_weights,
@@ -490,6 +492,10 @@ def walk_forward_analysis(
     impact_model=DEFAULT_IMPACT_MODEL,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
     max_impact: Optional[float] = None,
+    family_returns: Optional[pd.DataFrame] = None,
+    family_stepdown: bool = False,
+    family_seed: Optional[int] = None,
+    family_n_bootstrap: int = 1000,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -568,6 +574,26 @@ def walk_forward_analysis(
             capacity-aware position cap: if a trade would exceed max_impact,
             the position is proportionally reduced. Opt-in; when None (default),
             no capacity-aware scaling is applied.
+        family_returns: Optional per-period return matrix for a *family* of
+            strategies, shape ``(T, K)`` with one column per strategy, aligned
+            to the same dates as the walk-forward out-of-sample record. When
+            supplied, the family-level Reality Check and Romano-Wolf stepdown
+            are run on this matrix and recorded under
+            ``summary["family_reality_check"]`` /
+            ``summary["family_stepdown"]`` (including the per-strategy
+            ``ci_lower`` / ``ci_upper``). Default ``None``: no family test is
+            run and the summary is byte-for-byte unchanged, so existing
+            coverage assertions are unaffected. The matrix is a measurement
+            input -- it does not change any return, cost, impact or capacity
+            number the walk-forward itself reports.
+        family_stepdown: When ``True`` (and ``family_returns`` is supplied),
+            also run the Romano-Wolf stepdown in addition to the Reality
+            Check. Default ``False``: only the Reality Check is run. Ignored
+            when ``family_returns`` is ``None``.
+        family_seed: RNG seed for the family bootstrap. ``None`` uses a fresh
+            RNG. Reproducible when set.
+        family_n_bootstrap: Number of stationary-block bootstrap resamples for
+            the family tests. Default 1000.
 
     Returns:
         Dictionary with walk-forward results including:
