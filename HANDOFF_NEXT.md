@@ -1,19 +1,24 @@
 # Handoff — next session
 
 ## What changed (this session)
-- Session 69 completed: added a regime-concentration / regime-robustness diagnostic (a Session 68-endorsed "robustness tool — parameter stability across regimes").
-  - `skills/quantitative-backtesting/scripts/regime_detection.py`: new `regime_concentration_diagnostic()` (classifies robust / moderate / fragile / insufficient_data).
-  - `skills/quantitative-backtesting/scripts/run_backtest.py`: attaches `results["regime_robustness"]` alongside `regime_analysis`.
-  - `skills/quantitative-backtesting/scripts/reporting.py`: tear-sheet JSON carries `summary["regime_robustness"]`.
-  - `skills/quantitative-backtesting/tests/test_regime_concentration_diagnostic.py`: 9 new tests.
-- Verified: new diagnostic + regime_detection + cpcv_records_regime_analysis = 33 passed; reporting + run_backtest = 176 passed; end-to-end smoke confirms `regime_robustness` in run_backtest results and tear-sheet JSON. Working tree clean except 3 modified scripts + 1 new test.
+- No production code changes. Working tree clean (`git status --porcelain` = 0).
+- Installed `pytest` and `pytest-xdist` into the user environment (not pinned in any requirements file — pre-existing gap noted in HANDOFF.md). Environment-only, no git changes.
+- `adjustment_integrity_guard` is already implemented in `skills/quantitative-backtesting/scripts/data_loader.py:162` and tested by `test_adjustment_integrity_guard.py` (10/10 per HANDOFF.md). NOT a remaining task.
+- `regime_robustness` is already wired into walk-forward/CPCV/Monte Carlo aggregates (`walk_forward.py:1377,4208,4469,6834,9856,10408`) and read by `reporting.py` (lines 1076, 1347, 1404). NOT a remaining task — the stale claim that it is `run_backtest`-only is incorrect.
 
-## What was actually verified
-- All focused suites touching the changed files green; no regressions. No full single-invocation gate run (environmental ~60+ min timeout; chunked evidence is the accepted substitute per Sessions 63-68).
+## What was actually verified (this session)
+- Focused baseline slice: `test_adjustment_integrity_guard.py test_regime_concentration_diagnostic.py test_data_loader.py test_loader_normalizes_structural_pit_violations.py` → **72 passed, 0 failed** in 1.87s (offline, committed fixtures).
+- Full quant gate started in background: `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` (pid 5157, background_process id `bgp_1d115805c001Q0lA7Z2TDuDp5g`, output teed to `/tmp/full_gate_out.txt`). Still running; expected ~60+ min. Do not repeat unbounded serial runs.
 
 ## What remains unresolved
-- Full quant gate not re-run as a single invocation.
-- `regime_robustness` wired into `run_backtest` only; walk-forward / CPCV / Monte Carlo aggregate paths compute `regime_analysis` but do not yet attach `regime_robustness`.
+- Full single-invocation quant gate result pending (background process above). Last gate result per HANDOFF.md: 1196 passed / 1 failed (artifact-mutation test, now resolved); expected ~1197/1197 when re-run with adequate budget.
+- pytest-xdist (`-n 4`) installed but not pinned in any requirements file.
+- Per HANDOFF.md: "no remaining bounded methodological gap found" — coverage is extensive across all registered strategies. If the gate is green, the baseline is fully confirmed; the next agent should either declare the quant research baseline complete or pursue one genuinely new methodological improvement (e.g., regime-aware cost models, capacity-aware position sizing, alternative validation schemes, multi-asset factor construction) rather than another strategy falsification test.
 
 ## One precise next task
-Implement a bounded data-quality guard: **split/dividend adjustment integrity** in `scripts/data_loader.py` — verify adjusted prices are point-in-time consistent with raw prices and split/dividend factors (no future leakage into the adjustment). Deliver the guard function + a focused unit test (offline, committed fixtures only). Do not add another strategy falsification test; do not commit unless explicitly asked. Run `python3 -m pytest skills/quantitative-backtesting/tests/test_data_loader.py skills/quantitative-backtesting/tests/test_loader_normalizes_structural_pit_violations.py skills/quantitative-backtesting/tests/test_regime_concentration_diagnostic.py -q -p no:cacheprovider` to confirm no regression, then `git checkout -- .` if the run dirties tracked artifacts.
+1. Check the background gate: `background_process status bgp_1d115805c001Q0lA7Z2TDuDp5g` and `tail /tmp/full_gate_out.txt`. Wait for it to exit.
+2. If EXIT 0 / all passed: baseline fully confirmed. Run `git checkout -- .` to restore any timestamp-only drift and keep `git status` clean. Do not commit unless explicitly asked.
+3. If a test fails: isolate with evidence, fix minimally, rerun focused tests, re-attempt the full gate.
+4. If green with no failures: decide whether to declare the baseline complete or select one bounded methodological gap per HANDOFF.md guidance above.
+
+(End of file)
