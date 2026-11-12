@@ -80,6 +80,7 @@ def parse_args():
     parser.add_argument("--regime-impact-coefficients", type=str, default=None, help="JSON dict mapping regime name (e.g. 'bull_high_vol') to a regime-specific market impact coefficient. When provided, market impact uses the regime-specific coefficient for each detected regime; regimes not in the dict fall back to --impact-coefficient. Disabled by default so no published number moves.")
     parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
     parser.add_argument("--max-impact", type=float, default=None, help="Maximum acceptable market impact per trade (as decimal, e.g., 0.0005 = 5 bps). When set and --impact-coefficient > 0, target positions are scaled so the estimated market impact of each trade stays below this threshold (capacity-aware position cap). Opt-in; unset means no capacity-aware scaling.")
+    parser.add_argument("--max-impacts", type=float, nargs="+", default=None, help="List of max-impact thresholds to sweep (overrides --max-impact).")
     parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3%% per year)")
     parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="List of annual borrow costs to sweep (overrides --borrow-cost).")
     parser.add_argument("--funding-cost", type=float, default=0.0, help="Annual funding cost rate for leveraged positions (as decimal, e.g., 0.02 = 2%% per year)")
@@ -1014,7 +1015,7 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
                                    impact_coefficient=None, borrow_cost=None,
                                    funding_cost=None, commission=None,
                                    slippage=None, fill_rate=None,
-                                   latency=None,
+                                   latency=None, max_impact=None,
                                    survivorship=None):
     """Run backtest for a single cost coefficient.
 
@@ -1034,6 +1035,8 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
         fill_rate = args.fill_rate
     if latency is None:
         latency = args.latency
+    if max_impact is None:
+        max_impact = getattr(args, "max_impact", None)
 
     class SweepArgs:
         def __init__(self, base):
@@ -1046,7 +1049,7 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
             self.slippage = slippage
             self.fill_rate = fill_rate
             self.latency = latency
-            self.max_impact = getattr(base, "max_impact", None)
+            self.max_impact = max_impact
 
     sweep_args = SweepArgs(args)
     results = run_backtest(data, strategy, sweep_args,
@@ -1069,6 +1072,7 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
         "slippage": slippage,
         "fill_rate": fill_rate,
         "latency": latency,
+        "max_impact": max_impact,
         "total_return": metrics.get("total_return", 0.0),
         "annualized_return": metrics.get("annualized_return", 0.0),
         "sharpe_ratio": metrics.get("sharpe_ratio", 0.0),
@@ -1384,6 +1388,28 @@ def main():
                 "Latency sweep",
                 "lat",
                 [f"{r['latency']}" for r in sweep_results],
+                sweep_results,
+            )
+        return 0
+
+    if getattr(args, "max_impacts", None) is not None and len(args.max_impacts) > 1:
+        sweep_results = []
+        for val in args.max_impacts:
+            sweep_results.append(
+                _run_backtest_sweep_coefficient(
+                    args, data, strategy, provenance, benchmark, max_impact=val,
+                    survivorship=survivorship,
+                )
+            )
+        sweep_path = output_dir / "run_backtest_max_impact_sweep.json"
+        with open(sweep_path, "w") as f:
+            json.dump({"max_impacts": args.max_impacts, "results": sweep_results}, f, indent=2)
+        print(f"Sweep results saved to: {sweep_path}")
+        if sweep_results:
+            _print_sweep_table(
+                "Max impact sweep",
+                "max_impact",
+                [f"{r['max_impact']:.6f}" for r in sweep_results],
                 sweep_results,
             )
         return 0
