@@ -164,8 +164,8 @@ def test_reality_check_family_example_romano_wolf_benchmark_subtracted():
     # Benchmark subtraction must change the adjusted p-values (not identical to raw stepdown)
     rw_raw = module.run_romano_wolf_family_stepdown(seed=12345, n_bootstrap=200)
     assert rw["adjusted_p_values"] != rw_raw["adjusted_p_values"]
-    # The ordering may change with benchmark subtraction
-    assert rw["ordered_indices"] == rw_raw["ordered_indices"] or rw["ordered_indices"] != rw_raw["ordered_indices"]
+    # Benchmark subtraction must change the reported mean excess returns.
+    assert rw["means"] != rw_raw["means"]
 
 
 if __name__ == "__main__":

@@ -2348,6 +2348,7 @@ def romano_wolf_stepdown(
     seed: Optional[int] = None,
     studentize: bool = True,
     alpha: float = 0.05,
+    ci_level: float = 0.95,
 ) -> Dict[str, Any]:
     """Romano-Wolf (2005) stepdown procedure for a strategy family.
 
@@ -2384,13 +2385,21 @@ def romano_wolf_stepdown(
             its Newey-West HAC standard error; if ``False``, use the raw
             (un-studentized) Reality Check statistic.
         alpha: Family-wise significance level (default 0.05).
+        ci_level: Confidence level for the per-strategy percentile bootstrap
+            confidence intervals of the mean excess performance (default 0.95).
+            These are *marginal* intervals that quantify each strategy's
+            effect-size uncertainty; they are not multiplicity-adjusted. The
+            FWER-controlled identification is given by ``adjusted_p_values`` /
+            ``rejected``.
 
     Returns:
         Dict with ``ordered_indices`` (original column indices, best first),
         ``p_values`` (stepdown p-value at each step), ``adjusted_p_values``
         (running-max Romano-Wolf adjusted p-values, non-decreasing),
         ``rejected`` (per ordered strategy), ``n_rejected``, ``statistics``,
-        ``means`` (both aligned to ``ordered_indices``), ``n_strategies``,
+        ``means`` (both aligned to ``ordered_indices``), ``ci_lower`` /
+        ``ci_upper`` (percentile bootstrap confidence limits for each mean,
+        aligned to ``ordered_indices``), ``ci_level``, ``n_strategies``,
         ``n_observations``, ``block_size``, ``n_bootstrap``, ``studentized``
         and ``alpha``.
 
@@ -2412,6 +2421,8 @@ def romano_wolf_stepdown(
         raise ValueError("performance must contain at least one strategy")
     if int(n_bootstrap) < 1:
         raise ValueError("n_bootstrap must be >= 1")
+    if not 0.0 < float(ci_level) < 1.0:
+        raise ValueError("ci_level must be in (0, 1)")
 
     if benchmark is not None:
         b = np.asarray(benchmark, dtype=float).ravel()
@@ -2446,16 +2457,25 @@ def romano_wolf_stepdown(
     order = [int(i) for i in np.argsort(-stat, kind="stable")]
 
     # Precompute one bootstrap statistic per resample for every strategy, using
-    # the same resample indices across all steps and strategies.
+    # the same resample indices across all steps and strategies. The bootstrap
+    # means are retained so the same resamples can also produce per-strategy
+    # percentile confidence intervals for the mean excess performance.
     rng = np.random.default_rng(seed)
     boot_stats = np.empty((int(n_bootstrap), K), dtype=float)
+    boot_means_all = np.empty((int(n_bootstrap), K), dtype=float)
     for b in range(int(n_bootstrap)):
         idx = _stationary_bootstrap_indices(T, block_size, rng)
         boot_means = F[idx].mean(axis=0)
+        boot_means_all[b] = boot_means
         if studentize:
             boot_stats[b] = math.sqrt(T) * (boot_means - means) / omegas
         else:
             boot_stats[b] = math.sqrt(T) * (boot_means - means)
+
+    lo_q = 100.0 * (1.0 - float(ci_level)) / 2.0
+    hi_q = 100.0 * (1.0 + float(ci_level)) / 2.0
+    ci_lo = np.percentile(boot_means_all, lo_q, axis=0)
+    ci_hi = np.percentile(boot_means_all, hi_q, axis=0)
 
     raw_p: List[float] = []
     remaining = list(order)
@@ -2480,6 +2500,9 @@ def romano_wolf_stepdown(
         "n_rejected": int(sum(1 for r in rejected if r)),
         "statistics": [float(stat[i]) for i in order],
         "means": [float(means[i]) for i in order],
+        "ci_lower": [float(ci_lo[i]) for i in order],
+        "ci_upper": [float(ci_hi[i]) for i in order],
+        "ci_level": float(ci_level),
         "n_strategies": int(K),
         "n_observations": int(T),
         "block_size": int(block_size),

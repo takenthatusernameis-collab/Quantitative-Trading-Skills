@@ -471,6 +471,8 @@ res = romano_wolf_stepdown(
 # res["ordered_indices"] lists strategies best-first (original column index).
 # res["adjusted_p_values"] are running-max FWER-adjusted p-values; res["rejected"]
 # is a prefix of the ordering, so res["n_rejected"] strategies are identified.
+# res["ci_lower"] / res["ci_upper"] give per-strategy percentile bootstrap
+# confidence limits for the mean excess performance (aligned to the ordering).
 ```
 
 Notes and limits:
@@ -483,6 +485,11 @@ Notes and limits:
   and steps, preserving serial and cross-sectional dependence.
 - Rejection identifies the leading strategies as better than the benchmark; it
   is still a family-wise control, not a per-strategy effect-size estimate.
+- `ci_lower` / `ci_upper` are *marginal* percentile bootstrap intervals for each
+  strategy's mean excess performance, at `ci_level` (default 0.95). They
+  quantify effect-size uncertainty per strategy but are **not** adjusted for
+  multiplicity; use `adjusted_p_values` / `rejected` for the FWER-controlled
+  decision. The intervals reuse the same bootstrap resamples as the test.
 
 ## Out-of-Sample Validation Framework
 

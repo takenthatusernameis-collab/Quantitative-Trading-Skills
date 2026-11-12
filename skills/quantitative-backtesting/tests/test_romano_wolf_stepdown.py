@@ -144,6 +144,75 @@ def test_romano_wolf_input_validation():
         raise AssertionError("expected ValueError for 3-D input")
 
 
+def test_romano_wolf_confidence_interval_contract():
+    """Per-strategy percentile bootstrap CIs are aligned and ordered."""
+    F = _family(T=504, K=4, seed=23)
+    res = romano_wolf_stepdown(F, n_bootstrap=1000, seed=9)
+
+    assert res["ci_level"] == 0.95
+    assert len(res["ci_lower"]) == res["n_strategies"]
+    assert len(res["ci_upper"]) == res["n_strategies"]
+    for lo, hi, mean in zip(res["ci_lower"], res["ci_upper"], res["means"]):
+        assert lo <= hi
+        # A percentile bootstrap interval for the mean should bracket the
+        # sample mean for these well-behaved Gaussian families.
+        assert lo <= mean <= hi
+
+
+def test_romano_wolf_confidence_interval_reproducible_and_seed_sensitive():
+    """Same seed reproduces the CIs; a different seed moves them."""
+    F = _family(T=504, K=3, seed=29)
+    a = romano_wolf_stepdown(F, n_bootstrap=500, seed=17)
+    b = romano_wolf_stepdown(F, n_bootstrap=500, seed=17)
+    c = romano_wolf_stepdown(F, n_bootstrap=500, seed=18)
+
+    assert a["ci_lower"] == b["ci_lower"]
+    assert a["ci_upper"] == b["ci_upper"]
+    assert a["ci_lower"] != c["ci_lower"] or a["ci_upper"] != c["ci_upper"]
+
+
+def test_romano_wolf_confidence_interval_widens_with_level():
+    """A higher confidence level yields weakly wider intervals."""
+    F = _family(T=504, K=3, seed=41)
+    lo95 = romano_wolf_stepdown(F, n_bootstrap=1000, seed=5, ci_level=0.95)
+    lo99 = romano_wolf_stepdown(F, n_bootstrap=1000, seed=5, ci_level=0.99)
+
+    for i in range(lo95["n_strategies"]):
+        width95 = lo95["ci_upper"][i] - lo95["ci_lower"][i]
+        width99 = lo99["ci_upper"][i] - lo99["ci_lower"][i]
+        assert width99 >= width95
+
+
+def test_romano_wolf_confidence_interval_benchmark_subtraction():
+    """A strategy at the benchmark has a CI covering zero; a real edge does not."""
+    T = 504
+    rng = np.random.default_rng(53)
+    benchmark = rng.normal(0.0, 0.01, T)
+    at_benchmark = benchmark.copy()
+    beats = benchmark + 0.02
+    F = np.column_stack([at_benchmark, beats])
+    res = romano_wolf_stepdown(F, benchmark=benchmark, n_bootstrap=2000, seed=3)
+
+    # ordered_indices[0] is the genuine-edge strategy (column 1).
+    assert res["ordered_indices"][0] == 1
+    assert res["ci_lower"][0] > 0.0
+    # The at-benchmark strategy is ordered last; its CI covers zero.
+    at_bench_rank = res["ordered_indices"].index(0)
+    assert res["ci_lower"][at_bench_rank] <= 0.0 <= res["ci_upper"][at_bench_rank]
+
+
+def test_romano_wolf_confidence_interval_validation():
+    """An out-of-range ci_level raises ValueError."""
+    F = _family(T=100, K=2, seed=2)
+    for bad in (0.0, 1.0, -0.1, 1.5):
+        try:
+            romano_wolf_stepdown(F, n_bootstrap=50, seed=1, ci_level=bad)
+        except ValueError:
+            pass
+        else:  # pragma: no cover
+            raise AssertionError(f"expected ValueError for ci_level={bad}")
+
+
 if __name__ == "__main__":
     import pytest
 
