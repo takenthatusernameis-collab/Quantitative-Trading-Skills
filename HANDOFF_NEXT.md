@@ -1,16 +1,15 @@
 # Handoff — next session
 
 ## Current state
-- Session 96 restored the `quant-regression-gate` job in `.github/workflows/validate-skills.yml` (HEAD 2e19cb1 had handoff files but the workflow lacked the gate). Job runs fast deterministic quant subset on `skills/**` changes in parallel with `validate`.
-- Working tree: modified `.github/workflows/validate-skills.yml`, plus `HANDOFF_SESSION96.md` and this updated `HANDOFF_NEXT.md`; no commit.
-- Details/evidence: `HANDOFF_SESSION96.md`.
+- `quant-regression-gate` job re-added to `.github/workflows/validate-skills.yml` (HEAD `b8816de` had removed it; originally added in `0f3c4de`). Working tree: modified, **uncommitted** (36 insertions in 1 file). Not committed — no explicit commit request was made.
+- Details/evidence: `HANDOFF_SESSION97.md`.
 
 ## What was actually verified
-- Workflow YAML syntax: `yaml.safe_load(...)` -> OK.
-- `git diff --check -- .github/workflows/validate-skills.yml` -> OK (31 insertions).
+- Workflow YAML syntax: `yaml.safe_load(...)` -> OK; jobs `['validate', 'quant-regression-gate']`; push/pr paths include the workflow file; gate `needs: validate`.
+- `git diff --check -- .github/workflows/validate-skills.yml` -> OK.
 - In `skills/quantitative-backtesting` with `PYTHONPATH=scripts`:
-  - `python3 -m pytest tests/test_romano_wolf_stepdown.py tests/test_reality_check.py tests/test_reality_check_family_example.py -q` -> **32 passed in 24.20s**.
-  - `python3 -m pytest tests/test_walk_forward.py -k "family or main_registers" -q` -> **8 passed, 199 deselected in 2.72s**.
+  - `python3 -m pytest tests/test_romano_wolf_stepdown.py tests/test_reality_check.py tests/test_reality_check_family_example.py -q` -> **32 passed in 23.77s**.
+  - `python3 -m pytest tests/test_walk_forward.py -k "family or main_registers" -q` -> **8 passed, 199 deselected in 2.56s**.
 
 ## What remains unresolved
 - Changes uncommitted; first GitHub Actions run for `quant-regression-gate` not observed from this environment.
