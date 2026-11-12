@@ -54,6 +54,33 @@ def _make_data(periods: int = 252, seed: int = 42) -> pd.DataFrame:
     )
 
 
+def _make_regime_shift_data(periods: int = 252, seed: int = 7) -> pd.DataFrame:
+    """OHLCV data with a clear trend + volatility regime shift.
+
+    First half: low-volatility uptrend. Second half: high-volatility
+    downtrend. Deterministic (fixed seed) so regime detection is stable
+    across runs; used to exercise run_backtest's regime-aware impact path.
+    """
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    half = periods // 2
+    rets = np.concatenate([
+        rng.normal(0.001, 0.008, half),
+        rng.normal(-0.001, 0.03, periods - half),
+    ])
+    prices = 100 * np.exp(np.cumsum(rets))
+    return pd.DataFrame(
+        {
+            "open": prices * rng.uniform(0.995, 1.005, periods),
+            "high": prices * rng.uniform(1.005, 1.02, periods),
+            "low": prices * rng.uniform(0.98, 0.995, periods),
+            "close": prices,
+            "volume": rng.integers(1_000_000, 10_000_000, periods),
+        },
+        index=dates,
+    )
+
+
 class _Args:
     def __init__(self, commission=0.0002, slippage=0.0001, initial_capital=100000,
                  strategy="sma_crossover", symbol="TEST", n_trials=None,
@@ -64,7 +91,7 @@ class _Args:
                  fill_rate=1.0, latency=0, panel_pricing="net-exposure",
                  impact_aggregation="panel",
                  train_frac=None, val_frac=None, test_frac=None, run_split=None,
-                 max_impact=None):
+                 max_impact=None, regime_impact_coefficients=None):
         self.commission = commission
         self.slippage = slippage
         self.initial_capital = initial_capital
@@ -89,6 +116,7 @@ class _Args:
         self.test_frac = test_frac
         self.run_split = run_split
         self.max_impact = max_impact
+        self.regime_impact_coefficients = regime_impact_coefficients
 
 
 def test_signals_active_detects_flat_and_active_series():
@@ -3992,6 +4020,56 @@ def test_run_backtest_max_impact_requires_positive_impact_coefficient():
         assert "impact-coefficient" in str(e) or "impact_coefficient" in str(e), f"unexpected message: {e}"
 
 
+def test_run_backtest_regime_impact_changes_output():
+    """run_backtest applies regime-specific impact coefficients.
+
+    On data with a detected non-unknown regime, mapping that regime to a
+    coefficient different from the flat --impact-coefficient must change the
+    charged market impact and therefore the return stream. Regimes absent
+    from the dict fall back to the flat coefficient.
+    """
+    from regime_detection import detect_combined_regime
+
+    data = _make_regime_shift_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 5, "slow_period": 20}')
+
+    regimes = detect_combined_regime(data["close"])
+    known = set(regimes.dropna().unique()) - {"unknown"}
+    assert known, "fixture must produce at least one non-unknown regime"
+
+    base = run_backtest(data, strategy, _Args(impact_coefficient=0.5))
+    # Map every detected known regime to a coefficient far from the flat 0.5.
+    regime_coeffs = {regime: 1.0 for regime in sorted(known)}
+    regime_args = _Args(
+        impact_coefficient=0.5,
+        regime_impact_coefficients=json.dumps(regime_coeffs),
+    )
+    impacted = run_backtest(data, strategy, regime_args)
+
+    assert not np.allclose(impacted["returns"], base["returns"], atol=1e-12), (
+        "regime-aware impact must change the return stream vs the flat coefficient"
+    )
+
+
+def test_run_backtest_regime_impact_unmapped_falls_back_to_base():
+    """Regimes not present in regime_impact_coefficients fall back to the
+    flat --impact-coefficient, so a dict naming no occurring regime is a
+    no-op vs a flat coefficient run.
+    """
+    data = _make_regime_shift_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 5, "slow_period": 20}')
+
+    base = run_backtest(data, strategy, _Args(impact_coefficient=0.5))
+    # Name a regime this fixture never produces: every period falls back to 0.5.
+    unmapped = run_backtest(
+        data, strategy,
+        _Args(impact_coefficient=0.5, regime_impact_coefficients='{"no_such_regime": 9.0}'),
+    )
+
+    np.testing.assert_array_equal(unmapped["returns"], base["returns"])
+    np.testing.assert_array_equal(unmapped["equity_curve"], base["equity_curve"])
+
+
 TEST_REGISTRY = [
     ("test_signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
     ("test_run_backtest_flat_strategy_raises", test_run_backtest_flat_strategy_raises),
@@ -4111,6 +4189,8 @@ TEST_REGISTRY = [
     ("test_run_backtest_max_impact_non_binding_preserves_uncapped", test_run_backtest_max_impact_non_binding_preserves_uncapped),
     ("test_run_backtest_max_impact_rejects_non_positive", test_run_backtest_max_impact_rejects_non_positive),
     ("test_run_backtest_max_impact_requires_positive_impact_coefficient", test_run_backtest_max_impact_requires_positive_impact_coefficient),
+    ("test_run_backtest_regime_impact_changes_output", test_run_backtest_regime_impact_changes_output),
+    ("test_run_backtest_regime_impact_unmapped_falls_back_to_base", test_run_backtest_regime_impact_unmapped_falls_back_to_base),
 ]
 
 if __name__ == "__main__":
