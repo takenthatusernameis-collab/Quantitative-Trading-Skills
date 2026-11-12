@@ -25,8 +25,10 @@ def _import_module(name, path):
 def test_reality_check_family_example_imports():
     module = _import_module("reality_check_family_example", EXAMPLE_PATH)
     assert hasattr(module, "run_reality_check_family_example")
+    assert hasattr(module, "run_reality_check_family_example_benchmark_subtracted")
     assert hasattr(module, "main")
     assert callable(module.run_reality_check_family_example)
+    assert callable(module.run_reality_check_family_example_benchmark_subtracted)
     assert callable(module.main)
 
 
@@ -70,3 +72,29 @@ if __name__ == "__main__":
     import pytest
 
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+def test_reality_check_family_example_benchmark_subtracted():
+    """Benchmark-subtracted Reality Check: H0 no strategy beats buy-and-hold MSFT."""
+    module = _import_module("reality_check_family_example_bench", EXAMPLE_PATH)
+    rc, family_returns, bench_aligned = module.run_reality_check_family_example_benchmark_subtracted(
+        seed=12345, n_bootstrap=200
+    )
+
+    assert family_returns.shape[1] == len(module.STRATEGIES) >= 2
+    assert rc["n_strategies"] == family_returns.shape[1]
+    assert rc["n_observations"] == len(family_returns) == len(bench_aligned)
+    assert rc["n_observations"] >= 50
+    assert list(family_returns.columns) == rc["strategy_names"]
+    assert rc.get("benchmark") == "MSFT"
+
+    assert rc["studentized"] is True
+    assert rc["n_bootstrap"] == 200
+    assert 0.0 <= rc["p_value"] <= 1.0
+    assert 0 <= rc["best_index"] < rc["n_strategies"]
+    assert len(rc["means"]) == rc["n_strategies"]
+    assert isinstance(rc["significant"], bool)
+
+    # Benchmark subtraction must change the family means (not identical to raw means).
+    rc_raw, _ = module.run_reality_check_family_example(seed=12345, n_bootstrap=200)
+    assert rc["means"] != rc_raw["means"]

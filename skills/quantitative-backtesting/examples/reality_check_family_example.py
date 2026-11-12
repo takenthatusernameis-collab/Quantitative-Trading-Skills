@@ -121,6 +121,7 @@ def _make_args(strategy_name: str, params: dict, output_dir: Path) -> SimpleName
 def run_reality_check_family_example(
     seed: int = 12345, n_bootstrap: int = 1000
 ) -> tuple[dict, pd.DataFrame]:
+    """Run the family Reality Check on raw OOS returns (H0: mean <= 0)."""
     panel, provenance = build_triple_panel()
     bench_df, _ = load_data(BENCHMARK_PATH, return_provenance=True)
 
@@ -160,17 +161,67 @@ def run_reality_check_family_example(
     return rc, family_returns
 
 
+def run_reality_check_family_example_benchmark_subtracted(
+    seed: int = 12345,
+    n_bootstrap: int = 1000,
+    family_returns: pd.DataFrame | None = None,
+) -> tuple[dict, pd.DataFrame, pd.Series]:
+    """Run the family Reality Check on benchmark-subtracted OOS returns.
+
+    Subtracts aligned buy-and-hold MSFT per-period returns from each strategy in
+    the family so the test targets H0: max_k E[r_{t,k} - b_t] <= 0 (no strategy
+    beats the benchmark by more than luck) rather than raw mean <= 0.
+    When ``family_returns`` is provided, it is reused instead of recomputing the
+    family (avoids redundant backtests).
+    """
+    if family_returns is None:
+        _, family_returns = run_reality_check_family_example(
+            seed=seed, n_bootstrap=n_bootstrap
+        )
+    bench_df, _ = load_data(BENCHMARK_PATH, return_provenance=True)
+    bench = bench_df.copy()
+    if not isinstance(bench.index, pd.DatetimeIndex):
+        bench.index = pd.to_datetime(bench.index)
+    bench_ret = bench["close"].pct_change().sort_index()
+    bench_aligned = bench_ret.reindex(family_returns.index)
+    valid = bench_aligned.notna().to_numpy()
+    if not valid.any():
+        raise RuntimeError("No overlapping benchmark returns on family OOS dates")
+    family_aligned = family_returns.loc[valid]
+    bench_aligned = bench_aligned.loc[valid]
+
+    rc = reality_check_test(
+        family_aligned.to_numpy(),
+        benchmark=bench_aligned.to_numpy(),
+        n_bootstrap=n_bootstrap,
+        seed=seed,
+    )
+    rc["strategy_names"] = list(family_aligned.columns)
+    rc["benchmark"] = BENCHMARK_PATH.stem
+    return rc, family_aligned, bench_aligned
+
+
 def main() -> int:
     rc, family_returns = run_reality_check_family_example()
     print("=== Reality Check Family Example (OOS test, net of 3bps, MSFT panel book) ===")
     print(f"Strategies: {rc['strategy_names']}")
     print(f"Family size: {rc['n_strategies']} | Observations: {rc['n_observations']}")
     print(f"Best index: {rc['best_index']} ({rc['strategy_names'][rc['best_index']]})")
-    print(f"Best mean excess (per period): {rc['best_mean']:.8f}")
+    print(f"Best mean excess (per period, raw): {rc['best_mean']:.8f}")
     print(f"Studentized: {rc['studentized']} | Block size: {rc['block_size']}")
     print(f"Bootstrap resamples: {rc['n_bootstrap']} | alpha: {rc['alpha']}")
     print(f"Test statistic: {rc['test_statistic']:.6f}")
     print(f"p-value: {rc['p_value']:.6f} | significant: {rc['significant']}")
+
+    rc_bench, _, bench_aligned = run_reality_check_family_example_benchmark_subtracted(
+        n_bootstrap=500, family_returns=family_returns
+    )
+    print("--- Benchmark-subtracted (H0: no strategy beats buy-and-hold MSFT) ---")
+    print(f"Benchmark: {rc_bench.get('benchmark')} | Observations: {rc_bench['n_observations']}")
+    print(f"Best index: {rc_bench['best_index']} ({rc_bench['strategy_names'][rc_bench['best_index']]})")
+    print(f"Best mean excess (per period vs benchmark): {rc_bench['best_mean']:.8f}")
+    print(f"Test statistic: {rc_bench['test_statistic']:.6f}")
+    print(f"p-value: {rc_bench['p_value']:.6f} | significant: {rc_bench['significant']}")
     print("EXAMPLE COMPLETE")
     return 0
 
