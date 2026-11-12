@@ -2229,8 +2229,9 @@ def reality_check_test(
     bias within one grid) and the Benjamini-Hochberg FDR control (the
     benchmark family). Rejecting H0 says the *best* strategy in the family
     beats the benchmark by more than luck; it does not by itself identify
-    which strategy does so (that requires a stepdown procedure, which is
-    future work).
+    which strategy does so. Use :func:`romano_wolf_stepdown` when you need a
+    family-wise-error-rate-controlled identification of the strategies driving
+    a rejection.
 
     Args:
         performance: Array-like of per-period performance. Shape ``(T,)`` for a
