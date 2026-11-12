@@ -8471,6 +8471,26 @@ def _benchmark_list_alpha_correction(
                 bench_result.setdefault("deflated_alpha", None)
                 bench_result.setdefault("expected_max_alpha", None)
 
+        # Benjamini-Hochberg FDR q-values across the benchmark family, applied
+        # to the corrected per-benchmark alpha p-values (DAR when available,
+        # Bonferroni fallback otherwise). This is an additional multiple-testing
+        # control reported alongside, not a replacement for, the existing
+        # alpha_pvalue/deflated_alpha fields.
+        try:
+            from utils import benjamini_hochberg
+            family_p = [
+                r.get("alpha_pvalue", 1.0) if r is not None else 1.0
+                for r in per_benchmark
+            ]
+            bh = benjamini_hochberg(family_p)
+            for i, bench_result in enumerate(per_benchmark):
+                if bench_result is None:
+                    continue
+                bench_result["alpha_qvalue_fdr_bh"] = bh["q_values"][i]
+                bench_result["alpha_fdr_bh_rejected"] = bh["rejected"][i]
+        except Exception:
+            pass
+
         # Aggregate Deflated Alpha for the primary (first) benchmark.
         primary = per_benchmark[0] if per_benchmark and per_benchmark[0] is not None else None
         if primary is not None and "alpha" in primary and np.isfinite(primary["alpha"]):

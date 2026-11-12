@@ -573,6 +573,24 @@ def calculate_metrics(
                     metrics.setdefault(f"{prefix}deflated_alpha", None)
                     metrics.setdefault(f"{prefix}expected_max_alpha", None)
 
+            # Benjamini-Hochberg FDR q-values across the benchmark family
+            # (corrected per-benchmark alpha p-values), reported alongside the
+            # existing alpha_pvalue/deflated_alpha fields.
+            if n_benchmarks >= 2:
+                try:
+                    from utils import benjamini_hochberg
+                    family_p = []
+                    for i in range(len(benchmark_metrics)):
+                        pkey = f"benchmark_{i}_alpha_pvalue"
+                        family_p.append(metrics.get(pkey, 1.0))
+                    bh = benjamini_hochberg(family_p)
+                    for i in range(len(benchmark_metrics)):
+                        if benchmark_metrics[i]:
+                            metrics[f"benchmark_{i}_alpha_qvalue_fdr_bh"] = bh["q_values"][i]
+                            metrics[f"benchmark_{i}_alpha_fdr_bh_rejected"] = bh["rejected"][i]
+                except Exception:
+                    pass
+
             if n_benchmarks >= 2:
                 try:
                     # Import deflated_alpha_ratio with circular import protection

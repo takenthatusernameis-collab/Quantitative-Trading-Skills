@@ -2071,6 +2071,91 @@ def _sweep_resolution_fields(result: Dict[str, Any]) -> Tuple[str, str]:
     return threshold_text, ("below resolution" if below else "resolvable")
 
 
+
+def benjamini_hochberg(p_values, alpha: float = 0.05):
+    """Benjamini-Hochberg FDR-adjusted q-values for a family of p-values.
+
+    Controls the expected false discovery rate under independent or
+    positively dependent tests (Benjamini & Hochberg, 1995). This is a
+    multiple-testing control distinct from family-wise error rate controls
+    such as Bonferroni: it bounds the expected proportion of false
+    discoveries among rejected hypotheses rather than the probability of any
+    false positive.
+
+    Args:
+        p_values: Sequence of p-values in [0, 1]. NaN/None entries are
+            treated as non-informative (q-value 1.0, not rejected).
+        alpha: Significance threshold used for the rejection decision
+            (default 0.05).
+
+    Returns:
+        Dict with:
+            - ``q_values``: list of BH-adjusted q-values aligned to the
+              input order (float in [0, 1]).
+            - ``rejected``: list of booleans, True where q_value <= alpha.
+            - ``alpha``: the threshold used.
+            - ``n_tests``: number of valid (finite) p-values in the family.
+            - ``n_rejected``: number of hypotheses rejected at ``alpha``.
+
+    Notes:
+        - q-values are monotone-cummin of the step-up adjusted values in
+          descending p-value rank, so they are non-decreasing with p.
+        - With 0 or 1 valid test, q-values equal the p-values and the
+          procedure is equivalent to a single test (no multiplicity penalty
+          beyond the test itself).
+    """
+    vals = list(p_values)
+    n_total = len(vals)
+    # Identify valid finite p-values
+    valid = []
+    for i, p in enumerate(vals):
+        try:
+            pv = float(p)
+        except Exception:
+            pv = float("nan")
+        if pv == pv and pv >= 0.0 and pv <= 1.0:  # finite and in [0,1]
+            valid.append((i, pv))
+        elif pv == pv and pv > 1.0:
+            valid.append((i, 1.0))
+        elif pv == pv and pv < 0.0:
+            valid.append((i, 0.0))
+        # NaN/inf/None treated as invalid -> q=1.0
+    m = len(valid)
+    q_values = [1.0] * n_total
+    rejected = [False] * n_total
+    if m == 0:
+        return {
+            "q_values": q_values,
+            "rejected": rejected,
+            "alpha": float(alpha),
+            "n_tests": 0,
+            "n_rejected": 0,
+        }
+    # Sort valid p-values descending for step-up cummin
+    valid_sorted = sorted(valid, key=lambda x: x[1], reverse=True)
+    prev_q = 1.0
+    # ranks in ascending p-value order: smallest p gets rank 1
+    # For descending list, rank = m - j
+    for j, (idx, pv) in enumerate(valid_sorted):
+        rank = m - j  # 1-based rank in ascending order of p
+        q = pv * m / rank
+        if q > 1.0:
+            q = 1.0
+        if q > prev_q:
+            q = prev_q  # enforce monotonicity
+        prev_q = q
+        q_values[idx] = float(q)
+    for i in range(n_total):
+        rejected[i] = bool(q_values[i] <= float(alpha))
+    n_rejected = sum(1 for r in rejected if r)
+    return {
+        "q_values": q_values,
+        "rejected": rejected,
+        "alpha": float(alpha),
+        "n_tests": m,
+        "n_rejected": int(n_rejected),
+    }
+
 def hierarchical_risk_parity(
     returns: pd.DataFrame,
     min_weight: float = 0.0,
