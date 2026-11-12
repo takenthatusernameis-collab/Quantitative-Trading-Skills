@@ -234,6 +234,7 @@ def test_romano_wolf_simultaneous_ci_contract():
     assert res["simultaneous_ci_level"] == 0.95
     assert res["simultaneous_ci_method"] == "max-t"
     assert res["simultaneous_ci_critical_value"] > 0.0
+    assert res["simultaneous_ci_small_sample_warning"] is None
     assert len(res["simultaneous_ci_lower"]) == res["n_strategies"]
     assert len(res["simultaneous_ci_upper"]) == res["n_strategies"]
     for lo, hi, mean in zip(
@@ -324,3 +325,14 @@ if __name__ == "__main__":
     import pytest
 
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+def test_romano_wolf_simultaneous_ci_small_sample_warning():
+    """Short samples emit a small-sample warning; T>=504 does not."""
+    short = romano_wolf_stepdown(_family(T=252, K=3, seed=71), n_bootstrap=100, seed=5)
+    assert isinstance(short["simultaneous_ci_small_sample_warning"], str)
+    assert "undercover" in short["simultaneous_ci_small_sample_warning"]
+    assert "252" in short["simultaneous_ci_small_sample_warning"]
+
+    long = romano_wolf_stepdown(_family(T=504, K=3, seed=71), n_bootstrap=100, seed=5)
+    assert long["simultaneous_ci_small_sample_warning"] is None

@@ -2392,7 +2392,10 @@ def romano_wolf_stepdown(
             These are *marginal* intervals that quantify each strategy's
             effect-size uncertainty; they are not multiplicity-adjusted. For an
             FWER-adjusted effect-size interval use the ``simultaneous_ci_*``
-            fields, which are at ``1 - alpha``.
+            fields, which are at ``1 - alpha`` (asymptotic max-t; when
+            ``n_observations < 504`` the result carries
+            ``simultaneous_ci_small_sample_warning`` because coverage may be
+            approximate).
 
     Returns:
         Dict with ``ordered_indices`` (original column indices, best first),
@@ -2405,10 +2408,12 @@ def romano_wolf_stepdown(
         ``simultaneous_ci_lower`` / ``simultaneous_ci_upper``
         (FWER-adjusted max-t simultaneous confidence limits, aligned to
         ``ordered_indices``), ``simultaneous_ci_level`` (``1 - alpha``),
-        ``simultaneous_ci_critical_value`` and
-        ``simultaneous_ci_method`` (``"max-t"``), ``n_strategies``,
-        ``n_observations``, ``block_size``, ``n_bootstrap``, ``studentized``
-        and ``alpha``.
+        ``simultaneous_ci_critical_value``,
+        ``simultaneous_ci_method`` (``"max-t"``), and
+        ``simultaneous_ci_small_sample_warning`` (``str`` when
+        ``n_observations < 504`` because the asymptotic band may undercover on
+        short samples, else ``None``), ``n_strategies``, ``n_observations``,
+        ``block_size``, ``n_bootstrap``, ``studentized`` and ``alpha``.
 
     References:
         - Romano, J. P. & Wolf, M. (2005). "Stepwise Multiple Testing as
@@ -2493,6 +2498,10 @@ def romano_wolf_stepdown(
     # covers every strategy's mean simultaneously with probability 1 - alpha.
     # Unlike the marginal percentile intervals above, these bands widen with
     # the family size and are the effect-size counterpart of the FWER control.
+    # Asymptotic: measured joint coverage on zero-mean families (n_bootstrap=300,
+    # alpha=0.05, 60 sims, seed 2026) was ~0.92 at T=252, ~0.93 at T=378, and
+    # ~0.92 at T=504 for K=4-5, so short samples can undercover; interpret with
+    # the small-sample warning below.
     max_abs_boot = np.max(np.abs(boot_stats), axis=1)
     sim_crit = float(np.percentile(max_abs_boot, 100.0 * (1.0 - float(alpha))))
     if studentize:
@@ -2501,6 +2510,12 @@ def romano_wolf_stepdown(
         sim_half_width = np.full(K, sim_crit / math.sqrt(T), dtype=float)
     sim_lo = means - sim_half_width
     sim_hi = means + sim_half_width
+    sim_warning = None
+    if T < 504:
+        sim_warning = (
+            "max-t simultaneous bands are asymptotic and may undercover on short samples "
+            f"(n_observations={int(T)} < 504); interpret coverage as approximate"
+        )
 
     raw_p: List[float] = []
     remaining = list(order)
@@ -2533,6 +2548,7 @@ def romano_wolf_stepdown(
         "simultaneous_ci_level": float(1.0 - float(alpha)),
         "simultaneous_ci_critical_value": sim_crit,
         "simultaneous_ci_method": "max-t",
+        "simultaneous_ci_small_sample_warning": sim_warning,
         "n_strategies": int(K),
         "n_observations": int(T),
         "block_size": int(block_size),

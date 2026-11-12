@@ -1,55 +1,42 @@
 # Handoff — next session
 
 ## Current state
-- Session 92 added FWER-adjusted max-t simultaneous confidence bands to
-  `utils.romano_wolf_stepdown`. The fields are `simultaneous_ci_lower`,
-  `simultaneous_ci_upper`, `simultaneous_ci_level`, `simultaneous_ci_critical_value`,
-  and `simultaneous_ci_method`; they are carried by the walk-forward family
-  summary and the CLI summary JSON.
-- Focused tests pass: `test_romano_wolf_stepdown.py` (18), reality-check +
+- Session 93 investigated max-t simultaneous band small-sample coverage for
+  `utils.romano_wolf_stepdown` (T=252/378/504, K=4/5) and added an additive
+  `simultaneous_ci_small_sample_warning` field (`None` for `n_observations >= 504`,
+  warning string otherwise). Docs now include a measured coverage table and note
+  that a bootstrap-variance-studentized variant showed inconsistent improvement
+  and is not exposed.
+- Focused tests pass: `test_romano_wolf_stepdown.py` (19), reality-check +
   family-example tests (12), walk-forward family subset (7), coverage subset (2).
-- Working tree has 7 modified files, no commit (per the no-commit rule).
-- Full details, evidence, and the exact commands are in
-  `HANDOFF_SESSION92.md`.
+- Working tree has modified quant skill files plus handoffs; no commit.
+- Full details and evidence are in `HANDOFF_SESSION93.md`.
 
 ## What was actually verified
-- `python3 -m pytest skills/quantitative-backtesting/tests/test_romano_wolf_stepdown.py -q` -> 18 passed.
+- Coverage reproduction and bootstrap-variance probe recorded in
+  `HANDOFF_SESSION93.md` (deterministic scripts, offline).
+- `PYTHONPATH=skills/quantitative-backtesting/scripts python3 -m pytest skills/quantitative-backtesting/tests/test_romano_wolf_stepdown.py -q` -> 19 passed.
 - `python3 -m pytest skills/quantitative-backtesting/tests/test_reality_check.py skills/quantitative-backtesting/tests/test_reality_check_family_example.py -q` -> 12 passed.
 - `python3 -m pytest skills/quantitative-backtesting/tests/test_walk_forward.py -q -k "family or main_registers"` -> 7 passed.
 - `python3 -m pytest skills/quantitative-backtesting/tests/test_examples_coverage.py -q -k "reality_check"` -> 2 passed.
-- `git diff --check` and `py_compile` on all changed files -> OK.
-- Manual example run -> exit 0; both stepdown blocks print `sim95%CI`.
+- `git diff --check` and `py_compile` on modified .py files -> OK.
 
 ## What remains unresolved
-- Full single-invocation quant gate was not rerun; CI is still needed for 100%
-  green confirmation. Do not rerun the unchanged full gate in-session.
-- The max-t band is asymptotic: a side measurement at T=252, K=5 covered all
-  means ~86% of the time (vs. ~95% at T=504). The docs now state this caveat.
-- Studentization still uses full-sample Newey-West HAC variances; a
-  bootstrap-variance studentization variant is not implemented.
+- Full single-invocation quant gate was not rerun; CI is needed for 100% green confirmation.
+- Max-t bands remain asymptotic/approximate on short samples; warning is surfaced in result dict but not yet explicitly surfaced in example/CLI text.
 - `reality_check_test` still returns no per-strategy CIs.
+- Bootstrap-variance studentization not adopted (mixed evidence).
 
 ## Approaches already tried / failed (do not repeat unchanged)
-- Full gate serial or `-n 4`: timed out at ~60/30/20 min across Sessions 84-92.
-- The full `test_examples_coverage.py` suite exceeds the 120 s command timeout
-  when combined with other files. Run the `-k "reality_check"` subset.
+- Full gate serial or `-n 4`: timed out in prior sessions; do not rerun unchanged in-session.
+- Full `test_examples_coverage.py` combined with other files can exceed 120s timeout; use `-k "reality_check"` subset.
 - Do not regress `test_walk_forward_reports_notional_weighted_capacity_in_book_mode`.
-- Do not use T=252 for the simultaneous-band coverage test; the committed test
-  uses T=504 and asserts >= 90%.
+- Do not use T=252 for committed simultaneous-band coverage assertion expecting >=0.90 in all environments (committed test remains T=504).
+- Bootstrap-variance-studentized max-t statistic showed inconsistent improvement across T/K — do not add without stronger evidence.
 
 ## One precise next task
-Investigate the small-sample undercoverage of the new max-t bands and add a
-bounded, opt-in robustness improvement if the evidence supports it:
-- Reproduce coverage vs. T (252, 378, 504) for K=4/5 with a deterministic script.
-- Determine whether the cause is the full-sample Newey-West `omega_k` or the
-  bootstrap max-statistic approximation.
-- If it is the variance estimate, add an optional `studentize_method="bootstrap"`
-  (or a `min_observations` warning field) to `romano_wolf_stepdown`, reusing the
-  existing resamples; keep the default output unchanged.
-- Add focused tests and update `references/validation_methods.md` with the
-  measured coverage table.
-- Constraints: offline, committed fixtures only; do not change default outputs;
-  do not rerun the full gate in-session; do not commit unless explicitly asked;
-  CI is needed for 100% green confirmation.
-
-(End of file)
+Audit and, if needed, improve downstream surfacing of `simultaneous_ci_small_sample_warning` in user-facing outputs without changing default statistical behavior:
+- Inspect `scripts/walk_forward.py`, CLI summary formatting, and `examples/reality_check_family_example.py` for visibility of the warning when present.
+- If absent, add minimal additive display/persistence (e.g. print warning in example when not None; verify walk-forward summary JSON includes it via stored stepdown dict with a small offline run).
+- Add/extend focused tests only if needed (prefer existing family/example coverage tests); keep changes offline with committed fixtures.
+- Constraints: do not change default stepdown outputs/semantics beyond additive surfacing; do not rerun the full gate in-session; do not commit unless explicitly asked; CI is needed for 100% green confirmation.
