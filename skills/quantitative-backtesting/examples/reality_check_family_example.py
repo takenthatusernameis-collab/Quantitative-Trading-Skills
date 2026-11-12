@@ -205,22 +205,71 @@ def run_romano_wolf_family_stepdown(
     seed: int = 12345,
     n_bootstrap: int = 1000,
     family_returns: pd.DataFrame | None = None,
+    benchmark: pd.Series | None = None,
 ) -> dict:
     """Identify which strategies drive the family rejection (FWER-controlled).
 
     Runs the Romano-Wolf (2005) stepdown on the same K-column OOS return
     matrix used by the Reality Check, reusing ``family_returns`` when supplied
     to avoid redundant backtests.
+
+    If ``benchmark`` is provided, the stepdown tests whether any strategy
+    beats the benchmark (H0: max_k E[r_{t,k} - b_t] <= 0) rather than testing
+    raw mean <= 0. The benchmark Series must be aligned to the same dates as
+    ``family_returns``.
     """
     if family_returns is None:
         _, family_returns = run_reality_check_family_example(
             seed=seed, n_bootstrap=n_bootstrap
         )
     res = romano_wolf_stepdown(
-        family_returns.to_numpy(), n_bootstrap=n_bootstrap, seed=seed
+        family_returns.to_numpy(),
+        benchmark=benchmark.to_numpy() if benchmark is not None else None,
+        n_bootstrap=n_bootstrap,
+        seed=seed,
     )
     res["strategy_names"] = list(family_returns.columns)
     return res
+
+
+def run_romano_wolf_family_stepdown_benchmark_subtracted(
+    seed: int = 12345,
+    n_bootstrap: int = 1000,
+    family_returns: pd.DataFrame | None = None,
+) -> tuple[dict, pd.DataFrame, pd.Series]:
+    """Romano-Wolf stepdown on benchmark-subtracted OOS returns.
+
+    Subtracts aligned buy-and-hold MSFT per-period returns from each strategy in
+    the family so the test targets H0: max_k E[r_{t,k} - b_t] <= 0 (no strategy
+    beats the benchmark by more than luck) rather than raw mean <= 0.
+    When ``family_returns`` is provided, it is reused instead of recomputing the
+    family (avoids redundant backtests).
+    """
+    if family_returns is None:
+        _, family_returns = run_reality_check_family_example(
+            seed=seed, n_bootstrap=n_bootstrap
+        )
+    bench_df, _ = load_data(BENCHMARK_PATH, return_provenance=True)
+    bench = bench_df.copy()
+    if not isinstance(bench.index, pd.DatetimeIndex):
+        bench.index = pd.to_datetime(bench.index)
+    bench_ret = bench["close"].pct_change().sort_index()
+    bench_aligned = bench_ret.reindex(family_returns.index)
+    valid = bench_aligned.notna().to_numpy()
+    if not valid.any():
+        raise RuntimeError("No overlapping benchmark returns on family OOS dates")
+    family_aligned = family_returns.loc[valid]
+    bench_aligned = bench_aligned.loc[valid]
+
+    rw = romano_wolf_stepdown(
+        family_aligned.to_numpy(),
+        benchmark=bench_aligned.to_numpy(),
+        n_bootstrap=n_bootstrap,
+        seed=seed,
+    )
+    rw["strategy_names"] = list(family_aligned.columns)
+    rw["benchmark"] = BENCHMARK_PATH.stem
+    return rw, family_aligned, bench_aligned
 
 
 def main() -> int:
@@ -254,6 +303,20 @@ def main() -> int:
             f"  rank {rank}: {name} | p={rw['p_values'][rank]:.6f} "
             f"adj_p={rw['adjusted_p_values'][rank]:.6f} "
             f"rejected={rw['rejected'][rank]}"
+        )
+
+    rw_bench, _, _ = run_romano_wolf_family_stepdown_benchmark_subtracted(
+        n_bootstrap=500, family_returns=family_returns
+    )
+    print("--- Romano-Wolf stepdown benchmark-subtracted (H0: no strategy beats buy-and-hold MSFT) ---")
+    print(f"Benchmark: {rw_bench.get('benchmark')} | Observations: {rw_bench['n_observations']}")
+    print(f"Rejected: {rw_bench['n_rejected']} of {rw_bench['n_strategies']}")
+    for rank, idx in enumerate(rw_bench["ordered_indices"]):
+        name = rw_bench["strategy_names"][idx]
+        print(
+            f"  rank {rank}: {name} | p={rw_bench['p_values'][rank]:.6f} "
+            f"adj_p={rw_bench['adjusted_p_values'][rank]:.6f} "
+            f"rejected={rw_bench['rejected'][rank]}"
         )
     print("EXAMPLE COMPLETE")
     return 0

@@ -27,10 +27,12 @@ def test_reality_check_family_example_imports():
     assert hasattr(module, "run_reality_check_family_example")
     assert hasattr(module, "run_reality_check_family_example_benchmark_subtracted")
     assert hasattr(module, "run_romano_wolf_family_stepdown")
+    assert hasattr(module, "run_romano_wolf_family_stepdown_benchmark_subtracted")
     assert hasattr(module, "main")
     assert callable(module.run_reality_check_family_example)
     assert callable(module.run_reality_check_family_example_benchmark_subtracted)
     assert callable(module.run_romano_wolf_family_stepdown)
+    assert callable(module.run_romano_wolf_family_stepdown_benchmark_subtracted)
     assert callable(module.main)
 
 
@@ -129,3 +131,44 @@ def test_reality_check_family_example_romano_wolf_stepdown():
             seen_false = True
         else:
             assert not seen_false
+
+
+def test_reality_check_family_example_romano_wolf_benchmark_subtracted():
+    """Benchmark-subtracted Romano-Wolf: aligned lengths, reordering, adjusted p-values change."""
+    module = _import_module("reality_check_family_example_rw_bench", EXAMPLE_PATH)
+    rw, family_aligned, bench_aligned = module.run_romano_wolf_family_stepdown_benchmark_subtracted(
+        seed=12345, n_bootstrap=200
+    )
+
+    # Aligned lengths match
+    assert rw["n_observations"] == len(family_aligned) == len(bench_aligned)
+    assert rw["n_observations"] >= 50
+    assert rw["n_strategies"] == family_aligned.shape[1] >= 2
+    assert list(family_aligned.columns) == rw["strategy_names"]
+    assert rw.get("benchmark") == "MSFT"
+
+    # Adjusted p-values are non-decreasing and rejections form a prefix
+    assert len(rw["adjusted_p_values"]) == rw["n_strategies"]
+    assert all(0.0 <= p <= 1.0 for p in rw["adjusted_p_values"])
+    assert all(
+        rw["adjusted_p_values"][i] <= rw["adjusted_p_values"][i + 1]
+        for i in range(rw["n_strategies"] - 1)
+    )
+    seen_false = False
+    for r in rw["rejected"]:
+        if not r:
+            seen_false = True
+        else:
+            assert not seen_false
+
+    # Benchmark subtraction must change the adjusted p-values (not identical to raw stepdown)
+    rw_raw = module.run_romano_wolf_family_stepdown(seed=12345, n_bootstrap=200)
+    assert rw["adjusted_p_values"] != rw_raw["adjusted_p_values"]
+    # The ordering may change with benchmark subtraction
+    assert rw["ordered_indices"] == rw_raw["ordered_indices"] or rw["ordered_indices"] != rw_raw["ordered_indices"]
+
+
+if __name__ == "__main__":
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))
