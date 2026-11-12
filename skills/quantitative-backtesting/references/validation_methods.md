@@ -443,12 +443,46 @@ Notes and limits:
 - The bootstrap is seeded for reproducibility and drops rows with any
   non-finite value (listwise), keeping the strategies aligned.
 - Rejecting H0 says the best strategy beats the benchmark by more than luck; it
-  does **not** by itself identify which strategy does so. Identifying the
-  winner requires a stepdown procedure (e.g. Romano-Wolf), which is not yet
-  implemented.
+  does **not** by itself identify which strategy does so. That stepdown is
+  available separately via `utils.romano_wolf_stepdown` (below).
 - The test needs the per-period return *series* of every family member, not
   just their Sharpe ratios. It is a standalone utility and is not yet wired
   into a CLI summary.
+
+### Romano-Wolf Stepdown (Romano & Wolf 2005)
+
+`utils.romano_wolf_stepdown` extends the Reality Check to identify *which*
+strategies drive a family-wise rejection while still controlling the
+family-wise error rate (FWER). Strategies are ordered by their (optionally
+studentized) statistic and tested sequentially; at each step the best
+*remaining* strategy is tested against the largest bootstrap statistic over
+the surviving set. Once a step fails to reject, testing stops, so rejections
+form a prefix of the ordering.
+
+```python
+from utils import romano_wolf_stepdown
+
+res = romano_wolf_stepdown(
+    performance,          # shape (T,) or (T, K)
+    benchmark=bench,      # optional (T,) benchmark return
+    n_bootstrap=2000,
+    seed=0,               # reproducible
+)
+# res["ordered_indices"] lists strategies best-first (original column index).
+# res["adjusted_p_values"] are running-max FWER-adjusted p-values; res["rejected"]
+# is a prefix of the ordering, so res["n_rejected"] strategies are identified.
+```
+
+Notes and limits:
+
+- With `K=1` the procedure reduces exactly to `reality_check_test` (same
+  statistic and p-value).
+- Adjusted p-values are the running maximum of the stepdown p-values, so they
+  are non-decreasing and rejections form a prefix of `ordered_indices`.
+- The same seeded stationary bootstrap resamples are reused across strategies
+  and steps, preserving serial and cross-sectional dependence.
+- Rejection identifies the leading strategies as better than the benchmark; it
+  is still a family-wise control, not a per-strategy effect-size estimate.
 
 ## Out-of-Sample Validation Framework
 

@@ -26,9 +26,11 @@ def test_reality_check_family_example_imports():
     module = _import_module("reality_check_family_example", EXAMPLE_PATH)
     assert hasattr(module, "run_reality_check_family_example")
     assert hasattr(module, "run_reality_check_family_example_benchmark_subtracted")
+    assert hasattr(module, "run_romano_wolf_family_stepdown")
     assert hasattr(module, "main")
     assert callable(module.run_reality_check_family_example)
     assert callable(module.run_reality_check_family_example_benchmark_subtracted)
+    assert callable(module.run_romano_wolf_family_stepdown)
     assert callable(module.main)
 
 
@@ -98,3 +100,32 @@ def test_reality_check_family_example_benchmark_subtracted():
     # Benchmark subtraction must change the family means (not identical to raw means).
     rc_raw, _ = module.run_reality_check_family_example(seed=12345, n_bootstrap=200)
     assert rc["means"] != rc_raw["means"]
+
+
+def test_reality_check_family_example_romano_wolf_stepdown():
+    """Romano-Wolf stepdown returns a valid FWER-controlled ranking."""
+    module = _import_module("reality_check_family_example_rw", EXAMPLE_PATH)
+    rw = module.run_romano_wolf_family_stepdown(seed=12345, n_bootstrap=200)
+
+    assert rw["n_strategies"] == len(module.STRATEGIES) >= 2
+    assert rw["n_observations"] >= 50
+    assert len(rw["ordered_indices"]) == rw["n_strategies"]
+    assert sorted(rw["ordered_indices"]) == list(range(rw["n_strategies"]))
+    assert rw["strategy_names"] == [name for name, _ in module.STRATEGIES]
+
+    assert len(rw["p_values"]) == rw["n_strategies"]
+    assert len(rw["adjusted_p_values"]) == rw["n_strategies"]
+    assert len(rw["rejected"]) == rw["n_strategies"]
+    assert 0 <= rw["n_rejected"] <= rw["n_strategies"]
+    assert all(0.0 <= p <= 1.0 for p in rw["adjusted_p_values"])
+    assert all(
+        rw["adjusted_p_values"][i] <= rw["adjusted_p_values"][i + 1]
+        for i in range(rw["n_strategies"] - 1)
+    )
+    # Rejections are a prefix of the ordered ranking.
+    seen_false = False
+    for r in rw["rejected"]:
+        if not r:
+            seen_false = True
+        else:
+            assert not seen_false

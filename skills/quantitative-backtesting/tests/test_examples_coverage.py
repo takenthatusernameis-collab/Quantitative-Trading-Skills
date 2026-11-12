@@ -1098,11 +1098,13 @@ def test_reality_check_family_example_runs():
     assert "EXAMPLE COMPLETE" in result.stdout
     assert "Reality Check Family Example" in result.stdout
     assert "Benchmark-subtracted" in result.stdout
+    assert "Romano-Wolf stepdown" in result.stdout
     # Must report the key Reality Check outputs
     assert "p-value:" in result.stdout
     assert "Test statistic:" in result.stdout
     assert "Family size:" in result.stdout
     assert "Observations:" in result.stdout
+    assert "Rejected:" in result.stdout
 
 
 # ---------------------------------------------------------------------------

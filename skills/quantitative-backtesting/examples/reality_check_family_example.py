@@ -31,7 +31,7 @@ sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 from data_loader import load_data, load_multi_symbol  # noqa: E402
 from run_backtest import run_backtest  # noqa: E402
 from strategy_builder import build_strategy  # noqa: E402
-from utils import reality_check_test  # noqa: E402
+from utils import reality_check_test, romano_wolf_stepdown  # noqa: E402
 
 SRC = SKILLS_DIR / "assets" / "example_data" / "real_market_data"
 BENCHMARK_PATH = SRC / "MSFT.csv"
@@ -201,6 +201,28 @@ def run_reality_check_family_example_benchmark_subtracted(
     return rc, family_aligned, bench_aligned
 
 
+def run_romano_wolf_family_stepdown(
+    seed: int = 12345,
+    n_bootstrap: int = 1000,
+    family_returns: pd.DataFrame | None = None,
+) -> dict:
+    """Identify which strategies drive the family rejection (FWER-controlled).
+
+    Runs the Romano-Wolf (2005) stepdown on the same K-column OOS return
+    matrix used by the Reality Check, reusing ``family_returns`` when supplied
+    to avoid redundant backtests.
+    """
+    if family_returns is None:
+        _, family_returns = run_reality_check_family_example(
+            seed=seed, n_bootstrap=n_bootstrap
+        )
+    res = romano_wolf_stepdown(
+        family_returns.to_numpy(), n_bootstrap=n_bootstrap, seed=seed
+    )
+    res["strategy_names"] = list(family_returns.columns)
+    return res
+
+
 def main() -> int:
     rc, family_returns = run_reality_check_family_example()
     print("=== Reality Check Family Example (OOS test, net of 3bps, MSFT panel book) ===")
@@ -222,6 +244,17 @@ def main() -> int:
     print(f"Best mean excess (per period vs benchmark): {rc_bench['best_mean']:.8f}")
     print(f"Test statistic: {rc_bench['test_statistic']:.6f}")
     print(f"p-value: {rc_bench['p_value']:.6f} | significant: {rc_bench['significant']}")
+
+    rw = run_romano_wolf_family_stepdown(n_bootstrap=500, family_returns=family_returns)
+    print("--- Romano-Wolf stepdown (identify winners, FWER-controlled) ---")
+    print(f"Rejected: {rw['n_rejected']} of {rw['n_strategies']}")
+    for rank, idx in enumerate(rw["ordered_indices"]):
+        name = rw["strategy_names"][idx]
+        print(
+            f"  rank {rank}: {name} | p={rw['p_values'][rank]:.6f} "
+            f"adj_p={rw['adjusted_p_values'][rank]:.6f} "
+            f"rejected={rw['rejected'][rank]}"
+        )
     print("EXAMPLE COMPLETE")
     return 0
 

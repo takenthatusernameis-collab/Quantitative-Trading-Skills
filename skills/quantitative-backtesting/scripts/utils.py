@@ -2339,6 +2339,155 @@ def reality_check_test(
     }
 
 
+def romano_wolf_stepdown(
+    performance,
+    benchmark=None,
+    n_bootstrap: int = 1000,
+    block_size: Optional[int] = None,
+    seed: Optional[int] = None,
+    studentize: bool = True,
+    alpha: float = 0.05,
+) -> Dict[str, Any]:
+    """Romano-Wolf (2005) stepdown procedure for a strategy family.
+
+    Extends :func:`reality_check_test` so that, when the family-wise null is
+    rejected, it also identifies *which* strategies drive the rejection while
+    still controlling the family-wise error rate (FWER). The strategies are
+    ordered by their (optionally studentized) test statistic and tested
+    sequentially: at each step only the best *remaining* strategy is tested,
+    using the largest bootstrap statistic over the surviving set. Once a step
+    fails to reject, testing stops, so rejections form a prefix of the ordered
+    strategies.
+
+    The null and alternative match the Reality Check::
+
+        H0: max_k E[f_{t,k}] <= 0        H1: max_k E[f_{t,k}] > 0
+
+    with ``f_{t,k} = r_{t,k} - b_t`` the per-period excess performance of
+    strategy ``k`` over the benchmark. The same stationary block-bootstrap
+    resample indices are reused at every step (and across all strategies), so
+    serial and cross-sectional dependence are preserved and the procedure is
+    reproducible from ``seed``.
+
+    Args:
+        performance: Array-like of per-period performance. Shape ``(T,)`` for a
+            single strategy or ``(T, K)`` for ``K`` strategies (one column per
+            strategy). Rows with any non-finite value (in ``performance`` or
+            ``benchmark``) are dropped listwise so the strategies stay aligned.
+        benchmark: Optional per-period benchmark return, shape ``(T,)``.
+        n_bootstrap: Number of bootstrap resamples (default 1000).
+        block_size: Mean block length for the stationary bootstrap. ``None``
+            (default) selects ``max(2, round(T ** (1/3)))``.
+        seed: RNG seed for reproducibility. ``None`` uses a fresh RNG.
+        studentize: If ``True`` (default), studentize each strategy's mean by
+            its Newey-West HAC standard error; if ``False``, use the raw
+            (un-studentized) Reality Check statistic.
+        alpha: Family-wise significance level (default 0.05).
+
+    Returns:
+        Dict with ``ordered_indices`` (original column indices, best first),
+        ``p_values`` (stepdown p-value at each step), ``adjusted_p_values``
+        (running-max Romano-Wolf adjusted p-values, non-decreasing),
+        ``rejected`` (per ordered strategy), ``n_rejected``, ``statistics``,
+        ``means`` (both aligned to ``ordered_indices``), ``n_strategies``,
+        ``n_observations``, ``block_size``, ``n_bootstrap``, ``studentized``
+        and ``alpha``.
+
+    References:
+        - Romano, J. P. & Wolf, M. (2005). "Stepwise Multiple Testing as
+          Formal Data Snooping." Journal of Econometrics 124(2): 317-338.
+        - White, H. (2000). "A Reality Check for Data Snooping."
+          Econometrica 68(5): 1097-1126.
+        - Hansen, P. R. (2005). "A Test for Superior Predictive Ability."
+          Journal of Business & Economic Statistics 23(4): 365-380.
+    """
+    F = np.asarray(performance, dtype=float)
+    if F.ndim == 1:
+        F = F.reshape(-1, 1)
+    if F.ndim != 2:
+        raise ValueError("performance must be 1-D or 2-D")
+    T, K = F.shape
+    if K < 1:
+        raise ValueError("performance must contain at least one strategy")
+    if int(n_bootstrap) < 1:
+        raise ValueError("n_bootstrap must be >= 1")
+
+    if benchmark is not None:
+        b = np.asarray(benchmark, dtype=float).ravel()
+        if b.shape[0] != T:
+            raise ValueError(
+                f"benchmark length {b.shape[0]} does not match performance rows {T}"
+            )
+        F = F - b.reshape(-1, 1)
+
+    finite_rows = np.isfinite(F).all(axis=1)
+    F = F[finite_rows]
+    T = F.shape[0]
+    if T < 2:
+        raise ValueError("need at least 2 finite observations to run the test")
+
+    if block_size is None:
+        block_size = max(2, int(round(T ** (1.0 / 3.0))))
+    block_size = max(2, min(int(block_size), T))
+
+    means = F.mean(axis=0)
+    if studentize:
+        omegas = np.array(
+            [math.sqrt(_newey_west_long_run_variance(F[:, k])) for k in range(K)],
+            dtype=float,
+        )
+        omegas = np.where(omegas > 0.0, omegas, 1.0)
+        stat = math.sqrt(T) * means / omegas
+    else:
+        omegas = np.ones(K, dtype=float)
+        stat = math.sqrt(T) * means
+
+    order = [int(i) for i in np.argsort(-stat, kind="stable")]
+
+    # Precompute one bootstrap statistic per resample for every strategy, using
+    # the same resample indices across all steps and strategies.
+    rng = np.random.default_rng(seed)
+    boot_stats = np.empty((int(n_bootstrap), K), dtype=float)
+    for b in range(int(n_bootstrap)):
+        idx = _stationary_bootstrap_indices(T, block_size, rng)
+        boot_means = F[idx].mean(axis=0)
+        if studentize:
+            boot_stats[b] = math.sqrt(T) * (boot_means - means) / omegas
+        else:
+            boot_stats[b] = math.sqrt(T) * (boot_means - means)
+
+    raw_p: List[float] = []
+    remaining = list(order)
+    while remaining:
+        observed = float(stat[remaining[0]])
+        boot_max = boot_stats[:, remaining].max(axis=1)
+        raw_p.append(float(np.mean(boot_max >= observed)))
+        remaining = remaining[1:]
+
+    adjusted: List[float] = []
+    running = 0.0
+    for p in raw_p:
+        running = max(running, p)
+        adjusted.append(float(running))
+
+    rejected = [bool(p <= float(alpha)) for p in adjusted]
+    return {
+        "ordered_indices": order,
+        "p_values": raw_p,
+        "adjusted_p_values": adjusted,
+        "rejected": rejected,
+        "n_rejected": int(sum(1 for r in rejected if r)),
+        "statistics": [float(stat[i]) for i in order],
+        "means": [float(means[i]) for i in order],
+        "n_strategies": int(K),
+        "n_observations": int(T),
+        "block_size": int(block_size),
+        "n_bootstrap": int(n_bootstrap),
+        "studentized": bool(studentize),
+        "alpha": float(alpha),
+    }
+
+
 def hierarchical_risk_parity(
     returns: pd.DataFrame,
     min_weight: float = 0.0,
