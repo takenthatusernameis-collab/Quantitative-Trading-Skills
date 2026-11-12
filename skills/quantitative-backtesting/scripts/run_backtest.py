@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, Any, List
 
 import pandas as pd
+import numpy as np
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
@@ -78,6 +79,7 @@ def parse_args():
     parser.add_argument("--impact-aggregation", type=str, default="panel", choices=["panel", "notional-weighted"], help="Market-impact aggregation convention. 'panel' (default) charges the equal-weighted mean of the per-asset impact rates -- the convention every published number was produced under. 'notional-weighted' charges the dollar-consistent aggregation (the impact rate of each name applied to the notional traded in that name); default unchanged so no published number moves.")
     parser.add_argument("--regime-impact-coefficients", type=str, default=None, help="JSON dict mapping regime name (e.g. 'bull_high_vol') to a regime-specific market impact coefficient. When provided, market impact uses the regime-specific coefficient for each detected regime; regimes not in the dict fall back to --impact-coefficient. Disabled by default so no published number moves.")
     parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
+    parser.add_argument("--max-impact", type=float, default=None, help="Maximum acceptable market impact per trade (as decimal, e.g., 0.0005 = 5 bps). When set and --impact-coefficient > 0, target positions are scaled so the estimated market impact of each trade stays below this threshold (capacity-aware position cap). Opt-in; unset means no capacity-aware scaling.")
     parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3%% per year)")
     parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="List of annual borrow costs to sweep (overrides --borrow-cost).")
     parser.add_argument("--funding-cost", type=float, default=0.0, help="Annual funding cost rate for leveraged positions (as decimal, e.g., 0.02 = 2%% per year)")
@@ -491,6 +493,42 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     if fill_rate < 1.0:
         positions = positions * fill_rate
 
+    # Capacity-aware position scaling (opt-in): when --max-impact is set and
+    # impact is enabled, scale net-exposure position changes so the estimated
+    # market impact of each trade stays below the threshold. Mirrors the
+    # walk_forward.py net-exposure path (_calculate_strategy_returns). The
+    # book pricing path charges costs on the held book itself and is not
+    # rescaled here (same convention as walk_forward.py).
+    max_impact = getattr(args, "max_impact", None)
+    if max_impact is not None:
+        if max_impact <= 0:
+            raise ValueError(f"--max-impact must be positive, got {max_impact}")
+        if args.impact_coefficient <= 0:
+            raise ValueError("--max-impact requires --impact-coefficient > 0")
+        if volume is not None and held_book is None:
+            equity = args.initial_capital * (1 + raw_returns).cumprod()
+            adv_shares = volume.rolling(window=args.adv_window, min_periods=1).mean()
+            adv_notional = adv_shares * close
+            unscaled_changes = positions.diff().abs()
+            impact_model = getattr(args, "impact_model", "linear")
+            if impact_model == "sqrt":
+                max_change = ((max_impact / float(args.impact_coefficient)) ** 2) * adv_notional / equity
+            else:
+                max_change = (max_impact * adv_notional) / (equity * float(args.impact_coefficient))
+            if is_panel:
+                max_change = max_change.mean(axis=1)
+            scale_factor = (max_change / unscaled_changes).clip(upper=1.0).fillna(1.0)
+            scaled_changes = unscaled_changes * scale_factor
+            first_pos = positions.iloc[0]
+            scaled_positions = pd.Series(index=positions.index, dtype=float)
+            scaled_positions.iloc[0] = first_pos
+            for i in range(1, len(positions)):
+                direction = np.sign(positions.diff().iloc[i])
+                if pd.isna(direction):
+                    direction = 0.0
+                scaled_positions.iloc[i] = scaled_positions.iloc[i - 1] + direction * scaled_changes.iloc[i]
+            positions = scaled_positions
+
     # Borrow and funding costs are annualized rates applied per period.
     # The per-period rate divides by the number of periods per year
     # inferred from the data's index (e.g. 252 for business-daily,
@@ -749,6 +787,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             "adv_window": args.adv_window,
             "borrow_cost": args.borrow_cost,
             "funding_cost": args.funding_cost,
+            "max_impact": getattr(args, "max_impact", None),
             "strategy": args.strategy,
             "symbol": args.symbol,
             "n_trials": getattr(args, "n_trials", None),
@@ -1007,6 +1046,7 @@ def _run_backtest_sweep_coefficient(args, data, strategy, provenance, benchmark,
             self.slippage = slippage
             self.fill_rate = fill_rate
             self.latency = latency
+            self.max_impact = getattr(base, "max_impact", None)
 
     sweep_args = SweepArgs(args)
     results = run_backtest(data, strategy, sweep_args,
