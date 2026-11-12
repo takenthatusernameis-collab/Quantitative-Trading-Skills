@@ -4068,9 +4068,11 @@ def test_run_backtest_max_impact_reduces_turnover_and_impact_cost():
     assert cap_05bps["returns"].sum() > uncapped["returns"].sum(), "0.5bps cap must reduce impact drag"
 
     # Tighter cap (0.1bps) must reduce drag MORE than looser cap (0.5bps)
-    drag_01bps = uncapped["returns"].sum() - cap_01bps["returns"].sum()
-    drag_05bps = uncapped["returns"].sum() - cap_05bps["returns"].sum()
-    assert drag_01bps > drag_05bps, "Tighter cap must reduce impact drag more than looser cap"
+    # On flat market, returns are negative (costs only). Less negative = less drag.
+    # Improvement = capped_sum - uncapped_sum (positive when drag is reduced).
+    improvement_01bps = cap_01bps["returns"].sum() - uncapped["returns"].sum()
+    improvement_05bps = cap_05bps["returns"].sum() - uncapped["returns"].sum()
+    assert improvement_01bps > improvement_05bps, "Tighter cap must reduce impact drag more than looser cap"
 
     # Verify the config records max_impact correctly
     assert cap_01bps["config"]["max_impact"] == 0.00001
