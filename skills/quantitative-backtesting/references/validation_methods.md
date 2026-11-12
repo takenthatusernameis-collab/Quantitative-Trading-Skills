@@ -481,8 +481,10 @@ res = romano_wolf_stepdown(
 # res["ordered_indices"] lists strategies best-first (original column index).
 # res["adjusted_p_values"] are running-max FWER-adjusted p-values; res["rejected"]
 # is a prefix of the ordering, so res["n_rejected"] strategies are identified.
-# res["ci_lower"] / res["ci_upper"] give per-strategy percentile bootstrap
+# res["ci_lower"] / res["ci_upper"] give per-strategy *marginal* percentile
 # confidence limits for the mean excess performance (aligned to the ordering).
+# res["simultaneous_ci_lower"] / res["simultaneous_ci_upper"] give FWER-adjusted
+# max-t simultaneous limits at 1 - alpha (aligned to the ordering).
 ```
 
 Notes and limits:
@@ -500,6 +502,17 @@ Notes and limits:
   quantify effect-size uncertainty per strategy but are **not** adjusted for
   multiplicity; use `adjusted_p_values` / `rejected` for the FWER-controlled
   decision. The intervals reuse the same bootstrap resamples as the test.
+- `simultaneous_ci_lower` / `simultaneous_ci_upper` are the FWER-adjusted
+  counterpart: a max-t band built from the same bootstrap resamples at
+  `simultaneous_ci_level = 1 - alpha` (default 0.95). The critical value is
+  the `1 - alpha` quantile of the maximum absolute studentized bootstrap
+  statistic across the family, so the band covers every strategy's mean
+  simultaneously with probability `1 - alpha` asymptotically (short samples or
+  highly persistent returns can undercover; treat the band as approximate).
+  It widens with the family size and is always at least as wide as the marginal
+  interval for a given strategy under symmetric bootstrap distributions.
+  `ci_level` controls only the marginal intervals; `alpha` controls both the
+  stepdown decision and the simultaneous band coverage.
 
 ## Out-of-Sample Validation Framework
 

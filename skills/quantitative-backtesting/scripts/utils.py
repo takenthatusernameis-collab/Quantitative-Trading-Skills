@@ -2384,13 +2384,15 @@ def romano_wolf_stepdown(
         studentize: If ``True`` (default), studentize each strategy's mean by
             its Newey-West HAC standard error; if ``False``, use the raw
             (un-studentized) Reality Check statistic.
-        alpha: Family-wise significance level (default 0.05).
+        alpha: Family-wise significance level (default 0.05). Also sets the
+            coverage of the simultaneous confidence bands: they are at
+            ``1 - alpha``.
         ci_level: Confidence level for the per-strategy percentile bootstrap
             confidence intervals of the mean excess performance (default 0.95).
             These are *marginal* intervals that quantify each strategy's
-            effect-size uncertainty; they are not multiplicity-adjusted. The
-            FWER-controlled identification is given by ``adjusted_p_values`` /
-            ``rejected``.
+            effect-size uncertainty; they are not multiplicity-adjusted. For an
+            FWER-adjusted effect-size interval use the ``simultaneous_ci_*``
+            fields, which are at ``1 - alpha``.
 
     Returns:
         Dict with ``ordered_indices`` (original column indices, best first),
@@ -2398,8 +2400,13 @@ def romano_wolf_stepdown(
         (running-max Romano-Wolf adjusted p-values, non-decreasing),
         ``rejected`` (per ordered strategy), ``n_rejected``, ``statistics``,
         ``means`` (both aligned to ``ordered_indices``), ``ci_lower`` /
-        ``ci_upper`` (percentile bootstrap confidence limits for each mean,
-        aligned to ``ordered_indices``), ``ci_level``, ``n_strategies``,
+        ``ci_upper`` (marginal percentile bootstrap confidence limits for each
+        mean, aligned to ``ordered_indices``), ``ci_level``,
+        ``simultaneous_ci_lower`` / ``simultaneous_ci_upper``
+        (FWER-adjusted max-t simultaneous confidence limits, aligned to
+        ``ordered_indices``), ``simultaneous_ci_level`` (``1 - alpha``),
+        ``simultaneous_ci_critical_value`` and
+        ``simultaneous_ci_method`` (``"max-t"``), ``n_strategies``,
         ``n_observations``, ``block_size``, ``n_bootstrap``, ``studentized``
         and ``alpha``.
 
@@ -2421,6 +2428,8 @@ def romano_wolf_stepdown(
         raise ValueError("performance must contain at least one strategy")
     if int(n_bootstrap) < 1:
         raise ValueError("n_bootstrap must be >= 1")
+    if not 0.0 < float(alpha) < 1.0:
+        raise ValueError("alpha must be in (0, 1)")
     if not 0.0 < float(ci_level) < 1.0:
         raise ValueError("ci_level must be in (0, 1)")
 
@@ -2477,6 +2486,22 @@ def romano_wolf_stepdown(
     ci_lo = np.percentile(boot_means_all, lo_q, axis=0)
     ci_hi = np.percentile(boot_means_all, hi_q, axis=0)
 
+    # Simultaneous (FWER-adjusted) max-t confidence bands. The same bootstrap
+    # resamples already used for the stepdown give the joint distribution of
+    # the studentized strategy means. The (1 - alpha) quantile of the maximum
+    # absolute bootstrap statistic is the critical value for a band that
+    # covers every strategy's mean simultaneously with probability 1 - alpha.
+    # Unlike the marginal percentile intervals above, these bands widen with
+    # the family size and are the effect-size counterpart of the FWER control.
+    max_abs_boot = np.max(np.abs(boot_stats), axis=1)
+    sim_crit = float(np.percentile(max_abs_boot, 100.0 * (1.0 - float(alpha))))
+    if studentize:
+        sim_half_width = sim_crit * omegas / math.sqrt(T)
+    else:
+        sim_half_width = np.full(K, sim_crit / math.sqrt(T), dtype=float)
+    sim_lo = means - sim_half_width
+    sim_hi = means + sim_half_width
+
     raw_p: List[float] = []
     remaining = list(order)
     while remaining:
@@ -2503,6 +2528,11 @@ def romano_wolf_stepdown(
         "ci_lower": [float(ci_lo[i]) for i in order],
         "ci_upper": [float(ci_hi[i]) for i in order],
         "ci_level": float(ci_level),
+        "simultaneous_ci_lower": [float(sim_lo[i]) for i in order],
+        "simultaneous_ci_upper": [float(sim_hi[i]) for i in order],
+        "simultaneous_ci_level": float(1.0 - float(alpha)),
+        "simultaneous_ci_critical_value": sim_crit,
+        "simultaneous_ci_method": "max-t",
         "n_strategies": int(K),
         "n_observations": int(T),
         "block_size": int(block_size),

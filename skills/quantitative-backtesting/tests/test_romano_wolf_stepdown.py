@@ -103,6 +103,11 @@ def test_romano_wolf_unstudentized_and_reproducible():
     raw = romano_wolf_stepdown(F, n_bootstrap=300, seed=42, studentize=False)
     assert raw["studentized"] is False
     assert raw["ordered_indices"] == a["ordered_indices"]
+    assert len(raw["simultaneous_ci_lower"]) == raw["n_strategies"]
+    for lo, hi, mean in zip(
+        raw["simultaneous_ci_lower"], raw["simultaneous_ci_upper"], raw["means"]
+    ):
+        assert lo <= mean <= hi
 
 
 def test_romano_wolf_drops_non_finite_rows():
@@ -127,6 +132,14 @@ def test_romano_wolf_input_validation():
             pass
         else:  # pragma: no cover
             raise AssertionError(f"expected ValueError for {kwargs}")
+
+    for bad_alpha in (0.0, 1.0, -0.1, 1.5):
+        try:
+            romano_wolf_stepdown(F, n_bootstrap=50, seed=1, alpha=bad_alpha)
+        except ValueError:
+            pass
+        else:  # pragma: no cover
+            raise AssertionError(f"expected ValueError for alpha={bad_alpha}")
 
     short = np.zeros((1, 2))
     try:
@@ -211,6 +224,100 @@ def test_romano_wolf_confidence_interval_validation():
             pass
         else:  # pragma: no cover
             raise AssertionError(f"expected ValueError for ci_level={bad}")
+
+
+def test_romano_wolf_simultaneous_ci_contract():
+    """FWER-adjusted max-t bands are aligned, bracket the mean, and are valid."""
+    F = _family(T=504, K=4, seed=23)
+    res = romano_wolf_stepdown(F, n_bootstrap=1000, seed=9, alpha=0.05)
+
+    assert res["simultaneous_ci_level"] == 0.95
+    assert res["simultaneous_ci_method"] == "max-t"
+    assert res["simultaneous_ci_critical_value"] > 0.0
+    assert len(res["simultaneous_ci_lower"]) == res["n_strategies"]
+    assert len(res["simultaneous_ci_upper"]) == res["n_strategies"]
+    for lo, hi, mean in zip(
+        res["simultaneous_ci_lower"], res["simultaneous_ci_upper"], res["means"]
+    ):
+        assert lo <= hi
+        assert lo <= mean <= hi
+
+
+def test_romano_wolf_simultaneous_ci_wider_than_marginal():
+    """The simultaneous band is at least as wide as the marginal interval."""
+    F = _family(T=504, K=4, seed=41)
+    res = romano_wolf_stepdown(
+        F, n_bootstrap=1000, seed=5, ci_level=0.95, alpha=0.05
+    )
+    for i in range(res["n_strategies"]):
+        marginal_width = res["ci_upper"][i] - res["ci_lower"][i]
+        simultaneous_width = (
+            res["simultaneous_ci_upper"][i] - res["simultaneous_ci_lower"][i]
+        )
+        assert simultaneous_width >= marginal_width - 1e-12
+
+
+def test_romano_wolf_simultaneous_ci_reproducible_and_seed_sensitive():
+    """Same seed reproduces the simultaneous bands; a different seed moves them."""
+    F = _family(T=504, K=3, seed=29)
+    a = romano_wolf_stepdown(F, n_bootstrap=500, seed=17)
+    b = romano_wolf_stepdown(F, n_bootstrap=500, seed=17)
+    c = romano_wolf_stepdown(F, n_bootstrap=500, seed=18)
+
+    assert a["simultaneous_ci_lower"] == b["simultaneous_ci_lower"]
+    assert a["simultaneous_ci_upper"] == b["simultaneous_ci_upper"]
+    assert (
+        a["simultaneous_ci_lower"] != c["simultaneous_ci_lower"]
+        or a["simultaneous_ci_upper"] != c["simultaneous_ci_upper"]
+    )
+
+
+def test_romano_wolf_simultaneous_ci_benchmark_subtraction():
+    """A benchmark strategy's simultaneous band covers zero; a real edge does not."""
+    T = 504
+    rng = np.random.default_rng(53)
+    benchmark = rng.normal(0.0, 0.01, T)
+    at_benchmark = benchmark.copy()
+    beats = benchmark + 0.02
+    F = np.column_stack([at_benchmark, beats])
+    res = romano_wolf_stepdown(F, benchmark=benchmark, n_bootstrap=2000, seed=3)
+
+    assert res["ordered_indices"][0] == 1
+    assert res["simultaneous_ci_lower"][0] > 0.0
+    at_bench_rank = res["ordered_indices"].index(0)
+    assert (
+        res["simultaneous_ci_lower"][at_bench_rank]
+        <= 0.0
+        <= res["simultaneous_ci_upper"][at_bench_rank]
+    )
+
+
+def test_romano_wolf_simultaneous_ci_fwer_coverage():
+    """Across zero-mean families the simultaneous bands cover all means ~95% of the time.
+
+    This is a Monte Carlo check of the max-t construction: marginal 95%
+    intervals would cover all K means far less often (roughly 0.95**K under
+    independence). The fixed seed makes the check deterministic.
+    """
+    rng = np.random.default_rng(2026)
+    T, K, n_sim, n_boot = 504, 4, 60, 300
+    covered = 0
+    for s in range(n_sim):
+        F = rng.normal(0.0, 0.01, size=(T, K))
+        res = romano_wolf_stepdown(
+            F, n_bootstrap=n_boot, seed=5000 + s, alpha=0.05
+        )
+        if all(
+            lo <= 0.0 <= hi
+            for lo, hi in zip(
+                res["simultaneous_ci_lower"], res["simultaneous_ci_upper"]
+            )
+        ):
+            covered += 1
+    assert covered / n_sim >= 0.90, (
+        "simultaneous bands undercovered the joint null: "
+        f"{covered}/{n_sim} families covered"
+    )
 
 
 if __name__ == "__main__":

@@ -304,6 +304,7 @@ def main() -> int:
             f"adj_p={rw['adjusted_p_values'][rank]:.6f} "
             f"mean={rw['means'][rank]:.8f} "
             f"95%CI=[{rw['ci_lower'][rank]:.8f}, {rw['ci_upper'][rank]:.8f}] "
+            f"sim95%CI=[{rw['simultaneous_ci_lower'][rank]:.8f}, {rw['simultaneous_ci_upper'][rank]:.8f}] "
             f"rejected={rw['rejected'][rank]}"
         )
 
@@ -320,6 +321,7 @@ def main() -> int:
             f"adj_p={rw_bench['adjusted_p_values'][rank]:.6f} "
             f"mean={rw_bench['means'][rank]:.8f} "
             f"95%CI=[{rw_bench['ci_lower'][rank]:.8f}, {rw_bench['ci_upper'][rank]:.8f}] "
+            f"sim95%CI=[{rw_bench['simultaneous_ci_lower'][rank]:.8f}, {rw_bench['simultaneous_ci_upper'][rank]:.8f}] "
             f"rejected={rw_bench['rejected'][rank]}"
         )
     print("EXAMPLE COMPLETE")

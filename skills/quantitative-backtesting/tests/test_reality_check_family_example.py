@@ -132,6 +132,16 @@ def test_reality_check_family_example_romano_wolf_stepdown():
         else:
             assert not seen_false
 
+    # The example path must carry the FWER-adjusted simultaneous bands too.
+    assert len(rw["simultaneous_ci_lower"]) == rw["n_strategies"]
+    assert len(rw["simultaneous_ci_upper"]) == rw["n_strategies"]
+    assert rw["simultaneous_ci_method"] == "max-t"
+    assert rw["simultaneous_ci_level"] == 0.95
+    for lo, hi, mean in zip(
+        rw["simultaneous_ci_lower"], rw["simultaneous_ci_upper"], rw["means"]
+    ):
+        assert lo <= mean <= hi
+
 
 def test_reality_check_family_example_romano_wolf_benchmark_subtracted():
     """Benchmark-subtracted Romano-Wolf: aligned lengths, reordering, adjusted p-values change."""

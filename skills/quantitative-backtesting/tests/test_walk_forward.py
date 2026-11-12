@@ -828,6 +828,13 @@ def test_walk_forward_analysis_family_reality_check_and_stepdown():
     assert len(rw["means"]) == len(rw["ci_lower"]) == len(rw["ci_upper"]) == 3
     for lo, mean, hi in zip(rw["ci_lower"], rw["means"], rw["ci_upper"]):
         assert lo <= mean <= hi, "each percentile CI must bracket its ordered mean"
+    assert len(rw["simultaneous_ci_lower"]) == len(rw["simultaneous_ci_upper"]) == 3
+    assert rw["simultaneous_ci_method"] == "max-t"
+    assert rw["simultaneous_ci_level"] == 0.95
+    for lo, mean, hi in zip(
+        rw["simultaneous_ci_lower"], rw["means"], rw["simultaneous_ci_upper"]
+    ):
+        assert lo <= mean <= hi, "each simultaneous CI must bracket its ordered mean"
     adj = rw["adjusted_p_values"]
     assert all(b >= a for a, b in zip(adj, adj[1:])), (
         "Romano-Wolf adjusted p-values must be non-decreasing"
@@ -924,6 +931,13 @@ def test_cli_walk_forward_family_diagnostics_end_to_end():
         assert len(rw["means"]) == len(rw["ci_lower"]) == len(rw["ci_upper"]) == 3
         for lo, mean, hi in zip(rw["ci_lower"], rw["means"], rw["ci_upper"]):
             assert lo <= mean <= hi, "each percentile CI must bracket its ordered mean"
+        assert len(rw["simultaneous_ci_lower"]) == len(rw["simultaneous_ci_upper"]) == 3
+        assert rw["simultaneous_ci_method"] == "max-t"
+        assert rw["simultaneous_ci_level"] == 0.95
+        for lo, mean, hi in zip(
+            rw["simultaneous_ci_lower"], rw["means"], rw["simultaneous_ci_upper"]
+        ):
+            assert lo <= mean <= hi, "each simultaneous CI must bracket its ordered mean"
         adj = rw["adjusted_p_values"]
         assert all(b >= a for a, b in zip(adj, adj[1:])), (
             "Romano-Wolf adjusted p-values must be non-decreasing"
