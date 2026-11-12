@@ -446,8 +446,13 @@ Notes and limits:
   does **not** by itself identify which strategy does so. That stepdown is
   available separately via `utils.romano_wolf_stepdown` (below).
 - The test needs the per-period return *series* of every family member, not
-  just their Sharpe ratios. It is a standalone utility and is not yet wired
-  into a CLI summary.
+  just their Sharpe ratios. It is also usable standalone. As an additive,
+  opt-in, `walk_forward_analysis(..., family_returns=<DataFrame>, family_stepdown=True)`
+  runs both controls on the supplied family matrix and records the result under
+  `summary["family_reality_check"]` / `summary["family_stepdown"]`. The matrix is
+  reindexed to the walk-forward OOS dates; the default (`family_returns=None`)
+  leaves the summary byte-for-byte unchanged, and an unusable matrix is reported
+  under `summary["family_reality_check_error"]` rather than raising.
 
 ### Romano-Wolf Stepdown (Romano & Wolf 2005)
 

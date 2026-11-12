@@ -462,6 +462,71 @@ def _dict_to_multiindex(data_dict: dict) -> pd.DataFrame:
     return panel
 
 
+def _align_family_returns(family_returns, oos_returns: pd.Series):
+    """Return ``family_returns`` as a ``(T, K)`` DataFrame aligned to OOS dates.
+
+    ``family_returns`` may be a DataFrame (one column per strategy) or an
+    array-like ``(T, K)`` matrix. When it is a DataFrame whose index is a
+    ``DatetimeIndex`` and the walk-forward OOS record is also datetime-indexed,
+    the frame is reindexed to the OOS dates so the family test covers exactly
+    the same out-of-sample periods as the strategy. Otherwise the frame is used
+    as supplied (positional alignment). A non-DataFrame input is wrapped in a
+    positional DataFrame.
+    """
+    if isinstance(family_returns, pd.DataFrame):
+        if (
+            isinstance(oos_returns.index, pd.DatetimeIndex)
+            and isinstance(family_returns.index, pd.DatetimeIndex)
+        ):
+            return family_returns.reindex(oos_returns.index)
+        return family_returns
+    return pd.DataFrame(np.asarray(family_returns, dtype=float))
+
+
+def _family_multiple_testing_summary(
+    family_returns,
+    oos_returns: pd.Series,
+    stepdown: bool = False,
+    seed: Optional[int] = None,
+    n_bootstrap: int = 1000,
+) -> Dict[str, Any]:
+    """Run the family Reality Check (and optional Romano-Wolf stepdown).
+
+    This is a *measurement* input: it changes no walk-forward return, cost,
+    impact or capacity number. The family matrix is aligned to the walk-forward
+    OOS record (see :func:`_align_family_returns`), so the test is run on the
+    same out-of-sample periods as the strategy. A matrix with fewer than two
+    finite rows, or a length mismatch, is reported under ``error`` rather than
+    raising, so an opt-in diagnostic can never break the walk-forward run.
+
+    Returns a dict with ``reality_check`` (the :func:`reality_check_test`
+    result, or ``None``), ``stepdown`` (only when ``stepdown`` is true), and an
+    ``error`` string when the input could not be tested.
+    """
+    result: Dict[str, Any] = {"reality_check": None, "error": None}
+    if stepdown:
+        result["stepdown"] = None
+    try:
+        frame = _align_family_returns(family_returns, oos_returns)
+        matrix = frame.to_numpy(dtype=float)
+        if matrix.ndim != 2 or matrix.shape[1] < 1 or matrix.shape[0] < 2:
+            result["error"] = (
+                "family_returns must be a 2-D matrix with at least one strategy "
+                "column and at least two finite rows aligned to the OOS record"
+            )
+            return result
+        rc = reality_check_test(matrix, seed=seed, n_bootstrap=n_bootstrap)
+        rc["strategy_names"] = [str(c) for c in frame.columns]
+        result["reality_check"] = rc
+        if stepdown:
+            result["stepdown"] = romano_wolf_stepdown(
+                matrix, seed=seed, n_bootstrap=n_bootstrap
+            )
+    except Exception as exc:  # opt-in measurement input; never break the run
+        result["error"] = f"{type(exc).__name__}: {exc}"
+    return result
+
+
 def walk_forward_analysis(
     data: Union[pd.DataFrame, dict],
     strategy_factory: Callable,
@@ -1097,6 +1162,27 @@ def walk_forward_analysis(
     summary["test_resolution"] = _build_test_resolution(summary, oos_returns)
 
     summary["bias_controls_engaged"] = bool(pit_results is not None)
+
+    # Family-level multiple-testing diagnostics (additive, opt-in). When a
+    # per-period family return matrix is supplied, run the family Reality Check
+    # (and, when requested, the Romano-Wolf stepdown) on it so the family result
+    # is carried by the walk-forward summary instead of standing alone. Default
+    # ``None`` / ``False``: no test is run and the summary is byte-for-byte
+    # unchanged. This is a measurement: it changes no return, cost, impact or
+    # capacity number reported above.
+    if family_returns is not None:
+        _family = _family_multiple_testing_summary(
+            family_returns,
+            oos_returns,
+            stepdown=bool(family_stepdown),
+            seed=family_seed,
+            n_bootstrap=family_n_bootstrap,
+        )
+        summary["family_reality_check"] = _family.get("reality_check")
+        if _family.get("error") is not None:
+            summary["family_reality_check_error"] = _family["error"]
+        if family_stepdown:
+            summary["family_stepdown"] = _family.get("stepdown")
 
     # Surface market-impact capacity estimate in the summary when impact is
     # enabled and estimable; keep None (backward compatible) otherwise.

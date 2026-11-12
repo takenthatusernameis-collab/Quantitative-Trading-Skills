@@ -758,6 +758,119 @@ def test_walk_forward_analysis_validate_pit_passes_on_clean_data():
     )
 
 
+def _family_return_frame(index: pd.Index, seed: int = 7) -> pd.DataFrame:
+    """A committed-fixture style family return matrix on the given OOS dates.
+
+    Three synthetic strategies: a strong positive-mean one, a flat one, and a
+    negative-mean one. Used only to exercise the family-level multiple-testing
+    diagnostics carried by the walk-forward summary.
+    """
+    rng = np.random.default_rng(seed)
+    n = len(index)
+    return pd.DataFrame(
+        {
+            "strong_momentum": rng.normal(0.004, 0.01, n),
+            "flat_signal": rng.normal(0.0, 0.01, n),
+            "negative_signal": rng.normal(-0.004, 0.01, n),
+        },
+        index=index,
+    )
+
+
+def _family_walk_forward_result(**overrides):
+    data = _make_ohlcv_data(periods=500, seed=42)
+    kwargs = dict(
+        data=data,
+        strategy_factory=lambda p: build_strategy("sma_crossover", json.dumps(p or {})),
+        param_grid={"fast_period": [3, 5], "slow_period": [8, 10]},
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        validate_pit=False,
+        family_seed=12345,
+        family_n_bootstrap=200,
+    )
+    kwargs.update(overrides)
+    return data, walk_forward_analysis(**kwargs)
+
+
+def test_walk_forward_analysis_family_reality_check_and_stepdown():
+    """Opt-in family diagnostics are carried by the walk-forward summary.
+
+    A supplied ``family_returns`` matrix must produce
+    ``summary["family_reality_check"]`` aligned to the out-of-sample record and,
+    with ``family_stepdown=True``, ``summary["family_stepdown"]`` with per-strategy
+    percentile confidence intervals aligned to the ordered means.
+    """
+    data, result = _family_walk_forward_result(
+        family_returns=_family_return_frame(_make_ohlcv_data(periods=500, seed=42).index),
+        family_stepdown=True,
+    )
+    summary = result["summary"]
+    oos_len = len(result["oos_returns"])
+    assert oos_len > 2, "walk-forward must produce an OOS record for this test"
+
+    rc = summary["family_reality_check"]
+    assert rc is not None, "family_reality_check must be recorded when family_returns is supplied"
+    assert rc["n_observations"] == oos_len, (
+        "family matrix must be aligned to the OOS dates (reindexed), got "
+        f"{rc['n_observations']} vs OOS {oos_len}"
+    )
+    assert rc["n_strategies"] == 3
+    assert rc["strategy_names"] == ["strong_momentum", "flat_signal", "negative_signal"]
+    assert len(rc["means"]) == 3
+    assert 0 <= rc["best_index"] < 3
+    assert 0.0 <= rc["p_value"] <= 1.0
+
+    rw = summary["family_stepdown"]
+    assert rw is not None, "family_stepdown must be recorded when family_stepdown=True"
+    assert len(rw["ordered_indices"]) == 3
+    assert len(rw["means"]) == len(rw["ci_lower"]) == len(rw["ci_upper"]) == 3
+    for lo, mean, hi in zip(rw["ci_lower"], rw["means"], rw["ci_upper"]):
+        assert lo <= mean <= hi, "each percentile CI must bracket its ordered mean"
+    adj = rw["adjusted_p_values"]
+    assert all(b >= a for a, b in zip(adj, adj[1:])), (
+        "Romano-Wolf adjusted p-values must be non-decreasing"
+    )
+
+
+def test_walk_forward_analysis_family_diagnostics_are_reproducible():
+    """The family bootstrap must be reproducible from ``family_seed``."""
+    family = _family_return_frame(_make_ohlcv_data(periods=500, seed=42).index)
+    _, first = _family_walk_forward_result(family_returns=family, family_stepdown=True)
+    _, second = _family_walk_forward_result(family_returns=family, family_stepdown=True)
+    rc1 = first["summary"]["family_reality_check"]
+    rc2 = second["summary"]["family_reality_check"]
+    rw1 = first["summary"]["family_stepdown"]
+    rw2 = second["summary"]["family_stepdown"]
+    assert rc1["p_value"] == rc2["p_value"]
+    assert rc1["means"] == rc2["means"]
+    assert rw1["adjusted_p_values"] == rw2["adjusted_p_values"]
+    assert rw1["ordered_indices"] == rw2["ordered_indices"]
+
+
+def test_walk_forward_analysis_without_family_returns_keeps_summary_unchanged():
+    """Default (no ``family_returns``) must not add family keys to the summary."""
+    _, result = _family_walk_forward_result()
+    summary = result["summary"]
+    assert "family_reality_check" not in summary
+    assert "family_stepdown" not in summary
+    assert "family_reality_check_error" not in summary
+
+
+def test_walk_forward_analysis_family_returns_too_short_records_error():
+    """An unusable family matrix is reported, never raised: the run still ends."""
+    data = _make_ohlcv_data(periods=500, seed=42)
+    _, result = _family_walk_forward_result(
+        family_returns=pd.DataFrame(
+            {"only_one_row": [0.001]}, index=[data.index[0]]
+        ),
+    )
+    summary = result["summary"]
+    assert summary["family_reality_check"] is None
+    assert "family_reality_check_error" in summary
+
+
 def test_cli_out_of_sample_benchmark_cost_is_periodic_false():
     """CLI end-to-end test for out-of-sample without --benchmark-cost-is-periodic flag (default False).
 
@@ -6679,6 +6792,12 @@ TEST_REGISTRY.append(
 TEST_REGISTRY.append(
     ("test_walk_forward_analysis_surfaces_capacity_per_period", test_walk_forward_analysis_surfaces_capacity_per_period)
 )
+TEST_REGISTRY.extend([
+    ("test_walk_forward_analysis_family_reality_check_and_stepdown", test_walk_forward_analysis_family_reality_check_and_stepdown),
+    ("test_walk_forward_analysis_family_diagnostics_are_reproducible", test_walk_forward_analysis_family_diagnostics_are_reproducible),
+    ("test_walk_forward_analysis_without_family_returns_keeps_summary_unchanged", test_walk_forward_analysis_without_family_returns_keeps_summary_unchanged),
+    ("test_walk_forward_analysis_family_returns_too_short_records_error", test_walk_forward_analysis_family_returns_too_short_records_error),
+])
 
 
 def _make_panel_returns_data(periods: int = 200, n_assets: int = 2, seed: int = 3):
