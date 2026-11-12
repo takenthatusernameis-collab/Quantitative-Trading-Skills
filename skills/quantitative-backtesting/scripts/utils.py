@@ -2209,6 +2209,7 @@ def reality_check_test(
     seed: Optional[int] = None,
     studentize: bool = True,
     alpha: float = 0.05,
+    ci_level: float = 0.95,
 ) -> Dict[str, Any]:
     """Family-wise Reality Check for the best of K strategies vs a benchmark.
 
@@ -2248,18 +2249,28 @@ def reality_check_test(
             its Newey-West HAC standard error; if ``False``, use the raw
             (un-studentized) Reality Check statistic.
         alpha: Significance level used only to fill the ``significant`` field.
+        ci_level: Confidence level for the per-strategy **marginal** percentile
+            bootstrap confidence intervals of the mean excess performance
+            (default 0.95), returned as ``ci_lower`` / ``ci_upper``. These
+            intervals quantify each strategy's effect-size uncertainty
+            pointwise -- they are *not* multiplicity-adjusted. For an
+            FWER-adjusted effect-size interval use the ``simultaneous_ci_*``
+            fields of :func:`romano_wolf_stepdown`.
 
     Returns:
         Dict with ``test_statistic``, ``p_value``, ``studentized``,
         ``n_strategies``, ``n_observations``, ``block_size``, ``n_bootstrap``,
         ``best_index`` (column index of the best strategy), ``best_mean``,
-        ``means`` (per-strategy mean excess performance), ``alpha`` and
+        ``means`` (per-strategy mean excess performance), ``ci_lower`` /
+        ``ci_upper`` (per-strategy marginal percentile bootstrap confidence
+        limits, aligned to the original column order), ``ci_level``,
+        ``ci_method`` (``"marginal_percentile"``), ``alpha`` and
         ``significant``.
 
     References:
         - White, H. (2000). "A Reality Check for Data Snooping."
           Econometrica 68(5): 1097-1126.
-        - Hansen, P. R. (2005). "A Test for Superior Predictive Ability."
+        - Hansen, P. R. (2005). "A Test for Superiority of Predictive Ability."
           Journal of Business & Economic Statistics 23(4): 365-380.
         - Politis, D. N. & Romano, J. P. (1994). "The Stationary Bootstrap."
           JASA 89(428): 1303-1313.
@@ -2313,9 +2324,16 @@ def reality_check_test(
 
     rng = np.random.default_rng(seed)
     exceed = 0
-    for _ in range(int(n_bootstrap)):
+    # Retain every bootstrap mean so the same resamples can also produce
+    # per-strategy marginal percentile confidence intervals for the mean
+    # excess performance (returned as ci_lower / ci_upper). Reusing the
+    # resamples that already drove the p-value keeps the intervals tied to
+    # the test that was actually run rather than a second, independent draw.
+    boot_means_all = np.empty((int(n_bootstrap), K), dtype=float)
+    for b in range(int(n_bootstrap)):
         idx = _stationary_bootstrap_indices(T, block_size, rng)
         boot_means = F[idx].mean(axis=0)
+        boot_means_all[b] = boot_means
         if studentize:
             boot_stat = math.sqrt(T) * (boot_means - means) / omegas
         else:
@@ -2323,6 +2341,11 @@ def reality_check_test(
         if float(np.max(boot_stat)) >= observed:
             exceed += 1
     p_value = float(exceed) / float(n_bootstrap)
+
+    lo_q = 100.0 * (1.0 - float(ci_level)) / 2.0
+    hi_q = 100.0 * (1.0 + float(ci_level)) / 2.0
+    ci_lo = np.percentile(boot_means_all, lo_q, axis=0)
+    ci_hi = np.percentile(boot_means_all, hi_q, axis=0)
 
     return {
         "test_statistic": observed,
@@ -2335,6 +2358,10 @@ def reality_check_test(
         "best_index": best_index,
         "best_mean": best_mean,
         "means": [float(m) for m in means],
+        "ci_lower": [float(ci_lo[i]) for i in range(K)],
+        "ci_upper": [float(ci_hi[i]) for i in range(K)],
+        "ci_level": float(ci_level),
+        "ci_method": "marginal_percentile",
         "alpha": float(alpha),
         "significant": bool(p_value <= float(alpha)),
     }
