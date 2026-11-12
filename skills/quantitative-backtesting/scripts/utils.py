@@ -2156,6 +2156,189 @@ def benjamini_hochberg(p_values, alpha: float = 0.05):
         "n_rejected": int(n_rejected),
     }
 
+
+def _newey_west_long_run_variance(x: np.ndarray, bandwidth: Optional[int] = None) -> float:
+    """Newey-West HAC long-run variance of a mean-zero series.
+
+    Uses the Bartlett kernel with the common automatic bandwidth
+    ``floor(4 * (T / 100) ** (2 / 9))``. Returns a non-negative variance; a
+    degenerate (constant / too-short) input returns ``0.0``.
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    x = x - x.mean()
+    T = x.shape[0]
+    if T < 2:
+        return 0.0
+    if bandwidth is None:
+        bandwidth = int(np.floor(4.0 * (T / 100.0) ** (2.0 / 9.0)))
+    bandwidth = max(0, min(int(bandwidth), T - 1))
+    gamma0 = float(np.dot(x, x)) / T
+    var = gamma0
+    for lag in range(1, bandwidth + 1):
+        w = 1.0 - lag / (bandwidth + 1.0)
+        gamma = float(np.dot(x[lag:], x[:-lag])) / T
+        var += 2.0 * w * gamma
+    return max(var, 0.0)
+
+
+def _stationary_bootstrap_indices(n_obs: int, block_size: int, rng) -> np.ndarray:
+    """Indices of a stationary (Politis-Romano) block-bootstrap resample.
+
+    Blocks have geometrically distributed lengths with mean ``block_size`` and
+    wrap around the sample (circular), preserving the serial dependence of the
+    original series. The same index path is used for every strategy so the
+    cross-sectional dependence of a strategy family is preserved.
+    """
+    p_new_block = 1.0 / float(block_size)
+    idx = np.empty(n_obs, dtype=int)
+    pos = int(rng.integers(0, n_obs))
+    for i in range(n_obs):
+        idx[i] = pos
+        if rng.random() < p_new_block:
+            pos = int(rng.integers(0, n_obs))
+        else:
+            pos = (pos + 1) % n_obs
+    return idx
+
+
+def reality_check_test(
+    performance,
+    benchmark=None,
+    n_bootstrap: int = 1000,
+    block_size: Optional[int] = None,
+    seed: Optional[int] = None,
+    studentize: bool = True,
+    alpha: float = 0.05,
+) -> Dict[str, Any]:
+    """Family-wise Reality Check for the best of K strategies vs a benchmark.
+
+    Implements White's (2000) Reality Check for a family of strategies and,
+    optionally, its studentized variant (Hansen 2005, "A Test for Superiority
+    of Predictive Ability"). The null hypothesis is that **no** strategy in
+    the family has a positive expected per-period excess performance::
+
+        H0: max_k E[f_{t,k}] <= 0        H1: max_k E[f_{t,k}] > 0
+
+    where ``f_{t,k} = r_{t,k} - b_t`` is the per-period excess performance of
+    strategy ``k`` over the benchmark. The test statistic is the largest
+    (studentized) mean across the family, and its null distribution is
+    obtained by a stationary block bootstrap that resamples the *same* time
+    indices for every strategy (so the cross-sectional dependence of the
+    family is preserved). This is a family-wise control that complements,
+    and is distinct from, the per-strategy Deflated Sharpe Ratio (selection
+    bias within one grid) and the Benjamini-Hochberg FDR control (the
+    benchmark family). Rejecting H0 says the *best* strategy in the family
+    beats the benchmark by more than luck; it does not by itself identify
+    which strategy does so (that requires a stepdown procedure, which is
+    future work).
+
+    Args:
+        performance: Array-like of per-period performance. Shape ``(T,)`` for a
+            single strategy or ``(T, K)`` for ``K`` strategies (one column per
+            strategy). Rows with any non-finite value (in ``performance`` or
+            ``benchmark``) are dropped listwise so the strategies stay aligned.
+        benchmark: Optional per-period benchmark return, shape ``(T,)``. When
+            omitted, the raw ``performance`` is tested (H0: mean <= 0).
+        n_bootstrap: Number of bootstrap resamples (default 1000).
+        block_size: Mean block length for the stationary bootstrap. ``None``
+            (default) selects ``max(2, round(T ** (1/3)))``.
+        seed: RNG seed for reproducibility. ``None`` uses a fresh RNG.
+        studentize: If ``True`` (default), studentize each strategy's mean by
+            its Newey-West HAC standard error; if ``False``, use the raw
+            (un-studentized) Reality Check statistic.
+        alpha: Significance level used only to fill the ``significant`` field.
+
+    Returns:
+        Dict with ``test_statistic``, ``p_value``, ``studentized``,
+        ``n_strategies``, ``n_observations``, ``block_size``, ``n_bootstrap``,
+        ``best_index`` (column index of the best strategy), ``best_mean``,
+        ``means`` (per-strategy mean excess performance), ``alpha`` and
+        ``significant``.
+
+    References:
+        - White, H. (2000). "A Reality Check for Data Snooping."
+          Econometrica 68(5): 1097-1126.
+        - Hansen, P. R. (2005). "A Test for Superior Predictive Ability."
+          Journal of Business & Economic Statistics 23(4): 365-380.
+        - Politis, D. N. & Romano, J. P. (1994). "The Stationary Bootstrap."
+          JASA 89(428): 1303-1313.
+    """
+    F = np.asarray(performance, dtype=float)
+    if F.ndim == 1:
+        F = F.reshape(-1, 1)
+    if F.ndim != 2:
+        raise ValueError("performance must be 1-D or 2-D")
+    T, K = F.shape
+    if K < 1:
+        raise ValueError("performance must contain at least one strategy")
+    if int(n_bootstrap) < 1:
+        raise ValueError("n_bootstrap must be >= 1")
+
+    if benchmark is not None:
+        b = np.asarray(benchmark, dtype=float).ravel()
+        if b.shape[0] != T:
+            raise ValueError(
+                f"benchmark length {b.shape[0]} does not match performance rows {T}"
+            )
+        F = F - b.reshape(-1, 1)
+
+    # Listwise deletion keeps every strategy aligned on the same rows.
+    finite_rows = np.isfinite(F).all(axis=1)
+    F = F[finite_rows]
+    T = F.shape[0]
+    if T < 2:
+        raise ValueError("need at least 2 finite observations to run the test")
+
+    if block_size is None:
+        block_size = max(2, int(round(T ** (1.0 / 3.0))))
+    block_size = max(2, min(int(block_size), T))
+
+    means = F.mean(axis=0)
+    best_index = int(np.argmax(means))
+    best_mean = float(means[best_index])
+
+    if studentize:
+        omegas = np.array(
+            [math.sqrt(_newey_west_long_run_variance(F[:, k])) for k in range(K)],
+            dtype=float,
+        )
+        # Guard against a zero long-run variance (constant column) so the
+        # studentized statistic stays finite.
+        omegas = np.where(omegas > 0.0, omegas, 1.0)
+        stat = math.sqrt(T) * means / omegas
+    else:
+        stat = math.sqrt(T) * means
+    observed = float(np.max(stat))
+
+    rng = np.random.default_rng(seed)
+    exceed = 0
+    for _ in range(int(n_bootstrap)):
+        idx = _stationary_bootstrap_indices(T, block_size, rng)
+        boot_means = F[idx].mean(axis=0)
+        if studentize:
+            boot_stat = math.sqrt(T) * (boot_means - means) / omegas
+        else:
+            boot_stat = math.sqrt(T) * (boot_means - means)
+        if float(np.max(boot_stat)) >= observed:
+            exceed += 1
+    p_value = float(exceed) / float(n_bootstrap)
+
+    return {
+        "test_statistic": observed,
+        "p_value": p_value,
+        "studentized": bool(studentize),
+        "n_strategies": int(K),
+        "n_observations": int(T),
+        "block_size": int(block_size),
+        "n_bootstrap": int(n_bootstrap),
+        "best_index": best_index,
+        "best_mean": best_mean,
+        "means": [float(m) for m in means],
+        "alpha": float(alpha),
+        "significant": bool(p_value <= float(alpha)),
+    }
+
+
 def hierarchical_risk_parity(
     returns: pd.DataFrame,
     min_weight: float = 0.0,

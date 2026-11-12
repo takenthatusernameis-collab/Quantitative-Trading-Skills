@@ -404,6 +404,52 @@ python3 scripts/walk_forward.py monte-carlo \
     --n-trials 50
 ```
 
+## Family-Wise Reality Check (White 2000 / Hansen 2005)
+
+`utils.reality_check_test` is a family-level multiple-testing control for
+comparing several strategies against a common benchmark. It is a third,
+distinct control alongside the Deflated Sharpe Ratio (selection bias within
+one grid) and the Benjamini-Hochberg FDR correction (the benchmark family).
+
+Given per-period performance `f_{t,k} = r_{t,k} - b_t` for `K` strategies, it
+tests:
+
+```
+H0: max_k E[f_{t,k}] <= 0        H1: max_k E[f_{t,k}] > 0
+```
+
+i.e. whether the *best* strategy in the family beats the benchmark by more than
+luck. The statistic is the largest (optionally studentized) mean across the
+family, and its null distribution is obtained by a **stationary block
+bootstrap** (Politis-Romano) that resamples the *same* time indices for every
+strategy, preserving the cross-sectional dependence of the family.
+
+```python
+from utils import reality_check_test
+
+res = reality_check_test(
+    performance,          # shape (T,) or (T, K); one column per strategy
+    benchmark=bench,      # optional (T,) benchmark return
+    n_bootstrap=2000,
+    seed=0,               # reproducible
+)
+# res["p_value"] <= 0.05 rejects H0: the best strategy beats the benchmark.
+```
+
+Notes and limits:
+
+- `studentize=True` (default) scales each mean by its Newey-West HAC standard
+  error; `studentize=False` gives White's raw Reality Check statistic.
+- The bootstrap is seeded for reproducibility and drops rows with any
+  non-finite value (listwise), keeping the strategies aligned.
+- Rejecting H0 says the best strategy beats the benchmark by more than luck; it
+  does **not** by itself identify which strategy does so. Identifying the
+  winner requires a stepdown procedure (e.g. Romano-Wolf), which is not yet
+  implemented.
+- The test needs the per-period return *series* of every family member, not
+  just their Sharpe ratios. It is a standalone utility and is not yet wired
+  into a CLI summary.
+
 ## Out-of-Sample Validation Framework
 
 `out_of_sample_validation` implements a three-phase validation framework
