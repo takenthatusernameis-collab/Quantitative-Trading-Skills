@@ -48,6 +48,7 @@ from walk_forward import (  # noqa: E402
     _benchmark_stats_with_splits,
     _add_benchmark_to_summary,
     _benchmark_list_alpha_correction,
+    _print_family_stepdown,
     deflated_alpha_ratio,
     minimum_detectable_alpha,
     minimum_detectable_sharpe,
@@ -905,10 +906,17 @@ def test_cli_walk_forward_family_diagnostics_end_to_end():
             "--family-seed", "12345",
             "--family-bootstrap", "200",
         ]
+        stdout = StringIO()
         with patch.object(sys, "argv", argv), \
-                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                redirect_stdout(stdout), redirect_stderr(StringIO()):
             rc = walk_forward_main()
         assert rc == 0, "CLI with family diagnostics should exit 0"
+
+        output = stdout.getvalue()
+        assert "Family Romano-Wolf stepdown:" in output, (
+            "the CLI must print the family stepdown block when --family-stepdown "
+            "is passed"
+        )
 
         summary_path = os.path.join(out_dir, "walk_forward_summary.json")
         assert os.path.exists(summary_path), "walk_forward_summary.json not written"
@@ -942,6 +950,66 @@ def test_cli_walk_forward_family_diagnostics_end_to_end():
         assert all(b >= a for a, b in zip(adj, adj[1:])), (
             "Romano-Wolf adjusted p-values must be non-decreasing"
         )
+
+        # The OOS record is 189 bars (< 504), so the additive small-sample
+        # warning must be both persisted in the summary and surfaced in the
+        # user-facing CLI output. This is an honest-reporting invariant: an
+        # asymptotic max-t band on a short sample must not be printed as if it
+        # had exact coverage.
+        warning = rw.get("simultaneous_ci_small_sample_warning")
+        assert isinstance(warning, str) and "undercover" in warning
+        assert "WARNING:" in output and warning in output
+
+
+def test_print_family_stepdown_surfaces_small_sample_warning_only_when_present():
+    """The family stepdown formatter surfaces the small-sample warning when set.
+
+    An asymptotic max-t band on a short sample must not be printed as if it had
+    exact coverage: the additive ``simultaneous_ci_small_sample_warning`` must be
+    printed when present and must not be printed when it is ``None``. A missing
+    or malformed diagnostic is a no-op so the CLI never crashes on it.
+    """
+    base = {
+        "n_strategies": 2,
+        "n_observations": 189,
+        "n_rejected": 1,
+        "strategy_names": ["a", "b"],
+        "ordered_indices": [0, 1],
+        "p_values": [0.01, 0.4],
+        "adjusted_p_values": [0.02, 0.4],
+        "means": [0.01, 0.0],
+        "ci_lower": [0.0, -0.01],
+        "ci_upper": [0.02, 0.01],
+        "simultaneous_ci_lower": [-0.005, -0.02],
+        "simultaneous_ci_upper": [0.025, 0.015],
+        "rejected": [True, False],
+    }
+
+    warned = dict(
+        base,
+        simultaneous_ci_small_sample_warning="max-t band may undercover at n=189",
+    )
+    buf = StringIO()
+    with redirect_stdout(buf):
+        _print_family_stepdown(warned)
+    out = buf.getvalue()
+    assert "Family Romano-Wolf stepdown:" in out
+    assert "Observations: 189" in out
+    assert "WARNING:" in out and "undercover" in out
+
+    quiet = dict(base, simultaneous_ci_small_sample_warning=None)
+    buf = StringIO()
+    with redirect_stdout(buf):
+        _print_family_stepdown(quiet)
+    out = buf.getvalue()
+    assert "Family Romano-Wolf stepdown:" in out
+    assert "WARNING:" not in out
+
+    for value in (None, "not-a-dict", 42):
+        buf = StringIO()
+        with redirect_stdout(buf):
+            _print_family_stepdown(value)
+        assert buf.getvalue() == ""
 
 
 def test_cli_walk_forward_without_family_flags_adds_no_family_keys():
@@ -6897,6 +6965,7 @@ TEST_REGISTRY.extend([
     ("test_walk_forward_analysis_without_family_returns_keeps_summary_unchanged", test_walk_forward_analysis_without_family_returns_keeps_summary_unchanged),
     ("test_walk_forward_analysis_family_returns_too_short_records_error", test_walk_forward_analysis_family_returns_too_short_records_error),
     ("test_cli_walk_forward_family_diagnostics_end_to_end", test_cli_walk_forward_family_diagnostics_end_to_end),
+    ("test_print_family_stepdown_surfaces_small_sample_warning_only_when_present", test_print_family_stepdown_surfaces_small_sample_warning_only_when_present),
     ("test_cli_walk_forward_without_family_flags_adds_no_family_keys", test_cli_walk_forward_without_family_flags_adds_no_family_keys),
 ])
 

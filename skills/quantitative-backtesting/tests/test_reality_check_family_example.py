@@ -6,8 +6,10 @@ from multiple strategies and applies ``utils.reality_check_test``. Offline,
 committed fixtures only; no live network.
 """
 
+import contextlib
 import importlib.util
 import sys
+from io import StringIO
 from pathlib import Path
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent
@@ -141,6 +143,33 @@ def test_reality_check_family_example_romano_wolf_stepdown():
         rw["simultaneous_ci_lower"], rw["simultaneous_ci_upper"], rw["means"]
     ):
         assert lo <= mean <= hi
+
+    # The committed real-market OOS split yields 502 observations (< 504), so
+    # the additive small-sample warning must be present: the asymptotic max-t
+    # band must not be reported as if it had exact coverage.
+    warning = rw.get("simultaneous_ci_small_sample_warning")
+    if rw["n_observations"] < 504:
+        assert isinstance(warning, str) and "undercover" in warning
+    else:
+        assert warning is None
+
+
+def test_reality_check_family_example_main_surfaces_small_sample_warning():
+    """The example's printed output carries the small-sample warning.
+
+    ``main()`` runs the offline, committed-fixture pipeline. Its stdout must
+    contain the additive ``WARNING`` line for each Romano-Wolf stepdown so the
+    approximate nature of the simultaneous band is visible to a reader, not only
+    stored in a returned dict.
+    """
+    module = _import_module("reality_check_family_example_main", EXAMPLE_PATH)
+    buf = StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = module.main()
+    assert rc == 0
+    out = buf.getvalue()
+    assert "Romano-Wolf stepdown" in out
+    assert "WARNING:" in out and "undercover" in out
 
 
 def test_reality_check_family_example_romano_wolf_benchmark_subtracted():
