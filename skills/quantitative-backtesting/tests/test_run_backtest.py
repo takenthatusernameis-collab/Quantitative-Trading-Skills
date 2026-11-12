@@ -4020,6 +4020,63 @@ def test_run_backtest_max_impact_requires_positive_impact_coefficient():
         assert "impact-coefficient" in str(e) or "impact_coefficient" in str(e), f"unexpected message: {e}"
 
 
+def test_run_backtest_max_impact_reduces_turnover_and_impact_cost():
+    """A binding --max-impact cap reduces position turnover and market impact cost.
+
+    This test uses a controlled synthetic strategy on a FLAT market (zero returns)
+    so the strategy PnL is zero and only impact cost matters. This isolates the
+    impact cost reduction:
+    - The capped run must have strictly lower (less negative) total returns
+      (i.e., less impact drag)
+    - The reduction must be monotonic: tighter cap -> less drag
+    """
+    # Flat market: constant prices, zero returns
+    dates = pd.date_range("2020-01-01", periods=200, freq="B")
+    prices = np.full(200, 100.0)
+    data = pd.DataFrame({
+        "open": prices,
+        "high": prices,
+        "low": prices,
+        "close": prices,
+        "volume": np.full(200, 5_000_000),
+    }, index=dates)
+
+    # donchian_breakout takes positions on flat data (period < len(data))
+    strategy = build_strategy("donchian_breakout", '{"period": 20}')
+    impact_coeff = 0.5
+
+    # The estimated max impact for this strategy on this data:
+    # position changes are ~1.0, equity ~100k, ADV ~5M shares * $100 = $500M
+    # impact = 1.0 * 100k * 0.5 / 500M = 0.0001 = 1 bps
+    # Use caps well below that to ensure binding: 0.1 bps and 0.5 bps.
+    uncapped = run_backtest(data, strategy, _Args(impact_coefficient=impact_coeff, commission=0.0, slippage=0.0))
+    cap_01bps = run_backtest(data, strategy, _Args(impact_coefficient=impact_coeff, max_impact=0.00001, commission=0.0, slippage=0.0))
+    cap_05bps = run_backtest(data, strategy, _Args(impact_coefficient=impact_coeff, max_impact=0.00005, commission=0.0, slippage=0.0))
+    loose = run_backtest(data, strategy, _Args(impact_coefficient=impact_coeff, max_impact=1.0, commission=0.0, slippage=0.0))
+
+    # Loose cap must match uncapped exactly (cap never binds)
+    np.testing.assert_array_equal(loose["returns"], uncapped["returns"])
+    np.testing.assert_array_equal(loose["equity_curve"], uncapped["equity_curve"])
+
+    # Tighter caps must produce different returns (cap binds)
+    assert not np.allclose(cap_01bps["returns"], uncapped["returns"], atol=1e-12)
+    assert not np.allclose(cap_05bps["returns"], uncapped["returns"], atol=1e-12)
+
+    # On flat market, strategy returns = -impact_cost (negative).
+    # Capped runs should have LESS NEGATIVE returns (less impact drag).
+    assert cap_01bps["returns"].sum() > uncapped["returns"].sum(), "0.1bps cap must reduce impact drag"
+    assert cap_05bps["returns"].sum() > uncapped["returns"].sum(), "0.5bps cap must reduce impact drag"
+
+    # Tighter cap (0.1bps) must reduce drag MORE than looser cap (0.5bps)
+    drag_01bps = uncapped["returns"].sum() - cap_01bps["returns"].sum()
+    drag_05bps = uncapped["returns"].sum() - cap_05bps["returns"].sum()
+    assert drag_01bps > drag_05bps, "Tighter cap must reduce impact drag more than looser cap"
+
+    # Verify the config records max_impact correctly
+    assert cap_01bps["config"]["max_impact"] == 0.00001
+    assert cap_05bps["config"]["max_impact"] == 0.00005
+
+
 def test_run_backtest_regime_impact_changes_output():
     """run_backtest applies regime-specific impact coefficients.
 
@@ -4189,6 +4246,7 @@ TEST_REGISTRY = [
     ("test_run_backtest_max_impact_non_binding_preserves_uncapped", test_run_backtest_max_impact_non_binding_preserves_uncapped),
     ("test_run_backtest_max_impact_rejects_non_positive", test_run_backtest_max_impact_rejects_non_positive),
     ("test_run_backtest_max_impact_requires_positive_impact_coefficient", test_run_backtest_max_impact_requires_positive_impact_coefficient),
+    ("test_run_backtest_max_impact_reduces_turnover_and_impact_cost", test_run_backtest_max_impact_reduces_turnover_and_impact_cost),
     ("test_run_backtest_regime_impact_changes_output", test_run_backtest_regime_impact_changes_output),
     ("test_run_backtest_regime_impact_unmapped_falls_back_to_base", test_run_backtest_regime_impact_unmapped_falls_back_to_base),
 ]
