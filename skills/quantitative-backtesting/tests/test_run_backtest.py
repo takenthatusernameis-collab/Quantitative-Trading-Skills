@@ -63,7 +63,8 @@ class _Args:
                  multi_symbol=False, benchmark=None, risk_free_rate=None,
                  fill_rate=1.0, latency=0, panel_pricing="net-exposure",
                  impact_aggregation="panel",
-                 train_frac=None, val_frac=None, test_frac=None, run_split=None):
+                 train_frac=None, val_frac=None, test_frac=None, run_split=None,
+                 max_impact=None):
         self.commission = commission
         self.slippage = slippage
         self.initial_capital = initial_capital
@@ -87,6 +88,7 @@ class _Args:
         self.val_frac = val_frac
         self.test_frac = test_frac
         self.run_split = run_split
+        self.max_impact = max_impact
 
 
 def test_signals_active_detects_flat_and_active_series():
@@ -3875,6 +3877,71 @@ def test_run_backtest_split_signals_share_split_index():
         assert len(results["returns"]) == results["train_val_test_split"][f"{split}_size"] - 1
 
 
+def test_run_backtest_config_records_max_impact():
+    """results["config"] records max_impact; None when not requested."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 5, "slow_period": 20}')
+
+    uncapped = run_backtest(data, strategy, _Args(impact_coefficient=0.5))
+    assert uncapped["config"]["max_impact"] is None
+
+    capped = run_backtest(data, strategy, _Args(impact_coefficient=0.5, max_impact=0.0001))
+    assert capped["config"]["max_impact"] == 0.0001
+
+
+def test_run_backtest_max_impact_cap_binds_changes_outcome():
+    """A tight --max-impact cap changes the backtest outcome vs the uncapped run."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 5, "slow_period": 20}')
+
+    uncapped = run_backtest(data, strategy, _Args(impact_coefficient=0.5))
+    capped = run_backtest(data, strategy, _Args(impact_coefficient=0.5, max_impact=0.0001))
+
+    # The cap must bind: scaled position changes produce a different return stream.
+    assert capped["config"]["max_impact"] == 0.0001
+    assert not np.allclose(capped["returns"], uncapped["returns"], atol=1e-12)
+    assert not np.allclose(capped["equity_curve"], uncapped["equity_curve"], atol=1e-9)
+
+
+def test_run_backtest_max_impact_non_binding_preserves_uncapped():
+    """A very loose --max-impact cap leaves the run unchanged (cap inactive)."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 5, "slow_period": 20}')
+
+    uncapped = run_backtest(data, strategy, _Args(impact_coefficient=0.5))
+    loose = run_backtest(data, strategy, _Args(impact_coefficient=0.5, max_impact=1.0))
+
+    # A cap so loose it never binds must not move any number.
+    assert loose["config"]["max_impact"] == 1.0
+    np.testing.assert_array_equal(loose["returns"], uncapped["returns"])
+    np.testing.assert_array_equal(loose["equity_curve"], uncapped["equity_curve"])
+
+
+def test_run_backtest_max_impact_rejects_non_positive():
+    """--max-impact must be positive."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 5, "slow_period": 20}')
+
+    for bad in (0.0, -0.0001):
+        try:
+            run_backtest(data, strategy, _Args(impact_coefficient=0.5, max_impact=bad))
+            assert False, f"Expected ValueError for max_impact={bad}"
+        except ValueError as e:
+            assert "must be positive" in str(e), f"unexpected message: {e}"
+
+
+def test_run_backtest_max_impact_requires_positive_impact_coefficient():
+    """--max-impact requires --impact-coefficient > 0."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 5, "slow_period": 20}')
+
+    try:
+        run_backtest(data, strategy, _Args(impact_coefficient=0.0, max_impact=0.0001))
+        assert False, "Expected ValueError for impact_coefficient==0 with max_impact set"
+    except ValueError as e:
+        assert "impact-coefficient" in str(e) or "impact_coefficient" in str(e), f"unexpected message: {e}"
+
+
 TEST_REGISTRY = [
     ("test_signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
     ("test_run_backtest_flat_strategy_raises", test_run_backtest_flat_strategy_raises),
@@ -3987,6 +4054,11 @@ TEST_REGISTRY = [
     ("test_run_backtest_split_surfaces_split_metadata_in_tear_sheet_summary", test_run_backtest_split_surfaces_split_metadata_in_tear_sheet_summary),
     ("test_run_backtest_split_is_reproducible_across_runs", test_run_backtest_split_is_reproducible_across_runs),
     ("test_run_backtest_split_signals_share_split_index", test_run_backtest_split_signals_share_split_index),
+    ("test_run_backtest_config_records_max_impact", test_run_backtest_config_records_max_impact),
+    ("test_run_backtest_max_impact_cap_binds_changes_outcome", test_run_backtest_max_impact_cap_binds_changes_outcome),
+    ("test_run_backtest_max_impact_non_binding_preserves_uncapped", test_run_backtest_max_impact_non_binding_preserves_uncapped),
+    ("test_run_backtest_max_impact_rejects_non_positive", test_run_backtest_max_impact_rejects_non_positive),
+    ("test_run_backtest_max_impact_requires_positive_impact_coefficient", test_run_backtest_max_impact_requires_positive_impact_coefficient),
 ]
 
 if __name__ == "__main__":
