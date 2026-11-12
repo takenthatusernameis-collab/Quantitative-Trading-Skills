@@ -804,6 +804,24 @@ def test_parse_args_accepts_fill_rate():
     assert args.fill_rates is None
 
 
+def test_parse_args_accepts_max_impact():
+    """parse_args accepts --max-impact and --max-impacts, defaults to None."""
+    from unittest.mock import patch
+
+    with patch.object(sys, "argv", ["prog", "--data", "d.csv", "--max-impact", "0.0005"]):
+        args = parse_args()
+    assert args.max_impact == 0.0005
+
+    with patch.object(sys, "argv", ["prog", "--data", "d.csv", "--max-impacts", "0.0001", "0.001", "0.01"]):
+        args = parse_args()
+    assert args.max_impacts == [0.0001, 0.001, 0.01]
+
+    with patch.object(sys, "argv", ["prog", "--data", "d.csv"]):
+        args = parse_args()
+    assert args.max_impact is None
+    assert args.max_impacts is None
+
+
 def test_run_backtest_fill_rate_default_is_one():
     """fill_rate defaults to 1.0 and is recorded in the results config."""
     data = _make_data()
@@ -2217,6 +2235,38 @@ def test_cli_run_backtest_slippage_sweep():
         assert len(payload["results"]) == 3
         returns = [r["total_return"] for r in payload["results"]]
         assert returns[2] <= returns[0]
+
+
+def test_cli_run_backtest_max_impact_sweep():
+    """CLI run_backtest --max-impacts writes a sweep artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "run_backtest",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 5, "slow_period": 20}',
+            "--output", out_dir,
+            "--impact-coefficient", "0.5",
+            "--max-impacts", "0.0001", "0.001", "0.01",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0, f"CLI run_backtest max-impact sweep should exit 0, got {rc}"
+        sweep_path = os.path.join(out_dir, "run_backtest_max_impact_sweep.json")
+        assert os.path.exists(sweep_path), "run_backtest_max_impact_sweep.json not written"
+        with open(sweep_path) as f:
+            payload = json.load(f)
+        assert payload["max_impacts"] == [0.0001, 0.001, 0.01]
+        assert len(payload["results"]) == 3
+        returns = [r["total_return"] for r in payload["results"]]
+        # Tighter cap (0.0001) should produce different (less negative) return
+        # than looser caps (0.001, 0.01) which don't bind.
+        assert returns[0] != returns[2]
+
 
 def test_cli_multi_benchmark_provenance_shapes():
     """Two-benchmark run writes list with both checksums; single keeps dict; none omits artifact."""
@@ -3968,6 +4018,7 @@ TEST_REGISTRY = [
     ("test_run_backtest_borrow_cost_frequency_aware", test_run_backtest_borrow_cost_frequency_aware),
     ("test_run_backtest_market_impact_scales_with_equity_not_price", test_run_backtest_market_impact_scales_with_equity_not_price),
     ("test_parse_args_accepts_fill_rate", test_parse_args_accepts_fill_rate),
+    ("test_parse_args_accepts_max_impact", test_parse_args_accepts_max_impact),
     ("test_run_backtest_fill_rate_default_is_one", test_run_backtest_fill_rate_default_is_one),
     ("test_run_backtest_fill_rate_one_identical_to_default", test_run_backtest_fill_rate_one_identical_to_default),
     ("test_run_backtest_fill_rate_scales_borrow_cost_with_position", test_run_backtest_fill_rate_scales_borrow_cost_with_position),
@@ -4012,6 +4063,7 @@ TEST_REGISTRY = [
     ("test_cli_run_backtest_funding_sweep", test_cli_run_backtest_funding_sweep),
     ("test_cli_run_backtest_commission_sweep", test_cli_run_backtest_commission_sweep),
     ("test_cli_run_backtest_slippage_sweep", test_cli_run_backtest_slippage_sweep),
+    ("test_cli_run_backtest_max_impact_sweep", test_cli_run_backtest_max_impact_sweep),
     ("test_cli_multi_benchmark_provenance_shapes", test_cli_multi_benchmark_provenance_shapes),
     ("test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance", test_cli_tear_sheet_links_each_benchmark_metric_row_to_its_provenance),
     ("test_cli_benchmark_name_propagates_to_provenance_and_tear_sheet", test_cli_benchmark_name_propagates_to_provenance_and_tear_sheet),
