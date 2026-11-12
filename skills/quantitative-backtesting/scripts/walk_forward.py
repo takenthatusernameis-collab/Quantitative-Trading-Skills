@@ -5244,6 +5244,39 @@ def _print_overfitting_risk(
         print(f"{indent}Reason: {reason}")
 
 
+def _print_family_stepdown(
+    stepdown: Optional[Dict[str, Any]],
+    indent: str = "  ",
+) -> None:
+    """Print the Romano-Wolf stepdown results from a family diagnostic.
+
+    The stepdown identifies which strategies in a family drive a Reality Check
+    rejection while controlling the family-wise error rate. The simultaneous
+    confidence bands are asymptotic (max-t); when the sample size is below
+    504 observations a small-sample warning is printed.
+    """
+    if not isinstance(stepdown, dict):
+        return
+    print(f"{indent}Family Romano-Wolf stepdown:")
+    print(f"{indent}  Strategies: {stepdown.get('n_strategies')} | Observations: {stepdown.get('n_observations')}")
+    print(f"{indent}  Rejected: {stepdown.get('n_rejected')} of {stepdown.get('n_strategies')}")
+    warning = stepdown.get("simultaneous_ci_small_sample_warning")
+    if warning:
+        print(f"{indent}  WARNING: {warning}")
+    strategy_names = stepdown.get("strategy_names")
+    ordered = stepdown.get("ordered_indices", [])
+    for rank, idx in enumerate(ordered):
+        name = strategy_names[idx] if strategy_names and idx < len(strategy_names) else f"strategy_{idx}"
+        print(
+            f"{indent}  rank {rank}: {name} | p={stepdown['p_values'][rank]:.6f} "
+            f"adj_p={stepdown['adjusted_p_values'][rank]:.6f} "
+            f"mean={stepdown['means'][rank]:.8f} "
+            f"95%CI=[{stepdown['ci_lower'][rank]:.8f}, {stepdown['ci_upper'][rank]:.8f}] "
+            f"sim95%CI=[{stepdown['simultaneous_ci_lower'][rank]:.8f}, {stepdown['simultaneous_ci_upper'][rank]:.8f}] "
+            f"rejected={stepdown['rejected'][rank]}"
+        )
+
+
 def _selection_window_remedy(
     validation_method: str,
     context: Optional[Dict[str, Any]],
@@ -9112,6 +9145,9 @@ def run_walk_forward(args) -> int:
     # Check for overfitting
     diagnostics = overfitting_check(results)
     _print_overfitting_risk(diagnostics)
+
+    # Print family stepdown results when available
+    _print_family_stepdown(results["summary"].get("family_stepdown"))
 
     # Save results
     output_dir = Path(args.output)

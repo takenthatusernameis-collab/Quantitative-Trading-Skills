@@ -297,6 +297,8 @@ def main() -> int:
     rw = run_romano_wolf_family_stepdown(n_bootstrap=500, family_returns=family_returns)
     print("--- Romano-Wolf stepdown (identify winners, FWER-controlled) ---")
     print(f"Rejected: {rw['n_rejected']} of {rw['n_strategies']}")
+    if rw.get("simultaneous_ci_small_sample_warning"):
+        print(f"WARNING: {rw['simultaneous_ci_small_sample_warning']}")
     for rank, idx in enumerate(rw["ordered_indices"]):
         name = rw["strategy_names"][idx]
         print(
@@ -313,6 +315,8 @@ def main() -> int:
     )
     print("--- Romano-Wolf stepdown benchmark-subtracted (H0: no strategy beats buy-and-hold MSFT) ---")
     print(f"Benchmark: {rw_bench.get('benchmark')} | Observations: {rw_bench['n_observations']}")
+    if rw_bench.get("simultaneous_ci_small_sample_warning"):
+        print(f"WARNING: {rw_bench['simultaneous_ci_small_sample_warning']}")
     print(f"Rejected: {rw_bench['n_rejected']} of {rw_bench['n_strategies']}")
     for rank, idx in enumerate(rw_bench["ordered_indices"]):
         name = rw_bench["strategy_names"][idx]
