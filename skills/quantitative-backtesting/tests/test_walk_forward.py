@@ -871,6 +871,91 @@ def test_walk_forward_analysis_family_returns_too_short_records_error():
     assert "family_reality_check_error" in summary
 
 
+def _family_fixture_path():
+    return str(SKILLS_DIR / "tests" / "fixtures" / "family_returns.csv")
+
+
+def test_cli_walk_forward_family_diagnostics_end_to_end():
+    """CLI end-to-end: --family-returns/--family-stepdown reach the summary.
+
+    A committed per-period family return CSV is loaded by the CLI, aligned to
+    the walk-forward OOS record, and the Reality Check plus Romano-Wolf stepdown
+    are persisted in ``walk_forward_summary.json``. No profitability claim: this
+    is a wiring check for the multiple-testing diagnostics on synthetic data.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=500)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward.py", "walk-forward",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5], "slow_period": [8, 10]}',
+            "--output", out_dir,
+            "--family-returns", _family_fixture_path(),
+            "--family-stepdown",
+            "--family-seed", "12345",
+            "--family-bootstrap", "200",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, "CLI with family diagnostics should exit 0"
+
+        summary_path = os.path.join(out_dir, "walk_forward_summary.json")
+        assert os.path.exists(summary_path), "walk_forward_summary.json not written"
+        with open(summary_path) as f:
+            summary = json.load(f)["summary"]
+
+        rc_diag = summary.get("family_reality_check")
+        assert rc_diag is not None, "family_reality_check must be persisted"
+        assert rc_diag.get("error") is None, (
+            f"family diagnostic reported error: {rc_diag.get('error')}"
+        )
+        assert rc_diag["n_strategies"] == 3
+        assert rc_diag["strategy_names"] == ["strong_momentum", "flat_signal", "negative_signal"]
+        # Reindexed to the OOS record (189 bars), not the full 783-row fixture.
+        assert 2 < rc_diag["n_observations"] < 783
+
+        rw = summary.get("family_stepdown")
+        assert rw is not None, "family_stepdown must be persisted with --family-stepdown"
+        assert len(rw["ordered_indices"]) == 3
+        assert len(rw["means"]) == len(rw["ci_lower"]) == len(rw["ci_upper"]) == 3
+        for lo, mean, hi in zip(rw["ci_lower"], rw["means"], rw["ci_upper"]):
+            assert lo <= mean <= hi, "each percentile CI must bracket its ordered mean"
+        adj = rw["adjusted_p_values"]
+        assert all(b >= a for a, b in zip(adj, adj[1:])), (
+            "Romano-Wolf adjusted p-values must be non-decreasing"
+        )
+
+
+def test_cli_walk_forward_without_family_flags_adds_no_family_keys():
+    """Default CLI path (no family flags) must not add family keys."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=500)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward.py", "walk-forward",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5], "slow_period": [8, 10]}',
+            "--output", out_dir,
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0
+
+        summary_path = os.path.join(out_dir, "walk_forward_summary.json")
+        with open(summary_path) as f:
+            summary = json.load(f)["summary"]
+        assert "family_reality_check" not in summary
+        assert "family_stepdown" not in summary
+        assert "family_reality_check_error" not in summary
+
+
 def test_cli_out_of_sample_benchmark_cost_is_periodic_false():
     """CLI end-to-end test for out-of-sample without --benchmark-cost-is-periodic flag (default False).
 
@@ -6797,6 +6882,8 @@ TEST_REGISTRY.extend([
     ("test_walk_forward_analysis_family_diagnostics_are_reproducible", test_walk_forward_analysis_family_diagnostics_are_reproducible),
     ("test_walk_forward_analysis_without_family_returns_keeps_summary_unchanged", test_walk_forward_analysis_without_family_returns_keeps_summary_unchanged),
     ("test_walk_forward_analysis_family_returns_too_short_records_error", test_walk_forward_analysis_family_returns_too_short_records_error),
+    ("test_cli_walk_forward_family_diagnostics_end_to_end", test_cli_walk_forward_family_diagnostics_end_to_end),
+    ("test_cli_walk_forward_without_family_flags_adds_no_family_keys", test_cli_walk_forward_without_family_flags_adds_no_family_keys),
 ])
 
 

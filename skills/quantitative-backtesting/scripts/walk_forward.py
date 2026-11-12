@@ -527,6 +527,25 @@ def _family_multiple_testing_summary(
     return result
 
 
+def _load_family_returns_csv(path):
+    """Load an optional per-period family return matrix from CSV.
+
+    The file's first column is a date index (parsed with ``parse_dates``) and
+    the remaining columns are one strategy return series each. Returns ``None``
+    when ``path`` is falsy so an unset ``--family-returns`` leaves the walk
+    forward summary unchanged. Column values are coerced to numeric; a
+    non-numeric cell becomes ``NaN`` rather than raising, so a malformed fixture
+    surfaces through the family diagnostic's own ``error`` channel instead of
+    breaking the run.
+    """
+    if not path:
+        return None
+    frame = pd.read_csv(path, parse_dates=[0], index_col=0)
+    frame = frame.apply(pd.to_numeric, errors="coerce")
+    frame.index.name = frame.index.name or "date"
+    return frame
+
+
 def walk_forward_analysis(
     data: Union[pd.DataFrame, dict],
     strategy_factory: Callable,
@@ -8935,6 +8954,13 @@ def run_walk_forward(args) -> int:
         _print_sweep_resolution_note(sweep_rows)
         return 0
 
+    # Optional family-level multiple-testing diagnostics: load a per-period
+    # family return matrix (date index + one column per strategy) and let
+    # walk_forward_analysis run the Reality Check (and, when requested, the
+    # Romano-Wolf stepdown) on the same OOS periods. Unset keeps the summary
+    # unchanged.
+    family_returns = _load_family_returns_csv(getattr(args, "family_returns", None))
+
     results = walk_forward_analysis(
         data=data,
         strategy_factory=strategy_factory,
@@ -8963,6 +8989,10 @@ def run_walk_forward(args) -> int:
         pit_strict=getattr(args, "point_in_time_strict", False),
         regime_impact_coefficients=regime_impact_coefficients,
         max_impact=max_impact,
+        family_returns=family_returns,
+        family_stepdown=getattr(args, "family_stepdown", False),
+        family_seed=getattr(args, "family_seed", None),
+        family_n_bootstrap=getattr(args, "family_bootstrap", 1000),
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
@@ -11278,6 +11308,10 @@ def main():
     wf_parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="Sweep over multiple market impact coefficients for capacity/impact sensitivity; overrides --impact-coefficient when given (e.g. --impact-coefficients 0 1 2 5).")
     wf_parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual borrow costs for short positions; overrides --borrow-cost when given (e.g. --borrow-costs 0 0.01 0.03).")
     wf_parser.add_argument("--funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual funding costs for leveraged positions; overrides --funding-cost when given (e.g. --funding-costs 0 0.01 0.02).")
+    wf_parser.add_argument("--family-returns", type=str, default=None, help="Path to a CSV of per-period family returns for the multiple-testing diagnostics (first column = date index, remaining columns = strategies). Opt-in: unset adds no family keys to the summary.")
+    wf_parser.add_argument("--family-stepdown", action="store_true", help="Also run the Romano-Wolf stepdown on the family returns (requires --family-returns); identifies which strategies drive a Reality Check rejection.")
+    wf_parser.add_argument("--family-seed", type=int, default=None, help="RNG seed for the family bootstrap (Reality Check / stepdown). Unset uses a fresh seed.")
+    wf_parser.add_argument("--family-bootstrap", type=int, default=1000, help="Stationary-block bootstrap resamples for the family diagnostics (default 1000).")
     wf_parser.set_defaults(func=run_walk_forward)
 
     # Parameter optimization

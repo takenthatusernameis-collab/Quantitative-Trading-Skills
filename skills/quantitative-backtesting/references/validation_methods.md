@@ -452,7 +452,12 @@ Notes and limits:
   `summary["family_reality_check"]` / `summary["family_stepdown"]`. The matrix is
   reindexed to the walk-forward OOS dates; the default (`family_returns=None`)
   leaves the summary byte-for-byte unchanged, and an unusable matrix is reported
-  under `summary["family_reality_check_error"]` rather than raising.
+  under `summary["family_reality_check_error"]` rather than raising. From the
+  `walk-forward` CLI, pass `--family-returns <csv>` (first column a date index,
+  one column per strategy), optionally `--family-stepdown`, `--family-seed`, and
+  `--family-bootstrap`; the results are persisted in `walk_forward_summary.json`
+  under the same `summary` keys, and omitting the flags leaves the summary
+  unchanged.
 
 ### Romano-Wolf Stepdown (Romano & Wolf 2005)
 
