@@ -768,6 +768,8 @@ def test_book_sqrt_market_impact_matches_closed_form():
 # Registry
 # ---------------------------------------------------------------------------
 
+NEWTESTS
+
 TEST_REGISTRY = [
     ("test_borrow_cost_reduces_short_returns", test_borrow_cost_reduces_short_returns),
     ("test_borrow_cost_no_effect_on_long_or_flat", test_borrow_cost_no_effect_on_long_or_flat),
