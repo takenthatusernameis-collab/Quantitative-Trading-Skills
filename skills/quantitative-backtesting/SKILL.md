@@ -61,6 +61,12 @@ This skill provides a comprehensive framework for systematic trading strategy de
 - Trade distribution analysis
 - Walk-forward / CPCV / Monte Carlo analysis rendering (via `analysis_results` parameter on `generate_tear_sheet`)
 
+### 7. Portfolio Allocation (Hierarchical Risk Parity)
+- `utils.hierarchical_risk_parity`: Implements the HRP algorithm (López de Prado, 2016) for robust portfolio construction. Builds a hierarchical clustering of assets based on correlation distance, then recursively allocates capital using inverse-variance weighting within each cluster. Produces diversified portfolios more robust to estimation error than mean-variance optimization.
+- Supports configurable linkage methods (`single`, `complete`, `average`, `ward`) and weight bounds (`min_weight`, `max_weight`).
+- Requires `scipy` (declared in `requirements.txt`). Works on multi-asset return panels (DataFrame with assets as columns).
+- Example: `examples/hrp_portfolio_allocation_example.py` demonstrates HRP allocation on a committed multi-asset panel fixture, comparing HRP weights to equal-weight and inverse-volatility baselines. Purely an allocation-layer utility (in-sample weights from historical returns), not a trading-strategy backtest and not evidence of profitability.
+
 ## How to Use
 
 ### Basic Usage: Simple Moving Average Crossover Backtest

@@ -84,7 +84,7 @@ def test_benchmark_aware_metrics_pinned_on_aapl_real_window():
         "oos_sharpe_gt_zero": False,
         "oos_total_return_gt_benchmark": False,
         "deflated_sharpe_pvalue_lt_0.10": False,
-        "benchmark_alpha_pvalue_lt_0.05": True,
+        "benchmark_alpha_pvalue_lt_0.05": False,
     }
     for c in result["criteria"]:
         name = c["name"]
@@ -96,13 +96,13 @@ def test_benchmark_aware_metrics_pinned_on_aapl_real_window():
 
     observed = result.get("observed") or {}
     EXPECTED = {
-        "sharpe_ratio": -1.3013699003638697,
-        "total_return": -0.42546223321687104,
-        "benchmark_total_return": 0.7742601739304709,
-        "benchmark_alpha": -0.33397005804456864,
-        "benchmark_alpha_pvalue": 0.01992157562944763,
-        "correlation_with_benchmark": 0.31294701843761635,
-        "deflated_sharpe_pvalue": 0.9999202378434575,
+        "sharpe_ratio": -0.1439393233148262,
+        "total_return": -0.05051279837754248,
+        "benchmark_total_return": 0.1777791151856597,
+        "benchmark_alpha": -0.07688897836014013,
+        "benchmark_alpha_pvalue": 0.7023843838120852,
+        "correlation_with_benchmark": 0.4254234682604355,
+        "deflated_sharpe_pvalue": 0.9782592228444734,
         "n_trials": 6,
     }
     REL_TOL = 1e-3

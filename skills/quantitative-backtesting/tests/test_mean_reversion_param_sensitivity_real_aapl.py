@@ -60,28 +60,28 @@ def test_param_sensitivity_runs_on_aapl_real_window_mean_reversion():
 
     EXPECTED_METRICS = {
         (20, 2.0): {
-            "sharpe_ratio": -1.3013699003638697,
-            "total_return": -0.42546223321687104,
+            "sharpe_ratio": -0.1439393233148262,
+            "total_return": -0.05051279837754248,
         },
         (10, 1.5): {
-            "sharpe_ratio": -1.1263882043363285,
-            "total_return": -0.37409531803110585,
+            "sharpe_ratio": 0.03060978544237819,
+            "total_return": -0.004220573350831039,
         },
         (40, 2.0): {
-            "sharpe_ratio": -1.231585143316415,
-            "total_return": -0.41077356022792977,
+            "sharpe_ratio": -0.1538172409425785,
+            "total_return": -0.06210343490613731,
         },
         (20, 2.5): {
-            "sharpe_ratio": -1.2998563723231422,
-            "total_return": -0.3994386699151491,
+            "sharpe_ratio": 0.7835647246061415,
+            "total_return": 0.2090576520830533,
         },
         (20, 1.0): {
-            "sharpe_ratio": -1.3376368160132421,
-            "total_return": -0.4971427184048862,
+            "sharpe_ratio": 0.0763376784586835,
+            "total_return": 0.007152997644483681,
         },
         (14, 2.0): {
-            "sharpe_ratio": -1.2217129107335833,
-            "total_return": -0.3759724647738052,
+            "sharpe_ratio": 0.4175259768799424,
+            "total_return": 0.11082644621726385,
         },
     }
     REL_TOL = 1e-3

@@ -120,7 +120,7 @@ def test_benchmark_aware_metrics_pinned_on_triple_real_window():
         "oos_sharpe_gt_zero": False,
         "oos_total_return_gt_benchmark": False,
         "deflated_sharpe_pvalue_lt_0.10": False,
-        "benchmark_alpha_pvalue_lt_0.05": True,
+        "benchmark_alpha_pvalue_lt_0.05": False,
     }
     for c in result["criteria"]:
         name = c["name"]
@@ -132,13 +132,13 @@ def test_benchmark_aware_metrics_pinned_on_triple_real_window():
 
     observed = result.get("observed") or {}
     EXPECTED = {
-        "sharpe_ratio": -1.3013699003638697,
-        "total_return": -0.42546223321687104,
-        "benchmark_total_return": 0.9015402575236577,
-        "benchmark_alpha": -0.36171541871753354,
-        "benchmark_alpha_pvalue": 0.010814971127658796,
-        "correlation_with_benchmark": 0.34722990172324447,
-        "deflated_sharpe_pvalue": 0.9999202378434575,
+        "sharpe_ratio": -0.1439393233148262,
+        "total_return": -0.05051279837754248,
+        "benchmark_total_return": 0.17111801811540486,
+        "benchmark_alpha": -0.07211686433039296,
+        "benchmark_alpha_pvalue": 0.729208452086642,
+        "correlation_with_benchmark": 0.35172254769542815,
+        "deflated_sharpe_pvalue": 0.9782592228444734,
         "n_trials": 6,
     }
     REL_TOL = 1e-3

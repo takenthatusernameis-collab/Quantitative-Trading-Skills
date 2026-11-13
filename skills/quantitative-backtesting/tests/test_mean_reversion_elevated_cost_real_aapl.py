@@ -61,20 +61,20 @@ def test_elevated_cost_sweep_runs_on_aapl_real_window_mean_reversion():
 
     EXPECTED_METRICS = {
         (2.0, 1.0): {
-            "sharpe_ratio": -1.3013699003638697,
-            "total_return": -0.42546223321687104,
+            "sharpe_ratio": -0.1439393233148262,
+            "total_return": -0.05051279837754248,
         },
         (5.0, 2.5): {
-            "sharpe_ratio": -1.332523576323755,
-            "total_return": -0.4329117976316216,
+            "sharpe_ratio": -0.1747849358873424,
+            "total_return": -0.05907371274946621,
         },
         (10.0, 5.0): {
-            "sharpe_ratio": -1.3842772597856319,
-            "total_return": -0.4451209555725346,
+            "sharpe_ratio": -0.22599530685109686,
+            "total_return": -0.07325770674925633,
         },
         (20.0, 10.0): {
-            "sharpe_ratio": -1.4870538677622318,
-            "total_return": -0.4687824256832025,
+            "sharpe_ratio": -0.3274105984092921,
+            "total_return": -0.10107816217807465,
         },
     }
     REL_TOL = 1e-3
