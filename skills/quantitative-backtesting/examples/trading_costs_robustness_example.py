@@ -205,6 +205,32 @@ def _fmt_pct(v):
     return f"{f:.2%}"
 
 
+def _fmt_signed_pct(v):
+    """Format a decimal as a signed percentage, or 'N/A' when None/non-finite."""
+    if v is None:
+        return "N/A"
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return "N/A"
+    if not np.isfinite(f):
+        return "N/A"
+    return f"{f:+.2%}"
+
+
+def _safe_diff(a, b):
+    """Return ``a - b`` when both are finite numbers, else ``None``."""
+    if a is None or b is None:
+        return None
+    try:
+        fa, fb = float(a), float(b)
+    except (TypeError, ValueError):
+        return None
+    if not (np.isfinite(fa) and np.isfinite(fb)):
+        return None
+    return fa - fb
+
+
 def _make_universe():
     """Generate a synthetic universe and return (strategy_df, benchmark_dfs, symbols)."""
     raw = generate_multi_asset_data(n_assets=N_ASSETS, periods=N_PERIODS, seed=42)
@@ -765,18 +791,18 @@ def run_cpcv_robustness(data_df, benchmark_dfs, factory, impact_model=DEFAULT_IM
         print(f"     Overfitting: {results[name]['overfitting_risk']}")
         print()
 
-        low, high = results["low_cost"], results["high_cost"]
-        low_sharpe, high_sharpe = low["oos_sharpe"], high["oos_sharpe"]
-        low_ret, high_ret = low["total_oos_return"], high["total_oos_return"]
-        d_sharpe = (high_sharpe - low_sharpe) if (low_sharpe is not None and high_sharpe is not None) else None
-        d_ret = (high_ret - low_ret) if (low_ret is not None and high_ret is not None) else None
-        print("   Cost impact on OOS performance:")
-        print(f"     Sharpe:  {_fmt_num(low_sharpe)} → {_fmt_num(high_sharpe)} "
-              f"(Δ {_fmt_num(d_sharpe)})")
-        print(f"     Return:  {_fmt_pct(low_ret)} → {_fmt_pct(high_ret)} "
-              f"(Δ {_fmt_pct(d_ret)})")
-        print()
-        return results
+    low, high = results["low_cost"], results["high_cost"]
+    low_sharpe, high_sharpe = low["oos_sharpe"], high["oos_sharpe"]
+    low_ret, high_ret = low["total_oos_return"], high["total_oos_return"]
+    d_sharpe = (high_sharpe - low_sharpe) if (low_sharpe is not None and high_sharpe is not None) else None
+    d_ret = (high_ret - low_ret) if (low_ret is not None and high_ret is not None) else None
+    print("   Cost impact on OOS performance:")
+    print(f"     Sharpe:  {_fmt_num(low_sharpe)} → {_fmt_num(high_sharpe)} "
+          f"(Δ {_fmt_num(d_sharpe)})")
+    print(f"     Return:  {_fmt_pct(low_ret)} → {_fmt_pct(high_ret)} "
+          f"(Δ {_fmt_pct(d_ret)})")
+    print()
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -1127,28 +1153,28 @@ def main():
                       f"DAR ranges {min(dar_values):.3f}→{max(dar_values):.3f} "
                       f"across cost-modeling choices, demonstrating cost sensitivity "
                       f"in statistical inference when skill is present.")
-        print(f"  3. CPCV OOS Sharpe: low-cost={cpcv_results['low_cost']['oos_sharpe']:.3f} "
-              f"vs high-cost={cpcv_results['high_cost']['oos_sharpe']:.3f}.")
+        print(f"  3. CPCV OOS Sharpe: low-cost={_fmt_num(cpcv_results['low_cost']['oos_sharpe'])} "
+              f"vs high-cost={_fmt_num(cpcv_results['high_cost']['oos_sharpe'])}.")
         short_res = cost_extras["short"]
         lev_res = cost_extras["levered"]
-        short_delta = short_res["borrow_return"] - short_res["baseline_return"]
-        lev_delta = lev_res["funding_return"] - lev_res["baseline_return"]
+        short_delta = _safe_diff(short_res["borrow_return"], short_res["baseline_return"])
+        lev_delta = _safe_diff(lev_res["funding_return"], lev_res["baseline_return"])
         print(f"  3b. Short-capable variant: borrow_cost=3% reduces return by "
-              f"{short_delta:+.2%} (Sharpe {short_res['baseline_sharpe']:.3f}→{short_res['borrow_sharpe']:.3f}); "
+              f"{_fmt_signed_pct(short_delta)} (Sharpe {_fmt_num(short_res['baseline_sharpe'])}→{_fmt_num(short_res['borrow_sharpe'])}); "
               f"funding_cost=2% has no effect (no leverage).")
         print(f"  3c. Leveraged variant (2x): funding_cost=2% reduces return by "
-              f"{lev_delta:+.2%} (Sharpe {lev_res['baseline_sharpe']:.3f}→{lev_res['funding_sharpe']:.3f}).")
+              f"{_fmt_signed_pct(lev_delta)} (Sharpe {_fmt_num(lev_res['baseline_sharpe'])}→{_fmt_num(lev_res['funding_sharpe'])}).")
         mn_res = cost_extras["market_neutral"]
-        mn_delta = mn_res["both_return"] - mn_res["baseline_return"]
+        mn_delta = _safe_diff(mn_res["both_return"], mn_res["baseline_return"])
         print(f"  3d. Market-neutral leveraged variant (long A, short B, 2x gross exposure): combined borrow=3% + funding=2% reduces return by "
-              f"{mn_delta:+.2%} (Sharpe {mn_res['baseline_sharpe']:.3f}→{mn_res['both_sharpe']:.3f}).")
+              f"{_fmt_signed_pct(mn_delta)} (Sharpe {_fmt_num(mn_res['baseline_sharpe'])}→{_fmt_num(mn_res['both_sharpe'])}).")
         impact_res = cost_extras.get("market_impact")
         if impact_res:
             imp_base = impact_res["baseline_return"]
             imp_high = impact_res["high_coeff_return"]
             print(f"  3e. Market-impact sensitivity (market-neutral pairs, 2x gross exposure): "
-                  f"impact_coefficient 0→5.0 reduces return by {imp_high - imp_base:+.2%} "
-                  f"({imp_base:.2%}→{imp_high:.2%}).  The original implementation scaled "
+                  f"impact_coefficient 0→5.0 reduces return by {_fmt_signed_pct(_safe_diff(imp_high, imp_base))} "
+                  f"({_fmt_pct(imp_base)}→{_fmt_pct(imp_high)}).  The original implementation scaled "
                   f"position_notional by the raw asset price instead of portfolio equity, "
                   f"making impact_coefficient a silent no-op; this sweep confirms the fix.")
         if args.regime_aware:

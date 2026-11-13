@@ -305,12 +305,54 @@ def test_book_regime_aware_changes_net_results_vs_constant():
         )
 
 
+def test_main_handles_none_cpcv_metrics():
+    """main() KEY FINDINGS must not crash when CPCV OOS metrics are None.
+
+    Regression guard: the CPCV cost-impact line and the KEY FINDINGS block
+    format OOS Sharpe values that can be ``None`` (e.g. a very short synthetic
+    series or a degenerate validation fold).  Formatting ``None`` with a
+    ``:.3f`` specifier raises ``TypeError: unsupported format string passed to
+    NoneType.__format__``.  This stubs ``run_cpcv_robustness`` so the None path
+    is exercised in seconds instead of a full multi-minute sensitivity sweep.
+    """
+    def _stub_cpcv(*_args, **_kwargs):
+        return {
+            "low_cost": {"oos_sharpe": None},
+            "high_cost": {"oos_sharpe": None},
+        }
+
+    saved_cpcv = costs_example.run_cpcv_robustness
+    saved_argv = sys.argv
+    buf = io.StringIO()
+    try:
+        costs_example.run_cpcv_robustness = _stub_cpcv
+        with _reduced_grids(), tempfile.TemporaryDirectory() as td:
+            sys.argv = [
+                "trading_costs_robustness_example.py",
+                "--regime-aware",
+                "--output",
+                str(Path(td) / "none.json"),
+            ]
+            with contextlib.redirect_stdout(buf):
+                costs_example.main()
+    finally:
+        costs_example.run_cpcv_robustness = saved_cpcv
+        sys.argv = saved_argv
+
+    out = buf.getvalue()
+    assert "3. CPCV OOS Sharpe: low-cost=N/A vs high-cost=N/A." in out, (
+        "KEY FINDINGS did not render the None CPCV Sharpe as N/A; "
+        f"captured tail:\n{out[-800:]}"
+    )
+
+
 TEST_REGISTRY = [
     ("test_example_exposes_regime_aware_entry_point", test_example_exposes_regime_aware_entry_point),
     ("test_regime_aware_flag_populates_metadata_and_cpcv", test_regime_aware_flag_populates_metadata_and_cpcv),
     ("test_regime_coefficient_keys_match_detected_labels", test_regime_coefficient_keys_match_detected_labels),
     ("test_regime_aware_changes_net_results_vs_constant", test_regime_aware_changes_net_results_vs_constant),
     ("test_book_regime_aware_changes_net_results_vs_constant", test_book_regime_aware_changes_net_results_vs_constant),
+    ("test_main_handles_none_cpcv_metrics", test_main_handles_none_cpcv_metrics),
 ]
 
 
