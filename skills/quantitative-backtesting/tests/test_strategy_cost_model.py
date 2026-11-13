@@ -565,6 +565,161 @@ def test_sqrt_market_impact_matches_closed_form():
     )
 
 
+def test_panel_sqrt_market_impact_matches_closed_form():
+    """The panel (``is_panel=True``) square-root impact must equal the
+    equal-weighted mean over constituents of
+    ``coefficient * sqrt(per_asset_notional / ADV_notional)``, and the
+    ``notional-weighted`` aggregation must equal ``|d| * mean(rate)``.
+
+    ``test_sqrt_market_impact_matches_closed_form`` pins only the single-asset
+    path. The panel path scales each constituent's notional by ``1 / n_assets``
+    and divides by *that constituent's* ADV, so a regression there (measuring
+    the whole basket against one ADV, or dropping the ``1 / n`` split) would
+    slip past the single-asset test. This pins both panel aggregations on a
+    constant-volume, zero-return frame where the closed form is exact, with
+    asset-specific close/volume so the mean over assets differs from any single
+    name.
+    """
+    periods = 6
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    symbols = ["AAA", "BBB", "CCC"]
+    # Constant-in-time but asset-specific close and volume so each name has a
+    # different ADV notional and the mean over assets differs from any single
+    # name (a guard against measuring the basket against one ADV).
+    close = pd.DataFrame(
+        {sym: np.full(periods, px)
+         for sym, px in zip(symbols, [100.0, 200.0, 50.0])},
+        index=dates,
+    )
+    volume = pd.DataFrame(
+        {sym: np.full(periods, vol)
+         for sym, vol in zip(symbols, [1_000_000.0, 2_000_000.0, 500_000.0])},
+        index=dates,
+    )
+    # Zero market return -> equity is flat at initial_capital, so the closed
+    # form is simply coeff * sqrt(|d| * equity / n_assets / (volume_i * close_i)).
+    raw_returns = pd.Series(np.zeros(periods), index=dates)
+    position_changes = pd.Series([0.0, 1.0, 0.0, 0.5, 0.0, 1.0], index=dates)
+
+    coefficient = 0.5
+    initial_capital = 100_000.0
+    adv_window = 20
+
+    result = market_impact_cost(
+        position_changes, raw_returns, close, volume,
+        is_panel=True, impact_coefficient=coefficient,
+        adv_window=adv_window, initial_capital=initial_capital,
+        impact_model="sqrt",
+    )
+    assert result is not None, "sqrt panel impact must be live for coefficient > 0"
+
+    n_assets = len(symbols)
+    equity = initial_capital * (1 + raw_returns).cumprod()
+    per_asset_notional = (position_changes * equity) / n_assets
+    adv_notional = volume.rolling(window=adv_window, min_periods=1).mean() * close
+    participation = per_asset_notional.values[:, None] / adv_notional.values
+    rate = coefficient * np.sqrt(participation)
+    expected = rate.mean(axis=1)
+
+    assert np.allclose(result.values, expected, atol=1e-12), (
+        f"panel sqrt impact must equal mean_i(coeff*sqrt(notional_i/ADV_i)): "
+        f"got {result.values}, expected {expected}"
+    )
+
+    # Notional-weighted aggregation applies each name's rate to the notional
+    # traded in that name and divides by equity; here every constituent trades
+    # the same notional, so it reduces to |d| * mean(rate).
+    result_nw = market_impact_cost(
+        position_changes, raw_returns, close, volume,
+        is_panel=True, impact_coefficient=coefficient,
+        adv_window=adv_window, initial_capital=initial_capital,
+        impact_model="sqrt", impact_aggregation="notional-weighted",
+    )
+    assert result_nw is not None
+    expected_nw = position_changes.values * expected
+    assert np.allclose(result_nw.values, expected_nw, atol=1e-12), (
+        f"notional-weighted panel impact must equal |d|*mean(rate): "
+        f"got {result_nw.values}, expected {expected_nw}"
+    )
+
+
+def test_book_sqrt_market_impact_matches_closed_form():
+    """The book-pricing square-root impact must equal the equal-weighted mean
+    over assets of ``coefficient * sqrt(|dw_i| * equity / ADV_notional_i)``,
+    and the ``notional-weighted`` aggregation must equal
+    ``sum_i rate_i * |dw_i|``.
+
+    ``book_market_impact_cost`` measures each name against its own ADV on the
+    *weight change*; a regression (charging the book notional once, or using the
+    weight instead of the weight change) would not be caught by the
+    net-exposure sqrt test. This pins both aggregations on a constant-volume,
+    zero-return frame where the closed form is exact.
+    """
+    periods = 6
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    symbols = ["AAA", "BBB", "CCC"]
+    close = pd.DataFrame(
+        {sym: np.full(periods, px)
+         for sym, px in zip(symbols, [100.0, 200.0, 50.0])},
+        index=dates,
+    )
+    volume = pd.DataFrame(
+        {sym: np.full(periods, vol)
+         for sym, vol in zip(symbols, [1_000_000.0, 2_000_000.0, 500_000.0])},
+        index=dates,
+    )
+    # A rotating long/short book: flat net exposure, weight changes of 1.0 in
+    # AAA and BBB on the flip bars, no trade in CCC.
+    held_book = pd.DataFrame(
+        {
+            "AAA": [0.5, 0.5, 0.5, -0.5, -0.5, 0.5],
+            "BBB": [-0.5, -0.5, -0.5, 0.5, 0.5, -0.5],
+            "CCC": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        },
+        index=dates,
+    )
+    raw_returns = pd.Series(np.zeros(periods), index=dates)
+
+    coefficient = 0.5
+    initial_capital = 100_000.0
+    adv_window = 20
+
+    result = book_market_impact_cost(
+        held_book=held_book, raw_returns=raw_returns, close=close,
+        volume=volume, impact_coefficient=coefficient,
+        adv_window=adv_window, initial_capital=initial_capital,
+        impact_model="sqrt",
+    )
+    assert result is not None, "sqrt book impact must be live for coefficient > 0"
+
+    equity = initial_capital * (1 + raw_returns).cumprod()
+    traded_weight = held_book.diff().abs()
+    adv_notional = volume.rolling(window=adv_window, min_periods=1).mean() * close
+    # The first diff row is NaN -> treated as no trade (zero impact).
+    traded_notional = traded_weight.mul(equity, axis=0).fillna(0.0)
+    participation = traded_notional.values / adv_notional.values
+    rate = coefficient * np.sqrt(participation)
+    expected = rate.mean(axis=1)
+
+    assert np.allclose(result.values, expected, atol=1e-12), (
+        f"book sqrt impact must equal mean_i(coeff*sqrt(|dw_i|*equity/ADV_i)): "
+        f"got {result.values}, expected {expected}"
+    )
+
+    result_nw = book_market_impact_cost(
+        held_book=held_book, raw_returns=raw_returns, close=close,
+        volume=volume, impact_coefficient=coefficient,
+        adv_window=adv_window, initial_capital=initial_capital,
+        impact_model="sqrt", impact_aggregation="notional-weighted",
+    )
+    assert result_nw is not None
+    expected_nw = (rate * traded_weight.fillna(0.0).values).sum(axis=1)
+    assert np.allclose(result_nw.values, expected_nw, atol=1e-12), (
+        f"notional-weighted book impact must equal sum_i rate_i*|dw_i|: "
+        f"got {result_nw.values}, expected {expected_nw}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -598,6 +753,10 @@ TEST_REGISTRY = [
      test_market_impact_sqrt_model_differs_from_linear_single_asset),
     ("test_sqrt_market_impact_matches_closed_form",
      test_sqrt_market_impact_matches_closed_form),
+    ("test_panel_sqrt_market_impact_matches_closed_form",
+     test_panel_sqrt_market_impact_matches_closed_form),
+    ("test_book_sqrt_market_impact_matches_closed_form",
+     test_book_sqrt_market_impact_matches_closed_form),
 ]
 
 

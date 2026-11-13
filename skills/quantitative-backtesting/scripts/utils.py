@@ -420,7 +420,11 @@ def market_impact_cost(
             # Every constituent carries the same notional here
             # (position_notional / n_assets), so this reduces to
             # position_notional / equity * mean(rate) = |d| * mean(rate).
-            market_impact = (rate * per_asset_notional).sum(axis=1) / equity
+            # `per_asset_notional` is a date-indexed Series, so it must be
+            # broadcast across the columns with axis=0; a plain `rate *
+            # per_asset_notional` would align the Series to the *columns* and
+            # silently produce all-NaN (zero impact).
+            market_impact = rate.mul(per_asset_notional, axis=0).sum(axis=1) / equity
         else:
             # Panel convention: the equal-weighted mean of the per-asset
             # impact rates (the convention every published number was
