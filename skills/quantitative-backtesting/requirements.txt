@@ -2,6 +2,9 @@
 # The scripts import numpy, pandas, and matplotlib (reporting/tear-sheet
 # figures). matplotlib is required for the figure-generating tests in
 # tests/test_reporting.py and for the tear-sheet / parameter heatmap outputs.
+# scipy is required by utils.hierarchical_risk_parity (hierarchical clustering
+# linkage / condensed distances) and by the HRP tests and worked example.
 matplotlib
 numpy
 pandas
+scipy
