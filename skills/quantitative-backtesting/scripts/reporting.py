@@ -725,6 +725,25 @@ def generate_tear_sheet(
             f"<tr><td>Strategy Capacity Min (Notional, book-based)</td>"
             f"<td class='metric'>{fmt_num(_metrics_min_capacity_book)}</td></tr>"
         )
+    # Notional-weighted capacity: the ``max_impact * ADV_i / (coefficient *
+    # dw_i^2)`` rule, which is the capacity consistent with the
+    # notional-weighted impact charge. Reported alongside the book-based
+    # ``|dw|`` rule above whenever the book pricing mode exposes a book and
+    # impact is enabled; None (row omitted) for the square-root model, for
+    # net-exposure pricing, or when no book is available.
+    _metrics_nw = metrics.get("capacity_notional_weighted")
+    if _metrics_nw is not None:
+        html_parts.append(
+            f"<tr><td>Strategy Capacity (Notional, notional-weighted)</td>"
+            f"<td class='metric'>{fmt_num(_metrics_nw)}</td></tr>"
+        )
+    _metrics_nw_trend = metrics.get("capacity_notional_weighted_trend") or {}
+    _metrics_min_capacity_nw = _metrics_nw_trend.get("min_capacity")
+    if _metrics_min_capacity_nw is not None:
+        html_parts.append(
+            f"<tr><td>Strategy Capacity Min (Notional, notional-weighted)</td>"
+            f"<td class='metric'>{fmt_num(_metrics_min_capacity_nw)}</td></tr>"
+        )
     html_parts.append("</table>")
 
     # Panel book diagnostic: the per-asset book the strategy holds against
@@ -982,6 +1001,24 @@ def generate_tear_sheet(
             html_parts.append(
                 f"<tr><td>Strategy Capacity Min (Notional, book-based)</td>"
                 f"<td class='metric'>{fmt_num(_wf_min_capacity_book)}</td></tr>"
+            )
+        # Notional-weighted capacity: the ``max_impact * ADV_i / (coefficient
+        # * dw_i^2)`` rule, consistent with the notional-weighted impact
+        # charge. Reported alongside the book-based ``|dw|`` rule above in
+        # book pricing mode; None (row omitted) for the square-root model,
+        # for net-exposure pricing, or when no book is available.
+        _wf_nw = wf_summary.get("capacity_notional_weighted")
+        if _wf_nw is not None:
+            html_parts.append(
+                f"<tr><td>Strategy Capacity (Notional, notional-weighted)</td>"
+                f"<td class='metric'>{fmt_num(_wf_nw)}</td></tr>"
+            )
+        _wf_nw_trend = wf_summary.get("capacity_notional_weighted_trend") or {}
+        _wf_min_capacity_nw = _wf_nw_trend.get("min_capacity")
+        if _wf_min_capacity_nw is not None:
+            html_parts.append(
+                f"<tr><td>Strategy Capacity Min (Notional, notional-weighted)</td>"
+                f"<td class='metric'>{fmt_num(_wf_min_capacity_nw)}</td></tr>"
             )
         html_parts.append("</table>")
 
