@@ -1087,6 +1087,126 @@ def regime_performance_summary(
     }
 
 
+def regime_aware_position_size(
+    base_signals: pd.Series,
+    close: pd.Series,
+    regimes: pd.Series,
+    target_vol_by_regime: Dict[str, float],
+    lookback: int = 63,
+    min_leverage: float = 0.0,
+    max_leverage: float = 2.0,
+    default_target_vol: Optional[float] = None,
+    periods_per_year: int = 252,
+) -> pd.Series:
+    """Scale ``base_signals`` to a per-regime volatility target.
+
+    This is a position-sizing overlay, not a signal generator. For every bar
+    ``t`` it computes::
+
+        realized_vol_t = std(returns[t-lookback+1 .. t]) * sqrt(periods_per_year)
+        target_t       = target_vol_by_regime[regime_t]
+        multiplier_t   = clip(target_t / realized_vol_t,
+                              min_leverage, max_leverage)
+        sized_t        = base_signals_t * multiplier_t
+
+    Point-in-time guarantee: ``realized_vol_t`` uses only returns up to and
+    including ``t`` (a trailing rolling window), and ``regime_t`` is taken as
+    supplied. The caller is responsible for passing point-in-time regime
+    labels (for example from ``detect_hmm_regime``'s forward filter or a causal
+    detector); this function does not infer regimes itself. Mutating future
+    prices therefore leaves every already-computed position size unchanged.
+
+    Args:
+        base_signals: Target direction/position from the underlying strategy.
+            Only its sign and scale are preserved; the overlay rescales it.
+        close: Close prices used to estimate realized volatility.
+        regimes: Regime label per bar, aligned with ``close``.
+        target_vol_by_regime: Mapping from regime label to annualized target
+            volatility (as a decimal, e.g. ``{"bull": 0.10, "bear": 0.20}``).
+            Values must be finite and non-negative.
+        lookback: Rolling window (in bars) for realized volatility. The first
+            ``lookback - 1`` bars have no estimate and are returned as NaN.
+        min_leverage: Lower clip bound for the position multiplier.
+        max_leverage: Upper clip bound for the position multiplier. Used as the
+            multiplier when realized volatility is exactly zero (the
+            target-vol convention of maximum permitted leverage).
+        default_target_vol: Target volatility for regime labels absent from
+            ``target_vol_by_regime`` (and for missing labels). If ``None``, an
+            unmapped regime raises ``ValueError`` instead of silently going
+            flat.
+        periods_per_year: Annualization factor for realized volatility.
+
+    Returns:
+        A float ``pd.Series`` of position sizes on the common index of
+        ``base_signals``, ``close`` and ``regimes``.
+
+    Raises:
+        ValueError: On invalid arguments, empty index overlap, or an unmapped
+            regime label when ``default_target_vol`` is not provided.
+    """
+    if lookback < 1:
+        raise ValueError(f"lookback must be >= 1, got {lookback}")
+    if min_leverage > max_leverage:
+        raise ValueError(
+            f"min_leverage ({min_leverage}) must be <= max_leverage ({max_leverage})"
+        )
+    if not target_vol_by_regime:
+        raise ValueError("target_vol_by_regime must not be empty")
+    for label, vol in target_vol_by_regime.items():
+        if not np.isfinite(vol) or vol < 0:
+            raise ValueError(
+                f"target volatility for regime {label!r} must be finite and "
+                f"non-negative, got {vol}"
+            )
+    if default_target_vol is not None and (
+        not np.isfinite(default_target_vol) or default_target_vol < 0
+    ):
+        raise ValueError(
+            f"default_target_vol must be finite and non-negative, got {default_target_vol}"
+        )
+
+    base = pd.Series(base_signals, dtype=float)
+    close_s = pd.Series(close, dtype=float)
+    reg = pd.Series(regimes)
+
+    common = base.index.intersection(close_s.index).intersection(reg.index)
+    if len(common) == 0:
+        raise ValueError(
+            "base_signals, close and regimes share no common index; cannot size positions"
+        )
+    base = base.loc[common]
+    close_s = close_s.loc[common]
+    reg = reg.loc[common]
+
+    returns = close_s.pct_change()
+    realized_vol = returns.rolling(window=lookback, min_periods=lookback).std() * np.sqrt(
+        periods_per_year
+    )
+
+    target = reg.map(target_vol_by_regime)
+    if target.isna().any():
+        if default_target_vol is None:
+            missing = sorted(reg[target.isna()].dropna().astype(str).unique().tolist())
+            detail = f" {missing}" if missing else ""
+            raise ValueError(
+                "no volatility target for regime label(s)"
+                f"{detail}; add them to target_vol_by_regime or pass "
+                "default_target_vol"
+            )
+        target = target.fillna(default_target_vol)
+    target = target.astype(float)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        multiplier = (target / realized_vol).clip(lower=min_leverage, upper=max_leverage)
+    # A zero target with zero realized volatility is 0/0 -> NaN; the intended
+    # multiplier is 0 (no position), not "not enough data".
+    multiplier = multiplier.mask((realized_vol == 0) & (target == 0), 0.0)
+
+    sized = base * multiplier
+    sized.name = base.name
+    return sized
+
+
 def add_regime_analysis_to_results(
     results: Dict,
     data: pd.DataFrame | Dict[str, pd.DataFrame],
