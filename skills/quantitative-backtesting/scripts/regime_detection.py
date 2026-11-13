@@ -935,6 +935,7 @@ def compute_regime_performance(
     returns: pd.Series,
     regimes: pd.Series,
     min_period_length: int = 21,
+    periods_per_year: Optional[float] = None,
 ) -> Dict[str, Dict[str, float]]:
     """
     Compute performance metrics per regime.
@@ -943,6 +944,12 @@ def compute_regime_performance(
         returns: Strategy returns series
         regimes: Regime labels series (aligned with returns)
         min_period_length: Minimum observations for a regime to be reported
+        periods_per_year: Annualization factor for the regime's return
+            frequency. ``None`` infers it from the returns index via
+            :func:`utils._annualization_factor` (252 business-daily,
+            365 calendar-daily, 52 weekly, 12 monthly, ...), falling back
+            to 252 when the index is not a DatetimeIndex or the frequency
+            cannot be inferred. Passing an explicit value overrides it.
 
     Returns:
         Dict mapping regime -> metrics dict
@@ -952,6 +959,16 @@ def compute_regime_performance(
 
     if len(aligned) == 0:
         return {}
+
+    if periods_per_year is None:
+        try:
+            from utils import _annualization_factor
+            periods_per_year = float(_annualization_factor(aligned["returns"].index))
+        except Exception:
+            periods_per_year = 252.0
+    periods_per_year = float(periods_per_year)
+    if not np.isfinite(periods_per_year) or periods_per_year <= 0:
+        periods_per_year = 252.0
 
     results = {}
 
@@ -964,10 +981,15 @@ def compute_regime_performance(
         if len(regime_returns) < min_period_length:
             continue
 
-        # Basic metrics
+        # Basic metrics. The annualization factor is inferred from the
+        # returns' own frequency (see _annualization_factor), so the same
+        # return process reported at daily, weekly or monthly frequency
+        # yields the same annualized regime metrics. Hardcoding 252 made
+        # weekly/monthly regime Sharpe numbers inconsistent with the daily
+        # ones computed elsewhere in the framework for the same process.
         total_return = (1 + regime_returns).prod() - 1
-        ann_return = (1 + total_return) ** (252 / len(regime_returns)) - 1
-        ann_vol = regime_returns.std() * np.sqrt(252)
+        ann_return = (1 + total_return) ** (periods_per_year / len(regime_returns)) - 1
+        ann_vol = regime_returns.std() * np.sqrt(periods_per_year)
         sharpe = ann_return / ann_vol if ann_vol > 0 else 0.0
 
         # Drawdown
@@ -1002,6 +1024,7 @@ def regime_performance_summary(
     returns: pd.Series,
     close: pd.Series,
     config: Optional[RegimeConfig] = None,
+    periods_per_year: Optional[float] = None,
 ) -> Dict:
     """
     Generate a complete regime-dependent performance summary.
@@ -1010,6 +1033,12 @@ def regime_performance_summary(
         returns: Strategy returns series
         close: Market close price series (for regime detection)
         config: Regime detection configuration
+        periods_per_year: Annualization factor for the regime metrics.
+            ``None`` infers it from the returns index via
+            :func:`utils._annualization_factor` (252 business-daily,
+            365 calendar-daily, 52 weekly, 12 monthly, ...), falling back
+            to 252 when the index is not a DatetimeIndex or the frequency
+            cannot be inferred. Passing an explicit value overrides it.
 
     Returns:
         Dict with regime detection results and per-regime performance
@@ -1043,13 +1072,16 @@ def regime_performance_summary(
         }
 
     trend_perf = compute_regime_performance(
-        df["returns"], df["trend_regime"], config.min_regime_length
+        df["returns"], df["trend_regime"], config.min_regime_length,
+        periods_per_year=periods_per_year,
     )
     vol_perf = compute_regime_performance(
-        df["returns"], df["vol_regime"], config.min_regime_length
+        df["returns"], df["vol_regime"], config.min_regime_length,
+        periods_per_year=periods_per_year,
     )
     combined_perf = compute_regime_performance(
-        df["returns"], df["combined_regime"], config.min_regime_length
+        df["returns"], df["combined_regime"], config.min_regime_length,
+        periods_per_year=periods_per_year,
     )
 
     # Identify regime periods for combined regime

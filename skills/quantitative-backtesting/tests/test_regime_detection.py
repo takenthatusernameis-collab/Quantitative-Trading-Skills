@@ -29,6 +29,7 @@ from regime_detection import (
     build_hmm_features,
     add_hmm_regime_analysis_to_results,
 )
+from utils import _annualization_factor
 
 
 def make_price_series(length: int = 300, seed: int = 42) -> pd.Series:
@@ -250,6 +251,57 @@ class TestRegimePerformance:
 
         assert "bull" in perf
         assert "unknown" not in perf
+
+    def test_annualization_uses_frequency_aware_factor(self):
+        """Regime metrics must be annualized with the returns' own frequency.
+
+        The framework's convention (``utils._annualization_factor``) is
+        frequency-aware: 252 business-daily, 365 calendar-daily, 52 weekly,
+        12 monthly. ``compute_regime_performance`` previously hardcoded 252,
+        so a weekly regime series was annualized with the wrong factor and its
+        Sharpe/volatility were inconsistent with the daily numbers the rest of
+        the framework reports for the same process. This pins the inferred
+        factor and the metrics that use it.
+        """
+        rng = np.random.default_rng(7)
+        n = 300
+        daily_ret = rng.normal(0.0005, 0.01, n)
+        weekly_ret = daily_ret[: n // 5 * 5].reshape(-1, 5).sum(axis=1)
+
+        dates_b = pd.date_range("2020-01-01", periods=n, freq="B")
+        dates_w = pd.date_range("2020-01-01", periods=len(weekly_ret), freq="W-SUN")
+
+        regimes_b = pd.Series(["bull"] * 150 + ["bear"] * 150, index=dates_b, dtype=object)
+        regimes_w = pd.Series(["bull"] * 30 + ["bear"] * 30, index=dates_w, dtype=object)
+
+        assert _annualization_factor(dates_b) == 252
+        assert _annualization_factor(dates_w) == 52
+
+        perf_b = compute_regime_performance(
+            pd.Series(daily_ret, index=dates_b), regimes_b, min_period_length=10
+        )
+        perf_w = compute_regime_performance(
+            pd.Series(weekly_ret, index=dates_w), regimes_w, min_period_length=10
+        )
+
+        w_ret = pd.Series(weekly_ret[:30])
+        expected_vol = float(w_ret.std(ddof=1) * np.sqrt(52))
+        expected_ret = float((1 + w_ret).prod() - 1)
+        expected_ret_ann = (1 + expected_ret) ** (52 / len(w_ret)) - 1
+
+        assert np.isclose(
+            perf_w["bull"]["annualized_volatility"], expected_vol, rtol=1e-9
+        ), f"weekly regime vol must use sqrt(52), got {perf_w['bull']['annualized_volatility']}"
+        assert np.isclose(
+            perf_w["bull"]["annualized_return"], expected_ret_ann, rtol=1e-9
+        ), f"weekly regime ann return must use 52, got {perf_w['bull']['annualized_return']}"
+
+        # A hardcoded 252 would make the weekly vol ~sqrt(252/52) = ~2.2x the
+        # correct value; assert it is NOT close to the wrong factor.
+        wrong_vol = float(w_ret.std(ddof=1) * np.sqrt(252))
+        assert not np.isclose(
+            perf_w["bull"]["annualized_volatility"], wrong_vol, rtol=0.05
+        ), "weekly regime vol must not be annualized with the hardcoded 252"
 
 
 class TestRegimePerformanceSummary:
