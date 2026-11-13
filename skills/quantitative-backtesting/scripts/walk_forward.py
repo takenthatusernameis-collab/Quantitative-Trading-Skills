@@ -895,6 +895,8 @@ def walk_forward_analysis(
                         initial_capital=initial_capital,
                         panel_pricing=panel_pricing,
                         impact_aggregation=impact_aggregation,
+                        impact_model=impact_model,
+                        regime_impact_coefficients=regime_impact_coefficients,
                         max_impact=max_impact,
                         book_weights=test_book_weights,
                     )
@@ -907,6 +909,7 @@ def walk_forward_analysis(
                         initial_capital=initial_capital,
                         panel_pricing=panel_pricing,
                         impact_aggregation=impact_aggregation,
+                        impact_model=impact_model,
                         regime_impact_coefficients=regime_impact_coefficients,
                         max_impact=max_impact,
                         book_weights=(
@@ -1412,6 +1415,7 @@ def parameter_optimization(
     benchmark_cost_is_periodic: bool = False,
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
+    impact_model: str = DEFAULT_IMPACT_MODEL,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
     max_impact: Optional[float] = None,
     inert_grid_report: Optional[Dict[str, Any]] = None,
@@ -1576,6 +1580,7 @@ def parameter_optimization(
                 initial_capital=initial_capital,
                 panel_pricing=panel_pricing,
                 impact_aggregation=impact_aggregation,
+                impact_model=impact_model,
                 regime_impact_coefficients=regime_impact_coefficients,
                 max_impact=max_impact,
                 book_weights=book_weights,
@@ -3663,6 +3668,7 @@ def cpcv_analysis(
     pit_strict: bool = False,
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
+    impact_model: str = DEFAULT_IMPACT_MODEL,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
@@ -3970,6 +3976,7 @@ def cpcv_analysis(
                         initial_capital=initial_capital,
                         panel_pricing=panel_pricing,
                         impact_aggregation=impact_aggregation,
+                        impact_model=impact_model,
                         regime_impact_coefficients=regime_impact_coefficients,
                         book_weights=test_book_weights,
                     )
@@ -3982,6 +3989,7 @@ def cpcv_analysis(
                         initial_capital=initial_capital,
                         panel_pricing=panel_pricing,
                         impact_aggregation=impact_aggregation,
+                        impact_model=impact_model,
                         regime_impact_coefficients=regime_impact_coefficients,
                         book_weights=(
                             strategy_target_weights(strategy, train_data)
@@ -5991,6 +5999,7 @@ def out_of_sample_validation(
     pit_strict: bool = False,
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
+    impact_model: str = DEFAULT_IMPACT_MODEL,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
@@ -6210,6 +6219,8 @@ def out_of_sample_validation(
             commission=commission,
             slippage=slippage,
             impact_coefficient=impact_coefficient,
+            impact_model=impact_model,
+            regime_impact_coefficients=regime_impact_coefficients,
             adv_window=adv_window,
             borrow_cost=borrow_cost,
             funding_cost=funding_cost,
@@ -6237,6 +6248,8 @@ def out_of_sample_validation(
             commission=commission,
             slippage=slippage,
             impact_coefficient=impact_coefficient,
+            impact_model=impact_model,
+            regime_impact_coefficients=regime_impact_coefficients,
             adv_window=adv_window,
             borrow_cost=borrow_cost,
             funding_cost=funding_cost,
@@ -6340,6 +6353,7 @@ def out_of_sample_validation(
         initial_capital=initial_capital,
         panel_pricing=panel_pricing,
         impact_aggregation=impact_aggregation,
+        impact_model=impact_model,
         regime_impact_coefficients=regime_impact_coefficients,
         book_weights=val_book_weights,
     )
@@ -6442,6 +6456,7 @@ def out_of_sample_validation(
                         initial_capital=initial_capital,
                         panel_pricing=panel_pricing,
                         impact_aggregation=impact_aggregation,
+                        impact_model=impact_model,
                         regime_impact_coefficients=regime_impact_coefficients,
                         book_weights=test_book_weights,
                     )
@@ -9795,6 +9810,7 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
             commission=commission,
             slippage=slippage,
             impact_coefficient=impact_coefficient,
+            impact_model=getattr(args, "impact_model", DEFAULT_IMPACT_MODEL),
             adv_window=args.adv_window,
             borrow_cost=borrow_cost,
             funding_cost=funding_cost,
@@ -9832,6 +9848,7 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
                                           latency=latency, fill_rate=fill_rate,
                                           initial_capital=args.initial_capital,
                                           panel_pricing=panel_pricing,
+                                          impact_model=getattr(args, "impact_model", DEFAULT_IMPACT_MODEL),
                                           regime_impact_coefficients=regime_impact_coefficients,
                                           book_weights=book_weights)
 
@@ -10253,6 +10270,7 @@ def run_monte_carlo(args) -> int:
             commission=args.commission,
             slippage=args.slippage,
             impact_coefficient=args.impact_coefficient,
+            impact_model=getattr(args, "impact_model", DEFAULT_IMPACT_MODEL),
             adv_window=args.adv_window,
             borrow_cost=args.borrow_cost,
             funding_cost=args.funding_cost,
@@ -10294,6 +10312,7 @@ def run_monte_carlo(args) -> int:
                                           latency=latency, fill_rate=fill_rate,
                                           initial_capital=args.initial_capital,
                                           panel_pricing=panel_pricing,
+                                          impact_model=getattr(args, "impact_model", DEFAULT_IMPACT_MODEL),
                                           regime_impact_coefficients=regime_impact_coefficients,
                                           book_weights=book_weights)
     # The warmup convention of the series the Monte Carlo resamples.

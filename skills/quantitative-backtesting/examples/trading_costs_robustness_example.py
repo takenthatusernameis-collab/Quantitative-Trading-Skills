@@ -82,7 +82,16 @@ def parse_args():
         "--regime-aware",
         action="store_true",
         help="Enable regime-aware market impact modeling. When set, uses higher impact coefficients "
-             "for stressed regimes (bear_high_vol, bear_low_vol, sideways_high_vol) and lower for calm regimes."
+             "for stressed regimes (bear_high, bear_low, sideways_high) and lower for calm regimes (bull_low). "
+             "Keys must match detect_combined_regime labels (trend_volatility, no '_vol' suffix)."
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Path to write the JSON summary. Default: "
+             "examples/example_output/trading_costs_robustness/trading_costs_sensitivity.json "
+             "(a gitignored directory, following the pairs_trading example convention)."
     )
     return parser.parse_args()
 
@@ -936,18 +945,23 @@ def run_commission_slippage_sweeps(data_df, factory, impact_model=DEFAULT_IMPACT
 def main():
     args = parse_args()
 
-    # Build regime impact coefficients if --regime-aware is set
+    # Build regime impact coefficients if --regime-aware is set.
+    # Keys MUST match the labels produced by detect_combined_regime()
+    # (TrendRegime + "_" + VolatilityRegime, e.g. "bull_high", "bear_low").
+    # The historical keys used a "_vol" suffix that never matched the detector,
+    # which made the regime-aware path a silent no-op (every label fell back to
+    # the base coefficient).
     regime_impact_coefficients = None
     if args.regime_aware:
         # Higher impact in stressed regimes (bear/high vol, sideways/high vol)
         # Lower impact in calm regimes (bull/low vol)
         regime_impact_coefficients = {
-            "bull_high_vol": args.impact_coefficient * 1.5,
-            "bull_low_vol": args.impact_coefficient * 0.5,
-            "bear_high_vol": args.impact_coefficient * 2.0,
-            "bear_low_vol": args.impact_coefficient * 1.5,
-            "sideways_high_vol": args.impact_coefficient * 1.5,
-            "sideways_low_vol": args.impact_coefficient * 0.8,
+            "bull_high": args.impact_coefficient * 1.5,
+            "bull_low": args.impact_coefficient * 0.5,
+            "bear_high": args.impact_coefficient * 2.0,
+            "bear_low": args.impact_coefficient * 1.5,
+            "sideways_high": args.impact_coefficient * 1.5,
+            "sideways_low": args.impact_coefficient * 0.8,
         }
         print(f"Regime-aware impact modeling ENABLED")
         print(f"  Base impact coefficient: {args.impact_coefficient}")
@@ -1029,7 +1043,20 @@ def main():
             "cpcv_robustness": cpcv_results,
             "commission_slippage_sweeps": sweep_results,
         }
-        out_path = tmpdir / "trading_costs_sensitivity.json"
+        # Persist the structured summary so sensitivity runs are reproducible and
+        # comparable across cost-model/regime settings. The default location is a
+        # gitignored example_output/ directory (same convention as
+        # pairs_trading_example.py); --output overrides it.
+        if args.output is not None:
+            out_path = Path(args.output)
+        else:
+            out_path = (
+                Path(__file__).resolve().parent
+                / "example_output"
+                / "trading_costs_robustness"
+                / "trading_costs_sensitivity.json"
+            )
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "w") as f:
             json.dump(summary, f, indent=2, default=str)
         print(f"Structured results saved to: {out_path}")
@@ -1081,9 +1108,9 @@ def main():
                   f"making impact_coefficient a silent no-op; this sweep confirms the fix.")
         if args.regime_aware:
             print(f"  4. Regime-aware impact modeling: costs are higher in stressed regimes "
-                  f"(bear_high_vol: {regime_impact_coefficients['bear_high_vol']:.3f}, "
-                  f"sideways_high_vol: {regime_impact_coefficients['sideways_high_vol']:.3f}) "
-                  f"vs calm regimes (bull_low_vol: {regime_impact_coefficients['bull_low_vol']:.3f}).")
+                  f"(bear_high: {regime_impact_coefficients['bear_high']:.3f}, "
+                  f"sideways_high: {regime_impact_coefficients['sideways_high']:.3f}) "
+                  f"vs calm regimes (bull_low: {regime_impact_coefficients['bull_low']:.3f}).")
         print()
         print("  Conclusion: Transaction costs materially affect both performance")
         print("  metrics and statistical inference (deflated alpha). Sensitivity")
