@@ -179,6 +179,32 @@ def _safe_float(v):
         return None
 
 
+def _fmt_num(v, nd=3):
+    """Format a numeric value to ``nd`` decimals, or 'N/A' when None/non-finite."""
+    if v is None:
+        return "N/A"
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return "N/A"
+    if not np.isfinite(f):
+        return "N/A"
+    return f"{f:.{nd}f}"
+
+
+def _fmt_pct(v):
+    """Format a decimal as a percentage, or 'N/A' when None/non-finite."""
+    if v is None:
+        return "N/A"
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return "N/A"
+    if not np.isfinite(f):
+        return "N/A"
+    return f"{f:.2%}"
+
+
 def _make_universe():
     """Generate a synthetic universe and return (strategy_df, benchmark_dfs, symbols)."""
     raw = generate_multi_asset_data(n_assets=N_ASSETS, periods=N_PERIODS, seed=42)
@@ -730,20 +756,27 @@ def run_cpcv_robustness(data_df, benchmark_dfs, factory, impact_model=DEFAULT_IM
         ret = results[name]["total_oos_return"]
         sharpe = results[name]["oos_sharpe"]
         dar = results[name]["deflated_alpha_ratio"]
-        print(f"     OOS Return:  {ret if ret is not None else 'N/A':>8.2%}")
-        print(f"     OOS Sharpe:  {sharpe if sharpe is not None else 'N/A':>8.3f}")
-        print(f"     DAR:         {dar if dar is not None else 'N/A':>8.3f}")
+        ret_str = f"{ret:>8.2%}" if ret is not None else f"{'N/A':>8}"
+        sharpe_str = f"{sharpe:>8.3f}" if sharpe is not None else f"{'N/A':>8}"
+        dar_str = f"{dar:>8.3f}" if dar is not None else f"{'N/A':>8}"
+        print(f"     OOS Return:  {ret_str}")
+        print(f"     OOS Sharpe:  {sharpe_str}")
+        print(f"     DAR:         {dar_str}")
         print(f"     Overfitting: {results[name]['overfitting_risk']}")
         print()
 
-    low, high = results["low_cost"], results["high_cost"]
-    print("   Cost impact on OOS performance:")
-    print(f"     Sharpe:  {low['oos_sharpe']:.3f} → {high['oos_sharpe']:.3f} "
-          f"(Δ {high['oos_sharpe'] - low['oos_sharpe']:+.3f})")
-    print(f"     Return:  {low['total_oos_return']:.2%} → {high['total_oos_return']:.2%} "
-          f"(Δ {high['total_oos_return'] - low['total_oos_return']:+.2%})")
-    print()
-    return results
+        low, high = results["low_cost"], results["high_cost"]
+        low_sharpe, high_sharpe = low["oos_sharpe"], high["oos_sharpe"]
+        low_ret, high_ret = low["total_oos_return"], high["total_oos_return"]
+        d_sharpe = (high_sharpe - low_sharpe) if (low_sharpe is not None and high_sharpe is not None) else None
+        d_ret = (high_ret - low_ret) if (low_ret is not None and high_ret is not None) else None
+        print("   Cost impact on OOS performance:")
+        print(f"     Sharpe:  {_fmt_num(low_sharpe)} → {_fmt_num(high_sharpe)} "
+              f"(Δ {_fmt_num(d_sharpe)})")
+        print(f"     Return:  {_fmt_pct(low_ret)} → {_fmt_pct(high_ret)} "
+              f"(Δ {_fmt_pct(d_ret)})")
+        print()
+        return results
 
 
 # ---------------------------------------------------------------------------
@@ -842,10 +875,11 @@ def run_commission_slippage_sweeps(data_df, factory, impact_model=DEFAULT_IMPACT
             "mode": mode, "cost_type": "baseline", "cost_bps": 0.0,
             "oos_return": base_ret, "oos_sharpe": base_sharpe,
         })
+        base_ret_str = f"{base_ret:>10}" if base_ret is not None else f"{'N/A':>10}"
+        base_sharpe_str = f"{base_sharpe:>9}" if base_sharpe is not None else f"{'N/A':>9}"
         print(
             f"   {mode:<16} | {'baseline':>10} | {'0':>7} | "
-            f"{base_ret if base_ret is not None else 'N/A':>10} | "
-            f"{base_sharpe if base_sharpe is not None else 'N/A':>9} | {'—':>8} | {'—':>7}"
+            f"{base_ret_str} | {base_sharpe_str} | {'—':>8} | {'—':>7}"
         )
 
         # Commission sweep (slippage held at 0)
@@ -862,9 +896,11 @@ def run_commission_slippage_sweeps(data_df, factory, impact_model=DEFAULT_IMPACT
             ds = None if (sharpe is None or base_sharpe is None) else sharpe - base_sharpe
             dr_str = f"{dr:+8.2%}" if dr is not None else f"{'N/A':>8}"
             ds_str = f"{ds:+7.3f}" if ds is not None else f"{'N/A':>7}"
+            ret_str = f"{ret:>10}" if ret is not None else f"{'N/A':>10}"
+            sharpe_str = f"{sharpe:>9}" if sharpe is not None else f"{'N/A':>9}"
             print(
                 f"   {mode:<16} | {'commission':>10} | {commission*10_000:>6.0f} bp | "
-                f"{ret if ret is not None else 'N/A':>10} | {sharpe if sharpe is not None else 'N/A':>9} | "
+                f"{ret_str} | {sharpe_str} | "
                 f"{dr_str} | {ds_str}"
             )
 
@@ -882,9 +918,11 @@ def run_commission_slippage_sweeps(data_df, factory, impact_model=DEFAULT_IMPACT
             ds = None if (sharpe is None or base_sharpe is None) else sharpe - base_sharpe
             dr_str = f"{dr:+8.2%}" if dr is not None else f"{'N/A':>8}"
             ds_str = f"{ds:+7.3f}" if ds is not None else f"{'N/A':>7}"
+            ret_str = f"{ret:>10}" if ret is not None else f"{'N/A':>10}"
+            sharpe_str = f"{sharpe:>9}" if sharpe is not None else f"{'N/A':>9}"
             print(
                 f"   {mode:<16} | {'slippage':>10} | {slippage*10_000:>6.0f} bp | "
-                f"{ret if ret is not None else 'N/A':>10} | {sharpe if sharpe is not None else 'N/A':>9} | "
+                f"{ret_str} | {sharpe_str} | "
                 f"{dr_str} | {ds_str}"
             )
 
@@ -924,10 +962,13 @@ def run_commission_slippage_sweeps(data_df, factory, impact_model=DEFAULT_IMPACT
             "mean_sharpe": mean_sharpe, "mean_total_return": mean_ret,
             "probability_of_ruin": por,
         })
+        mean_sharpe_str = f"{mean_sharpe:.3f}" if mean_sharpe is not None else "N/A"
+        mean_ret_str = f"{mean_ret:>8.2%}" if mean_ret is not None else f"{'N/A':>8}"
+        por_str = f"{por:.3f}" if por is not None else "N/A"
         print(
-            f"   {label:<18} | mean Sharpe={mean_sharpe if mean_sharpe is not None else 'N/A'} | "
-            f"mean return={mean_ret if mean_ret is not None else 'N/A':.2%} | "
-            f"P(ruin)={por if por is not None else 'N/A'}"
+            f"   {label:<18} | mean Sharpe={mean_sharpe_str} | "
+            f"mean return={mean_ret_str} | "
+            f"P(ruin)={por_str}"
         )
     print()
 
