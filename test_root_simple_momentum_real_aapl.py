@@ -5,7 +5,7 @@ Real-data regression guard for the root-level simple_momentum_hypothesis.py.
 Complements test_root_scripts_pit_bias_controls.py, which guards the same
 script on the bundled SYNTHETIC control (sample_ohlcv.csv / sample_benchmark.csv).
 This file exercises the root script's advertised methodology controls on the
-committed REAL-market fixture (AAPL, 2010-2019) so a silent change to the root
+committed REAL-market fixture (AAPL, 2020-2025) so a silent change to the root
 script's backtest wiring, cost model, capacity path or test-resolution block is
 caught on real data rather than only on a synthetic series.
 

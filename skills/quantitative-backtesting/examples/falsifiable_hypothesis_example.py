@@ -123,7 +123,7 @@ CRITERIA = [
      lambda v: v is not None and v > 0.90),
 ]
 
-def _ensure_real_market_data(symbol="AAPL", start="2020-01-01", end="2023-12-31",
+def _ensure_real_market_data(symbol="AAPL", start="2020-01-01", end="2025-12-31",
                              fixtures_dir=None, base_url=None, return_error=False):
     """Ensure committed real market data exists for symbol.
 
@@ -215,7 +215,7 @@ SLIPPAGE = 0.0001     # 1 bps per trade
 PARAM_GRID = {"fast_period": [10, 20], "slow_period": [30, 40]}
 
 
-def _run_on_real_market(symbol="AAPL", start="2020-01-01", end="2023-12-31",
+def _run_on_real_market(symbol="AAPL", start="2020-01-01", end="2025-12-31",
                         commission=COMMISSION, slippage=SLIPPAGE, benchmark_path=None,
                         fixtures_dir=None, base_url=None):
     """Run falsifiable hypothesis test on real market data (with optional fetch).
@@ -1043,7 +1043,7 @@ def main():
     parser = argparse.ArgumentParser(description="Falsifiable hypothesis test (pre-registered criteria).")
     parser.add_argument("--fetch-real", dest="fetch_real", metavar="SYMBOL", help="Fetch/run on real market data for SYMBOL (best-effort).")
     parser.add_argument("--start", dest="start", default="2020-01-01", help="Start date for real data (YYYY-MM-DD).")
-    parser.add_argument("--end", dest="end", default="2023-12-31", help="End date for real data (YYYY-MM-DD).")
+    parser.add_argument("--end", dest="end", default="2025-12-31", help="End date for real data (YYYY-MM-DD).")
     parser.add_argument("--benchmark", dest="benchmark", default=None, help="Optional benchmark CSV path.")
     parser.add_argument("--output-json", dest="output_json", default=None, help="Write results to JSON file.")
     parser.add_argument("--no-cost-sweep", dest="no_cost_sweep", action="store_true", help="Skip cost sensitivity sweep.")

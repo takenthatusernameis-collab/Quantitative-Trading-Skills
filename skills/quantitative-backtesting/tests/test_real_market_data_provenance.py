@@ -62,17 +62,66 @@ def test_provenance_manifest_exists_and_is_valid_json():
 
 
 def test_manifest_honest_source_note_not_fabricated():
-    """The manifest must not assert an unverified upstream source/fetch date.
+    """The manifest's source note must be an honest, verifiable record.
 
-    The exact source URL and fetch date are intentionally left unasserted so no
-    provenance is fabricated; the note must be present to make that choice
-    explicit rather than silent.
+    The note must name the upstream source (Yahoo Finance chart API) and the
+    fetch date, and it must not be fabricated: it must not claim a source or a
+    fetch date that was not actually performed, and it must not be allowed to
+    read as evidence of strategy performance. The guard therefore asserts the
+    note is present, names the source and a concrete fetch date, and explicitly
+    declines to present the fixtures as performance evidence.
     """
     prov = _load_provenance()
     note = prov.get("all_fixtures", {}).get("raw_source_note", "")
-    assert "not independently re-verified" in note, "manifest must state source is not re-verified"
-    assert "do not fabricate" in note.lower() or "not asserted" in note.lower(), (
-        "manifest must explicitly decline to assert unverified source/fetch date"
+    assert note, "manifest must carry a raw_source_note"
+    assert "yahoo" in note.lower(), "manifest must name the upstream source (Yahoo)"
+    assert "2026-11-12" in note, "manifest must record the actual fetch date"
+    assert "not evidence" in note.lower() or "not performance" in note.lower(), (
+        "manifest must explicitly decline to present the fixtures as performance evidence"
+    )
+    assert "fabricate" not in note.lower(), (
+        "manifest must not contain a self-contradictory 'do not fabricate' "
+        "disclaimer alongside a claimed fetch record"
+    )
+
+
+def test_fixtures_are_not_stale_relative_to_the_recorded_fetch_date():
+    """The committed fixtures must not be stale relative to their fetch date.
+
+    This guard exists because the previous fixtures (2010-2019) were silently
+    stale for years while their provenance claimed an unverified source: nothing
+    on disk flagged the gap. Two invariants are now executable:
+
+      1. The recorded fetch date must not predate the data's end date -- you
+         cannot have fetched a series after it ended, so a fetch date earlier
+         than ``end_date`` is an impossible record.
+      2. The data must not be stale: its end date must fall within a bounded
+         window of the fetch date (here, 2 years). A series whose end date is
+         more than two years before the fetch date is a fixture that was not
+         refreshed when its provenance was last updated, and the guard fails
+         rather than reporting a stale series as current.
+
+    The fetch date is parsed from the manifest's own note, so the invariant is
+    internal to the record -- it cannot be satisfied by editing the note alone.
+    """
+    import re
+
+    prov = _load_provenance()
+    allf = prov["all_fixtures"]
+    note = allf.get("raw_source_note", "")
+
+    match = re.search(r"(\d{4}-\d{2}-\d{2})", note)
+    assert match, "raw_source_note must carry a concrete fetch date (YYYY-MM-DD)"
+    fetch_date = pd.Timestamp(match.group(1))
+
+    end_date = pd.Timestamp(allf["end_date"])
+    assert fetch_date >= end_date, (
+        f"fetch date {fetch_date.date()} predates the data end date "
+        f"{end_date.date()}: an impossible record"
+    )
+    assert (fetch_date - end_date).days <= 365 * 2 + 31, (
+        f"data end date {end_date.date()} is more than ~2y before the fetch "
+        f"date {fetch_date.date()}: the fixture is stale"
     )
 
 
@@ -138,6 +187,7 @@ def test_documented_byte_identity_holds():
 TEST_REGISTRY = [
     ("test_provenance_manifest_exists_and_is_valid_json", test_provenance_manifest_exists_and_is_valid_json),
     ("test_manifest_honest_source_note_not_fabricated", test_manifest_honest_source_note_not_fabricated),
+    ("test_fixtures_are_not_stale_relative_to_the_recorded_fetch_date", test_fixtures_are_not_stale_relative_to_the_recorded_fetch_date),
     ("test_each_fixture_matches_manifest", test_each_fixture_matches_manifest),
     ("test_documented_byte_identity_holds", test_documented_byte_identity_holds),
 ]

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Real-data regression guard for the root-level simple_momentum_hypothesis.py cost
-path on the committed MSFT fixture (2010-2019).
+path on the committed MSFT fixture (2020-2025).
 
 Complements test_root_scripts_pit_bias_controls.py, which guards the same
 cost path on the bundled SYNTHETIC control (sample_ohlcv.csv /
