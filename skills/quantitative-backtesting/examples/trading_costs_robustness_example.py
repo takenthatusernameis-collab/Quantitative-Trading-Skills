@@ -23,6 +23,7 @@ All data is synthetic (generated via generate_sample_data.py); no external
 network access is required.
 """
 
+import argparse
 import json
 import sys
 import tempfile
@@ -52,6 +53,38 @@ from walk_forward import (  # noqa: E402
 )
 from performance import calculate_metrics  # noqa: E402
 from monte_carlo import monte_carlo_simulation  # noqa: E402
+from utils import DEFAULT_IMPACT_MODEL, IMPACT_MODEL_TYPES  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# CLI argument parsing
+# ---------------------------------------------------------------------------
+
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Trading Costs & Robustness Sensitivity Analysis with Regime-Aware Impact Modeling"
+    )
+    parser.add_argument(
+        "--impact-model",
+        type=str,
+        default=DEFAULT_IMPACT_MODEL,
+        choices=IMPACT_MODEL_TYPES,
+        help=f"Market impact model: 'linear' (default) or 'sqrt'. Default: {DEFAULT_IMPACT_MODEL}"
+    )
+    parser.add_argument(
+        "--impact-coefficient",
+        type=float,
+        default=0.5,
+        help="Base market impact coefficient (default: 0.5). Used as fallback for regimes not explicitly configured."
+    )
+    parser.add_argument(
+        "--regime-aware",
+        action="store_true",
+        help="Enable regime-aware market impact modeling. When set, uses higher impact coefficients "
+             "for stressed regimes (bear_high_vol, bear_low_vol, sideways_high_vol) and lower for calm regimes."
+    )
+    return parser.parse_args()
 
 
 # ---------------------------------------------------------------------------
@@ -201,15 +234,24 @@ def _metrics_from_returns(returns):
 # Section 1: Strategy cost sensitivity
 # ---------------------------------------------------------------------------
 
-def run_strategy_cost_sweep(data_df):
+def run_strategy_cost_sweep(data_df, impact_model=DEFAULT_IMPACT_MODEL, impact_coefficient=0.0, regime_impact_coefficients=None):
     """Sweep strategy commission × slippage and report net performance metrics."""
     print("1. STRATEGY COST SENSITIVITY SWEEP")
     print("-" * 75)
+    if regime_impact_coefficients:
+        print(f"   Regime-aware impact: ON (model={impact_model}, base_coeff={impact_coefficient})")
+        print(f"   Regime coefficients: {regime_impact_coefficients}")
+    else:
+        print(f"   Impact model: {impact_model}, coefficient: {impact_coefficient}")
+    print()
 
     signals = _strategy_signals(data_df)
     baseline_returns = _calculate_strategy_returns(
         data_df, signals, commission=0.0, slippage=0.0,
         borrow_cost=0.0, funding_cost=0.0,
+        impact_coefficient=impact_coefficient,
+        impact_model=impact_model,
+        regime_impact_coefficients=regime_impact_coefficients,
     )
     baseline = _metrics_from_returns(baseline_returns)
     print(
@@ -235,6 +277,9 @@ def run_strategy_cost_sweep(data_df):
                         data_df, signals,
                         commission=commission, slippage=slippage,
                         borrow_cost=borrow_cost, funding_cost=funding_cost,
+                        impact_coefficient=impact_coefficient,
+                        impact_model=impact_model,
+                        regime_impact_coefficients=regime_impact_coefficients,
                     )
                     m = _metrics_from_returns(returns)
                     entry = {
@@ -278,6 +323,9 @@ def run_strategy_cost_sweep(data_df):
     baseline_short = _calculate_strategy_returns(
         data_df, signals_short, commission=0.0, slippage=0.0,
         borrow_cost=0.0, funding_cost=0.0,
+        impact_coefficient=impact_coefficient,
+        impact_model=impact_model,
+        regime_impact_coefficients=regime_impact_coefficients,
     )
     bm = _metrics_from_returns(baseline_short)
     print(
@@ -288,12 +336,18 @@ def run_strategy_cost_sweep(data_df):
     short_high_b = _calculate_strategy_returns(
         data_df, signals_short, commission=0.0, slippage=0.0,
         borrow_cost=0.03, funding_cost=0.0,
+        impact_coefficient=impact_coefficient,
+        impact_model=impact_model,
+        regime_impact_coefficients=regime_impact_coefficients,
     )
     sb = _metrics_from_returns(short_high_b)
     # Test funding cost effect
     short_high_f = _calculate_strategy_returns(
         data_df, signals_short, commission=0.0, slippage=0.0,
         borrow_cost=0.0, funding_cost=0.02,
+        impact_coefficient=impact_coefficient,
+        impact_model=impact_model,
+        regime_impact_coefficients=regime_impact_coefficients,
     )
     sf = _metrics_from_returns(short_high_f)
     print(
@@ -319,6 +373,9 @@ def run_strategy_cost_sweep(data_df):
     baseline_lev = _calculate_strategy_returns(
         data_df, signals_levered, commission=0.0, slippage=0.0,
         borrow_cost=0.0, funding_cost=0.0,
+        impact_coefficient=impact_coefficient,
+        impact_model=impact_model,
+        regime_impact_coefficients=regime_impact_coefficients,
     )
     blm = _metrics_from_returns(baseline_lev)
     print(
@@ -328,6 +385,9 @@ def run_strategy_cost_sweep(data_df):
     lev_high_f = _calculate_strategy_returns(
         data_df, signals_levered, commission=0.0, slippage=0.0,
         borrow_cost=0.0, funding_cost=0.02,
+        impact_coefficient=impact_coefficient,
+        impact_model=impact_model,
+        regime_impact_coefficients=regime_impact_coefficients,
     )
     lfm = _metrics_from_returns(lev_high_f)
     print(
@@ -353,6 +413,9 @@ def run_strategy_cost_sweep(data_df):
     baseline_mn = _calculate_strategy_returns(
         data_mn, positions_mn, commission=0.0, slippage=0.0,
         borrow_cost=0.0, funding_cost=0.0,
+        impact_coefficient=impact_coefficient,
+        impact_model=impact_model,
+        regime_impact_coefficients=regime_impact_coefficients,
     )
     bmn = _metrics_from_returns(baseline_mn)
     print(
@@ -362,6 +425,9 @@ def run_strategy_cost_sweep(data_df):
     mn_both = _calculate_strategy_returns(
         data_mn, positions_mn, commission=0.0, slippage=0.0,
         borrow_cost=0.03, funding_cost=0.02,
+        impact_coefficient=impact_coefficient,
+        impact_model=impact_model,
+        regime_impact_coefficients=regime_impact_coefficients,
     )
     mb = _metrics_from_returns(mn_both)
     print(
@@ -381,6 +447,8 @@ def run_strategy_cost_sweep(data_df):
         r = _calculate_strategy_returns(
             data_mn, positions_mn, commission=0.0, slippage=0.0,
             impact_coefficient=coeff,
+            impact_model=impact_model,
+            regime_impact_coefficients=regime_impact_coefficients,
         )
         m = _metrics_from_returns(r)
         impact_rows.append((coeff, m["total_return"], m["sharpe_ratio"]))
@@ -583,10 +651,14 @@ def _run_benchmark_sweep_for_benchmark(strategy_returns, benchmark_df_or_list, s
 # Section 3: CPCV robustness under cost stress
 # ---------------------------------------------------------------------------
 
-def run_cpcv_robustness(data_df, benchmark_dfs, factory):
+def run_cpcv_robustness(data_df, benchmark_dfs, factory, impact_model=DEFAULT_IMPACT_MODEL, impact_coefficient=0.0, regime_impact_coefficients=None):
     """Run CPCV under low-cost and high-cost regimes and compare OOS results."""
     print("3. CPCV ROBUSTNESS UNDER COST STRESS")
     print("-" * 75)
+    if regime_impact_coefficients:
+        print(f"   Regime-aware impact: ON (model={impact_model}, base_coeff={impact_coefficient})")
+    else:
+        print(f"   Impact model: {impact_model}, coefficient: {impact_coefficient}")
 
     scenarios = {
         "low_cost": {
@@ -595,7 +667,7 @@ def run_cpcv_robustness(data_df, benchmark_dfs, factory):
         },
         "high_cost": {
             "commission": 0.0010, "slippage": 0.0005,
-            "impact_coefficient": 0.1, "borrow_cost": 0.03, "funding_cost": 0.02,
+            "impact_coefficient": impact_coefficient, "borrow_cost": 0.03, "funding_cost": 0.02,
         },
     }
 
@@ -621,6 +693,8 @@ def run_cpcv_robustness(data_df, benchmark_dfs, factory):
             commission=costs["commission"],
             slippage=costs["slippage"],
             impact_coefficient=costs["impact_coefficient"],
+            impact_model=impact_model,
+            regime_impact_coefficients=regime_impact_coefficients,
             borrow_cost=costs["borrow_cost"],
             funding_cost=costs["funding_cost"],
         )
@@ -638,6 +712,8 @@ def run_cpcv_robustness(data_df, benchmark_dfs, factory):
                 "commission_bps": costs["commission"] * 10_000,
                 "slippage_bps": costs["slippage"] * 10_000,
                 "impact_coefficient": costs["impact_coefficient"],
+                "impact_model": impact_model,
+                "regime_aware": regime_impact_coefficients is not None,
                 "borrow_cost_annual": costs["borrow_cost"],
                 "funding_cost_annual": costs["funding_cost"],
             },
@@ -665,7 +741,7 @@ def run_cpcv_robustness(data_df, benchmark_dfs, factory):
 # Section 4: Commission / slippage cost sweeps across validation modes
 # ---------------------------------------------------------------------------
 
-def _mode_oos_metrics(mode, data_df, factory, commission, slippage):
+def _mode_oos_metrics(mode, data_df, factory, commission, slippage, impact_model=DEFAULT_IMPACT_MODEL, impact_coefficient=0.0, regime_impact_coefficients=None):
     """Run one validation mode at given commission/slippage; return (oos_return, oos_sharpe)."""
     if mode == "walk_forward":
         r = walk_forward_analysis(
@@ -674,6 +750,9 @@ def _mode_oos_metrics(mode, data_df, factory, commission, slippage):
             train_months=WF_TRAIN_MONTHS, test_months=WF_TEST_MONTHS,
             step_months=WF_STEP_MONTHS, initial_capital=INITIAL_CAPITAL,
             commission=commission, slippage=slippage,
+            impact_coefficient=impact_coefficient,
+            impact_model=impact_model,
+            regime_impact_coefficients=regime_impact_coefficients,
         )
         s = r["summary"]
         return _safe_float(s.get("total_oos_return")), _safe_float(s.get("oos_sharpe"))
@@ -682,6 +761,9 @@ def _mode_oos_metrics(mode, data_df, factory, commission, slippage):
             data=data_df, strategy_factory=factory,
             param_grid=SWEEP_PARAM_GRID, initial_capital=INITIAL_CAPITAL,
             commission=commission, slippage=slippage,
+            impact_coefficient=impact_coefficient,
+            impact_model=impact_model,
+            regime_impact_coefficients=regime_impact_coefficients,
         )
         top = results[0] if results else None
         if top is None:
@@ -693,6 +775,9 @@ def _mode_oos_metrics(mode, data_df, factory, commission, slippage):
             param_grid=SWEEP_PARAM_GRID, n_splits=CPCV_N_SPLITS,
             test_size=CPCV_TEST_SIZE, initial_capital=INITIAL_CAPITAL,
             commission=commission, slippage=slippage,
+            impact_coefficient=impact_coefficient,
+            impact_model=impact_model,
+            regime_impact_coefficients=regime_impact_coefficients,
         )
         s = r["summary"]
         return _safe_float(s.get("total_oos_return")), _safe_float(s.get("oos_sharpe"))
@@ -707,13 +792,16 @@ def _mode_oos_metrics(mode, data_df, factory, commission, slippage):
             walk_forward_step_months=WF_STEP_MONTHS,
             cpcv_n_splits=CPCV_N_SPLITS, cpcv_test_size=CPCV_TEST_SIZE,
             initial_capital=INITIAL_CAPITAL, commission=commission, slippage=slippage,
+            impact_coefficient=impact_coefficient,
+            impact_model=impact_model,
+            regime_impact_coefficients=regime_impact_coefficients,
         )
         tp = r.get("test_performance") or {}
         return _safe_float(tp.get("test_total_return")), _safe_float(tp.get("test_sharpe"))
     raise ValueError(f"Unknown sweep mode: {mode}")
 
 
-def run_commission_slippage_sweeps(data_df, factory):
+def run_commission_slippage_sweeps(data_df, factory, impact_model=DEFAULT_IMPACT_MODEL, impact_coefficient=0.0, regime_impact_coefficients=None):
     """Section 4: Commission / slippage cost sweeps across all five validation modes.
 
     Runs walk-forward, parameter optimization, CPCV, out-of-sample, and
@@ -729,6 +817,10 @@ def run_commission_slippage_sweeps(data_df, factory):
     """
     print("4. COMMISSION / SLIPPAGE SENSITIVITY SWEEPS (ALL VALIDATION MODES)")
     print("-" * 75)
+    if regime_impact_coefficients:
+        print(f"   Regime-aware impact: ON (model={impact_model}, base_coeff={impact_coefficient})")
+    else:
+        print(f"   Impact model: {impact_model}, coefficient: {impact_coefficient}")
     print("   Mode             | Cost type  | Cost bps | OOS Return | OOS Sharpe | Δ Return | Δ Sharpe")
     print("   " + "-" * 100)
 
@@ -736,7 +828,7 @@ def run_commission_slippage_sweeps(data_df, factory):
     sweep_rows = []
     for mode in modes:
         # Baseline: frictionless (0 bps commission, 0 bps slippage)
-        base_ret, base_sharpe = _mode_oos_metrics(mode, data_df, factory, 0.0, 0.0)
+        base_ret, base_sharpe = _mode_oos_metrics(mode, data_df, factory, 0.0, 0.0, impact_model, impact_coefficient, regime_impact_coefficients)
         sweep_rows.append({
             "mode": mode, "cost_type": "baseline", "cost_bps": 0.0,
             "oos_return": base_ret, "oos_sharpe": base_sharpe,
@@ -751,7 +843,7 @@ def run_commission_slippage_sweeps(data_df, factory):
         for commission in COMMISSION_SWEEP_GRID:
             if commission == 0.0:
                 continue
-            ret, sharpe = _mode_oos_metrics(mode, data_df, factory, commission, 0.0)
+            ret, sharpe = _mode_oos_metrics(mode, data_df, factory, commission, 0.0, impact_model, impact_coefficient, regime_impact_coefficients)
             sweep_rows.append({
                 "mode": mode, "cost_type": "commission", "cost_bps": commission * 10_000,
                 "oos_return": ret, "oos_sharpe": sharpe,
@@ -769,7 +861,7 @@ def run_commission_slippage_sweeps(data_df, factory):
         for slippage in SLIPPAGE_SWEEP_GRID:
             if slippage == 0.0:
                 continue
-            ret, sharpe = _mode_oos_metrics(mode, data_df, factory, 0.0, slippage)
+            ret, sharpe = _mode_oos_metrics(mode, data_df, factory, 0.0, slippage, impact_model, impact_coefficient, regime_impact_coefficients)
             sweep_rows.append({
                 "mode": mode, "cost_type": "slippage", "cost_bps": slippage * 10_000,
                 "oos_return": ret, "oos_sharpe": sharpe,
@@ -799,6 +891,9 @@ def run_commission_slippage_sweeps(data_df, factory):
             data_df, signals,
             commission=commission, slippage=slippage,
             borrow_cost=0.0, funding_cost=0.0,
+            impact_coefficient=impact_coefficient,
+            impact_model=impact_model,
+            regime_impact_coefficients=regime_impact_coefficients,
         )
         mc = monte_carlo_simulation(
             base_returns,
@@ -839,6 +934,31 @@ def run_commission_slippage_sweeps(data_df, factory):
 # ---------------------------------------------------------------------------
 
 def main():
+    args = parse_args()
+
+    # Build regime impact coefficients if --regime-aware is set
+    regime_impact_coefficients = None
+    if args.regime_aware:
+        # Higher impact in stressed regimes (bear/high vol, sideways/high vol)
+        # Lower impact in calm regimes (bull/low vol)
+        regime_impact_coefficients = {
+            "bull_high_vol": args.impact_coefficient * 1.5,
+            "bull_low_vol": args.impact_coefficient * 0.5,
+            "bear_high_vol": args.impact_coefficient * 2.0,
+            "bear_low_vol": args.impact_coefficient * 1.5,
+            "sideways_high_vol": args.impact_coefficient * 1.5,
+            "sideways_low_vol": args.impact_coefficient * 0.8,
+        }
+        print(f"Regime-aware impact modeling ENABLED")
+        print(f"  Base impact coefficient: {args.impact_coefficient}")
+        print(f"  Impact model: {args.impact_model}")
+        print(f"  Regime coefficients: {regime_impact_coefficients}")
+    else:
+        print(f"Regime-aware impact modeling: DISABLED")
+        print(f"  Impact model: {args.impact_model}")
+        print(f"  Impact coefficient: {args.impact_coefficient}")
+    print()
+
     print("=" * 80)
     print("QUANTITATIVE BACKTESTING: TRADING COSTS & ROBUSTNESS SENSITIVITY ANALYSIS")
     print("=" * 80)
@@ -857,13 +977,31 @@ def main():
         factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
 
         # --- Section 1: Strategy cost sensitivity ---
-        cost_sweep, baseline_returns, cost_extras = run_strategy_cost_sweep(strategy_df)
+        cost_sweep, baseline_returns, cost_extras = run_strategy_cost_sweep(
+            strategy_df,
+            impact_model=args.impact_model,
+            impact_coefficient=args.impact_coefficient,
+            regime_impact_coefficients=regime_impact_coefficients,
+        )
 
         # --- Section 2: Benchmark cost-model sensitivity ---
         bench_sweep = run_benchmark_cost_sweep(baseline_returns, benchmark_dfs, strategy_df)
 
         # --- Section 3: CPCV robustness under cost stress ---
-        cpcv_results = run_cpcv_robustness(strategy_df, benchmark_dfs, factory)
+        cpcv_results = run_cpcv_robustness(
+            strategy_df, benchmark_dfs, factory,
+            impact_model=args.impact_model,
+            impact_coefficient=args.impact_coefficient,
+            regime_impact_coefficients=regime_impact_coefficients,
+        )
+
+        # --- Section 4: Commission / slippage cost sweeps across validation modes ---
+        sweep_results = run_commission_slippage_sweeps(
+            strategy_df, factory,
+            impact_model=args.impact_model,
+            impact_coefficient=args.impact_coefficient,
+            regime_impact_coefficients=regime_impact_coefficients,
+        )
 
         # --- Write structured JSON summary ---
         summary = {
@@ -875,6 +1013,10 @@ def main():
                 "strategy": "sma_crossover",
                 "strategy_params": STRATEGY_PARAMS,
                 "initial_capital": INITIAL_CAPITAL,
+                "impact_model": args.impact_model,
+                "impact_coefficient": args.impact_coefficient,
+                "regime_aware": args.regime_aware,
+                "regime_impact_coefficients": regime_impact_coefficients,
                 "positive_alpha_scenario": {
                     "benchmark_type": "degraded_strategy",
                     "primary_drag_annual": DEGRADED_PRIMARY_DRAG,
@@ -885,6 +1027,7 @@ def main():
             "strategy_exposure_demonstrations": cost_extras,
             "benchmark_cost_sweep": bench_sweep,
             "cpcv_robustness": cpcv_results,
+            "commission_slippage_sweeps": sweep_results,
         }
         out_path = tmpdir / "trading_costs_sensitivity.json"
         with open(out_path, "w") as f:
@@ -936,6 +1079,11 @@ def main():
                   f"({imp_base:.2%}→{imp_high:.2%}).  The original implementation scaled "
                   f"position_notional by the raw asset price instead of portfolio equity, "
                   f"making impact_coefficient a silent no-op; this sweep confirms the fix.")
+        if args.regime_aware:
+            print(f"  4. Regime-aware impact modeling: costs are higher in stressed regimes "
+                  f"(bear_high_vol: {regime_impact_coefficients['bear_high_vol']:.3f}, "
+                  f"sideways_high_vol: {regime_impact_coefficients['sideways_high_vol']:.3f}) "
+                  f"vs calm regimes (bull_low_vol: {regime_impact_coefficients['bull_low_vol']:.3f}).")
         print()
         print("  Conclusion: Transaction costs materially affect both performance")
         print("  metrics and statistical inference (deflated alpha). Sensitivity")
