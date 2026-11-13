@@ -211,11 +211,106 @@ def test_regime_aware_changes_net_results_vs_constant():
     )
 
 
+def test_book_regime_aware_changes_net_results_vs_constant():
+    """Regime-aware coefficients must change net results under book pricing.
+
+    The example's SMA-crossover strategy is long-only and has a flat net exposure
+    when priced as a panel. To exercise book pricing with regime-aware impact,
+    we construct a market-neutral multi-asset book (long/short with gross
+    turnover) and assert that switching on regime_impact_coefficients changes
+    the net return vs the constant-coefficient baseline. This mirrors
+    test_book_regime_aware_sqrt_matches_closed_form in test_strategy_cost_model.py
+    but uses the example's synthetic universe and the same coefficient keys.
+    """
+    with _reduced_grids():
+        # Build the same synthetic panel the example uses.
+        raw = costs_example.generate_multi_asset_data(
+            n_assets=costs_example.N_ASSETS, periods=costs_example.N_PERIODS, seed=42
+        )
+        panel = {sym: df.set_index("date") for sym, df in raw.items()}
+        symbols = sorted(panel.keys())
+
+        # Construct a market-neutral book that rotates its long/short legs.
+        # This mirrors the "Market-neutral leveraged variant" in Section 1 of
+        # trading_costs_robustness_example.py (lines ~408-418).
+        sig_a = costs_example._strategy_signals(panel[symbols[3]])
+        sig_b = costs_example._strategy_signals(panel[symbols[4]])
+        common = panel[symbols[3]].index.intersection(panel[symbols[4]].index)
+        pos_a = sig_a.reindex(common).fillna(0)
+        pos_b = -sig_b.reindex(common).fillna(0)
+        # Book weights: DataFrame with per-asset weights (long A, short B, 2x gross exposure).
+        book_weights = pd.DataFrame({
+            symbols[3]: pos_a * 1.0,
+            symbols[4]: pos_b * 1.0,
+        })
+        # Net exposure signal for the engine (flat for market-neutral book).
+        signals = pd.Series(0.0, index=common)
+
+        # Constant-coefficient regime-impact dict (matches --regime-aware keys).
+        base_coeff = 0.5
+        regime_impact_coefficients = {
+            "bull_high": base_coeff * 1.5,
+            "bull_low": base_coeff * 0.5,
+            "bear_high": base_coeff * 2.0,
+            "bear_low": base_coeff * 1.5,
+            "sideways_high": base_coeff * 1.5,
+            "sideways_low": base_coeff * 0.8,
+        }
+
+        # Panel data for the two assets in the book.
+        data_mn = {
+            symbols[3]: panel[symbols[3]].reindex(common),
+            symbols[4]: panel[symbols[4]].reindex(common),
+        }
+
+        # Run with regime-aware coefficients.
+        returns_regime = costs_example._calculate_strategy_returns(
+            data_mn,
+            signals,
+            panel_pricing="book",
+            book_weights=book_weights,
+            commission=0.0,
+            slippage=0.0,
+            borrow_cost=0.0,
+            funding_cost=0.0,
+            impact_coefficient=base_coeff,
+            impact_model="sqrt",
+            regime_impact_coefficients=regime_impact_coefficients,
+        )
+
+        # Run with constant coefficient (no regime dict).
+        returns_constant = costs_example._calculate_strategy_returns(
+            data_mn,
+            signals,
+            panel_pricing="book",
+            book_weights=book_weights,
+            commission=0.0,
+            slippage=0.0,
+            borrow_cost=0.0,
+            funding_cost=0.0,
+            impact_coefficient=base_coeff,
+            impact_model="sqrt",
+            regime_impact_coefficients=None,
+        )
+
+        # Total returns must differ; regime-aware charges more in stressed
+        # regimes and less in calm ones, so the compounded result cannot be
+        # identical to the constant-coefficient run.
+        total_regime = float((1 + returns_regime).prod() - 1)
+        total_constant = float((1 + returns_constant).prod() - 1)
+        assert total_regime != total_constant, (
+            "book pricing with regime-aware vs constant coefficients produced "
+            f"identical net returns ({total_regime:.4%} vs {total_constant:.4%}); "
+            "the regime path may be a silent no-op for book pricing"
+        )
+
+
 TEST_REGISTRY = [
     ("test_example_exposes_regime_aware_entry_point", test_example_exposes_regime_aware_entry_point),
     ("test_regime_aware_flag_populates_metadata_and_cpcv", test_regime_aware_flag_populates_metadata_and_cpcv),
     ("test_regime_coefficient_keys_match_detected_labels", test_regime_coefficient_keys_match_detected_labels),
     ("test_regime_aware_changes_net_results_vs_constant", test_regime_aware_changes_net_results_vs_constant),
+    ("test_book_regime_aware_changes_net_results_vs_constant", test_book_regime_aware_changes_net_results_vs_constant),
 ]
 
 
