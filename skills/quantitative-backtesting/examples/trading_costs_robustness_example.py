@@ -860,10 +860,12 @@ def run_commission_slippage_sweeps(data_df, factory, impact_model=DEFAULT_IMPACT
             })
             dr = None if (ret is None or base_ret is None) else ret - base_ret
             ds = None if (sharpe is None or base_sharpe is None) else sharpe - base_sharpe
+            dr_str = f"{dr:+8.2%}" if dr is not None else f"{'N/A':>8}"
+            ds_str = f"{ds:+7.3f}" if ds is not None else f"{'N/A':>7}"
             print(
                 f"   {mode:<16} | {'commission':>10} | {commission*10_000:>6.0f} bp | "
                 f"{ret if ret is not None else 'N/A':>10} | {sharpe if sharpe is not None else 'N/A':>9} | "
-                f"{dr if dr is not None else 'N/A':>+8.2%} | {ds if ds is not None else 'N/A':>+7.3f}"
+                f"{dr_str} | {ds_str}"
             )
 
         # Slippage sweep (commission held at 0)
@@ -878,10 +880,12 @@ def run_commission_slippage_sweeps(data_df, factory, impact_model=DEFAULT_IMPACT
             })
             dr = None if (ret is None or base_ret is None) else ret - base_ret
             ds = None if (sharpe is None or base_sharpe is None) else sharpe - base_sharpe
+            dr_str = f"{dr:+8.2%}" if dr is not None else f"{'N/A':>8}"
+            ds_str = f"{ds:+7.3f}" if ds is not None else f"{'N/A':>7}"
             print(
                 f"   {mode:<16} | {'slippage':>10} | {slippage*10_000:>6.0f} bp | "
                 f"{ret if ret is not None else 'N/A':>10} | {sharpe if sharpe is not None else 'N/A':>9} | "
-                f"{dr if dr is not None else 'N/A':>+8.2%} | {ds if ds is not None else 'N/A':>+7.3f}"
+                f"{dr_str} | {ds_str}"
             )
 
         print()
