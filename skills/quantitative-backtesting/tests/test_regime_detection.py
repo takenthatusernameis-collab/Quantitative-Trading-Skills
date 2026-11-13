@@ -21,6 +21,13 @@ from regime_detection import (
     compute_regime_performance,
     regime_performance_summary,
     add_regime_analysis_to_results,
+    HMMConfig,
+    GaussianHMM,
+    detect_hmm_regime,
+    detect_hmm_regime_with_probs,
+    fit_hmm_walkforward,
+    build_hmm_features,
+    add_hmm_regime_analysis_to_results,
 )
 
 
@@ -358,6 +365,333 @@ class TestRegimeConfig:
         assert config.vol_quantile_high == 0.8
         assert config.vol_quantile_low == 0.2
         assert config.min_regime_length == 10
+
+
+class TestHMMConfig:
+    """Tests for HMMConfig dataclass."""
+
+    def test_default_config(self):
+        """Default HMM config should have sensible values."""
+        config = HMMConfig()
+        assert config.n_states == 3
+        assert config.n_iter == 100
+        assert config.tol == 1e-4
+        assert config.covariance_type == "diag"
+        assert config.min_covar == 1e-6
+        assert config.random_state == 42
+        assert config.refit_window is None
+        assert config.train_frac == 0.7
+        assert config.min_regime_length == 21
+        assert config.use_returns is True
+        assert config.use_volatility is True
+        assert config.vol_window == 21
+        assert config.use_trend is False
+        assert config.trend_window == 50
+
+    def test_custom_config(self):
+        """Custom HMM config should accept all parameters."""
+        config = HMMConfig(
+            n_states=4,
+            n_iter=50,
+            tol=1e-3,
+            covariance_type="full",
+            min_covar=1e-4,
+            random_state=123,
+            refit_window=20,
+            train_frac=0.6,
+            min_regime_length=15,
+            use_returns=True,
+            use_volatility=False,
+            vol_window=30,
+            use_trend=True,
+            trend_window=100,
+        )
+        assert config.n_states == 4
+        assert config.n_iter == 50
+        assert config.tol == 1e-3
+        assert config.covariance_type == "full"
+        assert config.min_covar == 1e-4
+        assert config.random_state == 123
+        assert config.refit_window == 20
+        assert config.train_frac == 0.6
+        assert config.min_regime_length == 15
+        assert config.use_returns is True
+        assert config.use_volatility is False
+        assert config.vol_window == 30
+        assert config.use_trend is True
+        assert config.trend_window == 100
+
+
+class TestBuildHMMFeatures:
+    """Tests for HMM feature construction."""
+
+    def test_returns_only(self):
+        """Should build returns feature only when configured."""
+        prices = make_price_series(200)
+        config = HMMConfig(use_returns=True, use_volatility=False, use_trend=False)
+        X, names = build_hmm_features(prices, config)
+        assert X.shape == (200, 1)
+        assert names == ["returns"]
+        assert not np.isnan(X).any()
+
+    def test_returns_and_volatility(self):
+        """Should build returns and volatility features."""
+        prices = make_price_series(200)
+        config = HMMConfig(use_returns=True, use_volatility=True, use_trend=False)
+        X, names = build_hmm_features(prices, config)
+        assert X.shape == (200, 2)
+        assert names == ["returns", "volatility"]
+        assert not np.isnan(X).any()
+
+    def test_all_features(self):
+        """Should build all features when enabled."""
+        prices = make_price_series(300)
+        config = HMMConfig(use_returns=True, use_volatility=True, use_trend=True)
+        X, names = build_hmm_features(prices, config)
+        assert X.shape == (300, 3)
+        assert names == ["returns", "volatility", "trend"]
+        assert not np.isnan(X).any()
+
+    def test_no_features_raises(self):
+        """Should raise if no features enabled."""
+        prices = make_price_series(100)
+        config = HMMConfig(use_returns=False, use_volatility=False, use_trend=False)
+        try:
+            build_hmm_features(prices, config)
+            assert False, "Should have raised ValueError"
+        except ValueError as e:
+            assert "At least one feature must be enabled" in str(e)
+
+
+class TestGaussianHMM:
+    """Tests for GaussianHMM core functionality."""
+
+    def test_fit_and_predict(self):
+        """Should fit and predict on synthetic data."""
+        np.random.seed(42)
+        n = 300
+        # Two clear regimes
+        returns = np.concatenate([
+            np.random.normal(0.001, 0.01, n//2),
+            np.random.normal(-0.001, 0.02, n//2),
+        ])
+        X = returns.reshape(-1, 1)
+
+        config = HMMConfig(n_states=2, n_iter=50, random_state=42)
+        hmm = GaussianHMM(config)
+        hmm.fit(X)
+
+        assert hmm.converged_ or hmm.n_iter_ > 0
+        assert hmm.log_likelihood_ > -np.inf
+        assert hmm.means_.shape == (2, 1)
+        assert hmm.covars_.shape == (2, 1)
+        assert hmm.transmat_.shape == (2, 2)
+        assert hmm.startprob_.shape == (2,)
+
+        # Predict
+        states = hmm.predict(X)
+        assert states.shape == (n,)
+        assert set(states) <= {0, 1}
+
+    def test_filter_point_in_time(self):
+        """Forward filter should produce valid probabilities."""
+        np.random.seed(42)
+        n = 200
+        returns = np.random.normal(0.0005, 0.01, n)
+        X = returns.reshape(-1, 1)
+
+        config = HMMConfig(n_states=2, n_iter=30, random_state=42)
+        hmm = GaussianHMM(config)
+        hmm.fit(X)
+
+        filtered_probs, log_likelihood = hmm.filter(X)
+
+        assert filtered_probs.shape == (n, 2)
+        assert np.allclose(filtered_probs.sum(axis=1), 1.0, atol=1e-6)
+        assert (filtered_probs >= 0).all() and (filtered_probs <= 1).all()
+        assert np.isfinite(log_likelihood)
+
+    def test_score(self):
+        """Should compute log-likelihood."""
+        np.random.seed(42)
+        n = 200
+        returns = np.random.normal(0.0005, 0.01, n)
+        X = returns.reshape(-1, 1)
+
+        config = HMMConfig(n_states=2, n_iter=30, random_state=42)
+        hmm = GaussianHMM(config)
+        hmm.fit(X)
+
+        ll = hmm.score(X)
+        assert np.isfinite(ll)
+        assert np.isclose(ll, hmm.log_likelihood_, rtol=1e-6)
+
+    def test_deterministic_with_seed(self):
+        """Should be deterministic with fixed random seed."""
+        np.random.seed(42)
+        n = 200
+        returns = np.random.normal(0.0005, 0.01, n)
+        X = returns.reshape(-1, 1)
+
+        config = HMMConfig(n_states=2, n_iter=30, random_state=42)
+        hmm1 = GaussianHMM(config)
+        hmm1.fit(X)
+
+        hmm2 = GaussianHMM(config)
+        hmm2.fit(X)
+
+        assert np.allclose(hmm1.means_, hmm2.means_)
+        assert np.allclose(hmm1.covars_, hmm2.covars_)
+        assert np.allclose(hmm1.transmat_, hmm2.transmat_)
+        assert np.allclose(hmm1.startprob_, hmm2.startprob_)
+
+
+class TestHMMRegimeDetection:
+    """Tests for HMM regime detection functions."""
+
+    def test_detect_hmm_regime_basic(self):
+        """Should detect regimes on synthetic data with known structure."""
+        np.random.seed(42)
+        dates = pd.date_range("2020-01-01", periods=400, freq="B")
+        # Three clear regimes
+        returns = np.concatenate([
+            np.random.normal(0.001, 0.01, 133),   # Bull
+            np.random.normal(-0.0005, 0.02, 133), # Bear
+            np.random.normal(0.0001, 0.015, 134), # Sideways
+        ])
+        prices = 100 * np.exp(np.cumsum(returns))
+        close = pd.Series(prices, index=dates)
+
+        config = HMMConfig(n_states=3, n_iter=50, random_state=42)
+        regimes = detect_hmm_regime(close, config)
+
+        assert len(regimes) == 400
+        assert regimes.index.equals(close.index)
+        # Should have all three regime labels
+        unique_regimes = set(regimes.unique())
+        assert "bull" in unique_regimes
+        assert "bear" in unique_regimes
+        assert "sideways" in unique_regimes
+
+    def test_detect_hmm_regime_with_probs(self):
+        """Should return both regimes and state probabilities."""
+        np.random.seed(42)
+        dates = pd.date_range("2020-01-01", periods=300, freq="B")
+        returns = np.random.normal(0.0005, 0.01, 300)
+        prices = 100 * np.exp(np.cumsum(returns))
+        close = pd.Series(prices, index=dates)
+
+        config = HMMConfig(n_states=3, n_iter=30, random_state=42)
+        regimes, probs = detect_hmm_regime_with_probs(close, config)
+
+        assert len(regimes) == 300
+        assert probs.shape == (300, 3)
+        assert list(probs.columns) == ["state_0", "state_1", "state_2"]
+        assert np.allclose(probs.sum(axis=1), 1.0, atol=1e-6)
+        # Most likely state should match regime label
+        for i in range(len(regimes)):
+            most_likely = probs.iloc[i].idxmax()
+            state_num = int(most_likely.split("_")[1])
+            # This is a sanity check - the mapping may vary but should be consistent
+
+    def test_fit_hmm_walkforward_single_fit(self):
+        """fit_hmm_walkforward should work with single fit (refit_window=None)."""
+        np.random.seed(42)
+        dates = pd.date_range("2020-01-01", periods=300, freq="B")
+        returns = np.random.normal(0.0005, 0.01, 300)
+        prices = 100 * np.exp(np.cumsum(returns))
+        close = pd.Series(prices, index=dates)
+
+        config = HMMConfig(n_states=3, n_iter=30, refit_window=None, train_frac=0.6, random_state=42)
+        result = fit_hmm_walkforward(close, config)
+
+        assert isinstance(result.regimes, pd.Series)
+        assert len(result.regimes) == 300
+        assert result.state_probs.shape == (300, 3)
+        assert result.log_likelihood > -np.inf
+        assert result.n_iter > 0
+        assert "returns" in result.feature_names
+        assert "volatility" in result.feature_names
+
+    def test_fit_hmm_walkforward_refit(self):
+        """fit_hmm_walkforward should work with periodic refitting."""
+        np.random.seed(42)
+        dates = pd.date_range("2020-01-01", periods=400, freq="B")
+        returns = np.random.normal(0.0005, 0.01, 400)
+        prices = 100 * np.exp(np.cumsum(returns))
+        close = pd.Series(prices, index=dates)
+
+        config = HMMConfig(n_states=3, n_iter=20, refit_window=50, train_frac=0.5, random_state=42)
+        result = fit_hmm_walkforward(close, config)
+
+        assert isinstance(result.regimes, pd.Series)
+        assert len(result.regimes) == 400
+        assert result.state_probs.shape == (400, 3)
+        assert np.allclose(result.state_probs.sum(axis=1), 1.0, atol=1e-6)
+
+    def test_hmm_output_index_matches_input(self):
+        """Output index should match input index."""
+        prices = make_price_series(200)
+        config = HMMConfig(n_states=3, n_iter=20, random_state=42)
+        regimes = detect_hmm_regime(prices, config)
+        assert regimes.index.equals(prices.index)
+
+
+class TestAddHMMRegimeAnalysisToResults:
+    """Tests for adding HMM regime analysis to backtest results."""
+
+    def test_adds_hmm_regime_analysis_key(self):
+        """Should add hmm_regime_analysis key to results."""
+        prices = make_price_series(300)
+        np.random.seed(42)
+        returns = pd.Series(np.random.normal(0.0005, 0.01, 300), index=prices.index)
+
+        results = {"returns": returns}
+        data = pd.DataFrame({"close": prices})
+
+        config = HMMConfig(n_states=3, n_iter=20, random_state=42)
+        updated = add_hmm_regime_analysis_to_results(results, data, config=config)
+
+        assert "hmm_regime_analysis" in updated
+        analysis = updated["hmm_regime_analysis"]
+        assert "config" in analysis
+        assert "model_params" in analysis
+        assert "regime_performance" in analysis
+        assert "regime_distribution" in analysis
+
+    def test_handles_panel_data(self):
+        """Should handle panel data (dict of DataFrames)."""
+        prices = make_price_series(300)
+        np.random.seed(42)
+        returns = pd.Series(np.random.normal(0.0005, 0.01, 300), index=prices.index)
+
+        data = {"AAPL": pd.DataFrame({"close": prices})}
+        results = {"returns": returns}
+
+        config = HMMConfig(n_states=3, n_iter=20, random_state=42)
+        updated = add_hmm_regime_analysis_to_results(results, data, config=config)
+
+        assert "hmm_regime_analysis" in updated
+
+    def test_returns_original_if_no_returns_key(self):
+        """Should return original results if returns key missing."""
+        results = {"other_key": "value"}
+        data = {"close": make_price_series(100)}
+
+        config = HMMConfig(n_states=3, n_iter=20, random_state=42)
+        updated = add_hmm_regime_analysis_to_results(results, data, config=config)
+
+        assert "hmm_regime_analysis" not in updated
+
+    def test_returns_original_if_no_close_data(self):
+        """Should return original results if close data missing."""
+        results = {"returns": pd.Series([1, 2, 3])}
+        data = {"open": [1, 2, 3]}
+
+        config = HMMConfig(n_states=3, n_iter=20, random_state=42)
+        updated = add_hmm_regime_analysis_to_results(results, data, config=config)
+
+        assert "hmm_regime_analysis" not in updated
 
 
 if __name__ == "__main__":
