@@ -1515,87 +1515,10 @@ def test_book_regime_aware_linear_notional_weighted_matches_closed_form():
 
 
 # ---------------------------------------------------------------------------
-# Registry
+# Regime-aware NOTIONAL-WEIGHTED market-impact model: closed-form formula pin
+# (single-asset regime-aware + notional-weighted combined)
 # ---------------------------------------------------------------------------
 
-TEST_REGISTRY = [
-    ("test_borrow_cost_reduces_short_returns", test_borrow_cost_reduces_short_returns),
-    ("test_borrow_cost_no_effect_on_long_or_flat", test_borrow_cost_no_effect_on_long_or_flat),
-    ("test_funding_cost_reduces_leveraged_returns", test_funding_cost_reduces_leveraged_returns),
-    ("test_funding_cost_no_effect_at_or_below_1x", test_funding_cost_no_effect_at_or_below_1x),
-    ("test_commission_and_slippage_reduce_returns_with_turnover", test_commission_and_slippage_reduce_returns_with_turnover),
-    ("test_zero_turnover_pays_no_commission_after_entry", test_zero_turnover_pays_no_commission_after_entry),
-    ("test_market_impact_is_live", test_market_impact_is_live),
-    ("test_market_impact_monotone_in_coefficient", test_market_impact_monotone_in_coefficient),
-    ("test_fill_rate_scales_positions_and_costs_elementwise", test_fill_rate_scales_positions_and_costs_elementwise),
-    ("test_deterministic_given_identical_inputs", test_deterministic_given_identical_inputs),
-    ("test_book_pricing_matches_book_pnl_minus_independently_computed_costs",
-     test_book_pricing_matches_book_pnl_minus_independently_computed_costs),
-    ("test_book_pricing_charges_gross_turnover_on_rotation_in_place",
-     test_book_pricing_charges_gross_turnover_on_rotation_in_place),
-    ("test_book_borrow_cost_charges_short_legs", test_book_borrow_cost_charges_short_legs),
-    ("test_book_funding_cost_charges_gross_exposure_beyond_1x",
-     test_book_funding_cost_charges_gross_exposure_beyond_1x),
-    ("test_book_market_impact_live_and_monotone", test_book_market_impact_live_and_monotone),
-    ("test_book_pricing_deterministic_given_identical_inputs",
-     test_book_pricing_deterministic_given_identical_inputs),
-    ("test_market_impact_reduces_returns_market_neutral_pairs_portfolio",
-     test_market_impact_reduces_returns_market_neutral_pairs_portfolio),
-    ("test_dict_panel_constant_position_pays_no_per_bar_impact_after_entry",
-     test_dict_panel_constant_position_pays_no_per_bar_impact_after_entry),
-    ("test_market_impact_sqrt_model_differs_from_linear_single_asset",
-     test_market_impact_sqrt_model_differs_from_linear_single_asset),
-    ("test_sqrt_market_impact_matches_closed_form",
-     test_sqrt_market_impact_matches_closed_form),
-    ("test_single_asset_notional_weighted_sqrt_matches_closed_form",
-     test_single_asset_notional_weighted_sqrt_matches_closed_form),
-    ("test_panel_sqrt_market_impact_matches_closed_form",
-     test_panel_sqrt_market_impact_matches_closed_form),
-    ("test_book_sqrt_market_impact_matches_closed_form",
-     test_book_sqrt_market_impact_matches_closed_form),
-    ("test_single_asset_regime_aware_sqrt_matches_closed_form",
-     test_single_asset_regime_aware_sqrt_matches_closed_form),
-    ("test_panel_regime_aware_sqrt_matches_closed_form",
-     test_panel_regime_aware_sqrt_matches_closed_form),
-    ("test_book_regime_aware_sqrt_matches_closed_form",
-     test_book_regime_aware_sqrt_matches_closed_form),
-    ("test_single_asset_regime_aware_linear_matches_closed_form",
-     test_single_asset_regime_aware_linear_matches_closed_form),
-    ("test_panel_regime_aware_linear_matches_closed_form",
-     test_panel_regime_aware_linear_matches_closed_form),
-    ("test_book_regime_aware_linear_matches_closed_form",
-     test_book_regime_aware_linear_matches_closed_form),
-    ("test_single_asset_regime_aware_sqrt_notional_weighted_matches_closed_form",
-     test_single_asset_regime_aware_sqrt_notional_weighted_matches_closed_form),
-    ("test_single_asset_regime_aware_linear_notional_weighted_matches_closed_form",
-     test_single_asset_regime_aware_linear_notional_weighted_matches_closed_form),
-    ("test_panel_regime_aware_sqrt_notional_weighted_matches_closed_form",
-     test_panel_regime_aware_sqrt_notional_weighted_matches_closed_form),
-    ("test_panel_regime_aware_linear_notional_weighted_matches_closed_form",
-     test_panel_regime_aware_linear_notional_weighted_matches_closed_form),
-    ("test_book_regime_aware_sqrt_notional_weighted_matches_closed_form",
-     test_book_regime_aware_sqrt_notional_weighted_matches_closed_form),
-    ("test_book_regime_aware_linear_notional_weighted_matches_closed_form",
-     test_book_regime_aware_linear_notional_weighted_matches_closed_form),
-]
-
-
-def main() -> int:
-    failures = 0
-    for name, fn in TEST_REGISTRY:
-        try:
-            fn()
-            print(f"PASS  {name}")
-        except Exception:
-            failures += 1
-            print(f"FAIL  {name}")
-            traceback.print_exc()
-    print(f"\n{len(TEST_REGISTRY) - failures}/{len(TEST_REGISTRY)} tests passed")
-    return 1 if failures else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
 def test_single_asset_notional_weighted_regime_aware_sqrt_matches_closed_form():
     """The single-asset (``is_panel=False``) square-root impact under
     ``notional-weighted`` aggregation with regime-aware coefficients must equal
@@ -1711,3 +1634,91 @@ def test_single_asset_notional_weighted_regime_aware_linear_matches_closed_form(
         f"unknown regime must fall back to the base coefficient: "
         f"got {fallback.values}, expected {expected_fallback.values}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Registry
+# ---------------------------------------------------------------------------
+
+TEST_REGISTRY = [
+    ("test_borrow_cost_reduces_short_returns", test_borrow_cost_reduces_short_returns),
+    ("test_borrow_cost_no_effect_on_long_or_flat", test_borrow_cost_no_effect_on_long_or_flat),
+    ("test_funding_cost_reduces_leveraged_returns", test_funding_cost_reduces_leveraged_returns),
+    ("test_funding_cost_no_effect_at_or_below_1x", test_funding_cost_no_effect_at_or_below_1x),
+    ("test_commission_and_slippage_reduce_returns_with_turnover", test_commission_and_slippage_reduce_returns_with_turnover),
+    ("test_zero_turnover_pays_no_commission_after_entry", test_zero_turnover_pays_no_commission_after_entry),
+    ("test_market_impact_is_live", test_market_impact_is_live),
+    ("test_market_impact_monotone_in_coefficient", test_market_impact_monotone_in_coefficient),
+    ("test_fill_rate_scales_positions_and_costs_elementwise", test_fill_rate_scales_positions_and_costs_elementwise),
+    ("test_deterministic_given_identical_inputs", test_deterministic_given_identical_inputs),
+    ("test_book_pricing_matches_book_pnl_minus_independently_computed_costs",
+     test_book_pricing_matches_book_pnl_minus_independently_computed_costs),
+    ("test_book_pricing_charges_gross_turnover_on_rotation_in_place",
+     test_book_pricing_charges_gross_turnover_on_rotation_in_place),
+    ("test_book_borrow_cost_charges_short_legs", test_book_borrow_cost_charges_short_legs),
+    ("test_book_funding_cost_charges_gross_exposure_beyond_1x",
+     test_book_funding_cost_charges_gross_exposure_beyond_1x),
+    ("test_book_market_impact_live_and_monotone", test_book_market_impact_live_and_monotone),
+    ("test_book_pricing_deterministic_given_identical_inputs",
+     test_book_pricing_deterministic_given_identical_inputs),
+    ("test_market_impact_reduces_returns_market_neutral_pairs_portfolio",
+     test_market_impact_reduces_returns_market_neutral_pairs_portfolio),
+    ("test_dict_panel_constant_position_pays_no_per_bar_impact_after_entry",
+     test_dict_panel_constant_position_pays_no_per_bar_impact_after_entry),
+    ("test_market_impact_sqrt_model_differs_from_linear_single_asset",
+     test_market_impact_sqrt_model_differs_from_linear_single_asset),
+    ("test_sqrt_market_impact_matches_closed_form",
+     test_sqrt_market_impact_matches_closed_form),
+    ("test_single_asset_notional_weighted_sqrt_matches_closed_form",
+     test_single_asset_notional_weighted_sqrt_matches_closed_form),
+    ("test_panel_sqrt_market_impact_matches_closed_form",
+     test_panel_sqrt_market_impact_matches_closed_form),
+    ("test_book_sqrt_market_impact_matches_closed_form",
+     test_book_sqrt_market_impact_matches_closed_form),
+    ("test_single_asset_regime_aware_sqrt_matches_closed_form",
+     test_single_asset_regime_aware_sqrt_matches_closed_form),
+    ("test_panel_regime_aware_sqrt_matches_closed_form",
+     test_panel_regime_aware_sqrt_matches_closed_form),
+    ("test_book_regime_aware_sqrt_matches_closed_form",
+     test_book_regime_aware_sqrt_matches_closed_form),
+    ("test_single_asset_regime_aware_linear_matches_closed_form",
+     test_single_asset_regime_aware_linear_matches_closed_form),
+    ("test_panel_regime_aware_linear_matches_closed_form",
+     test_panel_regime_aware_linear_matches_closed_form),
+    ("test_book_regime_aware_linear_matches_closed_form",
+     test_book_regime_aware_linear_matches_closed_form),
+    ("test_single_asset_regime_aware_sqrt_notional_weighted_matches_closed_form",
+     test_single_asset_regime_aware_sqrt_notional_weighted_matches_closed_form),
+    ("test_single_asset_regime_aware_linear_notional_weighted_matches_closed_form",
+     test_single_asset_regime_aware_linear_notional_weighted_matches_closed_form),
+    ("test_panel_regime_aware_sqrt_notional_weighted_matches_closed_form",
+     test_panel_regime_aware_sqrt_notional_weighted_matches_closed_form),
+    ("test_panel_regime_aware_linear_notional_weighted_matches_closed_form",
+     test_panel_regime_aware_linear_notional_weighted_matches_closed_form),
+    ("test_book_regime_aware_sqrt_notional_weighted_matches_closed_form",
+     test_book_regime_aware_sqrt_notional_weighted_matches_closed_form),
+("test_book_regime_aware_linear_notional_weighted_matches_closed_form",
+      test_book_regime_aware_linear_notional_weighted_matches_closed_form),
+    ("test_single_asset_notional_weighted_regime_aware_sqrt_matches_closed_form",
+      test_single_asset_notional_weighted_regime_aware_sqrt_matches_closed_form),
+    ("test_single_asset_notional_weighted_regime_aware_linear_matches_closed_form",
+      test_single_asset_notional_weighted_regime_aware_linear_matches_closed_form),
+]
+
+
+def main() -> int:
+    failures = 0
+    for name, fn in TEST_REGISTRY:
+        try:
+            fn()
+            print(f"PASS  {name}")
+        except Exception:
+            failures += 1
+            print(f"FAIL  {name}")
+            traceback.print_exc()
+    print(f"\n{len(TEST_REGISTRY) - failures}/{len(TEST_REGISTRY)} tests passed")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
