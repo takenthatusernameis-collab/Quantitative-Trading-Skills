@@ -1596,3 +1596,118 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+def test_single_asset_notional_weighted_regime_aware_sqrt_matches_closed_form():
+    """The single-asset (``is_panel=False``) square-root impact under
+    ``notional-weighted`` aggregation with regime-aware coefficients must equal
+    ``sqrt(participation) * period_impact_coeff * position_changes``.
+
+    Pins the combined ``is_panel=False`` + ``impact_aggregation="notional-weighted"``
+    + ``regimes``/``regime_impact_coefficients`` branch, where the concession rate
+    is scaled by a per-period regime coefficient and then charged as a fraction of
+    equity (rate * |d|). Mirrors the existing single-asset regime-aware and
+    notional-weighted tests but exercises both together. Unknown regime labels must
+    fall back to the base ``impact_coefficient``.
+    """
+    periods = 6
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    close = pd.Series([100.0, 101.0, 102.0, 103.0, 104.0, 105.0], index=dates)
+    volume = pd.Series(np.full(periods, 1_000_000.0), index=dates)
+    raw_returns = pd.Series(np.zeros(periods), index=dates)
+    position_changes = pd.Series([0.0, 1.0, 0.0, 0.5, 0.0, 1.0], index=dates)
+    regimes = pd.Series(["hi", "lo", "hi", "hi", "lo", "hi"], index=dates)
+    regime_impact_coefficients = {"hi": 0.8, "lo": 0.2}
+
+    coefficient = 0.5
+    adv_window = 20
+    initial_capital = 100_000.0
+
+    result = market_impact_cost(
+        position_changes, raw_returns, close, volume,
+        is_panel=False, impact_coefficient=coefficient,
+        adv_window=adv_window, initial_capital=initial_capital,
+        impact_model="sqrt", impact_aggregation="notional-weighted",
+        regimes=regimes, regime_impact_coefficients=regime_impact_coefficients,
+    )
+    assert result is not None, "notional-weighted regime-aware sqrt impact must be live for coefficient > 0"
+
+    equity = initial_capital * (1 + raw_returns).cumprod()
+    adv_notional = volume.rolling(window=adv_window, min_periods=1).mean() * close
+    participation = (position_changes * equity) / adv_notional
+    period_coeff = regimes.map(regime_impact_coefficients)
+    expected = np.sqrt(participation) * period_coeff * position_changes
+    assert np.allclose(result.values, expected.values, atol=1e-12), (
+        f"single-asset notional-weighted regime-aware sqrt impact must equal "
+        f"sqrt(participation)*regime_coeff*|d|: "
+        f"got {result.values}, expected {expected.values}"
+    )
+
+    unknown_regimes = pd.Series(["not_a_regime"] * periods, index=dates)
+    fallback = market_impact_cost(
+        position_changes, raw_returns, close, volume,
+        is_panel=False, impact_coefficient=coefficient,
+        adv_window=adv_window, initial_capital=initial_capital,
+        impact_model="sqrt", impact_aggregation="notional-weighted",
+        regimes=unknown_regimes, regime_impact_coefficients=regime_impact_coefficients,
+    )
+    expected_fallback = np.sqrt(participation) * coefficient * position_changes
+    assert np.allclose(fallback.values, expected_fallback.values, atol=1e-12), (
+        f"unknown regime must fall back to the base coefficient: "
+        f"got {fallback.values}, expected {expected_fallback.values}"
+    )
+
+
+def test_single_asset_notional_weighted_regime_aware_linear_matches_closed_form():
+    """The single-asset (``is_panel=False``) linear impact under
+    ``notional-weighted`` aggregation with regime-aware coefficients must equal
+    ``participation * period_impact_coeff * position_changes``.
+
+    Mirrors ``test_single_asset_notional_weighted_regime_aware_sqrt_matches_closed_form``
+    for the linear branch. Unknown regime labels must fall back to the base
+    ``impact_coefficient``.
+    """
+    periods = 6
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    close = pd.Series([100.0, 101.0, 102.0, 103.0, 104.0, 105.0], index=dates)
+    volume = pd.Series(np.full(periods, 1_000_000.0), index=dates)
+    raw_returns = pd.Series(np.zeros(periods), index=dates)
+    position_changes = pd.Series([0.0, 1.0, 0.0, 0.5, 0.0, 1.0], index=dates)
+    regimes = pd.Series(["hi", "lo", "hi", "hi", "lo", "hi"], index=dates)
+    regime_impact_coefficients = {"hi": 0.8, "lo": 0.2}
+
+    coefficient = 0.5
+    adv_window = 20
+    initial_capital = 100_000.0
+
+    result = market_impact_cost(
+        position_changes, raw_returns, close, volume,
+        is_panel=False, impact_coefficient=coefficient,
+        adv_window=adv_window, initial_capital=initial_capital,
+        impact_model="linear", impact_aggregation="notional-weighted",
+        regimes=regimes, regime_impact_coefficients=regime_impact_coefficients,
+    )
+    assert result is not None, "notional-weighted regime-aware linear impact must be live for coefficient > 0"
+
+    equity = initial_capital * (1 + raw_returns).cumprod()
+    adv_notional = volume.rolling(window=adv_window, min_periods=1).mean() * close
+    participation = (position_changes * equity) / adv_notional
+    period_coeff = regimes.map(regime_impact_coefficients)
+    expected = participation * period_coeff * position_changes
+    assert np.allclose(result.values, expected.values, atol=1e-12), (
+        f"single-asset notional-weighted regime-aware linear impact must equal "
+        f"participation*regime_coeff*|d|: "
+        f"got {result.values}, expected {expected.values}"
+    )
+
+    unknown_regimes = pd.Series(["not_a_regime"] * periods, index=dates)
+    fallback = market_impact_cost(
+        position_changes, raw_returns, close, volume,
+        is_panel=False, impact_coefficient=coefficient,
+        adv_window=adv_window, initial_capital=initial_capital,
+        impact_model="linear", impact_aggregation="notional-weighted",
+        regimes=unknown_regimes, regime_impact_coefficients=regime_impact_coefficients,
+    )
+    expected_fallback = participation * coefficient * position_changes
+    assert np.allclose(fallback.values, expected_fallback.values, atol=1e-12), (
+        f"unknown regime must fall back to the base coefficient: "
+        f"got {fallback.values}, expected {expected_fallback.values}"
+    )
