@@ -101,11 +101,11 @@ def test_root_simple_momentum_metrics_pinned_on_real_googl_window():
     metrics = result["metrics"]
 
     EXPECTED = {
-        "sharpe_ratio": 0.5143360018077565,
-        "total_return": 0.2072115709436657,
-        "benchmark_total_return": 0.2714240402506196,
-        "alpha": 0.040455858408182485,
-        "capacity": 457242.34985400003,
+        "sharpe_ratio": 1.9898930851896468,
+        "total_return": 0.7933945353378176,
+        "benchmark_total_return": 0.8997084290672288,
+        "alpha": 0.16164665456396723,
+        "capacity": 48697594.647033684,
     }
     for key, exp in EXPECTED.items():
         assert key in metrics, f"missing metric {key}"
@@ -118,16 +118,16 @@ def test_root_simple_momentum_metrics_pinned_on_real_googl_window():
     # Deflated Alpha Ratio (multiple-benchmark correction) pinned too.
     da = metrics["deflated_alpha"]
     assert da.get("n_benchmarks") == 2
-    assert abs(float(da["deflated_alpha_ratio"]) - 0.5462152222600346) <= REL_TOL
-    assert abs(float(da["p_value"]) - 0.4537847777399654) <= REL_TOL
+    assert abs(float(da["deflated_alpha_ratio"]) - 0.3004816555400691) <= REL_TOL
+    assert abs(float(da["p_value"]) - 0.6995183444599309) <= REL_TOL
 
     # Test resolution pinned.
     tr = metrics["test_resolution"]
     assert tr.get("alpha_status") == "resolvable"
-    assert abs(float(tr["min_detectable_alpha"]) - 0.18302207776218415) <= REL_TOL
+    assert abs(float(tr["min_detectable_alpha"]) - 0.5782326695296721) <= REL_TOL
     assert tr.get("alpha_beyond_plausible_bound") is True
     assert tr.get("plausible_max_annualized_alpha") == 0.1
-    assert tr.get("n_test_observations") == 502
+    assert tr.get("n_test_observations") == 301
     assert tr.get("n_benchmarks") == 2
 
 

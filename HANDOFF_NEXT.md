@@ -1,20 +1,39 @@
 # Handoff — next session
 
 ## Current state
-- `quant-regression-gate` job restored in `.github/workflows/validate-skills.yml` (HEAD lacked it). Working tree: **modified, uncommitted** (35 insertions). Details/evidence: `HANDOFF_SESSION98.md`.
+- Working tree: modified, 4 files (30 insertions / 30 deletions), all intended:
+  - `test_root_simple_momentum_cost_real_msft.py`
+  - `test_root_simple_momentum_cost_real_googl.py`
+  - `test_root_simple_momentum_real_msft.py`
+  - `test_root_simple_momentum_real_googl.py`
+- `skills/quantitative-backtesting/tests/` focused regression chunk: **32 passed** (romano_wolf, reality_check, reality_check_family_example).
+- Root regression-guard suite: **21 passed, 1 failed** (`python3 -m pytest test_root_*.py -q`).
+
+## What changed (this session)
+- Re-baselined stale exact-float pinned metrics in 4 root regression-guard files to match the regenerated committed real-market fixtures (2020–2025).
+- Root cause: commit `45db4fb` regenerated `real_market_data/*` (AAPL/GOOGL/MSFT/sample_benchmark/sample_ohlcv, 2010–2019 → 2020–2025) and updated docstrings but never re-baselined the pinned metrics. `run_backtest.py` and `simple_momentum_hypothesis.py` are unchanged — **not a backtest regression**.
+- Structural guards (costed < frictionless, capacity identical across cost settings, PIT/split controls) all pass, confirming the regenerated-fixture output is methodologically sound, not buggy. Re-baselining pins restores the guards' ability to catch silent cost-model / backtest-wiring changes without weakening any control.
 
 ## What was actually verified
-- Workflow YAML/structure OK: jobs `['validate', 'quant-regression-gate']`; push/pr paths include `skills/**` and `.github/workflows/validate-skills.yml`; gate `needs: validate`.
-- `git diff --check -- .github/workflows/validate-skills.yml` -> clean.
-- In `skills/quantitative-backtesting` with `PYTHONPATH=scripts` (Python 3.14.4, pytest 9.2.0):
-  - `python3 -m pytest tests/test_romano_wolf_stepdown.py tests/test_reality_check.py tests/test_reality_check_family_example.py -q` -> **32 passed in 24.02s**.
-  - `python3 -m pytest tests/test_walk_forward.py -k "family or main_registers" -q` -> **8 passed, 199 deselected in 2.62s**.
+- `test_root_simple_momentum_cost_real_msft.py`, `cost_real_googl.py`, `real_msft.py`, `real_googl.py` now pass (exact-float pins + 1e-3 rel tolerance).
+- `test_root_scripts_pit_bias_controls.py` (9 structural guards) passes; `test_root_debug_scripts.py` passes.
+- Working tree contains only the 4 intended edits; `__pycache__`/`.pytest_cache` untracked/ignored.
+- `python3 simple_momentum_hypothesis.py` (synthetic fixture) → exit 0, VERDICT: NOT SUPPORTED (pre-registered falsification on synthetic fixture).
 
 ## What remains unresolved
-- Uncommitted/unpushed; first GitHub Actions run for `quant-regression-gate` not observed. Full quant suite not in CI (timeouts). Max-t bands asymptotic on short samples; `reality_check_test` has no per-strategy CIs.
+- `test_root_simple_momentum_real_aapl.py::test_root_simple_momentum_metrics_pinned_on_real_aapl_window` still **FAILS**: it asserts `verdict == "SUPPORTED"`, but the regenerated 2020–2025 AAPL fixture honestly yields `NOT SUPPORTED` (deflated-alpha criterion fails because 301 test observations can't resolve alpha beyond the plausibility bound — the script itself notes this measures sample size, not the strategy).
+  - **Do not force the verdict to SUPPORTED** — that would be tuning to force an outcome, violating the test's own no-tuning rule and the mission's honesty principle.
+  - Bounded fix (separate task): either (a) re-baseline the pins AND change the verdict assertion to reflect the honest `NOT SUPPORTED` outcome (with a comment), or (b) convert this pinned test to a structural guard like `test_root_scripts_pit_bias_controls.py` (verdict deliberately not asserted).
+- Full single-invocation quant gate (`pytest skills/quantitative-backtesting/tests/ -q -n 4`) still cannot complete in-session (~60+ min env timeout); last known result 1196 passed / 1 failed (artifact-mutation test, resolved since).
 
 ## Approaches already tried / failed (do not repeat unchanged)
-- Do not run full `tests/` in CI (timeouts). Do not use a single `-k` across all gate files. Do not merge `validate` and `quant-regression-gate`. No repeated failures this session.
+- None this session; investigation was conclusive on first pass (stale pins after fixture regen).
 
-## One precise next task
-When explicitly asked to commit, stage and commit `.github/workflows/validate-skills.yml` (and desired handoff files) with message like `ci: add fast quant regression gate`, push, and monitor the first GitHub Actions run to confirm `quant-regression-gate` passes on `ubuntu-latest` (compare to local 32 passed + 8 passed, 199 deselected). If CI fails, inspect logs and apply the smallest evidence-based fix.
+## One precise next task (for the next agent)
+1. Run the full quant gate in CI / adequate budget: `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4`, then `git checkout -- .` to restore any timestamp-only drift and keep `git status` clean.
+   - If green (EXIT 0): baseline fully confirmed (1197/1197). Then select the next bounded methodological gap (coverage is extensive across all registered strategies) — e.g., regime-aware cost models, capacity-aware position sizing, alternative validation schemes, multi-asset factor construction — rather than another strategy falsification test.
+   - If a test fails: isolate with evidence, fix minimally, rerun focused tests, re-attempt the full gate.
+2. Resolve the `test_root_simple_momentum_real_aapl.py` pinned-verdict failure (option a or b above), re-run `test_root_*.py`, confirm 22/22.
+3. Do not commit unless explicitly asked. Keep changes minimal and reversible.
+
+(End of file)

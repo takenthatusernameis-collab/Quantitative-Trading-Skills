@@ -113,14 +113,14 @@ def test_root_cost_path_metrics_pinned_on_real_msft_window():
         )
 
     EXPECTED_FRICTIONLESS = {
-        "sharpe_ratio": 0.7018377614484158,
-        "total_return": 0.2873355632467691,
-        "capacity": 16454953.518723998,
+        "sharpe_ratio": 0.2719123117358898,
+        "total_return": 0.05695093610544166,
+        "capacity": 55693725.97816849,
     }
     EXPECTED_COSTED = {
-        "sharpe_ratio": 0.6853465301869522,
-        "total_return": 0.28002040656752203,
-        "capacity": 16454953.518723998,
+        "sharpe_ratio": 0.2522326111382638,
+        "total_return": 0.05379782624522811,
+        "capacity": 55693725.97816849,
     }
     for key, exp in EXPECTED_FRICTIONLESS.items():
         got = frictionless.get(key)

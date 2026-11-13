@@ -113,14 +113,14 @@ def test_root_cost_path_metrics_pinned_on_real_googl_window():
         )
 
     EXPECTED_FRICTIONLESS = {
-        "sharpe_ratio": 0.5289106671907221,
-        "total_return": 0.21336664633023106,
-        "capacity": 457242.34985400003,
+        "sharpe_ratio": 1.9950953186420326,
+        "total_return": 0.7960957730813361,
+        "capacity": 48697594.647033684,
     }
     EXPECTED_COSTED = {
-        "sharpe_ratio": 0.5143360018077565,
-        "total_return": 0.2072115709436657,
-        "capacity": 457242.34985400003,
+        "sharpe_ratio": 1.9898930851896468,
+        "total_return": 0.7933945353378176,
+        "capacity": 48697594.647033684,
     }
     for key, exp in EXPECTED_FRICTIONLESS.items():
         got = frictionless.get(key)
