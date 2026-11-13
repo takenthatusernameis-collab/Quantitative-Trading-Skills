@@ -565,6 +565,50 @@ def test_sqrt_market_impact_matches_closed_form():
     )
 
 
+def test_single_asset_notional_weighted_sqrt_matches_closed_form():
+    """The single-asset (``is_panel=False``) square-root impact under
+    ``notional-weighted`` aggregation must equal the closed-form
+    ``coefficient * sqrt(participation) * |d|``.
+
+    ``test_sqrt_market_impact_matches_closed_form`` pins only the default
+    "panel" aggregation for a single asset, where ``market_impact = rate``
+    (the price concession rate itself). Under ``notional-weighted`` the cost
+    is charged as a fraction of equity: the rate times the fraction of equity
+    traded (|d|), i.e. ``rate * position_changes``. A regression that drops
+    the ``|d|`` factor, or that applies the panel mean instead, would silently
+    over/under-state single-asset cost. This pins the formula on the same
+    constant-volume, zero-return frame where the closed form is exact.
+    """
+    periods = 6
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    close = pd.Series([100.0, 101.0, 102.0, 103.0, 104.0, 105.0], index=dates)
+    volume = pd.Series(np.full(periods, 1_000_000.0), index=dates)
+    raw_returns = pd.Series(np.zeros(periods), index=dates)
+    position_changes = pd.Series([0.0, 1.0, 0.0, 0.5, 0.0, 1.0], index=dates)
+
+    coefficient = 0.5
+    initial_capital = 100_000.0
+    adv_window = 20
+
+    result = market_impact_cost(
+        position_changes, raw_returns, close, volume,
+        is_panel=False, impact_coefficient=coefficient,
+        adv_window=adv_window, initial_capital=initial_capital,
+        impact_model="sqrt", impact_aggregation="notional-weighted",
+    )
+    assert result is not None, "single-asset notional-weighted sqrt impact must be live for coefficient > 0"
+
+    equity = initial_capital * (1 + raw_returns).cumprod()
+    adv_notional = volume.rolling(window=adv_window, min_periods=1).mean() * close
+    participation = (position_changes * equity) / adv_notional
+    expected = coefficient * np.sqrt(participation) * position_changes
+    assert np.allclose(result.values, expected.values, atol=1e-12), (
+        f"single-asset notional-weighted sqrt impact must equal "
+        f"coeff*sqrt(participation)*|d|: "
+        f"got {result.values}, expected {expected.values}"
+    )
+
+
 def test_panel_sqrt_market_impact_matches_closed_form():
     """The panel (``is_panel=True``) square-root impact must equal the
     equal-weighted mean over constituents of
@@ -753,6 +797,8 @@ TEST_REGISTRY = [
      test_market_impact_sqrt_model_differs_from_linear_single_asset),
     ("test_sqrt_market_impact_matches_closed_form",
      test_sqrt_market_impact_matches_closed_form),
+    ("test_single_asset_notional_weighted_sqrt_matches_closed_form",
+     test_single_asset_notional_weighted_sqrt_matches_closed_form),
     ("test_panel_sqrt_market_impact_matches_closed_form",
      test_panel_sqrt_market_impact_matches_closed_form),
     ("test_book_sqrt_market_impact_matches_closed_form",
