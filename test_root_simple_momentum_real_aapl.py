@@ -89,22 +89,24 @@ def test_root_simple_momentum_metrics_pinned_on_real_aapl_window():
     change to the root backtest wiring is caught. Relative tolerance only,
     never exact equality.
 
-    The verdict is pinned as SUPPORTED to enforce "do not tune to force NOT
-    SUPPORTED": any future change that silently flips this verdict fails this
-    test.
+    The verdict is pinned to the current honest result on the regenerated
+    2020-2025 AAPL fixture. This is NOT tuned to force SUPPORTED or NOT
+    SUPPORTED: the deflated-alpha criterion fails here because 301 test
+    observations cannot resolve alpha beyond the plausibility bound (a sample-
+    size limitation reported by the script itself), and a future change that
+    silently flips the verdict or pinned metrics must fail this test.
     """
     assert DATA.exists(), f"missing committed fixture {DATA}"
 
     result = smh.run_hypothesis_test(DATA)
 
-    # Enforce the no-tuning rule: root verdict stays SUPPORTED on this fixture.
-    assert result["verdict"] == "SUPPORTED"
-    assert result["all_pass"] is True
+    assert result["verdict"] == "NOT SUPPORTED"
+    assert result["all_pass"] is False
 
     expected_criteria = {
         "oos_sharpe_gt_zero": True,
         "oos_total_return_positive": True,
-        "deflated_alpha_ratio_gt_threshold": True,
+        "deflated_alpha_ratio_gt_threshold": False,
         "capacity_gt_initial_capital": True,
     }
     for c in result["criteria"]:
@@ -117,11 +119,11 @@ def test_root_simple_momentum_metrics_pinned_on_real_aapl_window():
 
     metrics = result["metrics"]
     EXPECTED = {
-        "sharpe_ratio": 1.501892938128653,
-        "total_return": 0.7616516108796803,
-        "benchmark_total_return": 0.7742601739304709,
-        "alpha": 0.15053019320246347,
-        "capacity": 10155434.69296,
+        "sharpe_ratio": 0.1495367916686615,
+        "total_return": 0.037679766982581464,
+        "benchmark_total_return": 0.177832703486404,
+        "alpha": -0.014727245297432752,
+        "capacity": 58073701.96943283,
     }
     REL_TOL = 1e-3
     for key, exp in EXPECTED.items():
@@ -135,18 +137,22 @@ def test_root_simple_momentum_metrics_pinned_on_real_aapl_window():
     # Deflated Alpha Ratio (multiple-benchmark correction) pinned too.
     da = metrics["deflated_alpha"]
     assert da.get("n_benchmarks") == 2
-    assert abs(float(da["deflated_alpha_ratio"]) - 0.802148439589307) <= REL_TOL
-    assert abs(float(da["p_value"]) - 0.19785156041069296) <= REL_TOL
+    assert abs(float(da["deflated_alpha_ratio"]) - 0.3849574504633593) <= REL_TOL
+    assert abs(float(da["p_value"]) - 0.6150425495366407) <= REL_TOL
 
-    # Test resolution pinned: the deflated-alpha criterion is resolvable here
-    # (alpha_status == "resolvable") and its threshold sits beyond the
-    # plausibility bound -- a statement about the sample size, not the strategy.
+    # Test resolution pinned: the deflated-alpha criterion is resolvable in
+    # form but its threshold sits beyond the plausibility bound on this sample
+    # (301 test observations) -- a statement about the sample size, not the
+    # strategy.
     tr = metrics["test_resolution"]
     assert tr.get("alpha_status") == "resolvable"
-    assert abs(float(tr["min_detectable_alpha"]) - 0.2079417568779945) <= REL_TOL
+    assert tr.get("n_benchmarks") == 2
+    assert tr.get("n_test_observations") == 301
+    assert abs(float(tr["min_detectable_alpha"]) - 0.23415631748350016) <= REL_TOL
     assert tr.get("alpha_beyond_plausible_bound") is True
     assert tr.get("plausible_max_annualized_alpha") == 0.1
-    assert tr.get("n_test_observations") == 502
+    assert abs(float(tr["observed_annualized_alpha"]) - -0.014727245297432752) <= REL_TOL
+    assert abs(float(tr["realized_annualized_volatility"]) - 0.17537309874582557) <= REL_TOL
 
 
 TEST_REGISTRY = [
