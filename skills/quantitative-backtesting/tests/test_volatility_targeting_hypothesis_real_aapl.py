@@ -7,12 +7,12 @@ advertised costs (3 bps round-trip) and the two weak falsification criteria:
 oos_sharpe > 0 and oos_total_return > 0 (net of costs).
 
 METHODOLOGICAL FINDING (committed fixtures only, not evidence about any market):
-volatility targeting beats a zero baseline (Sharpe 0.77, return 47.4% net of
+volatility targeting beats a zero baseline (Sharpe 0.5000, return 16.10% net of
 3bp round-trip costs), so the weak two-criterion hypothesis is SUPPORTED.
 This is consistent with the benchmark-aware guard
 (test_volatility_targeting_benchmark_aware_real_aapl.py), which records NOT
-SUPPORTED: the strategy does not beat buy-and-hold AAPL (return 47.4% vs
-77.4%) and neither the benchmark alpha nor the Deflated Sharpe p-value is
+SUPPORTED: the strategy does not beat buy-and-hold AAPL (return 16.10% vs
+17.78%) and neither the benchmark alpha nor the Deflated Sharpe p-value is
 significant. The two verdicts are reported honestly -- weak-criterion support
 vs a zero baseline does not imply benchmark-beating performance.
 
@@ -93,8 +93,8 @@ def test_hypothesis_metrics_pinned_on_aapl_real_window():
 
     observed = result.get("observed") or {}
     EXPECTED = {
-        "sharpe_ratio": 0.7710596325955302,
-        "total_return": 0.4736842323382433,
+        "sharpe_ratio": 0.5000125402775002,
+        "total_return": 0.16104626397549926,
         "benchmark_total_return": None,
         "benchmark_alpha": None,
         "benchmark_alpha_pvalue": None,

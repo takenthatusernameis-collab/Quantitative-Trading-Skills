@@ -8,7 +8,7 @@ round-trip costs on the held-out test split. Pins observed metrics (regression
 guard, relative tolerance, never exact equality).
 
 Honest outcome on this committed window: MACD does not beat a zero baseline
-(Sharpe 0.0557, return -0.13% net of 3bp costs) so the weak-criterion verdict is
+(Sharpe -1.1718, return -34.41% net of 3bp costs) so the weak-criterion verdict is
 NOT SUPPORTED. This is consistent with the benchmark-aware guard
 (test_macd_benchmark_aware_real_aapl.py), which also records NOT SUPPORTED. This
 test records the weak-criterion outcome honestly and does not claim
@@ -34,8 +34,8 @@ REL_TOL = 1e-3
 # Pinned to the committed AAPL fixture via run_backtest.py (test split,
 # 3bp round-trip). Regression guard only -- never exact equality.
 EXPECTED = {
-    "sharpe_ratio": 0.055681981432280425,
-    "total_return": -0.0013037799286792495,
+    "sharpe_ratio": -1.1717750623626866,
+    "total_return": -0.34413777065367634,
 }
 
 

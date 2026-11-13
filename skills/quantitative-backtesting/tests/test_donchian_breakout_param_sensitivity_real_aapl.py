@@ -9,14 +9,15 @@ change to the backtest numbers is caught.
 
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
 Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
-Donchian breakout verdict is SUPPORTED across all six pre-registered parameter
-settings on this window, but the stronger benchmark-aware guard
+Donchian breakout verdict is mixed across the six pre-registered parameter
+settings on this window: the advertised (20, 10) setting is SUPPORTED but the
+shorter (10, 5) setting is NOT SUPPORTED, so the verdict flips across the
+grid. The stronger benchmark-aware guard
 (test_donchian_breakout_benchmark_aware_real_aapl.py) records NOT SUPPORTED
 for the advertised setting when comparing against buy-and-hold AAPL with
-Deflated Sharpe correction (does not beat benchmark with multiple-testing
-correction). This test records the weak-criterion outcome honestly and does not
-claim profitability; benchmark-aware comparison is required and robustness
-must be evaluated across both criteria.
+Deflated Sharpe correction. This test records the weak-criterion outcome
+honestly and does not claim profitability; benchmark-aware comparison is
+required and robustness must be evaluated across both criteria.
 
 Offline, committed fixtures only; no live network.
 """
@@ -66,28 +67,28 @@ def test_param_sensitivity_runs_on_aapl_real_window_donchian_breakout():
     # to the backtest numbers is caught. Compared with a relative tolerance.
     EXPECTED_METRICS = {
         (20, 10): {
-            "sharpe_ratio": 0.8389231327490344,
-            "total_return": 0.4881242103821919,
+            "sharpe_ratio": 0.07917778255250124,
+            "total_return": 0.009550335581158587,
         },
         (10, 5): {
-            "sharpe_ratio": 0.8436202792136674,
-            "total_return": 0.4325886851198093,
+            "sharpe_ratio": -0.14735336599507975,
+            "total_return": -0.06269088693984548,
         },
         (40, 20): {
-            "sharpe_ratio": 0.940719781871833,
-            "total_return": 0.52533206258575,
+            "sharpe_ratio": 0.2305379991985617,
+            "total_return": 0.05495943938550618,
         },
         (20, 5): {
-            "sharpe_ratio": 0.5999036848239977,
-            "total_return": 0.2720124382675799,
+            "sharpe_ratio": 0.32054250160631814,
+            "total_return": 0.08253259168555527,
         },
         (20, 20): {
-            "sharpe_ratio": 0.7966705947183883,
-            "total_return": 0.46041691005202945,
+            "sharpe_ratio": 0.12791022169955138,
+            "total_return": 0.016401781131697213,
         },
         (14, 7): {
-            "sharpe_ratio": 1.138140110895934,
-            "total_return": 0.70235327914856,
+            "sharpe_ratio": 0.07661670852633332,
+            "total_return": 0.008276276021433882,
         },
     }
     REL_TOL = 1e-3

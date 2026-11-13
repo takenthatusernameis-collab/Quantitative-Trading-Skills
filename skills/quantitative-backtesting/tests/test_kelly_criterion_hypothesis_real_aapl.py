@@ -8,13 +8,13 @@ round-trip costs on the held-out test split. Pins observed metrics (regression
 guard, relative tolerance, never exact equality).
 
 Honest outcome on this committed window: the Kelly overlay (standalone
-momentum fallback base) beats a zero baseline (Sharpe 0.7711, return 47.37%)
+momentum fallback base) beats a zero baseline (Sharpe 0.5000, return 16.10%)
 so the weak-criterion verdict is SUPPORTED. The stronger benchmark-aware
 guard (test_kelly_criterion_benchmark_aware_real_aapl.py) records NOT
-SUPPORTED: it does not beat buy-and-hold AAPL (77.43%), benchmark alpha is
-not significant (raw p 0.2175), and Deflated Sharpe p is not significant
-(p 0.7884 across 6 trials). This test records the weak-criterion outcome
-honestly and does not claim profitability.
+SUPPORTED: it does not beat buy-and-hold AAPL (17.78%), benchmark alpha is
+not significant, and Deflated Sharpe p is not significant across 6 trials.
+This test records the weak-criterion outcome honestly and does not claim
+profitability.
 
 Offline, committed fixtures only; no live network.
 """
@@ -36,8 +36,8 @@ REL_TOL = 1e-3
 # Pinned to the committed AAPL fixture via run_backtest.py (test split,
 # 3bp round-trip). Regression guard only — never exact equality.
 EXPECTED = {
-    "sharpe_ratio": 0.7710596325955302,
-    "total_return": 0.4736842323382433,
+    "sharpe_ratio": 0.5000125402775002,
+    "total_return": 0.16104626397549926,
 }
 
 

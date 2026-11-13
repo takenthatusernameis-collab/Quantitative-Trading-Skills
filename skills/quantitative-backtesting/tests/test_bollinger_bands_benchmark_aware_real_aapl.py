@@ -8,13 +8,13 @@ Ratio multiple-testing correction across the pre-registered parameter grid.
 
 METHODOLOGICAL FINDING (committed fixtures only, not evidence about any market):
 Bollinger Bands mean reversion on committed AAPL does NOT produce positive
-out-of-sample risk-adjusted returns (Sharpe -1.30 net of 3bp round-trip
-costs), does NOT beat buy-and-hold AAPL (return -42.55% vs benchmark 77.43%),
-the Deflated Sharpe p-value is not significant (p = 1.00 across 6 trials),
-though the raw benchmark alpha p-value happens to be significant (p = 0.02).
-Benchmark-aware verdict: NOT SUPPORTED. The elevated-cost sweep stays NOT
-SUPPORTED across tested cost levels (sensitivity noted, not a profitability
-claim).
+out-of-sample risk-adjusted returns (Sharpe -0.14 net of 3bp round-trip
+costs), does NOT beat buy-and-hold AAPL (return -5.05% vs benchmark +17.78%),
+the Deflated Sharpe p-value is not significant (p = 0.98 across 6 trials), and
+the raw benchmark alpha p-value is also not significant (p = 0.70). All four
+criteria FAIL. Benchmark-aware verdict: NOT SUPPORTED. The elevated-cost sweep
+stays NOT SUPPORTED across tested cost levels (sensitivity noted, not a
+profitability claim).
 
 This test pins the observed strategy + benchmark metrics (net of costs) as
 regression guards with relative tolerance so any silent change to the backtest
@@ -94,7 +94,7 @@ def test_benchmark_aware_metrics_pinned_on_aapl_real_window():
         "oos_sharpe_gt_zero": False,
         "oos_total_return_gt_benchmark": False,
         "deflated_sharpe_pvalue_lt_0.10": False,
-        "benchmark_alpha_pvalue_lt_0.05": True,
+        "benchmark_alpha_pvalue_lt_0.05": False,
     }
     for c in result["criteria"]:
         name = c["name"]
@@ -106,13 +106,13 @@ def test_benchmark_aware_metrics_pinned_on_aapl_real_window():
 
     observed = result.get("observed") or {}
     EXPECTED = {
-        "sharpe_ratio": -1.3013699003638697,
-        "total_return": -0.42546223321687104,
-        "benchmark_total_return": 0.7742601739304709,
-        "benchmark_alpha": -0.33397005804456864,
-        "benchmark_alpha_pvalue": 0.01992157562944763,
-        "correlation_with_benchmark": 0.31294701843761635,
-        "deflated_sharpe_pvalue": 0.9999202378434575,
+        "sharpe_ratio": -0.1439393233148262,
+        "total_return": -0.050513414733230566,
+        "benchmark_total_return": 0.177832703486404,
+        "benchmark_alpha": -0.07689223612756708,
+        "benchmark_alpha_pvalue": 0.7024013518670957,
+        "correlation_with_benchmark": 0.4253851594504657,
+        "deflated_sharpe_pvalue": 0.9783392953244237,
         "n_trials": 6,
     }
     REL_TOL = 1e-3

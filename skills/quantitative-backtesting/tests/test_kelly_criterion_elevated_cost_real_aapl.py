@@ -9,8 +9,8 @@ METHODOLOGICAL NOTE (committed fixtures only): under the weak two-criterion
 sweep (oos_sharpe > 0, oos_total_return > 0) the verdict is SUPPORTED across
 all tested cost levels (beats a zero baseline). The stronger benchmark-aware
 guard (test_kelly_criterion_benchmark_aware_real_aapl.py) records NOT
-SUPPORTED: it does not beat buy-and-hold AAPL (77.43%), alpha not significant
-(p 0.2175), Deflated Sharpe not significant (p 0.7884, N=6). Consistent;
+SUPPORTED: it does not beat buy-and-hold AAPL (17.78%), alpha not
+significant, Deflated Sharpe not significant across 6 trials. Consistent;
 records the weak-criterion outcome honestly, no profitability claim.
 
 Offline, committed fixtures only; no live network.
@@ -57,10 +57,10 @@ def test_elevated_cost_sweep_runs_on_aapl_real_window_kelly_criterion():
         }
 
     EXPECTED_METRICS = {
-        (2.0, 1.0):   {"sharpe_ratio": 0.7710596325955302, "total_return": 0.4736842323382433},
-        (5.0, 2.5):   {"sharpe_ratio": 0.7387352117865373, "total_return": 0.4479381654731962},
-        (10.0, 5.0):  {"sharpe_ratio": 0.6847886991308316, "total_return": 0.4059745119564797},
-        (20.0, 10.0): {"sharpe_ratio": 0.5767858761387973, "total_return": 0.3254858903148774},
+        (2.0, 1.0):   {"sharpe_ratio": 0.5000125402775002, "total_return": 0.16104626397549926},
+        (5.0, 2.5):   {"sharpe_ratio": 0.4767235896561322, "total_return": 0.1512482772597954},
+        (10.0, 5.0):  {"sharpe_ratio": 0.4377762127976601, "total_return": 0.13508311339995394},
+        (20.0, 10.0): {"sharpe_ratio": 0.35945984084337745, "total_return": 0.10336255895298274},
     }
     for r in rows:
         key = (r["commission_bps"], r["slippage_bps"])

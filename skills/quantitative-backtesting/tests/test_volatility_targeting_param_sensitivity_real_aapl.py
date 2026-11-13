@@ -9,14 +9,16 @@ change to the backtest numbers is caught.
 
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
 Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
-volatility-targeting verdict is SUPPORTED across all six pre-registered
-parameter settings on this window, because the strategy beats a zero baseline.
-The stronger benchmark-aware guard
-(test_volatility_targeting_benchmark_aware_real_aapl.py) records NOT SUPPORTED:
-the strategy does not beat buy-and-hold AAPL (return 47.4% vs 77.4%), the
-benchmark alpha is not significant (raw p = 0.22), and the Deflated Sharpe
-p-value is not significant (p = 0.79 across 6 trials). This test records the
-weak-criterion falsification outcome honestly and does not claim profitability.
+volatility-targeting verdict is SUPPORTED at four of the six pre-registered
+parameter settings on this window (target_vol 0.10/0.15/0.20 at lookback 63,
+and lookback 100) but NOT SUPPORTED at the lookback=50 rung (both criteria
+fail), so the verdict flips across the grid. The stronger benchmark-aware
+guard (test_volatility_targeting_benchmark_aware_real_aapl.py) records NOT
+SUPPORTED: the strategy does not beat buy-and-hold AAPL (return 16.10% vs
+17.78%), the benchmark alpha is not significant, and the Deflated Sharpe
+p-value is not significant across 6 trials. This test records the
+weak-criterion falsification outcome honestly and does not claim
+profitability; a verdict that flips across the grid is a sensitivity finding.
 
 Offline, committed fixtures only; no live network.
 """
@@ -66,28 +68,28 @@ def test_param_sensitivity_runs_on_aapl_real_window_volatility_targeting():
     # to the backtest numbers is caught. Compared with a relative tolerance.
     EXPECTED_METRICS = {
         (0.15, 63): {
-            "sharpe_ratio": 0.7710596325955302,
-            "total_return": 0.4736842323382433,
+            "sharpe_ratio": 0.5000125402775002,
+            "total_return": 0.16104626397549926,
         },
         (0.10, 63): {
-            "sharpe_ratio": 0.7710596325955302,
-            "total_return": 0.4736842323382433,
+            "sharpe_ratio": 0.5000125402775002,
+            "total_return": 0.16104626397549926,
         },
         (0.20, 63): {
-            "sharpe_ratio": 0.7710596325955302,
-            "total_return": 0.4736842323382433,
+            "sharpe_ratio": 0.5000125402775002,
+            "total_return": 0.16104626397549926,
         },
         (0.15, 50): {
-            "sharpe_ratio": 0.1720868275560054,
-            "total_return": 0.06029405217210648,
+            "sharpe_ratio": -0.38367414883518386,
+            "total_return": -0.15719611990517068,
         },
         (0.15, 100): {
-            "sharpe_ratio": 0.8219319509661736,
-            "total_return": 0.5151164660790588,
+            "sharpe_ratio": 0.367259699743025,
+            "total_return": 0.10659026717311959,
         },
         (0.10, 50): {
-            "sharpe_ratio": 0.1720868275560054,
-            "total_return": 0.06029405217210648,
+            "sharpe_ratio": -0.38367414883518386,
+            "total_return": -0.15719611990517068,
         },
     }
     REL_TOL = 1e-3

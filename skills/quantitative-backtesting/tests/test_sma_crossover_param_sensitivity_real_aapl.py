@@ -9,14 +9,17 @@ backtest numbers is caught.
 
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
 Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
-SMA crossover verdict is SUPPORTED across all six pre-registered parameter
-settings on this window, because the strategy beats a zero baseline. The
-stronger benchmark-aware guard (test_sma_crossover_benchmark_aware_real_aapl.py)
-records NOT SUPPORTED: the strategy does not beat buy-and-hold AAPL (return
-62.4% vs 77.4%), the benchmark alpha is not significant (raw p = 0.27), and
-the Deflated Sharpe p-value is not significant (p = 0.53 across 6 trials). This
-test records the weak-criterion falsification outcome honestly and does not
-claim profitability.
+SMA crossover verdict is mixed across the six pre-registered parameter
+settings on this window: five settings fail the Sharpe criterion (negative
+Sharpe at the advertised (12,26,9) and the shorter-period perturbations), and
+only the (10, 24, 9) setting passes both weak criteria. The stronger
+benchmark-aware guard (test_sma_crossover_benchmark_aware_real_aapl.py) records
+NOT SUPPORTED: the strategy does not beat buy-and-hold AAPL (return 1.33% vs
+17.78%), the benchmark alpha is not significant, and the Deflated Sharpe
+p-value is not significant across 6 trials. This test records the
+weak-criterion falsification outcome honestly and does not claim
+profitability; the mixed sweep result is itself evidence of parameter
+sensitivity, not of a robust edge.
 
 Offline, committed fixtures only; no live network.
 """
@@ -67,28 +70,28 @@ def test_param_sensitivity_runs_on_aapl_real_window_sma_crossover():
     # to the backtest numbers is caught. Compared with a relative tolerance.
     EXPECTED_METRICS = {
         (12, 26, 9): {
-            "sharpe_ratio": 1.2714469816901894,
-            "total_return": 0.6186548814405912,
+            "sharpe_ratio": -0.11906992264733102,
+            "total_return": -0.017278688267084785,
         },
         (8, 21, 5): {
-            "sharpe_ratio": 1.499409555687202,
-            "total_return": 0.7446910430249476,
+            "sharpe_ratio": -0.12108783054970294,
+            "total_return": -0.027242831202844764,
         },
         (16, 34, 12): {
-            "sharpe_ratio": 1.601337347563791,
-            "total_return": 0.8023163291782927,
+            "sharpe_ratio": -0.00953093491336495,
+            "total_return": 0.0030273009342898227,
         },
         (12, 26, 6): {
-            "sharpe_ratio": 1.2714469816901894,
-            "total_return": 0.6186548814405912,
+            "sharpe_ratio": -0.11906992264733102,
+            "total_return": -0.017278688267084785,
         },
         (12, 26, 12): {
-            "sharpe_ratio": 1.2714469816901894,
-            "total_return": 0.6186548814405912,
+            "sharpe_ratio": -0.11906992264733102,
+            "total_return": -0.017278688267084785,
         },
         (10, 24, 9): {
-            "sharpe_ratio": 1.3677576398518012,
-            "total_return": 0.6649145735880646,
+            "sharpe_ratio": 0.533675128881448,
+            "total_return": 0.12345407713793843,
         },
     }
     REL_TOL = 1e-3

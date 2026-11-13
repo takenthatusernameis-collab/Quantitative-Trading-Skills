@@ -10,13 +10,12 @@ change to the backtest numbers is caught.
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
 Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
 MACD crossover verdict is NOT SUPPORTED across all tested cost levels on this
-window: the advertised setting already fails the total-return criterion
-(return -0.13% vs the zero baseline) and higher costs push both Sharpe and
-return negative. The stronger benchmark-aware guard
-(test_macd_benchmark_aware_real_aapl.py) records NOT SUPPORTED as well: MACD
-does not beat buy-and-hold AAPL (return 77.4%), the benchmark alpha is not
-significant (raw p = 0.60), and the Deflated Sharpe p-value is not significant
-(p = 0.96 across 6 trials). The two verdicts are consistent -- this test
+window: the advertised setting already fails both criteria (Sharpe -1.1718,
+return -34.41%) and higher costs push both further negative. The stronger
+benchmark-aware guard (test_macd_benchmark_aware_real_aapl.py) records NOT
+SUPPORTED as well: MACD does not beat buy-and-hold AAPL (return 17.78%), the
+benchmark alpha is not significant, and the Deflated Sharpe p-value is not
+significant across 6 trials. The two verdicts are consistent -- this test
 records the weak-criterion falsification outcome honestly and does not claim
 profitability.
 
@@ -70,20 +69,20 @@ def test_elevated_cost_sweep_runs_on_aapl_real_window_macd():
     # Regression guard: pin strategy metrics (net of costs) per cost level.
     EXPECTED_METRICS = {
         (2.0, 1.0): {
-            "sharpe_ratio": 0.055681981432280425,
-            "total_return": -0.0013037799286792495,
+            "sharpe_ratio": -1.1717750623626866,
+            "total_return": -0.34413777065367634,
         },
         (5.0, 2.5): {
-            "sharpe_ratio": -0.009735817945987291,
-            "total_return": -0.03533277101693266,
+            "sharpe_ratio": -1.2426840910081356,
+            "total_return": -0.35960027910387704,
         },
         (10.0, 5.0): {
-            "sharpe_ratio": -0.1187099744698353,
-            "total_return": -0.08952229759903119,
+            "sharpe_ratio": -1.360672521056521,
+            "total_return": -0.38457998650449887,
         },
         (20.0, 10.0): {
-            "sharpe_ratio": -0.33614472917065236,
-            "total_return": -0.18904593370650513,
+            "sharpe_ratio": -1.5955952423509425,
+            "total_return": -0.4317052985164601,
         },
     }
     REL_TOL = 1e-3

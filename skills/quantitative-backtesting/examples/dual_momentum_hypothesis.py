@@ -445,11 +445,14 @@ def run_elevated_cost_sweep(data_path, grid=ELEVATED_COST_SWEEP_LEVELS,
 # parameters (lookback=252, top_quantile=0.5, risk_free_rate=0.0); the
 # advertised setting is the first rung. The grid is fixed before looking at
 # results, so verdict flips across it are robustness/sensitivity signal, not
-# parameter hunting.
+# parameter hunting. The longest lookback is bounded to fit the committed
+# fixture's held-out test window (302 rows): a lookback longer than the test
+# window leaves the indicator undefined for its entire span and the engine
+# refuses to backtest, so the rung stays inside the window.
 PARAM_SENSITIVITY_GRID = (
     (252, 0.5, 0.0),   # advertised baseline
     (189, 0.5, 0.0),   # shorter lookback (~39 weeks)
-    (315, 0.5, 0.0),   # longer lookback (~63 weeks)
+    (280, 0.5, 0.0),   # longer lookback (~56 weeks)
     (252, 0.4, 0.0),   # lower top quantile (more assets in the long book)
     (252, 0.6, 0.0),   # higher top quantile (fewer assets in the long book)
     (252, 0.5, 0.02),  # positive risk-free rate for the absolute-momentum floor

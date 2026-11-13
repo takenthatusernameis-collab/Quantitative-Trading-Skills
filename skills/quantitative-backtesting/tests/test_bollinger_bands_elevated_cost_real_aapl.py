@@ -66,20 +66,20 @@ def test_elevated_cost_sweep_runs_on_aapl_real_window_bollinger_bands():
     # Regression guard: pin strategy metrics (net of costs) per cost level.
     EXPECTED_METRICS = {
         (2.0, 1.0): {
-            "sharpe_ratio": -1.3013699003638697,
-            "total_return": -0.42546223321687104,
+            "sharpe_ratio": -0.1439393233148262,
+            "total_return": -0.050513414733230566,
         },
         (5.0, 2.5): {
-            "sharpe_ratio": -1.332523576323755,
-            "total_return": -0.4329117976316216,
+            "sharpe_ratio": -0.17479064416831386,
+            "total_return": -0.05912254078037327,
         },
         (10.0, 5.0): {
-            "sharpe_ratio": -1.3842772597856319,
-            "total_return": -0.4451209555725346,
+            "sharpe_ratio": -0.22598286707918178,
+            "total_return": -0.07330651901374452,
         },
         (20.0, 10.0): {
-            "sharpe_ratio": -1.4870538677622318,
-            "total_return": -0.4687824256832025,
+            "sharpe_ratio": -0.32744802811584584,
+            "total_return": -0.10106738375770641,
         },
     }
     REL_TOL = 1e-3

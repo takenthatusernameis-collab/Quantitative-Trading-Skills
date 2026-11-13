@@ -6,13 +6,16 @@ Sweeps the pre-registered PARAM_SENSITIVITY_GRID and pins observed out-of-sample
 metrics (net of costs) with relative tolerance.
 
 METHODOLOGICAL NOTE (committed fixtures only): under the weak two-criterion
-sweep (oos_sharpe > 0, oos_total_return > 0) the verdict is SUPPORTED across
-all pre-registered settings (beats a zero baseline). The benchmark-aware guard
+sweep (oos_sharpe > 0, oos_total_return > 0) the verdict is SUPPORTED at four
+of the six pre-registered settings on this window (lookback 63 and 100 beats
+a zero baseline) but NOT SUPPORTED at the lookback=50 rung (both criteria
+fail), so the verdict flips across the grid. The benchmark-aware guard
 (test_kelly_criterion_benchmark_aware_real_aapl.py) records NOT SUPPORTED
 (vs buy-and-hold, alpha/DSR not significant). On this fixture, fraction
 (0.25/0.5/1.0) is insensitive for these lookbacks under the CLI sizing path
 (observed), so lookback drives variation; the grid is pre-registered and
-honest. Records weak-criterion outcomes only, no profitability claim.
+honest. Records weak-criterion outcomes only, no profitability claim; a
+verdict that flips across the grid is a sensitivity finding.
 
 Offline, committed fixtures only; no live network.
 """
@@ -58,12 +61,12 @@ def test_param_sensitivity_runs_on_aapl_real_window_kelly_criterion():
 
     # Pinned observed metrics (fraction insensitive across 0.25/0.5/1.0 here).
     EXPECTED_METRICS = {
-        (63, 0.5):  {"sharpe_ratio": 0.7710596325955302, "total_return": 0.4736842323382433},
-        (50, 0.5):  {"sharpe_ratio": 0.1720868275560054, "total_return": 0.06029405217210648},
-        (100, 0.5): {"sharpe_ratio": 0.8219319509661736, "total_return": 0.5151164660790588},
-        (63, 0.25): {"sharpe_ratio": 0.7710596325955302, "total_return": 0.4736842323382433},
-        (63, 1.0):  {"sharpe_ratio": 0.7710596325955302, "total_return": 0.4736842323382433},
-        (50, 0.25): {"sharpe_ratio": 0.1720868275560054, "total_return": 0.06029405217210648},
+        (63, 0.5):  {"sharpe_ratio": 0.5000125402775002, "total_return": 0.16104626397549926},
+        (50, 0.5):  {"sharpe_ratio": -0.38367414883518386, "total_return": -0.15719611990517068},
+        (100, 0.5): {"sharpe_ratio": 0.367259699743025, "total_return": 0.10659026717311959},
+        (63, 0.25): {"sharpe_ratio": 0.5000125402775002, "total_return": 0.16104626397549926},
+        (63, 1.0):  {"sharpe_ratio": 0.5000125402775002, "total_return": 0.16104626397549926},
+        (50, 0.25): {"sharpe_ratio": -0.38367414883518386, "total_return": -0.15719611990517068},
     }
     for r in rows:
         key = (r["lookback"], r["fraction"])
@@ -74,7 +77,13 @@ def test_param_sensitivity_runs_on_aapl_real_window_kelly_criterion():
             assert abs(gotv - expv) <= REL_TOL * max(abs(expv), 1e-9), (
                 f"{k} regression at {key}: got {gotv}, expected {expv}"
             )
-        assert r["verdict"] == "SUPPORTED"
+        # Verdict is pinned per setting: the lookback=50 rung fails both weak
+        # criteria on this window, so the sweep is NOT uniformly SUPPORTED --
+        # the verdict flips across the grid, which is evidence of parameter
+        # sensitivity, not of a robust edge. Do not assert a single verdict
+        # across the whole grid.
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert r["all_pass"] == (r["verdict"] == "SUPPORTED")
 
     out = buffer.getvalue()
     assert "PARAMETER SENSITIVITY SWEEP" in out

@@ -8,9 +8,9 @@ round-trip costs on the held-out test split. Pins observed metrics (regression
 guard, relative tolerance, never exact equality).
 
 Honest outcome on this committed window: Donchian breakout beats a zero baseline
-(Sharpe 0.8389, return 48.81%) so the weak-criterion verdict is SUPPORTED. The
+(Sharpe 0.0792, return 0.96%) so the weak-criterion verdict is SUPPORTED. The
 stronger benchmark-aware guard (test_donchian_breakout_benchmark_aware_real_aapl.py)
-records NOT SUPPORTED: it does not beat buy-and-hold AAPL (77.43%) and neither
+records NOT SUPPORTED: it does not beat buy-and-hold AAPL (17.78%) and neither
 the benchmark alpha nor the Deflated Sharpe p-value is significant. This test
 records the weak-criterion outcome honestly and does not claim profitability.
 
@@ -34,8 +34,8 @@ REL_TOL = 1e-3
 # Pinned to the committed AAPL fixture via run_backtest.py (test split,
 # 3bp round-trip). Regression guard only -- never exact equality.
 EXPECTED = {
-    "sharpe_ratio": 0.8389231327490344,
-    "total_return": 0.4881242103821919,
+    "sharpe_ratio": 0.07917778255250124,
+    "total_return": 0.009550335581158587,
 }
 
 

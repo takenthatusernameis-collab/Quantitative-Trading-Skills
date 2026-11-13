@@ -93,8 +93,8 @@ def test_baseline_metrics_pinned_on_triple_real_window_dual_momentum():
     assert observed.get("total_return") is not None
 
     EXPECTED = {
-        "sharpe_ratio": 1.1676593094877479,
-        "total_return": 0.40834454698372635,
+        "sharpe_ratio": 0.5714563609925428,
+        "total_return": 0.07873174188606424,
     }
     REL_TOL = 1e-3
     for key, exp in EXPECTED.items():

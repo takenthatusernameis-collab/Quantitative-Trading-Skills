@@ -9,7 +9,7 @@ costs on the held-out test split. Pins observed metrics (regression guard,
 relative tolerance, never exact equality).
 
 Honest outcome on this committed window: Mean Reversion does NOT beat
-buy-and-hold AAPL (Sharpe -1.3014, return -42.55% vs benchmark +90.15%), so
+buy-and-hold AAPL (Sharpe -0.1439, return -5.05% vs benchmark +17.78%), so
 the verdict is NOT SUPPORTED. This test records the outcome honestly and does
 not claim profitability; the verdict itself is not asserted (SUPPORTED and NOT
 SUPPORTED are both valid scientific outcomes).

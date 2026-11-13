@@ -11,15 +11,14 @@ held-out window. This mirrors the existing EMA / MACD / Donchian / Bollinger /
 SMA / volatility-targeting triple patterns.
 
 METHODOLOGICAL FINDING (committed fixtures only, not evidence about any
-market): Bollinger Bands mean reversion on AAPL is strongly negative
-out-of-sample on the held-out window (Sharpe -1.30, return -42.5% net of 3bp
-round-trip costs), far below buy-and-hold MSFT (return 90.2%). Criterion-edge
-case: benchmark_alpha is NEGATIVE (-36.2%) yet ``benchmark_alpha_pvalue``
-(0.0108) is < 0.05, so ``benchmark_alpha_pvalue_lt_0.05`` PASSES -- the
-p-value criterion detects a statistically significant difference from the
-benchmark but does not by itself distinguish outperformance from
-underperformance. All other criteria FAIL. Benchmark-aware verdict: NOT
-SUPPORTED.
+market): Bollinger Bands mean reversion on AAPL is negative out-of-sample on
+the held-out window (Sharpe -0.14, return -5.1% net of 3bp round-trip costs),
+below buy-and-hold MSFT (return +17.1%). benchmark_alpha is NEGATIVE
+(-7.2%) and ``benchmark_alpha_pvalue`` (0.729) is not < 0.05, so
+``benchmark_alpha_pvalue_lt_0.05`` FAILS -- the p-value criterion detects a
+statistically significant difference from the benchmark only when it is
+present, and here it correctly reports no significant difference. All four
+criteria FAIL. Benchmark-aware verdict: NOT SUPPORTED.
 
 This test pins the observed strategy + benchmark metrics (net of costs) as
 regression guards with relative tolerance so any silent change to the backtest

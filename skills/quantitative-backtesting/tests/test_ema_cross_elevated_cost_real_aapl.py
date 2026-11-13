@@ -12,11 +12,11 @@ Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
 EMA crossover verdict is SUPPORTED across all tested cost levels, because the
 strategy beats a zero baseline on this window. The stronger benchmark-aware
 guard (test_ema_cross_benchmark_aware_real_aapl.py) records NOT SUPPORTED: the
-strategy does not beat buy-and-hold AAPL (return 65.8% vs 77.4%), the
-benchmark alpha is not significant (raw p = 0.21), and the Deflated Sharpe
-p-value is not significant (p = 0.49 across 6 trials). The two verdicts are
-consistent -- this test records the weak-criterion falsification outcome
-honestly and does not claim profitability.
+strategy does not beat buy-and-hold AAPL (return 7.11% vs 17.78%), the
+benchmark alpha is not significant, and the Deflated Sharpe p-value is not
+significant. The two verdicts are consistent -- this test records the
+weak-criterion falsification outcome honestly and does not claim
+profitability.
 
 Offline, committed fixtures only; no live network.
 """
@@ -68,20 +68,20 @@ def test_elevated_cost_sweep_runs_on_aapl_real_window_ema_cross():
     # Regression guard: pin strategy metrics (net of costs) per cost level.
     EXPECTED_METRICS = {
         (2.0, 1.0): {
-            "sharpe_ratio": 1.353936894017915,
-            "total_return": 0.6577585511528565,
+            "sharpe_ratio": 0.31230586959215506,
+            "total_return": 0.0710531812068349,
         },
         (5.0, 2.5): {
-            "sharpe_ratio": 1.3358179069589524,
-            "total_return": 0.6466296898936219,
+            "sharpe_ratio": 0.2868941857625272,
+            "total_return": 0.06579190109892163,
         },
         (10.0, 5.0): {
-            "sharpe_ratio": 1.3054851128757665,
-            "total_return": 0.6282364095102666,
+            "sharpe_ratio": 0.24441304727917695,
+            "total_return": 0.05707528852113852,
         },
         (20.0, 10.0): {
-            "sharpe_ratio": 1.2443543300798718,
-            "total_return": 0.592023693038183,
+            "sharpe_ratio": 0.15905496974514124,
+            "total_return": 0.03983619614469247,
         },
     }
     REL_TOL = 1e-3

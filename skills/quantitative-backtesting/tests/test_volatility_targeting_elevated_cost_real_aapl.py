@@ -13,10 +13,10 @@ volatility-targeting verdict is SUPPORTED across all tested cost levels,
 because the strategy beats a zero baseline on this window. The stronger
 benchmark-aware guard (test_volatility_targeting_benchmark_aware_real_aapl.py)
 records NOT SUPPORTED: the strategy does not beat buy-and-hold AAPL (return
-47.4% vs 77.4%), the benchmark alpha is not significant (raw p = 0.22), and
-the Deflated Sharpe p-value is not significant (p = 0.79 across 6 trials). The
-two verdicts are consistent -- this test records the weak-criterion
-falsification outcome honestly and does not claim profitability.
+16.10% vs 17.78%), the benchmark alpha is not significant, and the Deflated
+Sharpe p-value is not significant across 6 trials. The two verdicts are
+consistent -- this test records the weak-criterion falsification outcome
+honestly and does not claim profitability.
 
 Offline, committed fixtures only; no live network.
 """
@@ -68,20 +68,20 @@ def test_elevated_cost_sweep_runs_on_aapl_real_window_volatility_targeting():
     # Regression guard: pin strategy metrics (net of costs) per cost level.
     EXPECTED_METRICS = {
         (2.0, 1.0): {
-            "sharpe_ratio": 0.7710596325955302,
-            "total_return": 0.4736842323382433,
+            "sharpe_ratio": 0.5000125402775002,
+            "total_return": 0.16104626397549926,
         },
         (5.0, 2.5): {
-            "sharpe_ratio": 0.7387352117865373,
-            "total_return": 0.4479381654731962,
+            "sharpe_ratio": 0.4767235896561322,
+            "total_return": 0.1512482772597954,
         },
         (10.0, 5.0): {
-            "sharpe_ratio": 0.6847886991308316,
-            "total_return": 0.4059745119564797,
+            "sharpe_ratio": 0.4377762127976601,
+            "total_return": 0.13508311339995394,
         },
         (20.0, 10.0): {
-            "sharpe_ratio": 0.5767858761387973,
-            "total_return": 0.3254858903148774,
+            "sharpe_ratio": 0.35945984084337745,
+            "total_return": 0.10336255895298274,
         },
     }
     REL_TOL = 1e-3

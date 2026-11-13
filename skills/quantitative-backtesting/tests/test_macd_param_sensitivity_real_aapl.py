@@ -9,18 +9,16 @@ change to the backtest numbers is caught.
 
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
 Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
-MACD crossover verdict is mixed across the six pre-registered parameter
-settings on this window: the advertised (12, 26, 9) setting fails the
-total-return criterion (return -0.13% vs the zero baseline), as do the shorter
-(8, 21, 5) and (12, 26, 6) and (10, 24, 9) settings, while the longer
-(16, 34, 12) and (12, 26, 12) settings pass both weak criteria. The stronger
-benchmark-aware guard (test_macd_benchmark_aware_real_aapl.py) records NOT
-SUPPORTED for the advertised setting: MACD does not beat buy-and-hold AAPL
-(return 77.4%), the benchmark alpha is not significant (raw p = 0.60), and the
-Deflated Sharpe p-value is not significant (p = 0.96 across 6 trials). This
-test records the weak-criterion falsification outcome honestly and does not
-claim profitability; the mixed sweep result is itself evidence of parameter
-sensitivity, not of a robust edge.
+MACD crossover verdict is NOT SUPPORTED across all six pre-registered parameter
+settings on this window: the advertised (12, 26, 9) setting fails both
+criteria (Sharpe -1.1718, return -34.41%) and every perturbation stays
+negative. The stronger benchmark-aware guard
+(test_macd_benchmark_aware_real_aapl.py) records NOT SUPPORTED for the
+advertised setting: MACD does not beat buy-and-hold AAPL (return 17.78%), the
+benchmark alpha is not significant, and the Deflated Sharpe p-value is not
+significant across 6 trials. This test records the weak-criterion
+falsification outcome honestly and does not claim profitability; the uniform
+failure is evidence against robustness, not of an edge.
 
 Offline, committed fixtures only; no live network.
 """
@@ -71,28 +69,28 @@ def test_param_sensitivity_runs_on_aapl_real_window_macd():
     # to the backtest numbers is caught. Compared with a relative tolerance.
     EXPECTED_METRICS = {
         (12, 26, 9): {
-            "sharpe_ratio": 0.055681981432280425,
-            "total_return": -0.0013037799286792495,
+            "sharpe_ratio": -1.1717750623626866,
+            "total_return": -0.34413777065367634,
         },
         (8, 21, 5): {
-            "sharpe_ratio": 0.022000277047474096,
-            "total_return": -0.01577077221885015,
+            "sharpe_ratio": -0.8679421061142073,
+            "total_return": -0.27761654627559595,
         },
         (16, 34, 12): {
-            "sharpe_ratio": 0.8553674517432268,
-            "total_return": 0.5082147950728451,
+            "sharpe_ratio": -1.6171267859649459,
+            "total_return": -0.440134067937031,
         },
         (12, 26, 6): {
-            "sharpe_ratio": -0.17340380820185772,
-            "total_return": -0.11091505654743661,
+            "sharpe_ratio": -1.2162315091581002,
+            "total_return": -0.35460176742718585,
         },
         (12, 26, 12): {
-            "sharpe_ratio": 0.13445876717754857,
-            "total_return": 0.042214921147721185,
+            "sharpe_ratio": -0.9596387359556532,
+            "total_return": -0.2963507522345299,
         },
         (10, 24, 9): {
-            "sharpe_ratio": -0.055766056887497896,
-            "total_return": -0.05632129853788492,
+            "sharpe_ratio": -1.0558872241577555,
+            "total_return": -0.3176876738408976,
         },
     }
     REL_TOL = 1e-3

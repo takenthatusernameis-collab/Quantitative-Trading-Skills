@@ -9,14 +9,15 @@ change to the backtest numbers is caught.
 
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
 Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
-Bollinger Bands mean-reversion verdict is NOT SUPPORTED across all six
-pre-registered parameter settings on this window (all negative Sharpe and large
-negative returns net of costs). The stronger benchmark-aware guard
-(test_bollinger_bands_benchmark_aware_real_aapl.py) records NOT SUPPORTED
-for the advertised setting: does not beat buy-and-hold AAPL, Deflated Sharpe
-p = 1.00 across 6 trials. This test records the weak-criterion falsification
-outcome honestly and does not claim profitability; the uniform failure is
-evidence against robustness, not of an edge.
+Bollinger Bands mean-reversion verdict is NOT SUPPORTED at the advertised
+setting (period=20, std_dev=2.0) and at three of the six pre-registered
+parameter settings, but SUPPORTED at two settings (period=10/std_dev=2.0 and
+period=20/std_dev=2.5) -- so the verdict is parameter-dependent on this window,
+which is evidence against robustness, not of an edge. The stronger
+benchmark-aware guard (test_bollinger_bands_benchmark_aware_real_aapl.py)
+records NOT SUPPORTED for the advertised setting. This test records the
+weak-criterion falsification outcome honestly and does not claim
+profitability; a verdict that flips across the grid is a sensitivity finding.
 
 Offline, committed fixtures only; no live network.
 """
@@ -66,28 +67,28 @@ def test_param_sensitivity_runs_on_aapl_real_window_bollinger_bands():
     # to the backtest numbers is caught. Compared with a relative tolerance.
     EXPECTED_METRICS = {
         (20, 2.0): {
-            "sharpe_ratio": -1.3013699003638697,
-            "total_return": -0.42546223321687104,
+            "sharpe_ratio": -0.1439393233148262,
+            "total_return": -0.050513414733230566,
         },
         (10, 2.0): {
-            "sharpe_ratio": -0.8902811759984492,
-            "total_return": -0.2690749015764644,
+            "sharpe_ratio": 0.4576538694132583,
+            "total_return": 0.11822568790165988,
         },
         (50, 2.0): {
-            "sharpe_ratio": -0.8098210171395067,
-            "total_return": -0.29170803127845546,
+            "sharpe_ratio": -0.5245531240621486,
+            "total_return": -0.16182536426809813,
         },
         (20, 1.5): {
-            "sharpe_ratio": -1.2812658499955396,
-            "total_return": -0.46493189328226703,
+            "sharpe_ratio": -0.27345219615268906,
+            "total_return": -0.0915043652530747,
         },
         (20, 2.5): {
-            "sharpe_ratio": -1.2998563723231422,
-            "total_return": -0.3994386699151491,
+            "sharpe_ratio": 0.783565051417456,
+            "total_return": 0.20905811448071132,
         },
         (10, 1.5): {
-            "sharpe_ratio": -1.1263882043363285,
-            "total_return": -0.37409531803110585,
+            "sharpe_ratio": 0.030610359017053345,
+            "total_return": -0.004220971098055082,
         },
     }
     REL_TOL = 1e-3

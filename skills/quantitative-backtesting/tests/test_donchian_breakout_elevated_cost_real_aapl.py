@@ -9,13 +9,14 @@ change to the backtest numbers is caught.
 
 METHODOLOGICAL NOTE (committed fixtures only, not evidence about any market):
 Under the weak two-criterion sweep (oos_sharpe > 0, oos_total_return > 0) the
-Donchian breakout verdict is SUPPORTED across all tested cost levels on this
-window, and the stronger benchmark-aware guard
-(test_donchian_breakout_benchmark_aware_real_aapl.py) records NOT SUPPORTED
-when comparing against buy-and-hold AAPL with Deflated Sharpe correction.
-The two verdicts are consistent -- this test records the weak-criterion
-outcome honestly and does not claim profitability; benchmark-aware
-comparison is required.
+Donchian breakout verdict is SUPPORTED at the advertised and 5bp/2.5bp cost
+levels but flips to NOT SUPPORTED at 10bp/5bp and 20bp/10bp costs on this
+window, so the weak-criterion result is cost-fragile here. The stronger
+benchmark-aware guard (test_donchian_breakout_benchmark_aware_real_aapl.py)
+records NOT SUPPORTED when comparing against buy-and-hold AAPL with Deflated
+Sharpe correction. The two verdicts are consistent -- this test records the
+weak-criterion outcome honestly and does not claim profitability;
+benchmark-aware comparison is required.
 
 Offline, committed fixtures only; no live network.
 """
@@ -67,20 +68,20 @@ def test_elevated_cost_sweep_runs_on_aapl_real_window_donchian_breakout():
     # Regression guard: pin strategy metrics (net of costs) per cost level.
     EXPECTED_METRICS = {
         (2.0, 1.0): {
-            "sharpe_ratio": 0.8389231327490344,
-            "total_return": 0.4881242103821919,
+            "sharpe_ratio": 0.07917778255250124,
+            "total_return": 0.009550335581158587,
         },
         (5.0, 2.5): {
-            "sharpe_ratio": 0.8058275145754742,
-            "total_return": 0.4635977212998674,
+            "sharpe_ratio": 0.04885700194457688,
+            "total_return": 0.0005597694201335823,
         },
         (10.0, 5.0): {
-            "sharpe_ratio": 0.7505531931582137,
-            "total_return": 0.4235916057882283,
+            "sharpe_ratio": -0.0017810754835683707,
+            "total_return": -0.014255708803219691,
         },
         (20.0, 10.0): {
-            "sharpe_ratio": 0.6396647773815045,
-            "total_return": 0.3467460793064707,
+            "sharpe_ratio": -0.10336858017974379,
+            "total_return": -0.04326377336231024,
         },
     }
     REL_TOL = 1e-3

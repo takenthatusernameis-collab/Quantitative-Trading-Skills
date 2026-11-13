@@ -8,8 +8,8 @@ round-trip costs on the held-out test split. Pins observed metrics (regression
 guard, relative tolerance, never exact equality).
 
 Honest outcome on this committed window: Bollinger Bands mean-reversion does
-NOT produce positive out-of-sample risk-adjusted returns (Sharpe -1.3014,
-total return -42.55%) so the weak-criterion verdict is NOT SUPPORTED. The
+NOT produce positive out-of-sample risk-adjusted returns (Sharpe -0.1439,
+total return -5.05%) so the weak-criterion verdict is NOT SUPPORTED. The
 stronger benchmark-aware guard (test_bollinger_bands_benchmark_aware_real_aapl.py)
 records NOT SUPPORTED too. This test records the weak-criterion outcome
 honestly and does not claim profitability.
@@ -34,8 +34,8 @@ REL_TOL = 1e-3
 # Pinned to the committed AAPL fixture via run_backtest.py (test split,
 # 3bp round-trip). Regression guard only -- never exact equality.
 EXPECTED = {
-    "sharpe_ratio": -1.3013699003638697,
-    "total_return": -0.42546223321687104,
+    "sharpe_ratio": -0.1439393233148262,
+    "total_return": -0.050513414733230566,
 }
 
 
