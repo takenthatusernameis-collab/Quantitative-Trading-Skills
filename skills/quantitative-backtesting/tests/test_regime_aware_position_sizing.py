@@ -23,7 +23,11 @@ from regime_detection import regime_aware_position_size  # noqa: E402
 
 def _series(values, name=None):
     index = pd.date_range("2020-01-01", periods=len(values), freq="B")
-    return pd.Series(values, index=index, dtype=float, name=name)
+    # Regime labels are strings; forcing dtype=float on them raises under
+    # pandas >= 3.0. Infer the dtype instead so numeric and label series both
+    # work from the same helper.
+    dtype = None if any(isinstance(v, str) for v in values) else float
+    return pd.Series(values, index=index, dtype=dtype, name=name)
 
 
 def _expected_multiplier(close, regimes, target_by_regime, lookback, periods_per_year=252):
@@ -112,10 +116,11 @@ def test_zero_target_with_zero_vol_is_flat_not_nan():
     sized = regime_aware_position_size(
         base, close, regimes, {"calm": 0.0}, lookback=3, min_leverage=0.0, max_leverage=2.0
     )
-    # Only the first lookback-1 bars are NaN (not enough history); the rest
-    # must be an explicit zero position, not 0/0 NaN.
-    assert sized.iloc[2:].notna().all()
-    assert np.allclose(sized.iloc[2:].values, 0.0)
+    # The first `lookback` bars (0..lookback-1) have no realized-vol
+    # estimate and are NaN by design; every bar from `lookback` onward must
+    # be an explicit zero position, not 0/0 NaN.
+    assert sized.iloc[3:].notna().all()
+    assert np.allclose(sized.iloc[3:].values, 0.0)
 
 
 def test_early_bars_are_nan_until_lookback_is_available():
@@ -125,8 +130,11 @@ def test_early_bars_are_nan_until_lookback_is_available():
     sized = regime_aware_position_size(
         base, close, regimes, {"calm": 0.20}, lookback=3
     )
-    assert sized.iloc[:2].isna().all()
-    assert sized.iloc[2:].notna().all()
+    # `pct_change` yields a leading NaN return, so the rolling std needs
+    # `lookback` non-NaN returns; the first `lookback` bars (0..lookback-1)
+    # are NaN and the first estimable bar is at index `lookback`.
+    assert sized.iloc[:3].isna().all()
+    assert sized.iloc[3:].notna().all()
 
 
 def test_unknown_regime_raises_without_default():
@@ -142,7 +150,11 @@ def test_unknown_regime_raises_without_default():
 def test_unknown_regime_falls_back_to_default_target():
     close = _series([100.0, 101.0, 99.0, 102.0, 100.0, 103.0])
     base = _series(np.ones(6))
-    regimes = _series(["calm", "calm", "storm", "calm", "calm", "calm"])
+    # The unknown "storm" label is placed at index 3, the first bar with an
+    # estimable realized volatility (the first `lookback` bars are NaN by
+    # design), so the fallback comparison is made on a real number rather
+    # than two NaNs.
+    regimes = _series(["calm", "calm", "calm", "storm", "calm", "calm"])
     sized = regime_aware_position_size(
         base, close, regimes, {"calm": 0.10}, lookback=3, default_target_vol=0.40
     )
@@ -154,7 +166,7 @@ def test_unknown_regime_falls_back_to_default_target():
         lookback=3,
     )
     # The mapped "storm" bar must use the 0.40 default, not the 0.10 calm target.
-    assert sized.iloc[2] > explicit.iloc[2]
+    assert sized.iloc[3] > explicit.iloc[3]
 
 
 def test_point_in_time_future_prices_do_not_change_past_sizes():
