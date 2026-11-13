@@ -954,6 +954,192 @@ def test_book_regime_aware_sqrt_matches_closed_form():
 
 
 # ---------------------------------------------------------------------------
+# Regime-aware LINEAR market-impact model: closed-form formula pin
+# ---------------------------------------------------------------------------
+
+def test_single_asset_regime_aware_linear_matches_closed_form():
+    """The single-asset (``is_panel=False``) regime-aware linear impact
+    must equal ``participation * regime_coefficient`` per period, and an
+    unknown regime label must fall back to the base ``impact_coefficient``.
+
+    Mirrors ``test_single_asset_regime_aware_sqrt_matches_closed_form`` but
+    for the linear branch. A regression that mis-aligns the regime series,
+    applies the regime coefficient incorrectly, or drops the fallback for
+    unknown regimes would silently misprice cost in exactly the regimes the
+    model exists to capture.
+    """
+    periods = 6
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    close = pd.Series([100.0, 101.0, 102.0, 103.0, 104.0, 105.0], index=dates)
+    volume = pd.Series(np.full(periods, 1_000_000.0), index=dates)
+    raw_returns = pd.Series(np.zeros(periods), index=dates)
+    position_changes = pd.Series([0.0, 1.0, 0.0, 0.5, 0.0, 1.0], index=dates)
+    regimes = pd.Series(["hi", "lo", "hi", "hi", "lo", "hi"], index=dates)
+    regime_impact_coefficients = {"hi": 0.8, "lo": 0.2}
+
+    coefficient = 0.5
+    adv_window = 20
+    initial_capital = 100_000.0
+
+    result = market_impact_cost(
+        position_changes, raw_returns, close, volume,
+        is_panel=False, impact_coefficient=coefficient,
+        adv_window=adv_window, initial_capital=initial_capital,
+        impact_model="linear", regimes=regimes,
+        regime_impact_coefficients=regime_impact_coefficients,
+    )
+    assert result is not None, "regime-aware linear impact must be live for coefficient > 0"
+
+    equity = initial_capital * (1 + raw_returns).cumprod()
+    adv_notional = volume.rolling(window=adv_window, min_periods=1).mean() * close
+    participation = (position_changes * equity) / adv_notional
+    period_coeff = regimes.map(regime_impact_coefficients)
+    expected = participation * period_coeff
+    assert np.allclose(result.values, expected.values, atol=1e-12), (
+        f"regime-aware linear impact must equal participation*regime_coeff: "
+        f"got {result.values}, expected {expected.values}"
+    )
+
+    # An unknown regime label falls back to the base coefficient, not NaN/0.
+    unknown_regimes = pd.Series(["not_a_regime"] * periods, index=dates)
+    fallback = market_impact_cost(
+        position_changes, raw_returns, close, volume,
+        is_panel=False, impact_coefficient=coefficient,
+        adv_window=adv_window, initial_capital=initial_capital,
+        impact_model="linear", regimes=unknown_regimes,
+        regime_impact_coefficients=regime_impact_coefficients,
+    )
+    expected_fallback = participation * coefficient
+    assert np.allclose(fallback.values, expected_fallback.values, atol=1e-12), (
+        f"unknown regime must fall back to the base coefficient: "
+        f"got {fallback.values}, expected {expected_fallback.values}"
+    )
+
+
+def test_panel_regime_aware_linear_matches_closed_form():
+    """The panel (``is_panel=True``) regime-aware linear impact must equal
+    the equal-weighted mean over constituents of
+    ``(per_asset_notional / ADV_notional_i) * regime_coeff_t``.
+
+    The panel path divides each constituent's notional by its own ADV and
+    applies one regime coefficient per period (broadcast across names).
+    A regression that broadcasts the coefficient along the wrong axis, or that
+    applies it to the mean instead of each asset, would only be visible when
+    assets have different ADV and the coefficient varies by period.
+    """
+    periods = 6
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    symbols = ["AAA", "BBB", "CCC"]
+    close = pd.DataFrame(
+        {sym: np.full(periods, px)
+         for sym, px in zip(symbols, [100.0, 200.0, 50.0])},
+        index=dates,
+    )
+    volume = pd.DataFrame(
+        {sym: np.full(periods, vol)
+         for sym, vol in zip(symbols, [1_000_000.0, 2_000_000.0, 500_000.0])},
+        index=dates,
+    )
+    raw_returns = pd.Series(np.zeros(periods), index=dates)
+    position_changes = pd.Series([0.0, 1.0, 0.0, 0.5, 0.0, 1.0], index=dates)
+    regimes = pd.Series(["hi", "lo", "hi", "lo", "hi", "lo"], index=dates)
+    regime_impact_coefficients = {"hi": 0.8, "lo": 0.2}
+
+    coefficient = 0.5
+    adv_window = 20
+    initial_capital = 100_000.0
+
+    result = market_impact_cost(
+        position_changes, raw_returns, close, volume,
+        is_panel=True, impact_coefficient=coefficient,
+        adv_window=adv_window, initial_capital=initial_capital,
+        impact_model="linear", regimes=regimes,
+        regime_impact_coefficients=regime_impact_coefficients,
+    )
+    assert result is not None
+
+    n_assets = len(symbols)
+    equity = initial_capital * (1 + raw_returns).cumprod()
+    per_asset_notional = (position_changes * equity) / n_assets
+    adv_notional = volume.rolling(window=adv_window, min_periods=1).mean() * close
+    participation = per_asset_notional.values[:, None] / adv_notional.values
+    period_coeff = regimes.map(regime_impact_coefficients).values[:, None]
+    rate = participation * period_coeff
+    expected = rate.mean(axis=1)
+
+    assert np.allclose(result.values, expected, atol=1e-12), (
+        f"regime-aware panel linear impact must equal "
+        f"mean_i(notional_i/ADV_i*regime_coeff_t): "
+        f"got {result.values}, expected {expected}"
+    )
+
+
+def test_book_regime_aware_linear_matches_closed_form():
+    """The book-pricing regime-aware linear impact must equal the
+    equal-weighted mean over assets of
+    ``(|dw_i| * equity / ADV_notional_i) * regime_coeff_t``.
+
+    The book path measures each name against its own ADV on the weight change
+    and applies one regime coefficient per period. A regression that applies
+    the coefficient to the mean rather than each asset, or mis-aligns the
+    regime series against the book index, would not be caught by the
+    constant-coefficient book test.
+    """
+    periods = 6
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    symbols = ["AAA", "BBB", "CCC"]
+    close = pd.DataFrame(
+        {sym: np.full(periods, px)
+         for sym, px in zip(symbols, [100.0, 200.0, 50.0])},
+        index=dates,
+    )
+    volume = pd.DataFrame(
+        {sym: np.full(periods, vol)
+         for sym, vol in zip(symbols, [1_000_000.0, 2_000_000.0, 500_000.0])},
+        index=dates,
+    )
+    held_book = pd.DataFrame(
+        {
+            "AAA": [0.5, 0.5, 0.5, -0.5, -0.5, 0.5],
+            "BBB": [-0.5, -0.5, -0.5, 0.5, 0.5, -0.5],
+            "CCC": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        },
+        index=dates,
+    )
+    raw_returns = pd.Series(np.zeros(periods), index=dates)
+    regimes = pd.Series(["hi", "lo", "hi", "lo", "hi", "lo"], index=dates)
+    regime_impact_coefficients = {"hi": 0.8, "lo": 0.2}
+
+    coefficient = 0.5
+    adv_window = 20
+    initial_capital = 100_000.0
+
+    result = book_market_impact_cost(
+        held_book=held_book, raw_returns=raw_returns, close=close,
+        volume=volume, impact_coefficient=coefficient,
+        adv_window=adv_window, initial_capital=initial_capital,
+        impact_model="linear", regimes=regimes,
+        regime_impact_coefficients=regime_impact_coefficients,
+    )
+    assert result is not None, "regime-aware linear book impact must be live for coefficient > 0"
+
+    equity = initial_capital * (1 + raw_returns).cumprod()
+    traded_weight = held_book.diff().abs()
+    adv_notional = volume.rolling(window=adv_window, min_periods=1).mean() * close
+    traded_notional = traded_weight.mul(equity, axis=0).fillna(0.0)
+    participation = traded_notional.values / adv_notional.values
+    period_coeff = regimes.map(regime_impact_coefficients).values[:, None]
+    rate = participation * period_coeff
+    expected = rate.mean(axis=1)
+
+    assert np.allclose(result.values, expected, atol=1e-12), (
+        f"regime-aware book linear impact must equal "
+        f"mean_i(|dw_i|*equity/ADV_i*regime_coeff_t): "
+        f"got {result.values}, expected {expected}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -998,6 +1184,12 @@ TEST_REGISTRY = [
      test_panel_regime_aware_sqrt_matches_closed_form),
     ("test_book_regime_aware_sqrt_matches_closed_form",
      test_book_regime_aware_sqrt_matches_closed_form),
+    ("test_single_asset_regime_aware_linear_matches_closed_form",
+     test_single_asset_regime_aware_linear_matches_closed_form),
+    ("test_panel_regime_aware_linear_matches_closed_form",
+     test_panel_regime_aware_linear_matches_closed_form),
+    ("test_book_regime_aware_linear_matches_closed_form",
+     test_book_regime_aware_linear_matches_closed_form),
 ]
 
 
