@@ -36,6 +36,7 @@ from utils import (  # noqa: E402
     book_market_impact_cost,
     book_return_from_held,
     held_book_weights,
+    market_impact_cost,
 )
 
 
@@ -487,54 +488,8 @@ def test_dict_panel_constant_position_pays_no_per_bar_impact_after_entry():
 
 
 # ---------------------------------------------------------------------------
-# Registry
+# Square-root market-impact model: end-to-end selection + closed-form formula
 # ---------------------------------------------------------------------------
-
-TEST_REGISTRY = [
-    ("test_borrow_cost_reduces_short_returns", test_borrow_cost_reduces_short_returns),
-    ("test_borrow_cost_no_effect_on_long_or_flat", test_borrow_cost_no_effect_on_long_or_flat),
-    ("test_funding_cost_reduces_leveraged_returns", test_funding_cost_reduces_leveraged_returns),
-    ("test_funding_cost_no_effect_at_or_below_1x", test_funding_cost_no_effect_at_or_below_1x),
-    ("test_commission_and_slippage_reduce_returns_with_turnover", test_commission_and_slippage_reduce_returns_with_turnover),
-    ("test_zero_turnover_pays_no_commission_after_entry", test_zero_turnover_pays_no_commission_after_entry),
-    ("test_market_impact_is_live", test_market_impact_is_live),
-    ("test_market_impact_monotone_in_coefficient", test_market_impact_monotone_in_coefficient),
-    ("test_fill_rate_scales_positions_and_costs_elementwise", test_fill_rate_scales_positions_and_costs_elementwise),
-    ("test_deterministic_given_identical_inputs", test_deterministic_given_identical_inputs),
-    ("test_book_pricing_matches_book_pnl_minus_independently_computed_costs",
-     test_book_pricing_matches_book_pnl_minus_independently_computed_costs),
-    ("test_book_pricing_charges_gross_turnover_on_rotation_in_place",
-     test_book_pricing_charges_gross_turnover_on_rotation_in_place),
-    ("test_book_borrow_cost_charges_short_legs", test_book_borrow_cost_charges_short_legs),
-    ("test_book_funding_cost_charges_gross_exposure_beyond_1x",
-     test_book_funding_cost_charges_gross_exposure_beyond_1x),
-    ("test_book_market_impact_live_and_monotone", test_book_market_impact_live_and_monotone),
-    ("test_book_pricing_deterministic_given_identical_inputs",
-     test_book_pricing_deterministic_given_identical_inputs),
-    ("test_market_impact_reduces_returns_market_neutral_pairs_portfolio",
-     test_market_impact_reduces_returns_market_neutral_pairs_portfolio),
-    ("test_dict_panel_constant_position_pays_no_per_bar_impact_after_entry",
-     test_dict_panel_constant_position_pays_no_per_bar_impact_after_entry),
-]
-
-
-def main() -> int:
-    failures = 0
-    for name, fn in TEST_REGISTRY:
-        try:
-            fn()
-            print(f"PASS  {name}")
-        except Exception:
-            failures += 1
-            print(f"FAIL  {name}")
-            traceback.print_exc()
-    print(f"\n{len(TEST_REGISTRY) - failures}/{len(TEST_REGISTRY)} tests passed")
-    return 1 if failures else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
-
 
 def test_market_impact_sqrt_model_differs_from_linear_single_asset():
     """Square-root impact must be selectable and produce a different net
@@ -563,12 +518,102 @@ def test_market_impact_sqrt_model_differs_from_linear_single_asset():
     assert float((1 + sqrt).prod() - 1) != float((1 + linear).prod() - 1), (
         "sqrt and linear impact totals must differ for the same coefficient"
     )
-    # Both models must still impose non-negative impact drag relative to no
-    # impact on this long-only, always-positive-return construction? Not
-    # guaranteed for signed raw returns; assert they differ from zero-impact.
     no_impact = _calculate_strategy_returns(
         data, sig, commission=0.0, slippage=0.0,
         impact_coefficient=0.0, impact_model="linear",
     )
     assert not np.allclose(linear.values, no_impact.values)
     assert not np.allclose(sqrt.values, no_impact.values)
+
+
+def test_sqrt_market_impact_matches_closed_form():
+    """The square-root impact cost returned by ``market_impact_cost`` must equal
+    the closed-form ``coefficient * sqrt(position_notional / ADV_notional)``.
+
+    ``test_market_impact_sqrt_model_differs_from_linear_single_asset`` only
+    proves the sqrt branch is *reachable*; it would still pass if the sqrt
+    formula were silently wrong (e.g. a missing coefficient, a linear term, or
+    a mis-scaled participation). This test pins the formula itself on a
+    constant-volume, zero-return frame where the closed form is exact, so a
+    regression in the empirically-grounded square-root law is caught directly.
+    """
+    periods = 6
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    close = pd.Series([100.0, 101.0, 102.0, 103.0, 104.0, 105.0], index=dates)
+    volume = pd.Series(np.full(periods, 1_000_000.0), index=dates)
+    # Zero market return -> equity is flat at initial_capital, so the closed
+    # form is simply coeff * sqrt(|d| * initial_capital / (volume * close)).
+    raw_returns = pd.Series(np.zeros(periods), index=dates)
+    position_changes = pd.Series([0.0, 1.0, 0.0, 0.5, 0.0, 1.0], index=dates)
+
+    coefficient = 0.5
+    initial_capital = 100_000.0
+    result = market_impact_cost(
+        position_changes, raw_returns, close, volume,
+        is_panel=False, impact_coefficient=coefficient,
+        adv_window=20, initial_capital=initial_capital, impact_model="sqrt",
+    )
+    assert result is not None, "sqrt impact must be live for coefficient > 0"
+
+    equity = initial_capital * (1 + raw_returns).cumprod()
+    adv_notional = volume.rolling(window=20, min_periods=1).mean() * close
+    participation = (position_changes * equity) / adv_notional
+    expected = coefficient * np.sqrt(participation)
+    assert np.allclose(result.values, expected.values, atol=1e-12), (
+        f"sqrt impact must equal coeff*sqrt(participation): "
+        f"got {result.values}, expected {expected.values}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Registry
+# ---------------------------------------------------------------------------
+
+TEST_REGISTRY = [
+    ("test_borrow_cost_reduces_short_returns", test_borrow_cost_reduces_short_returns),
+    ("test_borrow_cost_no_effect_on_long_or_flat", test_borrow_cost_no_effect_on_long_or_flat),
+    ("test_funding_cost_reduces_leveraged_returns", test_funding_cost_reduces_leveraged_returns),
+    ("test_funding_cost_no_effect_at_or_below_1x", test_funding_cost_no_effect_at_or_below_1x),
+    ("test_commission_and_slippage_reduce_returns_with_turnover", test_commission_and_slippage_reduce_returns_with_turnover),
+    ("test_zero_turnover_pays_no_commission_after_entry", test_zero_turnover_pays_no_commission_after_entry),
+    ("test_market_impact_is_live", test_market_impact_is_live),
+    ("test_market_impact_monotone_in_coefficient", test_market_impact_monotone_in_coefficient),
+    ("test_fill_rate_scales_positions_and_costs_elementwise", test_fill_rate_scales_positions_and_costs_elementwise),
+    ("test_deterministic_given_identical_inputs", test_deterministic_given_identical_inputs),
+    ("test_book_pricing_matches_book_pnl_minus_independently_computed_costs",
+     test_book_pricing_matches_book_pnl_minus_independently_computed_costs),
+    ("test_book_pricing_charges_gross_turnover_on_rotation_in_place",
+     test_book_pricing_charges_gross_turnover_on_rotation_in_place),
+    ("test_book_borrow_cost_charges_short_legs", test_book_borrow_cost_charges_short_legs),
+    ("test_book_funding_cost_charges_gross_exposure_beyond_1x",
+     test_book_funding_cost_charges_gross_exposure_beyond_1x),
+    ("test_book_market_impact_live_and_monotone", test_book_market_impact_live_and_monotone),
+    ("test_book_pricing_deterministic_given_identical_inputs",
+     test_book_pricing_deterministic_given_identical_inputs),
+    ("test_market_impact_reduces_returns_market_neutral_pairs_portfolio",
+     test_market_impact_reduces_returns_market_neutral_pairs_portfolio),
+    ("test_dict_panel_constant_position_pays_no_per_bar_impact_after_entry",
+     test_dict_panel_constant_position_pays_no_per_bar_impact_after_entry),
+    ("test_market_impact_sqrt_model_differs_from_linear_single_asset",
+     test_market_impact_sqrt_model_differs_from_linear_single_asset),
+    ("test_sqrt_market_impact_matches_closed_form",
+     test_sqrt_market_impact_matches_closed_form),
+]
+
+
+def main() -> int:
+    failures = 0
+    for name, fn in TEST_REGISTRY:
+        try:
+            fn()
+            print(f"PASS  {name}")
+        except Exception:
+            failures += 1
+            print(f"FAIL  {name}")
+            traceback.print_exc()
+    print(f"\n{len(TEST_REGISTRY) - failures}/{len(TEST_REGISTRY)} tests passed")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
