@@ -156,7 +156,24 @@ def detect_volatility_regime(
         return pd.Series(VolatilityRegime.UNKNOWN.value, index=close.index)
 
     returns = close.pct_change()
-    rolling_vol = returns.rolling(window).std() * np.sqrt(252)  # Annualized
+    # Annualize realized volatility with the return frequency inferred from
+    # the close index (252 business-daily, 365 calendar-daily, 52 weekly,
+    # 12 monthly, ...) via the framework convention ``utils._annualization_factor``,
+    # falling back to 252 for a non-DatetimeIndex or an un-inferable frequency.
+    # Hardcoding sqrt(252) overstated annualized volatility on non-daily data
+    # (e.g. ~2.2x too high for weekly bars), which mis-scaled the reported
+    # volatility regime and any downstream comparison against a per-regime
+    # annualized target. The expanding-quantile *classification* is invariant
+    # to this constant scale (both series and thresholds scale together), but
+    # the reported magnitude is not, so the level is corrected here.
+    try:
+        from utils import _annualization_factor
+        periods_per_year = float(_annualization_factor(close.index))
+    except Exception:
+        periods_per_year = 252.0
+    if not np.isfinite(periods_per_year) or periods_per_year <= 0:
+        periods_per_year = 252.0
+    rolling_vol = returns.rolling(window).std() * np.sqrt(periods_per_year)  # Annualized
 
     # Compute thresholds from the full series (expanding)
     vol_high_threshold = rolling_vol.expanding().quantile(quantile_high)
@@ -535,7 +552,20 @@ def build_hmm_features(
     # Rolling volatility feature
     if config.use_volatility:
         returns = close.pct_change()
-        rolling_vol = returns.rolling(config.vol_window).std() * np.sqrt(252)
+        # Annualize with the return frequency inferred from the index (see
+        # detect_volatility_regime); the hardcoded sqrt(252) overstated the
+        # feature scale on non-daily data. Regime *labels* are invariant to a
+        # constant per-feature scale (Gaussian-emission EM is location/scale
+        # invariant), but the reported ``means``/``covars`` model params are
+        # not, so the level is corrected here for interpretability.
+        try:
+            from utils import _annualization_factor
+            periods_per_year = float(_annualization_factor(close.index))
+        except Exception:
+            periods_per_year = 252.0
+        if not np.isfinite(periods_per_year) or periods_per_year <= 0:
+            periods_per_year = 252.0
+        rolling_vol = returns.rolling(config.vol_window).std() * np.sqrt(periods_per_year)
         features.append(rolling_vol.values.reshape(-1, 1))
         feature_names.append("volatility")
 

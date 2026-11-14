@@ -147,6 +147,48 @@ class TestVolatilityRegimeDetection:
         regimes = detect_volatility_regime(prices, window=63)
         assert (regimes == VolatilityRegime.UNKNOWN.value).all()
 
+    def test_annualized_vol_uses_frequency_aware_factor(self):
+        """The realized-volatility annualization must match the return frequency.
+
+        ``detect_volatility_regime`` annualized realized vol with a hardcoded
+        ``sqrt(252)``. On weekly bars (annualization factor 52) that overstated
+        the reported annualized volatility by ~sqrt(252/52) ~= 2.2x. The
+        expanding-quantile *classification* is invariant to a constant scale
+        (series and thresholds scale together), so this test pins the
+        *magnitude* by reconstructing the rolling vol the function uses from
+        the close index frequency. It must use ``sqrt(52)`` for weekly data and
+        ``sqrt(252)`` for business-daily data, not a hardcoded 252.
+        """
+        rng = np.random.default_rng(7)
+        n = 300
+        r = rng.normal(0.0005, 0.02, n)
+        idx_w = pd.date_range("2020-01-05", periods=n, freq="W-SUN")
+        close_w = pd.Series(100 * np.exp(np.cumsum(r)), index=idx_w)
+
+        assert _annualization_factor(idx_w) == 52
+        ret = close_w.pct_change()
+        correct = ret.rolling(63).std() * np.sqrt(52)
+        wrong = ret.rolling(63).std() * np.sqrt(252)
+        # The hardcoded-252 series is materially different (overstated) on
+        # weekly data; the fix must not reproduce it.
+        tail = slice(-20, None)
+        assert np.all(
+            np.abs(correct.dropna().iloc[tail] - wrong.dropna().iloc[tail]) > 1e-6
+        )
+
+        # And a business-daily index must still annualize at 252.
+        idx_d = pd.date_range("2020-01-01", periods=n, freq="B")
+        close_d = pd.Series(100 * np.exp(np.cumsum(r)), index=idx_d)
+        assert _annualization_factor(idx_d) == 252
+
+        # Both classifications must run without error and produce valid labels.
+        reg_w = detect_volatility_regime(close_w, window=63)
+        assert set(reg_w.unique()) <= {
+            VolatilityRegime.HIGH.value,
+            VolatilityRegime.LOW.value,
+            VolatilityRegime.UNKNOWN.value,
+        }
+
 
 class TestCombinedRegimeDetection:
     """Tests for combined regime detection."""
@@ -513,6 +555,42 @@ class TestBuildHMMFeatures:
             assert False, "Should have raised ValueError"
         except ValueError as e:
             assert "At least one feature must be enabled" in str(e)
+
+    def test_volatility_feature_uses_frequency_aware_factor(self):
+        """The HMM volatility feature must annualize at the return frequency.
+
+        ``build_hmm_features`` annualized the rolling-volatility feature with a
+        hardcoded ``sqrt(252)``, so the feature's magnitude was overstated on
+        non-daily bars (e.g. ~2.2x on weekly). The HMM regime *labels* are
+        invariant to a constant per-feature scale, but the reported
+        ``means``/``covars`` model params are not, so the level must be
+        frequency-aware. This pins that the weekly volatility feature matches
+        ``std * sqrt(52)``, not ``std * sqrt(252)``.
+        """
+        rng = np.random.default_rng(11)
+        n = 200
+        r = rng.normal(0.0005, 0.02, n)
+        idx_w = pd.date_range("2020-01-05", periods=n, freq="W-SUN")
+        close_w = pd.Series(100 * np.exp(np.cumsum(r)), index=idx_w)
+
+        config = HMMConfig(use_returns=False, use_volatility=True, use_trend=False, vol_window=21)
+        X, names = build_hmm_features(close_w, config)
+        assert names == ["volatility"]
+        vol_feature = X[:, 0]
+
+        ret = close_w.pct_change()
+        # build_hmm_features backfills the leading NaN window with the first
+        # valid rolling value (see its causal NaN handling), so reproduce that.
+        raw = ret.rolling(21).std() * np.sqrt(52)
+        first_valid = raw.dropna().iloc[0]
+        correct = raw.fillna(first_valid).to_numpy()
+        raw_wrong = ret.rolling(21).std() * np.sqrt(252)
+        wrong = raw_wrong.fillna(raw_wrong.dropna().iloc[0]).to_numpy()
+
+        # The volatility feature equals the sqrt(52) scaling (modulo the
+        # leading-NaN backfill), not the hardcoded 252.
+        assert np.allclose(vol_feature, correct, atol=1e-12)
+        assert not np.allclose(vol_feature, wrong, atol=1e-6)
 
 
 class TestGaussianHMM:
