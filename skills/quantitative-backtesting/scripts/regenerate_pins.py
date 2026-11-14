@@ -249,11 +249,12 @@ def _update_structural(src: str, got: int, exp: int) -> Tuple[str, int]:
         )
         src, n = pat.subn(lambda mm: mm.group(1) + str(got) + mm.group(2), src)
         count += n
-    # Generic fallback: a single unambiguous count-accessor assert ``== exp``.
+    # Generic fallback: a single unambiguous assert ``== exp`` on a line.
+    # Uniqueness per (file, exp) avoids false positives; structural count guards
+    # in this suite are deterministic integers from committed fixtures.
     if count == 0:
-        lhs_hint = r"(summary|dsr|result)\s*[\(\[\.]"
         pat = re.compile(
-            r"(?m)^([ \t]*assert\s+(?:" + lhs_hint + r").*?\s*==\s*)" + str(exp) + r"(\s*)$"
+            r"(?m)^([ \t]*assert\s+.+?\s*==\s*)" + str(exp) + r"(\s*)$"
         )
         matches = list(pat.finditer(src))
         if len(matches) == 1:
@@ -315,9 +316,11 @@ def _parse_failures(text: str) -> List[Dict]:
     """Extract every regression/structural failure from pytest output, tagged by file.
 
     Pytest emits a ``FAILED <file>::<test> - AssertionError: <message>`` header per
-    failing test (the message carries ``got ... expected ...`` for metric guards)
-    and ``E   ...`` detail lines (which repeat the message and carry
-    ``assert <got> == <exp>`` for structural count guards).
+    failing test (the message carries ``got ... expected ...`` for metric guards),
+    traceback lines ``<file>:<lineno>: in <test>`` before detail, and
+    ``E   ...`` detail lines (which repeat the message and carry
+    ``assert <got> == <exp>`` for structural count guards). Ordering varies with
+    ``--tb=short`` so we track file context from both traceback and FAILED lines.
     """
     updates: List[Dict] = []
     current_file = None
@@ -325,6 +328,10 @@ def _parse_failures(text: str) -> List[Dict]:
     seen_struct = set()
     for raw in text.splitlines():
         line = raw.strip()
+        # Traceback context: "tests/foo.py:71: in test_bar"
+        mtb = re.match(r"^(\S+?\.py):\d+:", line)
+        if mtb and not line.startswith("FAILED "):
+            current_file = mtb.group(1)
         if line.startswith("FAILED "):
             mfile = re.match(r"FAILED\s+(\S+)::\S+\s*-\s*(.*)$", line)
             if mfile:
