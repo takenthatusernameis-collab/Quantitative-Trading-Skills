@@ -1158,7 +1158,7 @@ def regime_aware_position_size(
     min_leverage: float = 0.0,
     max_leverage: float = 2.0,
     default_target_vol: Optional[float] = None,
-    periods_per_year: int = 252,
+    periods_per_year: Optional[float] = None,
 ) -> pd.Series:
     """Scale ``base_signals`` to a per-regime volatility target.
 
@@ -1197,6 +1197,15 @@ def regime_aware_position_size(
             unmapped regime raises ``ValueError`` instead of silently going
             flat.
         periods_per_year: Annualization factor for realized volatility.
+            ``None`` infers it from the ``close`` index via
+            :func:`utils._annualization_factor` (252 business-daily,
+            365 calendar-daily, 52 weekly, 12 monthly, ...), falling back
+            to 252 when the index is not a DatetimeIndex or the frequency
+            cannot be inferred. Passing an explicit value overrides it.
+            Defaults to ``None`` rather than a hardcoded 252: a caller
+            passing weekly ``close`` with the old default got a ~2.2x
+            under-sized position (multiplier 0.45x of correct), because the
+            realized vol was under-annualized.
 
     Returns:
         A float ``pd.Series`` of position sizes on the common index of
@@ -1239,6 +1248,21 @@ def regime_aware_position_size(
     base = base.loc[common]
     close_s = close_s.loc[common]
     reg = reg.loc[common]
+
+    if periods_per_year is None:
+        # Infer the annualization factor from the close index so a weekly or
+        # monthly series sizes positions against a weekly/monthly realized vol,
+        # not a daily-annualized one. Mirrors compute_regime_performance's
+        # ``Optional[float] = None`` pattern; falls back to 252 when the
+        # frequency cannot be inferred.
+        try:
+            from utils import _annualization_factor
+            periods_per_year = float(_annualization_factor(close_s.index))
+        except Exception:
+            periods_per_year = 252.0
+    periods_per_year = float(periods_per_year)
+    if not np.isfinite(periods_per_year) or periods_per_year <= 0:
+        periods_per_year = 252.0
 
     returns = close_s.pct_change()
     realized_vol = returns.rolling(window=lookback, min_periods=lookback).std() * np.sqrt(

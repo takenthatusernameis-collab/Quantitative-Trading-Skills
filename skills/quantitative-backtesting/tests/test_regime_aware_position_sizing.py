@@ -206,6 +206,57 @@ def test_preserves_base_direction_when_target_positive():
     assert (np.sign(valid.values) == np.sign(base.loc[valid.index].values)).all()
 
 
+def test_periods_per_year_default_infers_frequency_from_close():
+    # Weekly close: the default annualization factor must be 52, not 252.
+    # With the old hardcoded 252 the realized vol was over-annualized ~2.2x,
+    # so the multiplier was ~0.45x of the correct size for the same target.
+    # Random-walk prices give a non-zero realized vol so the factor
+    # actually matters (a constant or linear ramp has zero rolling std and
+    # clips to max_leverage in every case).
+    n = 40
+    rng = np.random.default_rng(42)
+    closes = 100.0 * np.cumprod(1.0 + rng.normal(0.0, 0.02, size=n))
+    close = pd.Series(closes, index=pd.date_range("2020-01-05", periods=n, freq="W"))
+    base = pd.Series(np.ones(n), index=close.index)
+    regimes = pd.Series(["calm"] * n, index=close.index)
+
+    sized = regime_aware_position_size(
+        base, close, regimes, {"calm": 0.20}, lookback=5
+    )
+
+    explicit = regime_aware_position_size(
+        base, close, regimes, {"calm": 0.20}, lookback=5, periods_per_year=52
+    )
+    assert np.allclose(
+        sized.dropna().values, explicit.dropna().values, atol=1e-12
+    ), "weekly default must equal explicit periods_per_year=52"
+
+    wrong = regime_aware_position_size(
+        base, close, regimes, {"calm": 0.20}, lookback=5, periods_per_year=252
+    )
+    assert not np.allclose(
+        sized.dropna().values, wrong.dropna().values, atol=1e-12
+    ), "weekly default must differ from the old hardcoded 252"
+
+    # Same data at business-daily frequency must infer 252 and match the
+    # explicit daily call (and differ from the weekly default).
+    daily_close = pd.Series(
+        closes, index=pd.date_range("2020-01-05", periods=n, freq="B")
+    )
+    daily_base = pd.Series(np.ones(n), index=daily_close.index)
+    daily_regimes = pd.Series(["calm"] * n, index=daily_close.index)
+    daily_sized = regime_aware_position_size(
+        daily_base, daily_close, daily_regimes, {"calm": 0.20}, lookback=5
+    )
+    daily_explicit = regime_aware_position_size(
+        daily_base, daily_close, daily_regimes, {"calm": 0.20}, lookback=5,
+        periods_per_year=252,
+    )
+    assert np.allclose(
+        daily_sized.dropna().values, daily_explicit.dropna().values, atol=1e-12
+    ), "business-daily default must equal explicit periods_per_year=252"
+
+
 def test_invalid_arguments_raise():
     close = _series([100.0, 101.0, 99.0, 102.0])
     base = _series(np.ones(4))
