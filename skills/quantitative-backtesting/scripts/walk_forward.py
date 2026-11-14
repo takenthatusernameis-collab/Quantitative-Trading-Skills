@@ -3948,6 +3948,12 @@ def cpcv_analysis(
     for fold in folds:
         train_data = fold["train_data"]
         test_data = fold["test_data"]
+        # Per-fold warmup history. This must be read from the fold record: a
+        # bare `warmup_data` here would leak the value left over from the
+        # fold-construction loop (the last group's pre-window slice) and every
+        # earlier fold would initialize its rolling indicators on the wrong
+        # bars, silently corrupting its signals.
+        warmup_data = fold["warmup_data"]
 
         best_sharpe = -np.inf
         best_params = None

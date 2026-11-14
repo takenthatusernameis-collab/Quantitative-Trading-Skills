@@ -123,11 +123,11 @@ def test_cpcv_macd_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 0.187993597879895,
-        "total_oos_return": 0.0241604262164683,
-        "oos_volatility": 0.3689719330609187,
-        "n_positive_folds": 146.0,
-        "win_rate_folds": 0.503448275862069,
+        "oos_sharpe": 0.7447269032141375,
+        "total_oos_return": 0.2952698296838272,
+        "oos_volatility": 0.36430224037670594,
+        "n_positive_folds": 147.0,
+        "win_rate_folds": 0.506896551724138,
         "avg_param_stability": 0.8000000000000002,
     }
     REL_TOL = 1e-6
@@ -144,8 +144,8 @@ def test_cpcv_macd_real_aapl_metrics_pinned():
     assert dsr.get("n_trials") == N_SPLITS
     dsr_p = dsr.get("p_value")
     assert dsr_p is not None
-    assert abs(dsr_p - 0.3770170125974466) <= 1e-6 * max(abs(0.3770170125974466), 1e-9)
-    assert abs(dsr.get("deflated_sharpe_ratio") - 0.6229829874025534) <= 1e-6
+    assert abs(dsr_p - 0.3438877198112952) <= 1e-6 * max(abs(0.3438877198112952), 1e-9)
+    assert abs(dsr.get("deflated_sharpe_ratio") - 0.6561122801887048) <= 1e-6
 
     # Honest verdict: Sharpe > 0 and return > 0 pass, but Deflated Sharpe
     # p-value >= 0.10 fails, so the hypothesis is NOT SUPPORTED.

@@ -134,9 +134,9 @@ def test_cpcv_multi_pair_zscore_real_aapl_googl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": -0.34548449156297234,
-        "total_oos_return": -0.012381091091831942,
-        "oos_volatility": 0.08004301552270347,
+        "oos_sharpe": -0.11647291221209279,
+        "total_oos_return": 0.008148306634161662,
+        "oos_volatility": 0.08233782716567825,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():
@@ -150,10 +150,11 @@ def test_cpcv_multi_pair_zscore_real_aapl_googl_metrics_pinned():
     assert dsr.get("n_trials") == N_SPLITS
     dsr_p = dsr.get("p_value")
     assert dsr_p is not None
-    assert abs(dsr_p - 0.4812429872696221) <= 1e-6 * max(abs(0.4812429872696221), 1e-9)
+    assert abs(dsr_p - 0.6671710452501018) <= 1e-6 * max(abs(0.6671710452501018), 1e-9)
 
-    # Honest verdict: Sharpe > 0 and return > 0 pass, but Deflated Sharpe
-    # p-value >= 0.10 fails, so the hypothesis is NOT SUPPORTED.
+    # Honest verdict (after the per-fold warmup fix): Sharpe < 0 and return > 0,
+    # and the Deflated Sharpe p-value >= 0.10 fails, so the hypothesis is NOT
+    # SUPPORTED.
     sharpe = summary["oos_sharpe"]
     ret = summary["total_oos_return"]
     passes = {
@@ -163,7 +164,7 @@ def test_cpcv_multi_pair_zscore_real_aapl_googl_metrics_pinned():
             dsr_p is not None and float(dsr_p) < DSR_PVALUE_THRESHOLD
         ),
     }
-    assert passes["oos_sharpe_gt_zero"] is True
+    assert passes["oos_sharpe_gt_zero"] is False
     assert passes["oos_total_return_positive"] is True
     assert passes["deflated_sharpe_pvalue_lt_0.10"] is False
     assert all(passes.values()) is False

@@ -122,8 +122,8 @@ def test_cpcv_donchian_breakout_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 0.06830019707840099,
-        "total_oos_return": -0.017162000195724558,
+        "oos_sharpe": 0.25140409441150585,
+        "total_oos_return": 0.057847225915785616,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():
@@ -137,7 +137,7 @@ def test_cpcv_donchian_breakout_real_aapl_metrics_pinned():
     assert dsr.get("n_trials") == N_SPLITS
     dsr_p = dsr.get("p_value")
     assert dsr_p is not None
-    assert abs(dsr_p - 0.3790572861418584) <= 1e-6 * max(abs(0.3790572861418584), 1e-9)
+    assert abs(dsr_p - 0.6040397313359386) <= 1e-6 * max(abs(0.6040397313359386), 1e-9)
 
     # Honest verdict: Sharpe > 0 and return > 0 pass, but Deflated Sharpe
     # p-value >= 0.10 fails, so the hypothesis is NOT SUPPORTED.

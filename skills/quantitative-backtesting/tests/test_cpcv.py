@@ -179,17 +179,76 @@ def test_cpcv_basic_structure():
     assert "n_folds" in summary
     assert "total_oos_return" in summary
     assert "overfitting_risk" in summary
-    # This configuration selects nothing in any fold (the 12-bar test window
-    # is shorter than the indicator warm-up), so there is no parameter
-    # stability to classify: the verdict is *not applicable*, not "low" and
-    # not "high". A categorical verdict on a run that could not trade is a
-    # category error. The reason is recorded, and the run says why in
-    # `no_selection_diagnosis`.
-    assert summary["overfitting_risk"] is None
-    assert "not applicable" in summary["overfitting_risk_reason"]
-    assert summary["no_selection_diagnosis"]["cause"] == (
-        "no_position_in_validation_window"
+    # After the CPCV per-fold warmup fix, the 12-bar test windows are scored
+    # with the preceding warmup history, so 4 of the 5 folds select a
+    # parameter (the fifth stays flat and is reported as a partial selection).
+    # The verdict is therefore a real categorical rating ('low'), not 'not
+    # applicable', and there is no all-flat no-selection diagnosis.
+    assert summary["folds_with_position"] == 4
+    assert summary["overfitting_risk"] == "low"
+    assert summary["no_selection_diagnosis"] is None
+
+
+def test_cpcv_uses_each_fold_own_warmup_history():
+    """Each CPCV fold must initialize its rolling indicators on the bars that
+    immediately precede *its own* test window.
+
+    Regression guard: the grid-search loop used to read a bare ``warmup_data``
+    variable left over from the fold-construction loop, so every fold was
+    scored on the *last* group's pre-window slice instead of its own. A fold
+    whose own warmup differs from the leaked one would then produce signals
+    computed on unrelated bars, silently changing the out-of-sample record.
+    This test records the exact index every ``generate_signals`` call receives
+    and asserts each fold's own ``warmup + test`` window is among them.
+    """
+    data = _make_sample_data(300)
+    base_factory = _make_strategy_factory("sma_crossover")
+
+    calls = []
+
+    class _SpyStrategy:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def generate_signals(self, frame):
+            calls.append(frame.index)
+            return self._inner.generate_signals(frame)
+
+        def get_position_sizing(self, frame, signals):
+            return self._inner.get_position_sizing(frame, signals)
+
+        def generate_target_weights(self, frame):
+            return self._inner.generate_target_weights(frame)
+
+    def spy_factory(params):
+        return _SpyStrategy(base_factory(params))
+
+    results = cpcv_analysis(
+        data=data,
+        strategy_factory=spy_factory,
+        param_grid={"fast_period": [10], "slow_period": [30]},
+        n_splits=4,
+        test_size=0.2,
+        validate_pit=False,
     )
+
+    recorded = [tuple(idx) for idx in calls]
+    checked = 0
+    for fold in results["folds"]:
+        warm = fold["warmup_data"]
+        test = fold["test_data"]
+        if len(warm) == 0:
+            # First group has no prior history; the framework scores it on the
+            # test window alone (no leak is observable there).
+            continue
+        expected = tuple(pd.concat([warm, test]).index)
+        assert expected in recorded, (
+            f"fold {fold['fold']} was not scored on its own warmup+test "
+            f"window ({len(expected)} bars starting {expected[0]}); "
+            f"it was scored on another fold's warmup history"
+        )
+        checked += 1
+    assert checked >= 1, "expected at least one fold with a non-empty warmup"
 
 
 def test_cpcv_purge_embargo():
@@ -1214,6 +1273,7 @@ def test_cpcv_book_pricing_keeps_the_net_exposure_numbers_unchanged():
 
 TEST_REGISTRY = [
     ("cpcv_basic_structure", test_cpcv_basic_structure),
+    ("cpcv_uses_each_fold_own_warmup_history", test_cpcv_uses_each_fold_own_warmup_history),
     ("cpcv_purge_embargo", test_cpcv_purge_embargo),
     ("cpcv_param_stability", test_cpcv_param_stability),
     ("cpcv_summary_calculation", test_cpcv_summary_calculation),

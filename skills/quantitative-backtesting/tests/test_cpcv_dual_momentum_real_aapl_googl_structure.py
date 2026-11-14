@@ -100,13 +100,19 @@ def test_cpcv_dual_momentum_real_aapl_googl_runs():
     assert "Point-in-time validation passed" in out
 
 
-def test_cpcv_dual_momentum_real_aapl_googl_no_selection_pinned():
+def test_cpcv_dual_momentum_real_aapl_googl_warmup_enables_selection_pinned():
     """Regression guard: the advertised CPCV run (lookback=252, n_splits=5,
-    test_size=0.2, panel/book) on the committed AAPL/GOOGL panel produces no
-    selectable out-of-sample fold because each ~100-bar test window is shorter
-    than the 252-bar lookback. This pins the honest structural outcome and the
-    no-selection diagnosis so a silent change to windowing, selection, or
-    diagnosis is caught. It does not tune to force a positive result.
+    test_size=0.2, panel/book) on the committed AAPL/GOOGL panel selects a
+    position in 4 of the 5 out-of-sample folds.
+
+    Each ~100-bar test window is shorter than the 252-bar lookback, so a naive
+    per-window signal is undefined. The CPCV path prepends the bars that
+    immediately precede each fold's test window as *warmup* (used only to
+    initialize the rolling indicators, then sliced away), which supplies the
+    lookback history without leaking future bars into the test record. This
+    pins that honest structural outcome: 4 folds trade, one stays flat, and the
+    run reports a real pooled OOS record rather than "no selection". It does
+    not tune to force a positive result.
     """
     for name in ("AAPL.csv", "GOOGL.csv"):
         assert (SRC / name).exists()
@@ -117,27 +123,18 @@ def test_cpcv_dual_momentum_real_aapl_googl_no_selection_pinned():
 
     summary = result["summary"]
     assert summary["n_folds"] == N_SPLITS
-    assert summary["folds_with_position"] == 0
+    assert summary["folds_with_position"] == 4
     assert summary["bias_controls_engaged"] is True
     assert summary.get("panel_pricing") == "book"
-    # No pooled OOS metrics when nothing was selected.
-    assert summary.get("total_oos_return") is None
+    # A real pooled OOS record now exists (it was None before the per-fold
+    # warmup fix, when no fold could satisfy the 252-bar lookback).
+    assert summary.get("total_oos_return") is not None
 
-    diag = summary.get("no_selection_diagnosis")
-    assert isinstance(diag, dict), "missing no_selection_diagnosis"
-    assert diag.get("cause") == "no_position_in_validation_window"
-    details = diag.get("details") or {}
-    assert details.get("validation_method") == "cpcv"
-    assert details.get("n_validation_windows") == N_SPLITS
-    assert details.get("n_windows_with_selected_params") == 0
-    assert details.get("cpcv_n_splits") == N_SPLITS
-    assert details.get("cpcv_test_size") == TEST_SIZE
-    windows = details.get("validation_window_bars") or []
-    assert len(windows) == N_SPLITS
-    # Each test window is materially shorter than the pre-registered lookback,
-    # which is the mechanical reason no position could be taken.
-    lookback = PARAM_GRID["lookback"][0]
-    assert all(int(w) < lookback for w in windows)
+    # One fold stays flat; that is a partial selection, not a total failure.
+    assert summary.get("no_selection_diagnosis") is None
+    partial = summary.get("partial_selection_diagnosis")
+    assert isinstance(partial, dict)
+    assert partial.get("cause") == "no_position_in_validation_window"
 
     out = buffer.getvalue()
     assert "Point-in-time validation passed" in out
@@ -145,5 +142,5 @@ def test_cpcv_dual_momentum_real_aapl_googl_no_selection_pinned():
 
 if __name__ == "__main__":
     test_cpcv_dual_momentum_real_aapl_googl_runs()
-    test_cpcv_dual_momentum_real_aapl_googl_no_selection_pinned()
+    test_cpcv_dual_momentum_real_aapl_googl_warmup_enables_selection_pinned()
     print("OK")

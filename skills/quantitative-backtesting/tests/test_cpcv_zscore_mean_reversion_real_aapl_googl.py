@@ -130,8 +130,8 @@ def test_cpcv_zscore_mean_reversion_real_aapl_googl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 0.4094300053036351,
-        "total_oos_return": 0.11612332713627382,
+        "oos_sharpe": -0.038754213188696776,
+        "total_oos_return": -0.023503421225704035,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():
@@ -145,7 +145,7 @@ def test_cpcv_zscore_mean_reversion_real_aapl_googl_metrics_pinned():
     assert dsr.get("n_trials") == N_SPLITS
     dsr_p = dsr.get("p_value")
     assert dsr_p is not None
-    assert abs(dsr_p - 0.9985440889481845) <= 1e-6 * max(abs(0.9985440889481845), 1e-9)
+    assert abs(dsr_p - 0.6936633220939353) <= 1e-6 * max(abs(0.6936633220939353), 1e-9)
 
     # Honest verdict: Sharpe < 0 and return < 0 fail, and Deflated Sharpe
     # p-value >= 0.10 fails, so the hypothesis is NOT SUPPORTED.

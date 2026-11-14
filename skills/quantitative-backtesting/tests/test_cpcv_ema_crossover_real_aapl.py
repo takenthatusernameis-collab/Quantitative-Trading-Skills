@@ -108,11 +108,11 @@ def test_cpcv_ema_crossover_real_aapl_metrics_pinned():
     costs) so a silent change to the backtest numbers is caught. Relative
     tolerance only, never exact equality.
 
-    Honest outcome: the pooled out-of-sample Sharpe is positive (+0.8861) and
-    total return is positive (+41.95%), but the Deflated Sharpe p-value
-    (0.1798) is at/above 0.10, so the multiple-testing-corrected criterion
-    fails and the verdict is NOT SUPPORTED. The test records the falsification
-    outcome and does not tune to force SUPPORT.
+    Honest outcome (after the CPCV per-fold warmup fix): the pooled
+    out-of-sample Sharpe is negative (-0.1505) and total return is negative
+    (-2.20%), and the Deflated Sharpe p-value (0.7301) is far above 0.10, so
+    every criterion fails and the honest verdict is NOT SUPPORTED. The test
+    records this outcome and does not tune to force SUPPORT.
     """
     assert (SRC / "AAPL.csv").exists()
 
@@ -123,12 +123,12 @@ def test_cpcv_ema_crossover_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 1.5127545822627568,
-        "total_oos_return": 0.11697353504293062,
-        "oos_volatility": 0.153381344883551,
-        "n_positive_folds": 35.0,
-        "win_rate_folds": 0.3017241379310345,
-        "avg_param_stability": 0.5,
+        "oos_sharpe": -0.1505084215298567,
+        "total_oos_return": -0.021976830050318696,
+        "oos_volatility": 0.1677136699005625,
+        "n_positive_folds": 67.0,
+        "win_rate_folds": 0.23103448275862068,
+        "avg_param_stability": 0.8,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():
@@ -144,11 +144,12 @@ def test_cpcv_ema_crossover_real_aapl_metrics_pinned():
     assert dsr.get("n_trials") == N_SPLITS
     dsr_p = dsr.get("p_value")
     assert dsr_p is not None
-    assert abs(dsr_p - 0.17979981377917853) <= 1e-6 * max(abs(0.17979981377917853), 1e-9)
-    assert abs(dsr.get("deflated_sharpe_ratio") - 0.8202001862208215) <= 1e-6
+    assert abs(dsr_p - 0.7301404640615972) <= 1e-6 * max(abs(0.7301404640615972), 1e-9)
+    assert abs(dsr.get("deflated_sharpe_ratio") - 0.2698595359384028) <= 1e-6
 
-    # Honest verdict: Sharpe > 0 and return > 0 pass, but Deflated Sharpe
-    # p-value >= 0.10 fails, so the hypothesis is NOT SUPPORTED.
+    # Honest verdict (after the per-fold warmup fix): Sharpe < 0 and return < 0
+    # fail, and the Deflated Sharpe p-value >= 0.10 fails, so the hypothesis is
+    # NOT SUPPORTED.
     sharpe = summary["oos_sharpe"]
     ret = summary["total_oos_return"]
     passes = {
@@ -158,8 +159,8 @@ def test_cpcv_ema_crossover_real_aapl_metrics_pinned():
             dsr_p is not None and float(dsr_p) < DSR_PVALUE_THRESHOLD
         ),
     }
-    assert passes["oos_sharpe_gt_zero"] is True
-    assert passes["oos_total_return_positive"] is True
+    assert passes["oos_sharpe_gt_zero"] is False
+    assert passes["oos_total_return_positive"] is False
     assert passes["deflated_sharpe_pvalue_lt_0.10"] is False
     assert all(passes.values()) is False
 

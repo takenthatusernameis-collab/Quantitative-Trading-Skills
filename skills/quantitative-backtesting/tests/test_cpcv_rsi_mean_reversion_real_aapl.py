@@ -124,11 +124,11 @@ def test_cpcv_rsi_mean_reversion_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": -0.2504009810094163,
-        "total_oos_return": -0.13713582363268662,
-        "oos_volatility": 0.3486879497416938,
-        "n_positive_folds": 104.0,
-        "win_rate_folds": 0.3586206896551724,
+        "oos_sharpe": -0.1599750749348126,
+        "total_oos_return": -0.0959486342197543,
+        "oos_volatility": 0.3308192830271403,
+        "n_positive_folds": 83.0,
+        "win_rate_folds": 0.28620689655172415,
         "avg_param_stability": 0.8,
     }
     REL_TOL = 1e-6
@@ -145,8 +145,8 @@ def test_cpcv_rsi_mean_reversion_real_aapl_metrics_pinned():
     assert dsr.get("n_trials") == N_SPLITS
     dsr_p = dsr.get("p_value")
     assert dsr_p is not None
-    assert abs(dsr_p - 0.9463573246658294) <= 1e-6 * max(abs(0.9463573246658294), 1e-9)
-    assert abs(dsr.get("deflated_sharpe_ratio") - 0.05364267533417061) <= 1e-6
+    assert abs(dsr_p - 0.7682068643971656) <= 1e-6 * max(abs(0.7682068643971656), 1e-9)
+    assert abs(dsr.get("deflated_sharpe_ratio") - 0.2317931356028345) <= 1e-6
 
     # Honest verdict: Sharpe < 0, return < 0, Deflated Sharpe p >= 0.10 => NOT
     # SUPPORTED. All three criteria fail on this committed window.
