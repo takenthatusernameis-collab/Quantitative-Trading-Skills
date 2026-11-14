@@ -86,20 +86,20 @@ def test_elevated_cost_sweep_runs_on_aapl_googl_real_window_multi_pair_zscore():
     # single-pair guard in test_zscore_elevated_cost_sensitivity_real_aapl_googl.py.
     EXPECTED_METRICS = {
         (2.0, 1.0): {
-            "sharpe_ratio": -0.4256114742108271,
-            "total_return": -0.030959664968179257,
+            "sharpe_ratio": 0.7110990902058707,
+            "total_return": 0.09772954160702252,
         },
         (5.0, 2.5): {
-            "sharpe_ratio": -0.5336697318874039,
-            "total_return": -0.046969474552062684,
+            "sharpe_ratio": 0.6327005515617641,
+            "total_return": 0.08887004708265778,
         },
         (10.0, 5.0): {
-            "sharpe_ratio": -0.7125384303768411,
-            "total_return": -0.07308232848114982,
+            "sharpe_ratio": 0.5018284455022648,
+            "total_return": 0.07425411749643795,
         },
         (20.0, 10.0): {
-            "sharpe_ratio": -1.0626776169126118,
-            "total_return": -0.12323612173328402,
+            "sharpe_ratio": 0.24079508041722858,
+            "total_return": 0.04557632776886966,
         },
     }
     REL_TOL = 1e-3

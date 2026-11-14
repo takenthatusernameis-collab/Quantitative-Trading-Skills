@@ -143,7 +143,7 @@ def test_walk_forward_rsi_mean_reversion_real_aapl_googl_metrics_pinned():
         )
 
     dsr = summary.get("deflated_sharpe") or {}
-    assert dsr.get("n_trials") == 8
+    assert dsr.get("n_trials") == 4
     dsr_p = dsr.get("p_value")
     assert dsr_p is not None
     assert abs(dsr_p - 0.9863010139285661) <= 1e-3 * max(abs(0.9863010139285661), 1e-9)

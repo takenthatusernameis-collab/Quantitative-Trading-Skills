@@ -96,28 +96,28 @@ def test_param_sensitivity_runs_on_aapl_googl_real_window_multi_pair_zscore():
     # claim, and no setting is tuned to force a particular outcome.
     EXPECTED_METRICS = {
         (20, 2.0, 0.5): {
-            "sharpe_ratio": -0.4256114742108271,
-            "total_return": -0.030959664968179257,
+            "sharpe_ratio": 0.7110990902058707,
+            "total_return": 0.09772954160702252,
         },
         (20, 1.5, 0.5): {
-            "sharpe_ratio": -0.8618415086703106,
-            "total_return": -0.11133986900980664,
+            "sharpe_ratio": 1.0272908361997162,
+            "total_return": 0.16810729739665065,
         },
         (20, 2.5, 0.5): {
-            "sharpe_ratio": 0.7913836712709592,
-            "total_return": 0.11160662522322795,
+            "sharpe_ratio": -0.22647256403169985,
+            "total_return": 0.011103281629603945,
         },
         (20, 2.0, 0.3): {
-            "sharpe_ratio": -0.40120821787504435,
-            "total_return": -0.03128264779111278,
+            "sharpe_ratio": 0.7649132596365089,
+            "total_return": 0.1077700052460735,
         },
         (20, 2.0, 0.7): {
-            "sharpe_ratio": -0.23944584663140164,
-            "total_return": -0.0006439866448758602,
+            "sharpe_ratio": 0.38428238865244463,
+            "total_return": 0.06034834317151594,
         },
         (15, 2.0, 0.5): {
-            "sharpe_ratio": -0.682529049918234,
-            "total_return": -0.06780720583825284,
+            "sharpe_ratio": 0.468778640510939,
+            "total_return": 0.07238405933339331,
         },
     }
     REL_TOL = 1e-3

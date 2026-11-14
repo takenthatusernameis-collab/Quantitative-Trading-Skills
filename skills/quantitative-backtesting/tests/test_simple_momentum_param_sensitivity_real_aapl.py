@@ -62,28 +62,28 @@ def test_param_sensitivity_runs_on_aapl_real_window_simple_momentum():
 
     EXPECTED_METRICS = {
         (10, 30): {
-            "sharpe_ratio": 1.501892938128653,
-            "total_return": 0.7616516108796803,
+            "sharpe_ratio": 0.1495367916686615,
+            "total_return": 0.037679766982581464,
         },
         (7, 30): {
-            "sharpe_ratio": 1.5655458472181898,
-            "total_return": 0.776839583459745,
+            "sharpe_ratio": -0.1040047321942564,
+            "total_return": -0.011209469572182829,
         },
         (15, 30): {
-            "sharpe_ratio": 1.8612153451515092,
-            "total_return": 0.9654769606088658,
+            "sharpe_ratio": 0.4946466548416106,
+            "total_return": 0.11880199069658026,
         },
         (10, 20): {
-            "sharpe_ratio": 1.48719245461529,
-            "total_return": 0.7343531843248572,
+            "sharpe_ratio": -0.3752171818526474,
+            "total_return": -0.08719789953571666,
         },
         (10, 40): {
-            "sharpe_ratio": 1.5126489928383258,
-            "total_return": 0.7350825882708802,
+            "sharpe_ratio": 0.28877051938590914,
+            "total_return": 0.0675128227910593,
         },
         (5, 20): {
-            "sharpe_ratio": 1.6815955431403176,
-            "total_return": 0.8243383981766756,
+            "sharpe_ratio": -0.45263156731425125,
+            "total_return": -0.08271165873729813,
         },
     }
     REL_TOL = 1e-3

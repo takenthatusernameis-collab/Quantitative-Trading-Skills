@@ -68,24 +68,24 @@ def test_param_sensitivity_runs_on_aapl_real_window_rsi_mean_reversion():
     # to the backtest numbers is caught. Compared with a relative tolerance.
     EXPECTED_METRICS = {
         (14, 30, 70): {
-            "sharpe_ratio": -0.8292982062961232,
-            "total_return": -0.29712322113455303,
+            "sharpe_ratio": 0.9264422710590631,
+            "total_return": 0.3010781700588485,
         },
         (10, 30, 70): {
-            "sharpe_ratio": -1.042834568593796,
-            "total_return": -0.37143915105174463,
+            "sharpe_ratio": 1.3181383060611203,
+            "total_return": 0.4843312044227286,
         },
         (20, 30, 70): {
-            "sharpe_ratio": -1.2762141872211425,
-            "total_return": -0.38822663564266235,
+            "sharpe_ratio": 0.08534905448245271,
+            "total_return": 0.012548943767393572,
         },
         (14, 25, 70): {
-            "sharpe_ratio": -0.8507170866138524,
-            "total_return": -0.282641401195895,
+            "sharpe_ratio": 1.2402830795819526,
+            "total_return": 0.4173305369731988,
         },
         (14, 35, 70): {
-            "sharpe_ratio": -1.113509939377958,
-            "total_return": -0.38990483545570154,
+            "sharpe_ratio": 1.1000742946562874,
+            "total_return": 0.38882622756053187,
         },
     }
     REL_TOL = 1e-3

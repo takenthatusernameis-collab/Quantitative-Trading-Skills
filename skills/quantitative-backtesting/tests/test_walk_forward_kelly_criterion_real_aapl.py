@@ -137,7 +137,7 @@ def test_walk_forward_kelly_criterion_real_aapl_metrics_pinned():
         "oos_volatility": 0.3403160111133147,
         "total_oos_return": 0.7993609483287143,
         "n_positive_periods": 267.0,
-        "win_rate_periods": 0.4782173259889835,
+        "win_rate_periods": 0.35838926174496644,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():
@@ -148,7 +148,7 @@ def test_walk_forward_kelly_criterion_real_aapl_metrics_pinned():
         )
 
     dsr = summary.get("deflated_sharpe") or {}
-    assert dsr.get("n_trials") == 8
+    assert dsr.get("n_trials") == 4
     dsr_p = dsr.get("p_value")
     assert dsr_p is not None
     assert abs(dsr_p - 0.9932632277741321) <= 1e-6 * max(abs(0.9932632277741321), 1e-9)

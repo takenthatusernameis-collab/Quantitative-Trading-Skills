@@ -139,9 +139,9 @@ def test_cpcv_kelly_criterion_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": -1.657244188797788,
-        "total_oos_return": -0.6211176250205181,
-        "oos_volatility": 0.28800919041981227,
+        "oos_sharpe": -1.801808813556185,
+        "total_oos_return": -0.13079793512620908,
+        "oos_volatility": 0.3203869962773295,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

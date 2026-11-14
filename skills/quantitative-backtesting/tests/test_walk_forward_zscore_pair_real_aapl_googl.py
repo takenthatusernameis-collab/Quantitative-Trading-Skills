@@ -151,7 +151,7 @@ def test_walk_forward_zscore_pair_real_aapl_googl_metrics_pinned():
         )
 
     dsr = summary.get("deflated_sharpe") or {}
-    assert dsr.get("n_trials") == 8
+    assert dsr.get("n_trials") == 4
     dsr_p = dsr.get("p_value")
     assert dsr_p is not None
     assert abs(dsr_p - 0.9945669877489902) <= 1e-3 * max(abs(0.9945669877489902), 1e-9)

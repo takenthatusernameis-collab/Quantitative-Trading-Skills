@@ -179,6 +179,24 @@ def _update_flat_dict(src: str, name: str, key: str, got) -> str:
     return src[:s] + new_block + src[e:]
 
 
+def _parse_key(paramkey: str):
+    """Parse a dict key from its failure-message text.
+
+    Keys may be tuple literals ("(2, 1.0)", "(0.15, 63)") or plain strings
+    ("borrow_cost=0.01"). Tuple keys compare equal across int/float
+    coercion ((2, 1.0) == (2.0, 1.0)), so match by evaluated value, not text.
+    """
+    try:
+        return ast.literal_eval(paramkey)
+    except (ValueError, SyntaxError):
+        return paramkey.strip('"').strip("'")
+
+
+def _entry_key_value(key_text: str):
+    try:
+        return ast.literal_eval(key_text)
+    except (ValueError, SyntaxError):
+        return key_text.strip('"').strip("'")
 def _update_nested_dict(src: str, name: str, paramkey: str, metric: str, got) -> str:
     """Replace EXPECTED_METRICS[paramkey][metric] = <num>."""
     block = _find_dict_block(src, name)
@@ -186,21 +204,22 @@ def _update_nested_dict(src: str, name: str, paramkey: str, metric: str, got) ->
         raise RuntimeError(f"could not find {name} dict block")
     s, e = block
     block_text = src[s:e]
-    # Find the paramkey entry: <paramkey>: { ... }
-    # paramkey like "(0.15, 63)" or "borrow_cost=0.01".
-    # Match at the start of a line (after optional indent/comma).
-    entry_pat = re.compile(
-        r'(?:^|[,\[])\s*' + re.escape(paramkey) + r'\s*:\s*\{'
-    )
-    m2 = entry_pat.search(block_text)
-    if not m2:
+    wanted = _parse_key(paramkey)
+    # Locate the entry whose key evaluates to ``wanted`` (matches int/float
+    # coercion, e.g. failure text "(2.0, 1.0)" vs source key "(2, 1.0)").
+    entry_pat = re.compile(r'(?m)^[ \t]*(.+?):\s*\{$')
+    entry_start = None
+    for m in entry_pat.finditer(block_text):
+        if _entry_key_value(m.group(1)) == wanted:
+            entry_start = m.start()
+            break
+    if entry_start is None:
         raise RuntimeError(f"paramkey {paramkey!r} not found in {name}")
-    entry_start = m2.start()
     # Find the closing brace of this nested dict (brace counting from its '{').
-    inner_open = block_text.index("{", m2.end() - 1)
+    inner_open = block_text.index("{", entry_start)
     depth = 0
-    j = inner_open
     inner_end = inner_open
+    j = inner_open
     while j < len(block_text):
         if block_text[j] == "{":
             depth += 1

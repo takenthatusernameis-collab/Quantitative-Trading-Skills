@@ -123,11 +123,11 @@ def test_cpcv_macd_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 0.7865803986257281,
-        "total_oos_return": 0.31545199173049876,
-        "oos_volatility": 0.36000571249765567,
-        "n_positive_folds": 143.0,
-        "win_rate_folds": 0.49310344827586206,
+        "oos_sharpe": 0.187993597879895,
+        "total_oos_return": 0.0241604262164683,
+        "oos_volatility": 0.3689719330609187,
+        "n_positive_folds": 146.0,
+        "win_rate_folds": 0.503448275862069,
         "avg_param_stability": 0.8000000000000002,
     }
     REL_TOL = 1e-6

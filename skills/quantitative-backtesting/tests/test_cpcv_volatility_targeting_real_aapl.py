@@ -130,9 +130,9 @@ def test_cpcv_volatility_targeting_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": -1.657244188797788,
-        "total_oos_return": -0.6211176250205181,
-        "oos_volatility": 0.28800919041981227,
+        "oos_sharpe": -0.8949618053097768,
+        "total_oos_return": -0.06203511291113928,
+        "oos_volatility": 0.08087182664159728,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

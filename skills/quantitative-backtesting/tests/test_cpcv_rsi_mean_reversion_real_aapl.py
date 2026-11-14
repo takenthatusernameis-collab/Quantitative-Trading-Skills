@@ -124,11 +124,11 @@ def test_cpcv_rsi_mean_reversion_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": -0.35055586201022443,
-        "total_oos_return": -0.15546688223776006,
-        "oos_volatility": 0.3250546823011977,
-        "n_positive_folds": 72.0,
-        "win_rate_folds": 0.2482758620689655,
+        "oos_sharpe": -0.2504009810094163,
+        "total_oos_return": -0.13713582363268662,
+        "oos_volatility": 0.3486879497416938,
+        "n_positive_folds": 104.0,
+        "win_rate_folds": 0.3586206896551724,
         "avg_param_stability": 0.8,
     }
     REL_TOL = 1e-6

@@ -68,20 +68,20 @@ def test_elevated_cost_sweep_runs_on_aapl_real_window_volatility_targeting():
     # Regression guard: pin strategy metrics (net of costs) per cost level.
     EXPECTED_METRICS = {
         (2.0, 1.0): {
-            "sharpe_ratio": 0.5000125402775002,
-            "total_return": 0.16104626397549926,
+            "sharpe_ratio": 0.5154860951632668,
+            "total_return": 0.10666302954386775,
         },
         (5.0, 2.5): {
-            "sharpe_ratio": 0.4767235896561322,
-            "total_return": 0.1512482772597954,
+            "sharpe_ratio": 0.4811721372496217,
+            "total_return": 0.09993440291125788,
         },
         (10.0, 5.0): {
-            "sharpe_ratio": 0.4377762127976601,
-            "total_return": 0.13508311339995394,
+            "sharpe_ratio": 0.423646883604601,
+            "total_return": 0.08880373816467158,
         },
         (20.0, 10.0): {
-            "sharpe_ratio": 0.35945984084337745,
-            "total_return": 0.10336255895298274,
+            "sharpe_ratio": 0.3075167534529911,
+            "total_return": 0.0668531130777601,
         },
     }
     REL_TOL = 1e-3

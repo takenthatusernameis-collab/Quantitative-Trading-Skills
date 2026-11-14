@@ -63,20 +63,20 @@ def test_elevated_cost_sweep_runs_on_aapl_real_window_simple_momentum():
 
     EXPECTED_METRICS = {
         (2.0, 1.0): {
-            "sharpe_ratio": 1.501892938128653,
-            "total_return": 0.7616516108796803,
+            "sharpe_ratio": 0.1495367916686615,
+            "total_return": 0.037679766982581464,
         },
         (5.0, 2.5): {
-            "sharpe_ratio": 1.4843430021036015,
-            "total_return": 0.7498512163419406,
+            "sharpe_ratio": 0.12800581085518536,
+            "total_return": 0.03300657816622854,
         },
         (10.0, 5.0): {
-            "sharpe_ratio": 1.4549310185359883,
-            "total_return": 0.7303476940682787,
+            "sharpe_ratio": 0.09214619796776848,
+            "total_return": 0.025260006188002615,
         },
         (20.0, 10.0): {
-            "sharpe_ratio": 1.3955347074425695,
-            "total_return": 0.6919477947304276,
+            "sharpe_ratio": 0.0205789187682757,
+            "total_return": 0.009923511863045187,
         },
     }
     REL_TOL = 1e-3

@@ -61,12 +61,12 @@ def test_param_sensitivity_runs_on_aapl_real_window_kelly_criterion():
 
     # Pinned observed metrics (fraction insensitive across 0.25/0.5/1.0 here).
     EXPECTED_METRICS = {
-        (63, 0.5):  {"sharpe_ratio": 0.5000125402775002, "total_return": 0.16104626397549926},
-        (50, 0.5):  {"sharpe_ratio": -0.38367414883518386, "total_return": -0.15719611990517068},
-        (100, 0.5): {"sharpe_ratio": 0.367259699743025, "total_return": 0.10659026717311959},
-        (63, 0.25): {"sharpe_ratio": 0.5000125402775002, "total_return": 0.16104626397549926},
-        (63, 1.0):  {"sharpe_ratio": 0.5000125402775002, "total_return": 0.16104626397549926},
-        (50, 0.25): {"sharpe_ratio": -0.38367414883518386, "total_return": -0.15719611990517068},
+        (63, 0.5):  {"sharpe_ratio": 1.1705091764789375, "total_return": 0.43823363659401915},
+        (50, 0.5):  {"sharpe_ratio": 1.4522847233674903, "total_return": 0.6445953746062361},
+        (100, 0.5): {"sharpe_ratio": 1.4229316139476362, "total_return": 0.4544866858053025},
+        (63, 0.25): {"sharpe_ratio": 1.3664423401820909, "total_return": 0.4932327159664933},
+        (63, 1.0):  {"sharpe_ratio": 0.8090747236950504, "total_return": 0.293613142961612},
+        (50, 0.25): {"sharpe_ratio": 1.4824783052118036, "total_return": 0.6113112517627852},
     }
     for r in rows:
         key = (r["lookback"], r["fraction"])

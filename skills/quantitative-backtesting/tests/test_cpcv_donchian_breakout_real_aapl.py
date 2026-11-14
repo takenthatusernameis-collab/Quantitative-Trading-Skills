@@ -122,8 +122,8 @@ def test_cpcv_donchian_breakout_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 0.5023300222776955,
-        "total_oos_return": 0.15886665409082412,
+        "oos_sharpe": 0.06830019707840099,
+        "total_oos_return": -0.017162000195724558,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

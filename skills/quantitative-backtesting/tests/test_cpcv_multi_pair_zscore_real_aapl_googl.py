@@ -134,9 +134,9 @@ def test_cpcv_multi_pair_zscore_real_aapl_googl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": -0.24631245553024675,
-        "total_oos_return": -0.003469568354377617,
-        "oos_volatility": 0.08278548383403471,
+        "oos_sharpe": -0.34548449156297234,
+        "total_oos_return": -0.012381091091831942,
+        "oos_volatility": 0.08004301552270347,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

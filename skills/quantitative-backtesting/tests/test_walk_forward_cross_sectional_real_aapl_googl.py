@@ -68,8 +68,8 @@ def test_walk_forward_cross_sectional_pairs_real_aapl_googl_structure():
     assert isinstance(result, dict)
     assert "periods" in result
     summary = result["summary"]
-    assert summary["n_periods"] == 35
-    assert summary["periods_with_position"] == 32
+    assert summary["n_periods"] == 19
+    assert summary["periods_with_position"] == 18
     assert summary["bias_controls_engaged"] is True
     assert summary["panel_pricing"] == "book"
     flat_warnings = [

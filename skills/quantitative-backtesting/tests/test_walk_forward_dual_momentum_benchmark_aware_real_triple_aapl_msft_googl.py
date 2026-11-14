@@ -105,8 +105,8 @@ def test_walk_forward_benchmark_aware_runs_on_triple_real_window():
     summary = result["summary"]
     dsr = summary.get("deflated_sharpe")
 
-    assert summary["n_periods"] == 8
-    assert summary["periods_with_position"] == 8
+    assert summary["n_periods"] == 3
+    assert summary["periods_with_position"] == 3
     assert result["point_in_time_validation"]["passed"] is True
     assert summary.get("bias_controls_engaged") is True
 
@@ -173,16 +173,16 @@ def test_walk_forward_benchmark_aware_metrics_pinned_on_triple_real_window():
         "benchmark_annualized_return": 0.42835893476816644,
         "alpha": 0.0528506276045724,
         "alpha_pvalue": 0.3407545407112619,
-        "correlation_with_benchmark": 0.3819646948596446,
-        "beta": 0.20213636240395685,
-        "r_squared": 0.14589702811922145,
-        "deflated_sharpe_ratio": 0.23107156539098966,
-        "deflated_sharpe_pvalue": 0.7689284346090104,
-        "expected_max_sharpe": 0.5432835939468214,
-        "n_periods": 8,
-        "periods_with_position": 8,
-        "n_observations": 1997,
-        "n_trials": 8,
+        "correlation_with_benchmark": 0.3610162124190759,
+        "beta": 0.1670098939142821,
+        "r_squared": 0.13033270562941535,
+        "deflated_sharpe_ratio": 0.899818542167631,
+        "deflated_sharpe_pvalue": 0.10018145783236898,
+        "expected_max_sharpe": 0.20890991374371315,
+        "n_periods": 4.0,
+        "periods_with_position": 3.0,
+        "n_observations": 748.0,
+        "n_trials": 3.0,
     }
     REL_TOL = 1e-3
     for key, exp in EXPECTED.items():

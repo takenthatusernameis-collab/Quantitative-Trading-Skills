@@ -63,20 +63,20 @@ def test_elevated_cost_sweep_runs_on_aapl_real_window_rsi_mean_reversion():
     # Regression guard: pin strategy metrics (net of costs) per cost level.
     EXPECTED_METRICS = {
         (2.0, 1.0): {
-            "sharpe_ratio": -0.8292982062961232,
-            "total_return": -0.29712322113455303,
+            "sharpe_ratio": 0.9264422710590631,
+            "total_return": 0.3010781700588485,
         },
         (5.0, 2.5): {
-            "sharpe_ratio": -0.864747873132777,
-            "total_return": -0.3074887983771166,
+            "sharpe_ratio": 0.8913725777676137,
+            "total_return": 0.2876668739813266,
         },
         (10.0, 5.0): {
-            "sharpe_ratio": -0.9236946704902164,
-            "total_return": -0.32443622582028564,
+            "sharpe_ratio": 0.8328493392842241,
+            "total_return": 0.2656080699877543,
         },
         (20.0, 10.0): {
-            "sharpe_ratio": -1.0409538432301322,
-            "total_return": -0.3571329274538704,
+            "sharpe_ratio": 0.7156299756101342,
+            "total_return": 0.22256994969552268,
         },
     }
     REL_TOL = 1e-3

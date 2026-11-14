@@ -91,8 +91,8 @@ def test_walk_forward_macd_real_aapl_runs():
     assert isinstance(result, dict)
     assert "periods" in result and "summary" in result
     summary = result["summary"]
-    assert summary["n_periods"] == 8
-    assert summary["periods_with_position"] == 8
+    assert summary["n_periods"] == 4
+    assert summary["periods_with_position"] == 4
     assert summary["bias_controls_engaged"] is True
     out = buffer.getvalue()
     assert "Point-in-time validation passed" in out

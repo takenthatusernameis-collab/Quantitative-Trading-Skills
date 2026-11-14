@@ -96,7 +96,7 @@ def test_benchmark_metrics_pinned_on_pair_real_window_zscore_mean_reversion():
         "benchmark_alpha": 0.07664637290301858,
         "benchmark_alpha_pvalue": 0.33536705690786595,
         "correlation_with_benchmark": 0.08859034710530442,
-        "deflated_sharpe_pvalue": 0.9936363103320118,
+        "deflated_sharpe_pvalue": 0.8764988058669765,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

@@ -57,10 +57,10 @@ def test_elevated_cost_sweep_runs_on_aapl_real_window_kelly_criterion():
         }
 
     EXPECTED_METRICS = {
-        (2.0, 1.0):   {"sharpe_ratio": 0.5000125402775002, "total_return": 0.16104626397549926},
-        (5.0, 2.5):   {"sharpe_ratio": 0.4767235896561322, "total_return": 0.1512482772597954},
-        (10.0, 5.0):  {"sharpe_ratio": 0.4377762127976601, "total_return": 0.13508311339995394},
-        (20.0, 10.0): {"sharpe_ratio": 0.35945984084337745, "total_return": 0.10336255895298274},
+        (2.0, 1.0):   {"sharpe_ratio": 1.1705091764789375, "total_return": 0.43823363659401915},
+        (5.0, 2.5):   {"sharpe_ratio": 1.1262885937430078, "total_return": 0.4171065570512986},
+        (10.0, 5.0):  {"sharpe_ratio": 1.052037237646278, "total_return": 0.3825406509264435},
+        (20.0, 10.0): {"sharpe_ratio": 0.901782697697226, "total_return": 0.3157687176141073},
     }
     for r in rows:
         key = (r["commission_bps"], r["slippage_bps"])

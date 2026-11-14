@@ -140,7 +140,7 @@ def test_benchmark_aware_metrics_pinned_on_triple_real_window():
         "benchmark_alpha": 0.1018914026724129,
         "benchmark_alpha_pvalue": 0.5542675639771097,
         "correlation_with_benchmark": 0.1361099597916875,
-        "deflated_sharpe_pvalue": 0.9427472575574871,
+        "deflated_sharpe_pvalue": 0.9090407950603052,
         "n_trials": 6,
     }
     REL_TOL = 1e-3

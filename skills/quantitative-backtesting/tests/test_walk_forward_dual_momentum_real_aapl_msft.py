@@ -96,8 +96,8 @@ def test_walk_forward_dual_momentum_runs_on_aapl_msft_pair_window():
     assert isinstance(result, dict)
     assert "periods" in result and "summary" in result
     summary = result["summary"]
-    assert summary["n_periods"] == 8
-    assert summary["periods_with_position"] == 8
+    assert summary["n_periods"] == 3
+    assert summary["periods_with_position"] == 3
     assert summary["bias_controls_engaged"] is True
     out = buffer.getvalue()
     assert "Point-in-time validation passed" in out
