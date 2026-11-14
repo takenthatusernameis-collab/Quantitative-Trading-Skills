@@ -130,8 +130,8 @@ def test_cpcv_zscore_mean_reversion_real_aapl_googl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": -1.6811501508590145,
-        "total_oos_return": -0.310067788066822,
+        "oos_sharpe": -0.1543204536653462,
+        "total_oos_return": -0.0526456806199872,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

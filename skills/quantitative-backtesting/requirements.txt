@@ -4,7 +4,7 @@
 # tests/test_reporting.py and for the tear-sheet / parameter heatmap outputs.
 # scipy is required by utils.hierarchical_risk_parity (hierarchical clustering
 # linkage / condensed distances) and by the HRP tests and worked example.
-matplotlib
-numpy
-pandas
-scipy
+matplotlib==3.11.2
+numpy==2.5.4
+pandas==3.1.1
+scipy==1.18.1

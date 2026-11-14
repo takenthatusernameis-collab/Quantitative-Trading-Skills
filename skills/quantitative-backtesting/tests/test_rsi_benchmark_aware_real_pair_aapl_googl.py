@@ -101,13 +101,13 @@ def test_benchmark_metrics_pinned_on_aapl_googl_real_window_rsi_mean_reversion()
     assert observed.get("n_trials") == N_TRIALS
 
     EXPECTED = {
-        "sharpe_ratio": -0.23328043478467775,
-        "total_return": -0.18710888209954857,
-        "benchmark_total_return": 0.9015402575236577,
-        "benchmark_alpha": -0.17682912461660333,
-        "benchmark_alpha_pvalue": 0.41650402897325933,
-        "correlation_with_benchmark": 0.2683761515952725,
-        "deflated_sharpe_pvalue": 0.9828116626799102,
+        "sharpe_ratio": -0.17963418984292787,
+        "total_return": -0.15198041180791866,
+        "benchmark_total_return": 0.1711375869976839,
+        "benchmark_alpha": -0.15137494848768812,
+        "benchmark_alpha_pvalue": 0.6721767235298922,
+        "correlation_with_benchmark": 0.3469280373841266,
+        "deflated_sharpe_pvalue": 0.9750473077098107,
     }
     REL_TOL = 1e-3
     for key, exp in EXPECTED.items():

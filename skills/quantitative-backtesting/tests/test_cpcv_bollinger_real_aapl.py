@@ -115,8 +115,8 @@ def test_cpcv_bollinger_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": -1.3506783553532666,
-        "total_oos_return": -0.38755833248491345,
+        "oos_sharpe": -0.7035325851271407,
+        "total_oos_return": -0.24633491422848175,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

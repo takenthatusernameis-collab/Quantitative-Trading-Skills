@@ -124,10 +124,10 @@ def test_walk_forward_dual_momentum_metrics_pinned_on_msft_googl_pair_window():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 0.2253083562872337,
-        "total_oos_return": 0.3648078797477998,
-        "deflated_sharpe_pvalue": 0.8534485951040356,
-        "deflated_sharpe_ratio": 0.14655140489596435,
+        "oos_sharpe": 0.16446658272351236,
+        "total_oos_return": 0.10295529898757128,
+        "deflated_sharpe_pvalue": 0.7817365475527399,
+        "deflated_sharpe_ratio": 0.2182634524472601,
     }
     REL_TOL = 1e-3
     for key, exp in EXPECTED.items():

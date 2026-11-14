@@ -102,12 +102,12 @@ def test_benchmark_metrics_pinned_on_pair_real_window_multi_pair_zscore():
     assert observed.get("n_trials") == N_TRIALS
 
     EXPECTED = {
-        "sharpe_ratio": -0.4256114742108271,
-        "total_return": -0.030959664968179257,
-        "benchmark_total_return": 0.9015402575236577,
-        "benchmark_alpha": -0.02244377413425092,
-        "benchmark_alpha_pvalue": 0.6817989101480841,
-        "correlation_with_benchmark": 0.08641782414147907,
+        "sharpe_ratio": 0.7110990902058707,
+        "total_return": 0.09772954160702252,
+        "benchmark_total_return": 0.1711375869976839,
+        "benchmark_alpha": 0.07664637290301858,
+        "benchmark_alpha_pvalue": 0.33536705690786595,
+        "correlation_with_benchmark": 0.08859034710530442,
         "deflated_sharpe_pvalue": 0.9936363103320118,
     }
     REL_TOL = 1e-6

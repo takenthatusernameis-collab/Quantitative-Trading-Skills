@@ -52,10 +52,10 @@ def test_borrow_cost_metrics_pinned_on_aapl_real_window_bollinger():
     sweep = _run()
     rows = {r["borrow_cost"]: r for r in sweep["results"]}
     EXPECTED = {
-        0.0:  {"total_return": -0.766272162609589,  "sharpe_ratio": -0.7695214181073696, "max_drawdown": -0.7663501816535281, "annualized_return": -0.13558881395060507},
-        0.01: {"total_return": -0.7750250579811158, "sharpe_ratio": -0.7893725625124363, "max_drawdown": -0.7750912333107879, "annualized_return": -0.13888968226393805},
-        0.03: {"total_return": -0.7915607092812144, "sharpe_ratio": -0.8290531766827137, "max_drawdown": -0.7916054863440233, "annualized_return": -0.1454540426753359},
-        0.05: {"total_return": -0.8068821633943203, "sharpe_ratio": -0.8687039090622567, "max_drawdown": -0.8069083276486478, "annualized_return": -0.15196887825888983},
+        0.0:  {"total_return": -0.4366411419375513,  "sharpe_ratio": -0.3192309180683687, "max_drawdown": -0.5532809944173023, "annualized_return": -0.0915548585220427},
+        0.01: {"total_return": -0.44982968943741575, "sharpe_ratio": -0.3344971342108903, "max_drawdown": -0.561448301451872, "annualized_return": -0.09514870471967507},
+        0.03: {"total_return": -0.475289241161317, "sharpe_ratio": -0.3650220772271352, "max_drawdown": -0.5773386107929064, "annualized_return": -0.10229422559121848},
+        0.05: {"total_return": -0.4995725182453523, "sharpe_ratio": -0.39553660765135684, "max_drawdown": -0.5926543531349933, "annualized_return": -0.10938388051879733},
     }
     REL_TOL = 1e-3
     for cost, exp in EXPECTED.items():

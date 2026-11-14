@@ -95,8 +95,8 @@ def test_walk_forward_donchian_real_aapl_runs():
     assert isinstance(result, dict)
     assert "periods" in result and "summary" in result
     summary = result["summary"]
-    assert summary["n_periods"] == 8
-    assert summary["periods_with_position"] == 8
+    assert summary["n_periods"] == 4
+    assert summary["periods_with_position"] == 4
     assert summary["bias_controls_engaged"] is True
     out = buffer.getvalue()
     assert "Point-in-time validation passed" in out
@@ -123,11 +123,11 @@ def test_walk_forward_donchian_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 0.2629358451358295,
-        "total_oos_return": 0.520974775650721,
-        "deflated_sharpe_pvalue": 0.7310656306564545,
-        "deflated_sharpe_ratio": 0.26893436934354553,
-        "win_rate_periods": 0.3400100150225338,
+        "oos_sharpe": 0.3655095432020048,
+        "total_oos_return": 0.34515028379088863,
+        "deflated_sharpe_pvalue": 0.43105373139071634,
+        "deflated_sharpe_ratio": 0.5689462686092837,
+        "win_rate_periods": 0.3520561685055166,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

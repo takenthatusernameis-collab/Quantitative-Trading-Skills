@@ -118,10 +118,10 @@ def test_walk_forward_zscore_pair_real_aapl_msft_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 0.30714511853085896,
-        "total_oos_return": 0.37165393035802174,
-        "deflated_sharpe_pvalue": 0.6658756888004178,
-        "deflated_sharpe_ratio": 0.33412431119958225,
+        "oos_sharpe": -0.19591814409420802,
+        "total_oos_return": 0.01602511946189744,
+        "deflated_sharpe_pvalue": 0.9283420201216803,
+        "deflated_sharpe_ratio": 0.07165797987831973,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

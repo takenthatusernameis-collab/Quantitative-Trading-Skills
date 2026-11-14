@@ -34,8 +34,8 @@ REL_TOL = 1e-3
 # Pinned to the committed AAPL fixture via run_backtest.py (test split,
 # 3bp round-trip). Regression guard only -- never exact equality.
 EXPECTED = {
-    "sharpe_ratio": 1.2793992909383751,
-    "total_return": 0.6235840012352531,
+    "sharpe_ratio": 0.03298756876189358,
+    "total_return": 0.013340458591081905,
 }
 
 

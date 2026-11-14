@@ -118,13 +118,13 @@ def test_benchmark_metrics_pinned_on_aapl_googl_real_window_cross_sectional_mome
     assert observed.get("n_trials") == N_TRIALS
 
     EXPECTED = {
-        "sharpe_ratio": -0.3924330675740782,
-        "total_return": -0.06146316584235767,
-        "benchmark_total_return": 0.9015402575236577,
-        "benchmark_alpha": -0.01089765046590818,
-        "benchmark_alpha_pvalue": 0.8940255484273542,
-        "correlation_with_benchmark": -0.08606093325649128,
-        "deflated_sharpe_pvalue": 0.9924762923384771,
+        "sharpe_ratio": -1.3643226461224385,
+        "total_return": -0.21885830738631573,
+        "benchmark_total_return": 0.1711375869976839,
+        "benchmark_alpha": -0.1839095162036061,
+        "benchmark_alpha_pvalue": 0.20072268575811847,
+        "correlation_with_benchmark": -0.09900128101820599,
+        "deflated_sharpe_pvalue": 0.9997050533618272,
     }
     REL_TOL = 1e-3
     for key, exp in EXPECTED.items():

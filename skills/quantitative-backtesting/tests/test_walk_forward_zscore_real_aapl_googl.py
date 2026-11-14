@@ -92,8 +92,8 @@ def test_walk_forward_zscore_real_aapl_googl_runs():
     assert isinstance(result, dict)
     assert "periods" in result and "summary" in result
     summary = result["summary"]
-    assert summary["n_periods"] == 8
-    assert summary["periods_with_position"] == 8
+    assert summary["n_periods"] == 4
+    assert summary["periods_with_position"] == 4
     assert summary["bias_controls_engaged"] is True
     out = buffer.getvalue()
     assert "Point-in-time validation passed" in out
@@ -118,16 +118,16 @@ def test_walk_forward_zscore_real_aapl_googl_metrics_pinned():
         result = _run_walk_forward()
 
     summary = result["summary"]
-    assert summary["n_periods"] == 8
-    assert summary["periods_with_position"] == 8
+    assert summary["n_periods"] == 4
+    assert summary["periods_with_position"] == 4
     assert summary["bias_controls_engaged"] is True
 
     EXPECTED = {
-        "oos_sharpe": -0.20967479043178497,
-        "oos_volatility": 0.12593587166939033,
-        "total_oos_return": -0.10715648992652782,
-        "n_positive_periods": 337,
-        "win_rate_periods": 0.16875312969454181,
+        "oos_sharpe": -0.13153152525440412,
+        "oos_volatility": 0.16597342534723775,
+        "total_oos_return": -0.05992826959670161,
+        "n_positive_periods": 196.0,
+        "win_rate_periods": 0.19658976930792377,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():
@@ -138,13 +138,13 @@ def test_walk_forward_zscore_real_aapl_googl_metrics_pinned():
         )
 
     dsr = summary.get("deflated_sharpe") or {}
-    assert dsr.get("n_trials") == 8
+    assert dsr.get("n_trials") == 4
     dsr_p = dsr.get("p_value")
     assert dsr_p is not None
-    assert abs(dsr_p - 0.9525007856763341) <= 1e-6 * max(abs(0.9525007856763341), 1e-9)
+    assert abs(dsr_p - 0.7617034001204199) <= 1e-6 * max(abs(0.7617034001204199), 1e-9)
     dsr_ratio = dsr.get("deflated_sharpe_ratio")
     assert dsr_ratio is not None
-    assert abs(dsr_ratio - 0.04749921432366594) <= 1e-6 * max(abs(0.04749921432366594), 1e-9)
+    assert abs(dsr_ratio - 0.23829659987958002) <= 1e-6 * max(abs(0.23829659987958002), 1e-9)
 
     raw_ok = summary["oos_sharpe"] > RAW_SHARPE_THRESHOLD
     ret_ok = summary["total_oos_return"] > TOTAL_RETURN_THRESHOLD

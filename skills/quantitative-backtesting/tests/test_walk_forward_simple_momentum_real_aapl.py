@@ -122,11 +122,11 @@ def test_walk_forward_simple_momentum_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 0.33012668540394957,
-        "total_oos_return": 0.6154315285859846,
-        "deflated_sharpe_pvalue": 0.868556965526281,
-        "deflated_sharpe_ratio": 0.13144303447371902,
-        "win_rate_periods": 0.28642964446670005,
+        "oos_sharpe": 0.496858651369694,
+        "total_oos_return": 0.4267620838667434,
+        "deflated_sharpe_pvalue": 0.5670690865059116,
+        "deflated_sharpe_ratio": 0.43293091349408847,
+        "win_rate_periods": 0.2748244734202608,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

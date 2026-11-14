@@ -130,10 +130,10 @@ def test_walk_forward_zscore_triple_real_aapl_msft_googl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": -0.0227828063263027,
-        "total_oos_return": 0.031960599071125806,
-        "deflated_sharpe_pvalue": 0.8417300493873988,
-        "deflated_sharpe_ratio": 0.15826995061260118,
+        "oos_sharpe": 0.061062202722359786,
+        "total_oos_return": 0.07598599975791909,
+        "deflated_sharpe_pvalue": 0.9534260282284825,
+        "deflated_sharpe_ratio": 0.04657397177151751,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

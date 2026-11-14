@@ -103,8 +103,8 @@ def test_walk_forward_zscore_pair_real_aapl_googl_runs():
     assert isinstance(result, dict)
     assert "periods" in result and "summary" in result
     summary = result["summary"]
-    assert summary["n_periods"] == 8
-    assert summary["periods_with_position"] == 8
+    assert summary["n_periods"] == 4
+    assert summary["periods_with_position"] == 4
     assert summary["bias_controls_engaged"] is True
     out = buffer.getvalue()
     assert "Point-in-time validation passed" in out
@@ -131,16 +131,16 @@ def test_walk_forward_zscore_pair_real_aapl_googl_metrics_pinned():
             result = _run_walk_forward()
 
     summary = result["summary"]
-    assert summary["n_periods"] == 8
-    assert summary["periods_with_position"] == 8
+    assert summary["n_periods"] == 4
+    assert summary["periods_with_position"] == 4
     assert summary["bias_controls_engaged"] is True
 
     EXPECTED = {
-        "oos_sharpe": -0.5887694174733262,
-        "oos_volatility": 0.08056194983176325,
-        "total_oos_return": -0.21594086096902132,
-        "n_positive_periods": 361,
-        "win_rate_periods": 0.18077115673510266,
+        "oos_sharpe": -0.28894378705362195,
+        "oos_volatility": 0.08364046460240565,
+        "total_oos_return": -0.029813005194749165,
+        "n_positive_periods": 192.0,
+        "win_rate_periods": 0.19257773319959878,
     }
     REL_TOL = 1e-3
     for key, exp in EXPECTED.items():

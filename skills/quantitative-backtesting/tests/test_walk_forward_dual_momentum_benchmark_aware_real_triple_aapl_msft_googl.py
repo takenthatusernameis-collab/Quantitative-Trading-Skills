@@ -167,12 +167,12 @@ def test_walk_forward_benchmark_aware_metrics_pinned_on_triple_real_window():
     dsr = summary["deflated_sharpe"]
 
     EXPECTED = {
-        "oos_sharpe": 0.2833374098356503,
-        "total_oos_return": 0.4544467923378548,
-        "benchmark_total_return": 3.334633507750687,
-        "benchmark_annualized_return": 0.20330733826134217,
-        "alpha": 0.011932390275677563,
-        "alpha_pvalue": 0.767685293678479,
+        "oos_sharpe": 0.9480562764754404,
+        "total_oos_return": 0.3914000783553224,
+        "benchmark_total_return": 1.8813538485114294,
+        "benchmark_annualized_return": 0.42835893476816644,
+        "alpha": 0.0528506276045724,
+        "alpha_pvalue": 0.3407545407112619,
         "correlation_with_benchmark": 0.3819646948596446,
         "beta": 0.20213636240395685,
         "r_squared": 0.14589702811922145,

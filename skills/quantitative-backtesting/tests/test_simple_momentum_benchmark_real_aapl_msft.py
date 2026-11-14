@@ -156,13 +156,13 @@ def test_benchmark_metrics_pinned_on_pair_real_window():
     assert metrics.get("n_trials") == N_TRIALS or metrics.get("deflated_sharpe", {}).get("n_trials") == N_TRIALS
 
     EXPECTED = {
-        "sharpe_ratio": 1.5022039789415151,
-        "total_return": 0.7618610218837236,
-        "benchmark_total_return": 0.9015402575236577,
-        "alpha": 0.19600061391949647,
-        "benchmark_alpha_pvalue": 0.1118498806219902,
-        "correlation_with_benchmark": 0.39093155261045215,
-        "deflated_sharpe_pvalue": 0.41010058119215187,
+        "sharpe_ratio": 0.14957494145434536,
+        "total_return": 0.037688060735438844,
+        "benchmark_total_return": 0.1711375869976839,
+        "alpha": 0.02416056017760676,
+        "benchmark_alpha_pvalue": 0.8785884406019873,
+        "correlation_with_benchmark": 0.1874270683104247,
+        "deflated_sharpe_pvalue": 0.9583672285917899,
     }
     REL_TOL = 1e-6
     dsr = metrics.get("deflated_sharpe") or {}

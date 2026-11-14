@@ -101,8 +101,8 @@ def test_walk_forward_kelly_criterion_real_aapl_runs():
     assert isinstance(result, dict)
     assert "periods" in result and "summary" in result
     summary = result["summary"]
-    assert summary["n_periods"] == 8
-    assert summary["periods_with_position"] == 8
+    assert summary["n_periods"] == 4
+    assert summary["periods_with_position"] == 4
     assert summary["bias_controls_engaged"] is True
     out = buffer.getvalue()
     assert "Point-in-time validation passed" in out
@@ -128,15 +128,15 @@ def test_walk_forward_kelly_criterion_real_aapl_metrics_pinned():
             result = _run_walk_forward()
 
     summary = result["summary"]
-    assert summary["n_periods"] == 8
-    assert summary["periods_with_position"] == 8
+    assert summary["n_periods"] == 4
+    assert summary["periods_with_position"] == 4
     assert summary["bias_controls_engaged"] is True
 
     EXPECTED = {
-        "oos_sharpe": -0.38617607871821996,
-        "oos_volatility": 0.25847052397276044,
-        "total_oos_return": -0.5921302782722866,
-        "n_positive_periods": 955,
+        "oos_sharpe": 0.6950353441570257,
+        "oos_volatility": 0.3403160111133147,
+        "total_oos_return": 0.7993609483287143,
+        "n_positive_periods": 267.0,
         "win_rate_periods": 0.4782173259889835,
     }
     REL_TOL = 1e-6

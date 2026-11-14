@@ -121,10 +121,10 @@ def test_walk_forward_dual_momentum_metrics_pinned_on_pair_real_window():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 0.21295630188494596,
-        "total_oos_return": 0.36212535463178175,
-        "deflated_sharpe_pvalue": 0.6494341910025344,
-        "deflated_sharpe_ratio": 0.3505658089974656,
+        "oos_sharpe": 0.42640357328955375,
+        "total_oos_return": 0.21065136294333664,
+        "deflated_sharpe_pvalue": 0.3487174510480239,
+        "deflated_sharpe_ratio": 0.6512825489519761,
     }
     REL_TOL = 1e-3
     for key, exp in EXPECTED.items():

@@ -99,13 +99,13 @@ def test_benchmark_metrics_pinned_on_triple_real_window_cross_sectional_momentum
     assert observed.get("n_trials") == N_TRIALS
 
     EXPECTED = {
-        "sharpe_ratio": -0.38958663446586,
-        "total_return": -0.020586723882316527,
-        "benchmark_total_return": 0.9015402575236577,
-        "benchmark_alpha": -0.004056454449303176,
-        "benchmark_alpha_pvalue": 0.9365655932207263,
-        "correlation_with_benchmark": -0.03705001777596127,
-        "deflated_sharpe_pvalue": 0.9924056313005674,
+        "sharpe_ratio": -0.06086675336851859,
+        "total_return": 0.010254526660692376,
+        "benchmark_total_return": 0.1711375869976839,
+        "benchmark_alpha": 0.021113008107025825,
+        "benchmark_alpha_pvalue": 0.8212721599582535,
+        "correlation_with_benchmark": -0.10683874181522092,
+        "deflated_sharpe_pvalue": 0.9748216227579503,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

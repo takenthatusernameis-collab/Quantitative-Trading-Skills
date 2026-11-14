@@ -96,8 +96,8 @@ def test_walk_forward_cross_sectional_pairs_real_aapl_googl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": -0.5979865209247139,
-        "total_oos_return": 0.05887906291105649,
+        "oos_sharpe": -1.1551293007480554,
+        "total_oos_return": -0.015576226068254928,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

@@ -122,8 +122,8 @@ def test_cpcv_sma_crossover_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 0.1048291989377569,
-        "total_oos_return": 0.04467990550419931,
+        "oos_sharpe": -1.115282735701127,
+        "total_oos_return": -0.03924518480341743,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

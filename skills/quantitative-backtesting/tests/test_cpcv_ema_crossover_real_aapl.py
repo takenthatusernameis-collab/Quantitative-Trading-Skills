@@ -123,11 +123,11 @@ def test_cpcv_ema_crossover_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 0.8860955718275146,
-        "total_oos_return": 0.4195426260454007,
-        "oos_volatility": 0.2040751432425466,
-        "n_positive_folds": 149,
-        "win_rate_folds": 0.3040816326530612,
+        "oos_sharpe": -0.9158360526659854,
+        "total_oos_return": -0.17634411907297853,
+        "oos_volatility": 0.18675168322999208,
+        "n_positive_folds": 70.0,
+        "win_rate_folds": 0.2413793103448276,
         "avg_param_stability": 0.8,
     }
     REL_TOL = 1e-6

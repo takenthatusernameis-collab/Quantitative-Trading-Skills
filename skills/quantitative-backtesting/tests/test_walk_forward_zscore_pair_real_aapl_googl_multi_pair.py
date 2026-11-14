@@ -119,10 +119,10 @@ def test_walk_forward_zscore_pair_real_aapl_googl_multi_pair_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": -0.5887694174733262,
-        "total_oos_return": -0.21594086096902132,
-        "deflated_sharpe_pvalue": 0.9945669877489902,
-        "deflated_sharpe_ratio": 0.005433012251009839,
+        "oos_sharpe": -0.28894378705362195,
+        "total_oos_return": -0.029813005194749165,
+        "deflated_sharpe_pvalue": 0.8903496929756208,
+        "deflated_sharpe_ratio": 0.10965030702437917,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

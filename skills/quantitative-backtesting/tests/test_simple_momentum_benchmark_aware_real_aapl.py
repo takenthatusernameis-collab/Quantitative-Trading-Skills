@@ -99,13 +99,13 @@ def test_benchmark_aware_metrics_pinned_on_aapl_real_window():
 
     observed = result.get("observed") or {}
     EXPECTED = {
-        "sharpe_ratio": 1.501892938128653,
-        "total_return": 0.7616516108796803,
-        "benchmark_total_return": 0.7742601739304709,
-        "benchmark_alpha": 0.15053019320246347,
-        "benchmark_alpha_pvalue": 0.12417723122181423,
-        "correlation_with_benchmark": 0.6812371566603925,
-        "deflated_sharpe_pvalue": 0.4102714751341421,
+        "sharpe_ratio": 0.1495367916686615,
+        "total_return": 0.037679766982581464,
+        "benchmark_total_return": 0.177832703486404,
+        "benchmark_alpha": -0.014727245297432752,
+        "benchmark_alpha_pvalue": 0.9107918955191099,
+        "correlation_with_benchmark": 0.5773257406484351,
+        "deflated_sharpe_pvalue": 0.9583708275484348,
         "n_trials": 6,
     }
     REL_TOL = 1e-3

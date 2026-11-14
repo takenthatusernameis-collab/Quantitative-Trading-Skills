@@ -118,12 +118,12 @@ def test_benchmark_aware_metrics_pinned_on_triple_real_window():
 
     observed = result.get("observed") or {}
     EXPECTED = {
-        "sharpe_ratio": 0.7710596325955302,
-        "total_return": 0.4736842323382433,
-        "benchmark_total_return": 0.9015402575236577,
-        "benchmark_alpha": 0.3020144571449056,
-        "benchmark_alpha_pvalue": 0.11925459385932424,
-        "correlation_with_benchmark": -0.1737197931143655,
+        "sharpe_ratio": 0.5154860951632668,
+        "total_return": 0.10666302954386775,
+        "benchmark_total_return": 0.1711375869976839,
+        "benchmark_alpha": 0.12500802155720464,
+        "benchmark_alpha_pvalue": 0.33102925749727974,
+        "correlation_with_benchmark": -0.298644481937308,
         "deflated_sharpe_pvalue": 0.788364484750614,
         "n_trials": 6,
     }

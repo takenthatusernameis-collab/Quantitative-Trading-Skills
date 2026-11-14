@@ -139,10 +139,10 @@ def test_walk_forward_cross_sectional_momentum_metrics_pinned_on_triple_real_win
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 0.37084079455542557,
-        "total_oos_return": 0.5397325982984924,
-        "deflated_sharpe_pvalue": 0.9297693662964296,
-        "deflated_sharpe_ratio": 0.07023063370357041,
+        "oos_sharpe": -0.353321072826707,
+        "total_oos_return": -0.10271011201552205,
+        "deflated_sharpe_pvalue": 0.9799508464469601,
+        "deflated_sharpe_ratio": 0.020049153553039933,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

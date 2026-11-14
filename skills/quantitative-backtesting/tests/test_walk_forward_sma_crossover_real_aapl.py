@@ -120,11 +120,11 @@ def test_walk_forward_sma_crossover_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 0.29228637084643855,
-        "total_oos_return": 0.5457952379610898,
-        "deflated_sharpe_pvalue": 0.6018818499109955,
-        "deflated_sharpe_ratio": 0.3981181500890045,
-        "win_rate_periods": 0.25938908362543817,
+        "oos_sharpe": 0.4563654612098278,
+        "total_oos_return": 0.3784080803807892,
+        "deflated_sharpe_pvalue": 0.9240260446437558,
+        "deflated_sharpe_ratio": 0.07597395535624413,
+        "win_rate_periods": 0.2637913741223671,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

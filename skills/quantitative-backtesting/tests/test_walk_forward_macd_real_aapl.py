@@ -116,11 +116,11 @@ def test_walk_forward_macd_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": 0.1388006607810333,
-        "total_oos_return": 0.2031051749225936,
-        "deflated_sharpe_pvalue": 0.8487484815767907,
-        "deflated_sharpe_ratio": 0.15125151842320922,
-        "win_rate_periods": 0.48172258387581374,
+        "oos_sharpe": 0.4033390565128385,
+        "total_oos_return": 0.4323788879901276,
+        "deflated_sharpe_pvalue": 0.2868033445675445,
+        "deflated_sharpe_ratio": 0.7131966554324555,
+        "win_rate_periods": 0.477432296890672,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

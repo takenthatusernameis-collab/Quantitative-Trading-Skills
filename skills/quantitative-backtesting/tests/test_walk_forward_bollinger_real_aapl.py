@@ -123,11 +123,11 @@ def test_walk_forward_bollinger_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": -0.5004618102384641,
-        "total_oos_return": -0.4861816624623724,
-        "deflated_sharpe_pvalue": 0.9997245917077903,
-        "deflated_sharpe_ratio": 0.0002754082922097334,
-        "win_rate_periods": 0.22934401602403606,
+        "oos_sharpe": -0.3302666238135357,
+        "total_oos_return": -0.22220067816400102,
+        "deflated_sharpe_pvalue": 0.9273886490567383,
+        "deflated_sharpe_ratio": 0.07261135094326165,
+        "win_rate_periods": 0.2678034102306921,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

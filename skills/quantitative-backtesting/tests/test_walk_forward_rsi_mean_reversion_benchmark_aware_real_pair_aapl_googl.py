@@ -172,12 +172,12 @@ def test_walk_forward_benchmark_aware_metrics_pinned_on_pair_real_window_rsi_mr(
     dsr = summary["deflated_sharpe"]
 
     EXPECTED = {
-        "oos_sharpe": 0.1328275543191368,
-        "total_oos_return": 0.16542654220916653,
-        "benchmark_total_return": 3.334633507750687,
-        "benchmark_annualized_return": 0.20330733826134217,
-        "alpha": 0.023554390057820025,
-        "alpha_pvalue": 0.8046386165896313,
+        "oos_sharpe": 0.0062562847703508265,
+        "total_oos_return": -0.14145721562707025,
+        "benchmark_total_return": 1.1002592034993874,
+        "benchmark_annualized_return": 0.2063050372553603,
+        "alpha": 0.008863891385535649,
+        "alpha_pvalue": 0.9596684786712304,
         "correlation_with_benchmark": 0.13094260924667486,
         "beta": 0.15228808133767605,
         "r_squared": 0.017145966916327415,

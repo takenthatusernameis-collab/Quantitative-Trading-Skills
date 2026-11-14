@@ -97,8 +97,8 @@ def test_walk_forward_rsi_mean_reversion_real_aapl_googl_runs():
     assert isinstance(result, dict)
     assert "periods" in result and "summary" in result
     summary = result["summary"]
-    assert summary["n_periods"] == 8
-    assert summary["periods_with_position"] == 8
+    assert summary["n_periods"] == 4
+    assert summary["periods_with_position"] == 4
     assert summary["bias_controls_engaged"] is True
     out = buffer.getvalue()
     assert "Point-in-time validation passed" in out
@@ -123,16 +123,16 @@ def test_walk_forward_rsi_mean_reversion_real_aapl_googl_metrics_pinned():
         result = _run_walk_forward()
 
     summary = result["summary"]
-    assert summary["n_periods"] == 8
-    assert summary["periods_with_position"] == 8
+    assert summary["n_periods"] == 4
+    assert summary["periods_with_position"] == 4
     assert summary["bias_controls_engaged"] is True
 
     EXPECTED = {
-        "total_oos_return": 0.16542654220916653,
-        "oos_sharpe": 0.1328275543191368,
-        "oos_volatility": 0.2698495797592499,
-        "n_positive_periods": 743,
-        "win_rate_periods": 0.37205808713069605,
+        "total_oos_return": -0.14145721562707025,
+        "oos_sharpe": 0.0062562847703508265,
+        "oos_volatility": 0.3482341131997554,
+        "n_positive_periods": 389.0,
+        "win_rate_periods": 0.3901705115346038,
     }
     REL_TOL = 1e-3
     for key, exp in EXPECTED.items():

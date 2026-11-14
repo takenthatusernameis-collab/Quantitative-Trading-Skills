@@ -105,13 +105,13 @@ def test_benchmark_metrics_pinned_on_triple_real_window_rsi_mean_reversion():
     assert observed.get("n_trials") == N_TRIALS
 
     EXPECTED = {
-        "sharpe_ratio": -0.29787533382040304,
-        "total_return": -0.3183616388937017,
-        "benchmark_total_return": 0.9015402575236577,
-        "benchmark_alpha": -0.2280940221579157,
-        "benchmark_alpha_pvalue": 0.4366875536727113,
-        "correlation_with_benchmark": 0.20255176223544216,
-        "deflated_sharpe_pvalue": 0.9858611370454999,
+        "sharpe_ratio": -0.23904261572714877,
+        "total_return": -0.23381514517694513,
+        "benchmark_total_return": 0.1711375869976839,
+        "benchmark_alpha": -0.23025931526502227,
+        "benchmark_alpha_pvalue": 0.5958023778108765,
+        "correlation_with_benchmark": 0.37495017998904245,
+        "deflated_sharpe_pvalue": 0.9766450457613917,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

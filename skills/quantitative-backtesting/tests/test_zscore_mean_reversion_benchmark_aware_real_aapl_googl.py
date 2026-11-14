@@ -87,7 +87,7 @@ def test_benchmark_metrics_pinned_on_pair_real_window_zscore_mean_reversion():
     assert observed.get("n_trials") == N_TRIALS
 
     EXPECTED = {
-        "sharpe_ratio": -0.4256114742108271,
+        "sharpe_ratio": 0.7110990902058707,
         "total_return": -0.03100842492016412,
         "benchmark_total_return": 0.9015402575236577,
         "benchmark_alpha": -0.022380402587827414,

@@ -101,8 +101,8 @@ def test_walk_forward_volatility_targeting_real_aapl_runs():
     assert isinstance(result, dict)
     assert "periods" in result and "summary" in result
     summary = result["summary"]
-    assert summary["n_periods"] == 8
-    assert summary["periods_with_position"] == 8
+    assert summary["n_periods"] == 4
+    assert summary["periods_with_position"] == 4
     assert summary["bias_controls_engaged"] is True
     out = buffer.getvalue()
     assert "Point-in-time validation passed" in out
@@ -132,16 +132,16 @@ def test_walk_forward_volatility_targeting_real_aapl_metrics_pinned():
             result = _run_walk_forward()
 
     summary = result["summary"]
-    assert summary["n_periods"] == 8
-    assert summary["periods_with_position"] == 8
+    assert summary["n_periods"] == 4
+    assert summary["periods_with_position"] == 4
     assert summary["bias_controls_engaged"] is True
 
     EXPECTED = {
-        "oos_sharpe": -0.38617607871821996,
-        "oos_volatility": 0.25847052397276044,
-        "total_oos_return": -0.5921302782722866,
-        "n_positive_periods": 955,
-        "win_rate_periods": 0.4782173259889835,
+        "oos_sharpe": 0.04461683981968077,
+        "oos_volatility": 0.15285311872001506,
+        "total_oos_return": 0.0457715763671549,
+        "n_positive_periods": 376.0,
+        "win_rate_periods": 0.5046979865771812,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

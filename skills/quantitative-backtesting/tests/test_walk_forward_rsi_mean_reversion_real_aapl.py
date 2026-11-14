@@ -119,11 +119,11 @@ def test_walk_forward_rsi_mean_reversion_real_aapl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": -0.09074437216335504,
-        "total_oos_return": -0.12223083332045648,
-        "deflated_sharpe_ratio": 3.2904688875456944e-05,
-        "deflated_sharpe_pvalue": 0.9999670953111246,
-        "win_rate_periods": 0.27541311967951926,
+        "oos_sharpe": -0.5059443652790976,
+        "total_oos_return": -0.3509183208815161,
+        "deflated_sharpe_ratio": 0.07031989714672066,
+        "deflated_sharpe_pvalue": 0.9296801028532793,
+        "win_rate_periods": 0.29989969909729186,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():

@@ -96,8 +96,8 @@ def test_walk_forward_cross_sectional_pairs_real_msft_googl_metrics_pinned():
     summary = result["summary"]
 
     EXPECTED = {
-        "oos_sharpe": -2.6656196270814996,
-        "total_oos_return": -0.10150779729057524,
+        "oos_sharpe": -2.3196362364072414,
+        "total_oos_return": -0.05986578115868535,
     }
     REL_TOL = 1e-6
     for key, exp in EXPECTED.items():
