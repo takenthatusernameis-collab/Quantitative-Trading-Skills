@@ -512,9 +512,9 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             unscaled_changes = positions.diff().abs()
             impact_model = getattr(args, "impact_model", "linear")
             if impact_model == "sqrt":
-                max_change = ((max_impact / float(args.impact_coefficient)) ** 2) * adv_notional / equity
+                max_change = ((max_impact / float(args.impact_coefficient)) ** 2) * adv_notional.div(equity, axis=0)
             else:
-                max_change = (max_impact * adv_notional) / (equity * float(args.impact_coefficient))
+                max_change = (max_impact * adv_notional).div(equity * float(args.impact_coefficient), axis=0)
             if is_panel:
                 max_change = max_change.mean(axis=1)
             scale_factor = (max_change / unscaled_changes).clip(upper=1.0).fillna(1.0)
@@ -547,9 +547,9 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
                 # Linear: |dw_i| <= max_impact * ADV_notional_i / (equity * impact_coefficient)
                 # Sqrt:   |dw_i| <= (max_impact / impact_coefficient)^2 * ADV_notional_i / equity
                 if impact_model == "sqrt":
-                    max_dw = ((max_impact / float(args.impact_coefficient)) ** 2) * adv_notional / equity
+                    max_dw = ((max_impact / float(args.impact_coefficient)) ** 2) * adv_notional.div(equity, axis=0)
                 else:
-                    max_dw = (max_impact * adv_notional) / (equity * float(args.impact_coefficient))
+                    max_dw = (max_impact * adv_notional).div(equity * float(args.impact_coefficient), axis=0)
                 # held_book is a DataFrame (dates x assets); scale its weight changes
                 # per asset. The held_book already includes lag and fill_rate.
                 unscaled_dw = held_book.diff().abs()

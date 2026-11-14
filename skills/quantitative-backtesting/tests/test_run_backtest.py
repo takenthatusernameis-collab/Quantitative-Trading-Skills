@@ -4167,11 +4167,11 @@ def test_run_backtest_book_pricing_max_impact_cap_binds_changes_outcome():
         data, strategy, _Args(impact_coefficient=0.5, panel_pricing="book")
     )
     capped = run_backtest(
-        data, strategy, _Args(impact_coefficient=0.5, max_impact=0.0001, panel_pricing="book")
+        data, strategy, _Args(impact_coefficient=0.5, max_impact=0.00005, panel_pricing="book")
     )
 
     # The cap must bind: scaled book weight changes produce a different return stream.
-    assert capped["config"]["max_impact"] == 0.0001
+    assert capped["config"]["max_impact"] == 0.00005
     assert capped["config"]["panel_pricing"] == "book"
     assert not np.allclose(capped["returns"], uncapped["returns"], atol=1e-12)
     assert not np.allclose(capped["equity_curve"], uncapped["equity_curve"], atol=1e-9)
