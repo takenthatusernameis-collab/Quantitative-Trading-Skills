@@ -81,6 +81,25 @@ def _make_regime_shift_data(periods: int = 252, seed: int = 7) -> pd.DataFrame:
     )
 
 
+def _make_multiasset_panel(periods: int = 200, n_assets: int = 3, seed: int = 42):
+    """MultiIndex OHLCV panel with cross-sectional dispersion."""
+    dates = pd.date_range("2020-01-01", periods=periods, freq="B")
+    symbols = [f"S{i}" for i in range(n_assets)]
+    cols = pd.MultiIndex.from_product(
+        [["open", "high", "low", "close", "volume"], symbols]
+    )
+    data = pd.DataFrame(0.0, index=dates, columns=cols)
+    rng = np.random.default_rng(seed)
+    for i, sym in enumerate(symbols):
+        prices = 100 * np.exp(np.cumsum(rng.normal(0.0004 * (i + 1), 0.011, periods)))
+        data[("open", sym)] = prices
+        data[("high", sym)] = prices
+        data[("low", sym)] = prices
+        data[("close", sym)] = prices
+        data[("volume", sym)] = rng.integers(1_000_000, 10_000_000, periods)
+    return data
+
+
 class _Args:
     def __init__(self, commission=0.0002, slippage=0.0001, initial_capital=100000,
                  strategy="sma_crossover", symbol="TEST", n_trials=None,
@@ -4129,6 +4148,54 @@ def test_run_backtest_regime_impact_unmapped_falls_back_to_base():
     np.testing.assert_array_equal(unmapped["equity_curve"], base["equity_curve"])
 
 
+def test_run_backtest_book_pricing_max_impact_cap_binds_changes_outcome():
+    """A tight --max-impact cap changes the backtest outcome in book pricing mode.
+
+    The book pricing path charges market impact on per-asset weight changes
+    against each asset's own ADV. When --max-impact is set, the per-asset
+    weight changes are scaled so the estimated impact per asset stays below
+    the threshold. A tight cap must bind and produce different returns than
+    the uncapped run.
+    """
+    # Multi-asset panel with different volumes per asset
+    data = _make_multiasset_panel(periods=200, n_assets=3, seed=42)
+    # Cross-sectional momentum with symmetric quantiles: market-neutral book,
+    # net-exposure signal is flat, so only book pricing takes positions.
+    strategy = build_strategy("cross_sectional_momentum", '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}')
+
+    uncapped = run_backtest(
+        data, strategy, _Args(impact_coefficient=0.5, panel_pricing="book")
+    )
+    capped = run_backtest(
+        data, strategy, _Args(impact_coefficient=0.5, max_impact=0.0001, panel_pricing="book")
+    )
+
+    # The cap must bind: scaled book weight changes produce a different return stream.
+    assert capped["config"]["max_impact"] == 0.0001
+    assert capped["config"]["panel_pricing"] == "book"
+    assert not np.allclose(capped["returns"], uncapped["returns"], atol=1e-12)
+    assert not np.allclose(capped["equity_curve"], uncapped["equity_curve"], atol=1e-9)
+
+
+def test_run_backtest_book_pricing_max_impact_non_binding_preserves_uncapped():
+    """A very loose --max-impact cap leaves the book pricing run unchanged."""
+    data = _make_multiasset_panel(periods=200, n_assets=3, seed=42)
+    strategy = build_strategy("cross_sectional_momentum", '{"lookback": 20, "top_quantile": 0.2, "bottom_quantile": 0.2}')
+
+    uncapped = run_backtest(
+        data, strategy, _Args(impact_coefficient=0.5, panel_pricing="book")
+    )
+    loose = run_backtest(
+        data, strategy, _Args(impact_coefficient=0.5, max_impact=1.0, panel_pricing="book")
+    )
+
+    # A cap so loose it never binds must not move any number.
+    assert loose["config"]["max_impact"] == 1.0
+    assert loose["config"]["panel_pricing"] == "book"
+    np.testing.assert_array_equal(loose["returns"], uncapped["returns"])
+    np.testing.assert_array_equal(loose["equity_curve"], uncapped["equity_curve"])
+
+
 TEST_REGISTRY = [
     ("test_signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
     ("test_run_backtest_flat_strategy_raises", test_run_backtest_flat_strategy_raises),
@@ -4251,6 +4318,8 @@ TEST_REGISTRY = [
     ("test_run_backtest_max_impact_reduces_turnover_and_impact_cost", test_run_backtest_max_impact_reduces_turnover_and_impact_cost),
     ("test_run_backtest_regime_impact_changes_output", test_run_backtest_regime_impact_changes_output),
     ("test_run_backtest_regime_impact_unmapped_falls_back_to_base", test_run_backtest_regime_impact_unmapped_falls_back_to_base),
+    ("test_run_backtest_book_pricing_max_impact_cap_binds_changes_outcome", test_run_backtest_book_pricing_max_impact_cap_binds_changes_outcome),
+    ("test_run_backtest_book_pricing_max_impact_non_binding_preserves_uncapped", test_run_backtest_book_pricing_max_impact_non_binding_preserves_uncapped),
 ]
 
 if __name__ == "__main__":

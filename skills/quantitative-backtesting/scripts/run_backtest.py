@@ -495,11 +495,10 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
         positions = positions * fill_rate
 
     # Capacity-aware position scaling (opt-in): when --max-impact is set and
-    # impact is enabled, scale net-exposure position changes so the estimated
-    # market impact of each trade stays below the threshold. Mirrors the
-    # walk_forward.py net-exposure path (_calculate_strategy_returns). The
-    # book pricing path charges costs on the held book itself and is not
-    # rescaled here (same convention as walk_forward.py).
+    # impact is enabled, scale position changes so the estimated
+    # market impact of each trade stays below the threshold. For net-exposure
+    # pricing this scales the scalar position changes. For book pricing this
+    # scales the per-asset book weight changes against each asset's own ADV.
     max_impact = getattr(args, "max_impact", None)
     if max_impact is not None:
         if max_impact <= 0:
@@ -529,6 +528,49 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
                     direction = 0.0
                 scaled_positions.iloc[i] = scaled_positions.iloc[i - 1] + direction * scaled_changes.iloc[i]
             positions = scaled_positions
+
+        # Capacity-aware position scaling for book pricing (opt-in): when
+        # --max-impact is set and impact is enabled, scale per-asset book
+        # weight changes so the estimated market impact of each trade in each
+        # asset stays below the threshold. This mirrors the net-exposure logic
+        # but applies per-asset caps based on each asset's own ADV.
+        if max_impact is not None and held_book is not None:
+            if volume is not None:
+                equity = args.initial_capital * (1 + raw_returns).cumprod()
+                adv_shares = volume.rolling(window=args.adv_window, min_periods=1).mean()
+                adv_notional = adv_shares * close
+                impact_model = getattr(args, "impact_model", "linear")
+                # Compute per-asset max allowed weight change |dw_i|
+                # Linear: impact_i = (|dw_i| * equity / ADV_notional_i) * impact_coefficient
+                # Sqrt:   impact_i = impact_coefficient * sqrt(|dw_i| * equity / ADV_notional_i)
+                # Solving for max |dw_i|:
+                # Linear: |dw_i| <= max_impact * ADV_notional_i / (equity * impact_coefficient)
+                # Sqrt:   |dw_i| <= (max_impact / impact_coefficient)^2 * ADV_notional_i / equity
+                if impact_model == "sqrt":
+                    max_dw = ((max_impact / float(args.impact_coefficient)) ** 2) * adv_notional / equity
+                else:
+                    max_dw = (max_impact * adv_notional) / (equity * float(args.impact_coefficient))
+                # held_book is a DataFrame (dates x assets); scale its weight changes
+                # per asset. The held_book already includes lag and fill_rate.
+                unscaled_dw = held_book.diff().abs()
+                # Align max_dw to held_book index/columns
+                max_dw = max_dw.reindex(index=held_book.index, columns=held_book.columns)
+                # Scale factor per asset per period: min(1, max_dw / |proposed_dw|)
+                scale_factor = (max_dw / unscaled_dw).clip(upper=1.0).fillna(1.0)
+                scaled_dw = unscaled_dw * scale_factor
+                # Reconstruct held_book from scaled weight changes.
+                # Seed from the first valid row of the original held_book.
+                scaled_book = held_book.copy()
+                first_valid = held_book.first_valid_index()
+                if first_valid is not None:
+                    first_loc = held_book.index.get_loc(first_valid)
+                    for i in range(first_loc + 1, len(held_book)):
+                        direction = np.sign(held_book.diff().iloc[i])
+                        direction = direction.fillna(0.0)
+                        scaled_book.iloc[i] = scaled_book.iloc[i - 1] + direction * scaled_dw.iloc[i]
+                held_book = scaled_book
+                # Recompute book_returns from the capped held_book
+                book_returns = book_return_from_held(held_book, close)
 
     # Borrow and funding costs are annualized rates applied per period.
     # The per-period rate divides by the number of periods per year
