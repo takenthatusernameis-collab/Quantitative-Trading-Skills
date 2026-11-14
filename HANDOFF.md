@@ -1,33 +1,31 @@
-# Handoff — Full quant gate COMPLETE; baseline green; no remaining bounded methodological gap found
+# Handoff — Full quant gate RED (122 failed / 1313 passed) on clean baseline; baseline NOT green
 
 ## What changed (this session)
-- No production code changes. Working tree clean (`git status --porcelain` = 0).
-- Re-verified the committed reproducible research artifact: `python3 simple_momentum_hypothesis.py` → **exit 0**, `VERDICT: NOT SUPPORTED` (falsification exercise on the synthetic fixture), all internal regression-guard assertions pass, and `results/` is deterministic (no timestamp churn; `git status --porcelain results/` empty).
+- No production code changes. Working tree clean (`git status --porcelain` = 0) at HEAD `87eeaf2`.
+- Ran the full quant gate: `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` → **completed** (30 min 32 s), **1313 passed, 122 failed**, exit nonzero.
 
 ## What was actually verified (cumulative)
-- Full quant gate: **complete**; the single historically-known failure (`test_examples_coverage.py::test_scripts_results_untouched_after_examples`, artifact mutation) now **passes** — `skills/quantitative-backtesting/scripts/results/` is gitignored (`.gitignore:15`) and examples write to temp/example_output, so tracked `scripts/` stays clean after example runs. Gate can be 100% green once re-run with adequate budget.
-- `test_adjustment_integrity_guard.py` → **10/10 passed** (clean data, consistent splits, multiple splits, corrupted adj_close, phantom future split, negative split/dividend, non-negative dividends, load_data provenance wiring).
-- Prior slices all green: adjustment/PIT/regime, walk_forward, reporting+monte_carlo, Donchian, cross-family hypothesis, mean-reversion elevated cost, CPCV regime, root scripts/PIT/cost tests.
-- Regime disclosure complete across all four backtest entry points (run_backtest, walk_forward incl. Monte Carlo, CPCV).
-- Deflated-alpha / Bonferroni multiple-testing correction and block bootstrap implemented and tested.
-- Purged CPCV with embargo (`purge_size`/`embargo_size`) implemented in walk_forward.py.
+- Prior slices still green: adjustment/PIT/regime, walk_forward, reporting+monte_carlo, Donchian, cross-family hypothesis, mean-reversion elevated cost, CPCV regime, root scripts/PIT/cost tests; focused chunk 274 passed; root suite 22 passed.
+- Full gate is **RED**: 122 deterministic failures, all pinned-metric/structural regressions (e.g. `oos_sharpe regression: got 0.3655, expected 0.2629`; `assert 4 == 8`), spanning walk-forward, CPCV, param-sensitivity, benchmark-aware tests. Re-ran one serially → still fails (not parallel pollution).
+- Environment: numpy 2.5.4, pandas 3.1.1, scipy 1.18.1; `skills/quantitative-backtesting/requirements.txt` pins NO versions. Pinned values trace to big-bang import commit `e866c04` and were never validated in this environment.
 
 ## What remains unresolved
-- Full single-invocation quant gate (`pytest skills/quantitative-backtesting/tests/ -n 4`) still cannot complete in-session (~60+ min environmental timeout); last verified result: **1196 passed, 1 failed** where the 1 failure was the artifact-mutation test, now resolved. Re-run in CI / adequate budget to confirm 100% green.
-- pytest-xdist (`-n 4`) installed but not pinned in any requirements file.
+- Baseline not green → the "next bounded methodological gap" task from HANDOFF.md is BLOCKED until the baseline is stabilized.
+- Root cause of 122 failures unconfirmed (environmental dependency drift vs genuine regression vs stale import pins).
+- pytest-xdist (`-n 4`) not pinned in requirements.txt.
+- CI workflow `quant-regression-gate` blocked on GitHub App `workflows` permission.
 
 ## Approaches already tried / failed (do not repeat unchanged)
-- Serial full gate: timed out at ~60 min twice.
-- Full gate `-n 4`: timed out at 30 min (reached 94%, all dots).
-- Full gate `-n 4` excluding 48 slow files: timed out at 20 min.
-- Resolution: focused chunks + CI with adequate budget; do not repeat unbounded serial runs.
+- Serial full gate: timed out ~60 min ×2.
+- Full gate `-n 4`: timed out ~30 min at 94% (earlier env); now completes ~30.5 min but red.
+- Full gate `-n 4` excluding 48 slow files: timed out ~20 min.
+- Blindly recalibrating pins to force green: REJECTED (weakens guards; not methodological progress).
 
 ## One precise next task (for the next agent)
-Run the full quant gate in CI / an environment with adequate budget:
-  `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4`
-then `git checkout -- .` to restore any timestamp-only drift and keep `git status` clean.
-- If green (EXIT 0): baseline fully confirmed (1197/1197). Then **select the next bounded methodological gap** — coverage is already extensive across all registered strategies (hypothesis, benchmark-aware, elevated-cost, param-sensitivity, CPCV, walk-forward, Monte Carlo). Look for a genuinely new methodological improvement (e.g., regime-aware cost models, capacity-aware position sizing, alternative validation schemes, multi-asset factor construction) rather than another strategy falsification test.
-- If a test fails: isolate with evidence, fix minimally, rerun focused tests, re-attempt the full gate.
-- Do not commit unless explicitly asked. Keep the working tree clean.
-
-(End of file)
+Stabilize the quant-test baseline before any new methodological work (see HANDOFF_SESSION115.md for full detail):
+1. Investigate the 122 pinned-test failures: environmental (unpinned deps) vs genuine regression vs stale pins from commit `e866c04`.
+2. If environmental: pin dependency versions in `skills/quantitative-backtesting/requirements.txt` and/or regenerate pins with documented justification — do NOT silently hand-tune each `EXPECTED` value.
+3. If genuine regression: fix code minimally, re-run affected tests.
+4. Re-run full gate to EXIT 0 (100% green), then `git checkout -- .` to restore timestamp-only drift; keep `git status` clean.
+5. Only once green: select the next bounded methodological gap (regime-aware cost models, capacity-aware sizing, alternative validation, multi-asset factor construction — not another strategy falsification test).
+6. Do not commit unless explicitly asked.
