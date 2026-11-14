@@ -3860,6 +3860,36 @@ def cpcv_analysis(
         if test_end_idx <= test_start_idx:
             continue
 
+        # Execution warmup: strategy signals on the test window are computed
+        # from rolling indicators (moving averages, volatility, Kelly sizing)
+        # that need prior history to be defined. Without it, the leading bars
+        # of every test window are NaN and the strategy is flat there -- and
+        # when the test window is shorter than the indicator's lookback (e.g.
+        # lookback=63 on a 60-bar window), *every* bar is NaN, the grid search
+        # finds no eligible combination, and the fold is silently dropped
+        # (folds_with_position == 0). The warmup history is *not* part of the
+        # test window: it is used only to initialize the rolling indicators,
+        # and the test returns below are sliced to the test indices so the OOS
+        # record is unchanged.
+        #
+        # The warmup length is the largest numeric parameter in the grid: a
+        # rolling indicator over `lookback` bars needs `lookback` bars of
+        # history to be non-NaN, so the largest numeric grid value is the
+        # smallest warmup that guarantees a fully-defined test window for
+        # every grid combination. It is a measurement of the grid, not a
+        # tuning knob: it changes no output number except by making the
+        # previously-dropped folds visible.
+        warmup_bars = execution_warmup_metadata(
+            WARMUP_CONVENTION_WALK_FORWARD, latency
+        )["execution_warmup_bars"]
+        _max_param = 0
+        for _vals in param_grid.values():
+            if isinstance(_vals, (list, tuple)):
+                for _v in _vals:
+                    if isinstance(_v, (int, float)) and not isinstance(_v, bool):
+                        _max_param = max(_max_param, int(_v))
+        warmup_bars = max(warmup_bars, _max_param)
+        warmup_start_idx = max(0, test_start_idx - warmup_bars)
         test_indices = list(range(test_start_idx, test_end_idx))
 
         # Training indices: all other groups, with purge/embargo
@@ -3886,6 +3916,10 @@ def cpcv_analysis(
 
         train_data = data.iloc[train_indices]
         test_data = data.iloc[test_indices]
+        # Warmup history used only to initialize rolling indicators on the
+        # test window; the test returns below are sliced to the test indices
+        # so the OOS record is unchanged (see the warmup comment above).
+        warmup_data = data.iloc[warmup_start_idx:test_start_idx] if warmup_start_idx < test_start_idx else data.iloc[0:0]
 
         folds.append({
             "fold": len(folds),
@@ -3896,6 +3930,7 @@ def cpcv_analysis(
             "test_end": test_data.index[-1],
             "train_data": train_data,
             "test_data": test_data,
+            "warmup_data": warmup_data,
             "train_indices": train_indices,
             "test_indices": test_indices,
         })
@@ -3943,17 +3978,32 @@ def cpcv_analysis(
 
             try:
                 strategy = strategy_factory(params)
+                # Generate signals on the warmup history + test window so the
+                # rolling indicators are defined across the whole test window
+                # (see the warmup comment above). The signals are then sliced
+                # back to the test window before returns / position counts are
+                # computed, so the OOS record is unchanged.
+                if len(warmup_data) > 0:
+                    sig_input = pd.concat([warmup_data, test_data])
+                    test_signals_full = strategy.generate_signals(sig_input)
+                    test_signals = test_signals_full.loc[test_data.index]
+                    if panel_pricing == "book":
+                        book_full = strategy_target_weights(strategy, sig_input)
+                        test_book_weights = (
+                            book_full.loc[test_data.index]
+                            if book_full is not None and len(book_full) == len(sig_input)
+                            else None
+                        )
+                    else:
+                        test_book_weights = None
+                else:
+                    test_signals = strategy.generate_signals(test_data)
+                    test_book_weights = (
+                        strategy_target_weights(strategy, test_data)
+                        if panel_pricing == "book"
+                        else None
+                    )
                 train_signals = strategy.generate_signals(train_data)
-                test_signals = strategy.generate_signals(test_data)
-
-                # Skip parameter sets that take no position in the test window.
-                # The test is book-aware in the "book" pricing mode: a
-                # market-neutral book is a position, not a flat one.
-                test_book_weights = (
-                    strategy_target_weights(strategy, test_data)
-                    if panel_pricing == "book"
-                    else None
-                )
                 position_bars = _window_position_bars(
                     strategy,
                     test_signals,

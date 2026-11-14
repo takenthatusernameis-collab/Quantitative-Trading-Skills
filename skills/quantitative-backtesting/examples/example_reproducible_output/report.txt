@@ -45,4 +45,19 @@ Benchmark Sharpe (SR*): 0.0000
 Z-Score:               -0.5710
 Observations:          503
 
+--- Test Resolution (Minimum Detectable Effect) ---
+Test Observations:           None
+Parameter Trials:            None
+Benchmarks:                  None
+Sharpe Status:               not_applicable
+Min Detectable Sharpe:       N/A
+Observed Ann. Sharpe:        N/A
+Sharpe Beyond Plausible:     False
+Alpha Status:                not_applicable
+Min Detectable Alpha:        N/A
+Observed Ann. Alpha:         N/A
+Alpha Beyond Plausible:      False
+Realized Ann. Volatility:    N/A
+Interpretation:              No significance test was run on this record, so there is no test resolution to report.
+
 ============================================================
