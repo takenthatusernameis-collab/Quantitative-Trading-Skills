@@ -66,30 +66,37 @@ def test_param_sensitivity_runs_on_aapl_real_window_volatility_targeting():
     # Regression guard: pin the observed out-of-sample metrics per parameter
     # setting so the robustness evidence is reproducible and any silent change
     # to the backtest numbers is caught. Compared with a relative tolerance.
+    #
+    # These numbers are NOT identical across target_vol at a fixed lookback:
+    # the VolatilityTargeting overlay was previously broken in standalone
+    # mode (the target_vol multiplier was computed and then discarded, so
+    # every target_vol produced the same unsized signal). The fix makes the
+    # sizing math actually apply, so the pinned metrics now differ by
+    # target_vol and lookback as the documented formula predicts.
     EXPECTED_METRICS = {
         (0.15, 63): {
-            "sharpe_ratio": 0.5000125402775002,
-            "total_return": 0.16104626397549926,
+            "sharpe_ratio": 0.5154860951632668,
+            "total_return": 0.10666302954386775,
         },
         (0.10, 63): {
-            "sharpe_ratio": 0.5000125402775002,
-            "total_return": 0.16104626397549926,
+            "sharpe_ratio": 0.44729933506308894,
+            "total_return": 0.07296094653230978,
         },
         (0.20, 63): {
-            "sharpe_ratio": 0.5000125402775002,
-            "total_return": 0.16104626397549926,
+            "sharpe_ratio": 0.5495794752133558,
+            "total_return": 0.13815856732330256,
         },
         (0.15, 50): {
-            "sharpe_ratio": -0.38367414883518386,
-            "total_return": -0.15719611990517068,
+            "sharpe_ratio": -0.10398593989275874,
+            "total_return": -0.009743911765914715,
         },
         (0.15, 100): {
-            "sharpe_ratio": 0.367259699743025,
-            "total_return": 0.10659026717311959,
+            "sharpe_ratio": 0.3290414214742712,
+            "total_return": 0.06747912716144122,
         },
         (0.10, 50): {
-            "sharpe_ratio": -0.38367414883518386,
-            "total_return": -0.15719611990517068,
+            "sharpe_ratio": -0.1683619399500347,
+            "total_return": -0.0033209027944205406,
         },
     }
     REL_TOL = 1e-3

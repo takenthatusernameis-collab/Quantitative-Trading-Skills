@@ -1371,19 +1371,15 @@ class VolatilityTargeting(StrategyBase):
         self.lookback = self.parameters.get("lookback", 63)  # ~3 months
 
     def generate_signals(self, data: pd.DataFrame) -> pd.Series:
-        if self.base_strategy is not None:
-            base_signals = self.base_strategy.generate_signals(data)
-        else:
-            # Standalone degraded mode: an overlay with no base strategy is
-            # undefined, so fall back to a plain time-series momentum base
-            # (close vs its rolling mean) that yields a tradable signal.
-            close = data["close"]
-            return (
-                (close > close.rolling(self.lookback).mean()).astype(float) * 2.0 - 1.0
-            )
+        close = data["close"]
+        base_signals = (
+            self.base_strategy.generate_signals(data)
+            if self.base_strategy is not None
+            else self._standalone_base(close)
+        )
 
         # Calculate realized volatility
-        returns = data["close"].pct_change()
+        returns = close.pct_change()
         realized_vol = returns.rolling(self.lookback).std() * np.sqrt(252)
 
         # Position multiplier to target volatility
@@ -1394,6 +1390,18 @@ class VolatilityTargeting(StrategyBase):
         sized_signals = base_signals * vol_multiplier
 
         return sized_signals
+
+    def _standalone_base(self, close: pd.Series) -> pd.Series:
+        """Direction base for standalone (no registered base strategy).
+
+        The overlay is undefined without a base signal, so fall back to a
+        plain time-series momentum base (close vs its rolling mean) that
+        yields a tradable direction. The volatility-targeting sizing math is
+        still applied below, so ``target_vol`` and ``lookback`` remain
+        meaningful in standalone mode (previously ``target_vol`` was silently
+        ignored here: the multiplier was computed but discarded).
+        """
+        return (close > close.rolling(self.lookback).mean()).astype(float) * 2.0 - 1.0
 
 
 class KellyCriterion(StrategyBase):
@@ -1413,19 +1421,15 @@ class KellyCriterion(StrategyBase):
         self.min_leverage = self.parameters.get("min_leverage", 0.0)
 
     def generate_signals(self, data: pd.DataFrame) -> pd.Series:
-        if self.base_strategy is not None:
-            base_signals = self.base_strategy.generate_signals(data)
-        else:
-            # Standalone degraded mode: an overlay with no base strategy is
-            # undefined, so fall back to a plain time-series momentum base
-            # (close vs its rolling mean) that yields a tradable signal.
-            close = data["close"]
-            return (
-                (close > close.rolling(self.lookback).mean()).astype(float) * 2.0 - 1.0
-            )
+        close = data["close"]
+        base_signals = (
+            self.base_strategy.generate_signals(data)
+            if self.base_strategy is not None
+            else self._standalone_base(close)
+        )
 
         # Calculate returns
-        returns = data["close"].pct_change()
+        returns = close.pct_change()
 
         # Calculate Kelly fraction: f* = (mu - r)/sigma^2 for continuous approx
         # or f* = (p*b - q)/b for binary outcomes; use continuous approximation
@@ -1444,6 +1448,18 @@ class KellyCriterion(StrategyBase):
         sized_signals = base_signals * kelly_fraction
 
         return sized_signals
+
+    def _standalone_base(self, close: pd.Series) -> pd.Series:
+        """Direction base for standalone (no registered base strategy).
+
+        The overlay is undefined without a base signal, so fall back to a
+        plain time-series momentum base (close vs its rolling mean) that
+        yields a tradable direction. The Kelly sizing math is still applied
+        below, so ``lookback``/``fraction``/leverage bounds remain meaningful
+        in standalone mode (previously the sizing math was computed and then
+        discarded here, so ``fraction`` was silently ignored).
+        """
+        return (close > close.rolling(self.lookback).mean()).astype(float) * 2.0 - 1.0
 
 
 # Strategy registry

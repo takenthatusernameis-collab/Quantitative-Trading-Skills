@@ -93,8 +93,8 @@ def test_hypothesis_metrics_pinned_on_aapl_real_window():
 
     observed = result.get("observed") or {}
     EXPECTED = {
-        "sharpe_ratio": 0.5000125402775002,
-        "total_return": 0.16104626397549926,
+        "sharpe_ratio": 0.5154860951632668,
+        "total_return": 0.10666302954386775,
         "benchmark_total_return": None,
         "benchmark_alpha": None,
         "benchmark_alpha_pvalue": None,
