@@ -577,7 +577,7 @@ _AUDIT_PARAMS = {
     "macd": None,
     "multi_pair_zscore_mean_reversion": None,
     "volatility_targeting": '{"target_vol": 0.15, "lookback": 63}',
-    "kelly_criterion": '{"lookback": 252, "fraction": 0.5, "max_leverage": 2.0}',
+    "kelly_criterion": '{"lookback": 63, "fraction": 0.5, "max_leverage": 2.0}',
 }
 
 
