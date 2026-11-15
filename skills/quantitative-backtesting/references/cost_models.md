@@ -87,6 +87,40 @@ For more sophisticated models, consider:
 - Order book depth-based models
 - Time-varying impact coefficients by regime
 
+### Regime-conditional commission and slippage
+
+Commission and slippage are empirically larger in stressed/illiquid regimes:
+spreads widen and fills take longer when volatility is high or the market is
+falling. The optional `regime_cost_multipliers` mapping lets a run scale the
+per-trade commission + slippage cost by a per-regime multiplier, reusing the
+same causal regime labels already used for regime-aware market impact
+(`regime_detection.detect_combined_regime`, e.g. `bull_high_vol`,
+`bear_low_vol`).
+
+The multiplier is applied to the **per-trade cost**, not to the rate itself:
+
+```
+position_changes = positions.diff().abs()
+cost_multiplier  = regime_cost_multipliers[regime_label_t]   # default 1.0
+costs            = position_changes * (commission + slippage) * cost_multiplier
+```
+
+Under book pricing it scales the book's gross-turnover transaction cost the
+same way (`utils.book_cost_components`), leaving the exposure-based borrow and
+funding legs untouched.
+
+Configuration is opt-in and disabled by default, so no published number moves:
+
+- `run_backtest.py --regime-cost-multipliers '{"bear_high_vol": 1.5}'`
+- `walk_forward.py --regime-cost-multipliers '{"bear_high_vol": 1.5}'`
+
+Regimes not present in the mapping fall back to `1.0` (no change). The
+multiplier is point-in-time: the regime labels are produced by the causal
+detector from bars up to and including the trade bar, so a trade is charged at
+the multiplier of the regime known when it was made, never a future one. A
+regime-conditional multiplier is a cost lever for sensitivity analysis (does the
+verdict survive a stressed-regime cost load?), not a profitability claim.
+
 #### Multi-asset panels
 
 For a panel (MultiIndex columns or a dict of per-asset frames) the portfolio is

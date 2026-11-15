@@ -47,6 +47,7 @@ from utils import (
     held_book_weights,
     market_impact_cost,
     reality_check_test,
+    regime_cost_multiplier_series,
     romano_wolf_stepdown,
     resolve_impact_aggregation,
     resolve_panel_pricing,
@@ -911,6 +912,7 @@ def walk_forward_analysis(
                         impact_aggregation=impact_aggregation,
                         impact_model=impact_model,
                         regime_impact_coefficients=regime_impact_coefficients,
+                        regime_cost_multipliers=regime_cost_multipliers,
                         max_impact=max_impact,
                         book_weights=test_book_weights,
                     )
@@ -925,6 +927,7 @@ def walk_forward_analysis(
                         impact_aggregation=impact_aggregation,
                         impact_model=impact_model,
                         regime_impact_coefficients=regime_impact_coefficients,
+                        regime_cost_multipliers=regime_cost_multipliers,
                         max_impact=max_impact,
                         book_weights=(
                             strategy_target_weights(strategy, train_data)
@@ -1610,6 +1613,7 @@ def parameter_optimization(
                 impact_aggregation=impact_aggregation,
                 impact_model=impact_model,
                 regime_impact_coefficients=regime_impact_coefficients,
+                regime_cost_multipliers=regime_cost_multipliers,
                 max_impact=max_impact,
                 book_weights=book_weights,
             )
@@ -4141,6 +4145,7 @@ def cpcv_analysis(
                         impact_aggregation=impact_aggregation,
                         impact_model=impact_model,
                         regime_impact_coefficients=regime_impact_coefficients,
+                        regime_cost_multipliers=regime_cost_multipliers,
                         book_weights=test_book_weights,
                     )
 
@@ -4154,6 +4159,7 @@ def cpcv_analysis(
                         impact_aggregation=impact_aggregation,
                         impact_model=impact_model,
                         regime_impact_coefficients=regime_impact_coefficients,
+                        regime_cost_multipliers=regime_cost_multipliers,
                         book_weights=(
                             strategy_target_weights(strategy, train_data)
                             if panel_pricing == "book"
@@ -6391,6 +6397,7 @@ def out_of_sample_validation(
             impact_coefficient=impact_coefficient,
             impact_model=impact_model,
             regime_impact_coefficients=regime_impact_coefficients,
+            regime_cost_multipliers=regime_cost_multipliers,
             adv_window=adv_window,
             borrow_cost=borrow_cost,
             funding_cost=funding_cost,
@@ -6420,6 +6427,7 @@ def out_of_sample_validation(
             impact_coefficient=impact_coefficient,
             impact_model=impact_model,
             regime_impact_coefficients=regime_impact_coefficients,
+            regime_cost_multipliers=regime_cost_multipliers,
             adv_window=adv_window,
             borrow_cost=borrow_cost,
             funding_cost=funding_cost,
@@ -6525,6 +6533,7 @@ def out_of_sample_validation(
         impact_aggregation=impact_aggregation,
         impact_model=impact_model,
         regime_impact_coefficients=regime_impact_coefficients,
+        regime_cost_multipliers=regime_cost_multipliers,
         book_weights=val_book_weights,
     )
 
@@ -6628,6 +6637,7 @@ def out_of_sample_validation(
                         impact_aggregation=impact_aggregation,
                         impact_model=impact_model,
                         regime_impact_coefficients=regime_impact_coefficients,
+                        regime_cost_multipliers=regime_cost_multipliers,
                         book_weights=test_book_weights,
                     )
 
@@ -7322,7 +7332,8 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                                 impact_coefficient, borrow_cost=None, funding_cost=None,
                                 commission=None, slippage=None, latency=None, fill_rate=None,
                                 pit_results=None, survivorship=None,
-                                regime_impact_coefficients: Optional[Dict[str, float]] = None):
+                                regime_impact_coefficients: Optional[Dict[str, float]] = None,
+                                regime_cost_multipliers: Optional[Dict[str, float]] = None):
     """Run parameter optimization for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -7460,7 +7471,8 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                            bench_commission, bench_slippage, bench_expense_ratio,
                            impact_coefficient, borrow_cost=None, funding_cost=None,
                            commission=None, slippage=None, latency=None, fill_rate=None,
-                           pit_results=None, survivorship=None, pit_strict=None):
+                           pit_results=None, survivorship=None, pit_strict=None,
+                           regime_cost_multipliers: Optional[Dict[str, float]] = None):
     """Run out-of-sample validation for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -7493,6 +7505,10 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         commission = args.commission
     if slippage is None:
         slippage = args.slippage
+    if regime_cost_multipliers is None:
+        regime_cost_multipliers = _parse_regime_cost_multipliers(
+            getattr(args, "regime_cost_multipliers", None)
+        )
     if latency is None:
         latency = getattr(args, "latency", 0)
     if latency is None:
@@ -7672,6 +7688,7 @@ survivorship=None,
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         regime_impact_coefficients=regime_impact_coefficients,
+        regime_cost_multipliers=regime_cost_multipliers,
     )
     summary = results["summary"]
     dsr = summary.get("deflated_sharpe")
@@ -7762,6 +7779,7 @@ def run_cpcv(args) -> int:
 
     param_grid = _parse_param_grid(args.param_grid)
     regime_impact_coefficients = _parse_regime_impact_coefficients(getattr(args, "regime_impact_coefficients", None))
+    regime_cost_multipliers = _parse_regime_cost_multipliers(getattr(args, "regime_cost_multipliers", None))
     strategy_factory = _make_strategy_factory(args.strategy)
 
     impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
@@ -7779,6 +7797,7 @@ def run_cpcv(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
                 survivorship=survivorship,
                 regime_impact_coefficients=regime_impact_coefficients,
+                regime_cost_multipliers=regime_cost_multipliers,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "cpcv_impact_sweep.json"
@@ -8925,6 +8944,37 @@ def _parse_regime_impact_coefficients(regime_impact_str: Optional[str]) -> Optio
         raise ValueError(f"Invalid JSON for regime_impact_coefficients: {e}")
 
 
+def _parse_regime_cost_multipliers(regime_cost_str: Optional[str]) -> Optional[Dict[str, float]]:
+    """Parse regime cost multipliers from JSON string.
+
+    Args:
+        regime_cost_str: JSON string mapping regime names to commission/
+            slippage multipliers (e.g., '{"bull_high_vol": 1.5}').
+
+    Returns:
+        Dict mapping regime names to float multipliers, or None if not provided.
+    """
+    if regime_cost_str is None:
+        return None
+    try:
+        multipliers = json.loads(regime_cost_str)
+        if not isinstance(multipliers, dict):
+            raise ValueError(
+                f"regime_cost_multipliers must be a JSON object, got {type(multipliers).__name__}"
+            )
+        for k, v in multipliers.items():
+            if not isinstance(v, (int, float)):
+                raise ValueError(f"Regime cost multiplier for '{k}' must be a number, got {type(v).__name__}")
+            if not np.isfinite(v) or v < 0:
+                raise ValueError(
+                    f"Regime cost multiplier for '{k}' must be finite and non-negative, got {v}"
+                )
+            multipliers[k] = float(v)
+        return multipliers
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON for regime_cost_multipliers: {e}")
+
+
 def run_walk_forward(args) -> int:
     """Run walk-forward analysis from CLI args."""
     print(f"Loading data from {args.data}...")
@@ -8961,6 +9011,7 @@ def run_walk_forward(args) -> int:
 
     param_grid = _parse_param_grid(args.param_grid)
     regime_impact_coefficients = _parse_regime_impact_coefficients(getattr(args, "regime_impact_coefficients", None))
+    regime_cost_multipliers = _parse_regime_cost_multipliers(getattr(args, "regime_cost_multipliers", None))
     strategy_factory = _make_strategy_factory(args.strategy)
 
     print(f"Running walk-forward analysis with {args.strategy}...")
@@ -8982,6 +9033,7 @@ def run_walk_forward(args) -> int:
             funding_cost=args.funding_cost, **{key: v},
             survivorship=survivorship,
             regime_impact_coefficients=regime_impact_coefficients,
+            regime_cost_multipliers=regime_cost_multipliers,
         ),
         latency_values=latencies,
         fill_rate_values=fill_rates,
@@ -9012,6 +9064,7 @@ def run_walk_forward(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
                 survivorship=survivorship,
                 regime_impact_coefficients=regime_impact_coefficients,
+                regime_cost_multipliers=regime_cost_multipliers,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "walk_forward_impact_sweep.json"
@@ -9219,6 +9272,7 @@ def run_walk_forward(args) -> int:
         validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
         regime_impact_coefficients=regime_impact_coefficients,
+        regime_cost_multipliers=regime_cost_multipliers,
         max_impact=max_impact,
         family_returns=family_returns,
         family_stepdown=getattr(args, "family_stepdown", False),
@@ -9515,6 +9569,7 @@ def run_parameter_optimization(args) -> int:
 
     param_grid = _parse_param_grid(args.param_grid)
     regime_impact_coefficients = _parse_regime_impact_coefficients(getattr(args, "regime_impact_coefficients", None))
+    regime_cost_multipliers = _parse_regime_cost_multipliers(getattr(args, "regime_cost_multipliers", None))
     strategy_factory = _make_strategy_factory(args.strategy)
 
     impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
@@ -9535,6 +9590,7 @@ def run_parameter_optimization(args) -> int:
                 survivorship=survivorship,
                 pit_results=pit_results,
                 regime_impact_coefficients=regime_impact_coefficients,
+                regime_cost_multipliers=regime_cost_multipliers,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_impact_sweep.json"
@@ -9570,6 +9626,7 @@ def run_parameter_optimization(args) -> int:
                 pit_results=pit_results,
                 survivorship=survivorship,
                 regime_impact_coefficients=regime_impact_coefficients,
+                regime_cost_multipliers=regime_cost_multipliers,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_borrow_sweep.json"
@@ -9605,6 +9662,7 @@ def run_parameter_optimization(args) -> int:
                 pit_results=pit_results,
                 survivorship=survivorship,
                 regime_impact_coefficients=regime_impact_coefficients,
+                regime_cost_multipliers=regime_cost_multipliers,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_funding_sweep.json"
@@ -9643,6 +9701,7 @@ def run_parameter_optimization(args) -> int:
             funding_cost=args.funding_cost, **{key: v},
             pit_results=pit_results, survivorship=survivorship,
             regime_impact_coefficients=regime_impact_coefficients,
+            regime_cost_multipliers=regime_cost_multipliers,
         ),
         latency_values=latencies,
         fill_rate_values=fill_rates,
@@ -9679,6 +9738,7 @@ def run_parameter_optimization(args) -> int:
                 pit_results=pit_results,
                 survivorship=survivorship,
                 regime_impact_coefficients=regime_impact_coefficients,
+                regime_cost_multipliers=regime_cost_multipliers,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_commission_sweep.json"
@@ -9719,6 +9779,7 @@ def run_parameter_optimization(args) -> int:
                 pit_results=pit_results,
                 survivorship=survivorship,
                 regime_impact_coefficients=regime_impact_coefficients,
+                regime_cost_multipliers=regime_cost_multipliers,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_slippage_sweep.json"
@@ -9744,6 +9805,7 @@ def run_parameter_optimization(args) -> int:
 
     param_grid = _parse_param_grid(args.param_grid)
     regime_impact_coefficients = _parse_regime_impact_coefficients(getattr(args, "regime_impact_coefficients", None))
+    regime_cost_multipliers = _parse_regime_cost_multipliers(getattr(args, "regime_cost_multipliers", None))
     strategy_factory = _make_strategy_factory(args.strategy)
 
     print(f"Running parameter optimization with {args.strategy}...")
@@ -9773,6 +9835,7 @@ def run_parameter_optimization(args) -> int:
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         inert_grid_report=inert_report,
         regime_impact_coefficients=regime_impact_coefficients,
+        regime_cost_multipliers=regime_cost_multipliers,
     )
 
     if not results:
@@ -9933,6 +9996,7 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
                                      impact_coefficient, borrow_cost=None, funding_cost=None,
                                      commission=None, slippage=None, latency=None, fill_rate=None,
                                      regime_impact_coefficients=None,
+                                     regime_cost_multipliers=None,
                                      pit_results=None, survivorship=None):
     """Run the Monte Carlo pipeline for a single cost coefficient (sweep helper).
 
@@ -9969,6 +10033,10 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         commission = args.commission
     if slippage is None:
         slippage = args.slippage
+    if regime_cost_multipliers is None:
+        regime_cost_multipliers = _parse_regime_cost_multipliers(
+            getattr(args, "regime_cost_multipliers", None)
+        )
     if latency is None:
         latency = getattr(args, "latency", 0)
     if latency is None:
@@ -10033,6 +10101,7 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
                                           panel_pricing=panel_pricing,
                                           impact_model=getattr(args, "impact_model", DEFAULT_IMPACT_MODEL),
                                           regime_impact_coefficients=regime_impact_coefficients,
+                                          regime_cost_multipliers=regime_cost_multipliers,
                                           book_weights=book_weights)
 
     dsr = None
@@ -10211,6 +10280,7 @@ def run_monte_carlo(args) -> int:
     # This mirrors the parsing in run_walk_forward so both entry points
     # handle the CLI argument identically.
     regime_impact_coefficients = _parse_regime_impact_coefficients(getattr(args, "regime_impact_coefficients", None))
+    regime_cost_multipliers = _parse_regime_cost_multipliers(getattr(args, "regime_cost_multipliers", None))
 
     impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
 
@@ -10226,6 +10296,7 @@ def run_monte_carlo(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
                 regime_impact_coefficients=regime_impact_coefficients,
+                regime_cost_multipliers=regime_cost_multipliers,
                 survivorship=survivorship,
             )
             sweep_rows.append(row)
@@ -10266,6 +10337,7 @@ def run_monte_carlo(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=cost, funding_cost=args.funding_cost,
                 regime_impact_coefficients=regime_impact_coefficients,
+                regime_cost_multipliers=regime_cost_multipliers,
                 survivorship=survivorship,
             )
             sweep_rows.append(row)
@@ -10303,6 +10375,7 @@ def run_monte_carlo(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
                 regime_impact_coefficients=regime_impact_coefficients,
+                regime_cost_multipliers=regime_cost_multipliers,
                 survivorship=survivorship,
             )
             sweep_rows.append(row)
@@ -10340,6 +10413,7 @@ def run_monte_carlo(args) -> int:
             args.impact_coefficient, borrow_cost=args.borrow_cost,
             funding_cost=args.funding_cost, **{key: v},
             regime_impact_coefficients=regime_impact_coefficients,
+            regime_cost_multipliers=regime_cost_multipliers,
             survivorship=survivorship,
         ),
         latency_values=latencies,
@@ -10376,6 +10450,7 @@ def run_monte_carlo(args) -> int:
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, commission=cost,
                 regime_impact_coefficients=regime_impact_coefficients,
+                regime_cost_multipliers=regime_cost_multipliers,
                 survivorship=survivorship,
             )
             sweep_rows.append(row)
@@ -10414,6 +10489,7 @@ def run_monte_carlo(args) -> int:
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, slippage=cost,
                 regime_impact_coefficients=regime_impact_coefficients,
+                regime_cost_multipliers=regime_cost_multipliers,
                 survivorship=survivorship,
             )
             sweep_rows.append(row)
@@ -10497,6 +10573,7 @@ def run_monte_carlo(args) -> int:
                                           panel_pricing=panel_pricing,
                                           impact_model=getattr(args, "impact_model", DEFAULT_IMPACT_MODEL),
                                           regime_impact_coefficients=regime_impact_coefficients,
+                                          regime_cost_multipliers=regime_cost_multipliers,
                                           book_weights=book_weights)
     # The warmup convention of the series the Monte Carlo resamples.
     _print_execution_warmup(
@@ -11495,6 +11572,7 @@ def main():
     common_parser.add_argument("--impact-coefficient", type=float, default=0.0, help="Market impact coefficient (position_notional/ADV * coefficient). 0 to disable.")
     common_parser.add_argument("--impact-aggregation", type=str, default="panel", choices=["panel", "notional-weighted"], help="Market-impact aggregation convention. 'panel' (default) charges the equal-weighted mean of the per-asset impact rates; 'notional-weighted' charges the dollar-consistent aggregation. Default unchanged so no published number moves.")
     common_parser.add_argument("--regime-impact-coefficients", type=str, default=None, help="JSON mapping of regime names to impact coefficients for regime-aware impact modeling (e.g., '{\"bull_high_vol\": 0.5, \"bear_high_vol\": 1.0}'). Regimes not in the mapping fall back to --impact-coefficient.")
+    common_parser.add_argument("--regime-cost-multipliers", type=str, default=None, help="JSON mapping of regime names to multipliers applied to the per-trade commission + slippage cost in that regime (e.g., '{\"bear_high_vol\": 1.5}'). Regimes not in the mapping fall back to 1.0 (no change). Opt-in; unset leaves every published number unchanged.")
     common_parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
     common_parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3%% per year)")
     common_parser.add_argument("--funding-cost", type=float, default=0.0, help="Annual funding cost rate for leveraged positions (as decimal, e.g., 0.02 = 2%% per year)")

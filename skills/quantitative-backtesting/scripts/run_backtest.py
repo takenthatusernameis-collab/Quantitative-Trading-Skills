@@ -43,6 +43,7 @@ from utils import (
     format_impact_dilution_lines,
     held_book_weights,
     market_impact_cost,
+    regime_cost_multiplier_series,
     resolve_impact_aggregation,
     resolve_panel_pricing,
     strategy_target_weights,
@@ -78,6 +79,7 @@ def parse_args():
     parser.add_argument("--impact-model", type=str, default="linear", choices=["linear", "sqrt"], help="Market impact model: 'linear' (default) or 'sqrt' (coefficient * sqrt(participation rate)).")
     parser.add_argument("--impact-aggregation", type=str, default="panel", choices=["panel", "notional-weighted"], help="Market-impact aggregation convention. 'panel' (default) charges the equal-weighted mean of the per-asset impact rates -- the convention every published number was produced under. 'notional-weighted' charges the dollar-consistent aggregation (the impact rate of each name applied to the notional traded in that name); default unchanged so no published number moves.")
     parser.add_argument("--regime-impact-coefficients", type=str, default=None, help="JSON dict mapping regime name (e.g. 'bull_high_vol') to a regime-specific market impact coefficient. When provided, market impact uses the regime-specific coefficient for each detected regime; regimes not in the dict fall back to --impact-coefficient. Disabled by default so no published number moves.")
+    parser.add_argument("--regime-cost-multipliers", type=str, default=None, help="JSON dict mapping regime name (e.g. 'bear_high_vol') to a multiplier applied to the per-trade commission + slippage cost in that regime. Regimes not in the dict fall back to 1.0 (no change). Disabled by default so no published number moves.")
     parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
     parser.add_argument("--max-impact", type=float, default=None, help="Maximum acceptable market impact per trade (as decimal, e.g., 0.0005 = 5 bps). When set and --impact-coefficient > 0, target positions are scaled so the estimated market impact of each trade stays below this threshold (capacity-aware position cap). Opt-in; unset means no capacity-aware scaling.")
     parser.add_argument("--max-impacts", type=float, nargs="+", default=None, help="List of max-impact thresholds to sweep (overrides --max-impact).")
@@ -363,7 +365,16 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             _regime_impact_coefficients = json.loads(_regime_impact_coefficients)
         except (TypeError, ValueError):
             _regime_impact_coefficients = None
-    if _regime_impact_coefficients:
+    # Regime-conditional commission/slippage multipliers (opt-in). Parsed
+    # independently of the impact coefficients but sharing the same causal
+    # regime labels, so one detection pass serves both cost legs.
+    _regime_cost_multipliers = getattr(args, "regime_cost_multipliers", None)
+    if _regime_cost_multipliers is not None:
+        try:
+            _regime_cost_multipliers = json.loads(_regime_cost_multipliers)
+        except (TypeError, ValueError):
+            _regime_cost_multipliers = None
+    if _regime_impact_coefficients or _regime_cost_multipliers:
         regime_close = close.iloc[:, 0] if (is_panel and isinstance(close, pd.DataFrame) and close.shape[1] > 0) else close
         if isinstance(regime_close, pd.Series) and len(regime_close) > 0:
             try:
@@ -599,6 +610,8 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             borrow_cost=args.borrow_cost,
             funding_cost=args.funding_cost,
             ann_factor=ann_factor,
+            regime_cost_multipliers=_regime_cost_multipliers,
+            regimes=regimes,
         )
         costs = _book_costs["total"]
         market_impact = book_market_impact_cost(
@@ -623,7 +636,18 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
         # warmup bars) -- this difference is intentional and pinned by
         # cross-path parity tests.
         position_changes = positions.diff().abs()
-        costs = position_changes * (args.commission + args.slippage)
+        # Regime-conditional commission/slippage multiplier (opt-in). The
+        # per-trade cost is scaled per period by the multiplier of the regime
+        # the trade was made in; regimes not in the dict fall back to 1.0, so
+        # the default leaves every published number unchanged. Point-in-time:
+        # the regime labels come from the causal detector above.
+        _cost_mult = regime_cost_multiplier_series(
+            regimes, _regime_cost_multipliers, index=position_changes.index,
+        )
+        _rate = args.commission + args.slippage
+        if _cost_mult is not None:
+            _rate = _rate * _cost_mult
+        costs = position_changes * _rate
 
         # Market impact model: impact = (position_notional / ADV) * impact_coefficient
         # ADV = rolling average of daily volume (in shares) * price
