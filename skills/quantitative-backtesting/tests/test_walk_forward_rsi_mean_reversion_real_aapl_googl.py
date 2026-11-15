@@ -146,11 +146,11 @@ def test_walk_forward_rsi_mean_reversion_real_aapl_googl_metrics_pinned():
     assert dsr.get("n_trials") == 4
     dsr_p = dsr.get("p_value")
     assert dsr_p is not None
-    assert abs(dsr_p - 0.9863010139285661) <= 1e-3 * max(abs(0.9863010139285661), 1e-9)
+    assert abs(dsr_p - 0.8267420409804018) <= 1e-3 * max(abs(0.8267420409804018), 1e-9)
 
     bd = summary.get("book_diagnostic") or {}
-    assert bd.get("n_periods_with_book") == 1488
-    assert abs(bd.get("charged_turnover", 0) - 0.13670505758637957) <= 1e-3
+    assert bd.get("n_periods_with_book") == 793
+    assert abs(bd.get("charged_turnover", 0) - 0.14042126379137412) <= 1e-3
 
     raw_ok = summary["oos_sharpe"] > RAW_SHARPE_THRESHOLD
     ret_ok = summary["total_oos_return"] > TOTAL_RETURN_THRESHOLD

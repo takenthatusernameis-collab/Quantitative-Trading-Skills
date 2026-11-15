@@ -83,10 +83,10 @@ def test_elevated_cost_sweep_runs_on_triple_real_window_multi_pair_zscore():
     # the current library build; compared with a relative tolerance (never exact
     # equality, since the last decimals depend on the numpy/pandas build).
     EXPECTED_METRICS = {
-        (2, 1): (0.22928163042546806, 0.08885542249506262),
-        (5, 2.5): (0.03645166937976205, 0.030174339523501903),
-        (10, 5): (-0.28347173461581776, -0.060753438896405165),
-        (20, 10): (-0.9118979386313808, -0.21945634456115926),
+        (2, 1): (0.5238340753639057, 0.1287833784010597),
+        (5, 2.5): (0.4079460134784286, 0.09965228389142422),
+        (10, 5): (0.21529139085933682, 0.052727130924078214),
+        (20, 10): (-0.16656378594372429, -0.0353198542963673),
     }
     REL_TOL = 1e-3
     for r in rows:

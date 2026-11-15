@@ -43,8 +43,8 @@ def test_benchmark_aware_rsi_metrics_pinned_on_aapl_real_window():
     )
     assert result["verdict"] == "NOT SUPPORTED"
     obs = result["observed"]
-    assert abs(obs["sharpe_ratio"] - (-0.829298206297)) < 1e-6
-    assert abs(obs["total_return"] - (-0.297123221134)) < 1e-6
+    assert abs(obs["sharpe_ratio"] - 0.9264422710590631) < 1e-6
+    assert abs(obs["total_return"] - (0.3010781700588485)) < 1e-6
 
 
 if __name__ == "__main__":

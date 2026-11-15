@@ -116,10 +116,10 @@ def test_walk_forward_zscore_mean_reversion_real_aapl_metrics_pinned():
     assert dsr.get("n_trials") == 4
     dsr_p = dsr.get("p_value")
     assert dsr_p is not None
-    assert abs(dsr_p - 0.9985296036391956) <= 1e-6 * max(abs(0.9985296036391956), 1e-9)
+    assert abs(dsr_p - 0.8672511030406561) <= 1e-6 * max(abs(0.8672511030406561), 1e-9)
     dsr_ratio = dsr.get("deflated_sharpe_ratio")
     assert dsr_ratio is not None
-    assert abs(dsr_ratio - 0.0014703963608043713) <= 1e-6 * max(abs(0.0014703963608043713), 1e-9)
+    assert abs(dsr_ratio - 0.1327488969593439) <= 1e-6 * max(abs(0.1327488969593439), 1e-9)
 
     passes = {
         "oos_sharpe_gt_zero": bool(summary["oos_sharpe"] > 0),

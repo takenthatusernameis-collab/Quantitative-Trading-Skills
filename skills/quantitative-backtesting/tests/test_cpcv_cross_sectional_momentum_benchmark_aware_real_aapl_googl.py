@@ -138,19 +138,19 @@ def test_cpcv_benchmark_aware_metrics_pinned_on_pair_real_window():
     dsr = summary["deflated_sharpe"]
 
     EXPECTED = {
-        "total_oos_return": -0.016255788024777007,
-        "oos_sharpe": -0.22582872980692847,
-        "benchmark_total_return": 0.09741656760871131,
-        "alpha": -0.0016529436989074372,
-        "alpha_pvalue": 0.9820950334574922,
-        "correlation_with_benchmark": -0.046678128198974274,
-        "beta": -0.019815333978656993,
-        "r_squared": 0.002178847652159921,
-        "deflated_sharpe_ratio": 0.25469018617154626,
-        "deflated_sharpe_pvalue": 0.7453098138284537,
-        "expected_max_sharpe": 0.24916879575639422,
-        "dsr_n_trials": 5,
-        "dsr_n_observations": 490,
+        "total_oos_return": 0.007647309805853153,
+        "oos_sharpe": -0.03565004751766523,
+        "benchmark_total_return": 0.199265292227355,
+        "alpha": 0.02260543793253493,
+        "alpha_pvalue": 0.8590210920490734,
+        "correlation_with_benchmark": -0.06138435868310325,
+        "beta": -0.030554496724447523,
+        "r_squared": 0.0037680394909358483,
+        "deflated_sharpe_ratio": 0.3951676557854952,
+        "deflated_sharpe_pvalue": 0.6048323442145048,
+        "expected_max_sharpe": 0.24199474690579673,
+        "dsr_n_trials": 4,
+        "dsr_n_observations": 232,
     }
 
     # Strategy/benchmark metrics

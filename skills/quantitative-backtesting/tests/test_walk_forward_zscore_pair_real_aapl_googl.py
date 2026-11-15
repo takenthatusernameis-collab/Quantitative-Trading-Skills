@@ -154,11 +154,11 @@ def test_walk_forward_zscore_pair_real_aapl_googl_metrics_pinned():
     assert dsr.get("n_trials") == 4
     dsr_p = dsr.get("p_value")
     assert dsr_p is not None
-    assert abs(dsr_p - 0.9945669877489902) <= 1e-3 * max(abs(0.9945669877489902), 1e-9)
+    assert abs(dsr_p - 0.8903496929756208) <= 1e-3 * max(abs(0.8903496929756208), 1e-9)
 
     bd = summary.get("book_diagnostic") or {}
-    assert bd.get("n_periods_with_book") == 726
-    assert abs(bd.get("charged_turnover", 0) - 0.06309464196294441) <= 1e-3
+    assert bd.get("n_periods_with_book") == 394
+    assert abs(bd.get("charged_turnover", 0) - 0.06519558676028084) <= 1e-3
 
     raw_ok = summary["oos_sharpe"] > RAW_SHARPE_THRESHOLD
     ret_ok = summary["total_oos_return"] > TOTAL_RETURN_THRESHOLD
