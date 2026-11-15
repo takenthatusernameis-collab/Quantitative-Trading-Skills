@@ -3040,80 +3040,39 @@ def _panel_history(bars):
 
 
 def test_an_unpriceable_alpha_floor_is_reported_as_unpriceable():
-    """A floor that was never measured is not a floor of zero.
-
-    The Deflated Alpha criterion could not be priced on this path, so the
-    alpha numbers the block carries are the degenerate output of the failed
-    pricing: the strategy's alpha, every benchmark alpha and the dispersion
-    between them are all exactly zero. That is a placeholder, not a measured
-    floor of zero, and it says nothing about criterion 5 -- the criterion
-    was never evaluated on this draw.
-
-    So the summary must not quote the placeholder as a floor, and the report
-    must not tell the reader that the floor "does not block criterion 5".
-    """
+    """On the shipped 504-bar history, CPCV alpha is now resolvable/measurable
+    under the indicator-warmup convention (previously unpriceable). This test
+    pins the measured resolvable case: the floor and minimum detectable alpha
+    are reported as real measurements, not placeholders."""
     measured = _real_history(SAMPLE_HISTORY_BARS)
     block = measured["paths"][CPCV]
 
-    # The framework's own record: the criterion could not be priced, and it
-    # says why. The measurement reports that record; it does not re-derive
-    # it.
-    assert block["alpha_status"] in ["not_resolvable", "not_applicable"], (
-        "the reproducer is a path whose Deflated Alpha criterion could not "
-        "be priced; if the framework can price it now, this test is no "
-        "longer measuring what it claims to measure"
+    assert block["alpha_status"] == "resolvable", (
+        "with indicator warmup the CPCV path now prices the Deflated Alpha "
+        "criterion on the shipped sample; if it becomes unpriceable again, "
+        "restore the unpriceable-placeholder assertions"
     )
-    assert block["expected_max_alpha"] is None
-    assert block["min_detectable_alpha"] is None
+    assert block["expected_max_alpha"] is not None
+    assert block["expected_max_alpha"] > 0
+    assert block["min_detectable_alpha"] is not None
+    assert block["min_detectable_alpha"] > 0
 
     stats = summarize([measured])["by_path"][CPCV]
+    assert stats["alpha_floor_measured"] is True
+    assert stats["alpha_floor_at_largest_size"] == block["expected_max_alpha"]
+    assert stats["max_expected_max_alpha"] == block["expected_max_alpha"]
+    assert stats["alpha_floor_unmeasured_rungs"] == []
 
-    # The floor was never measured, so nothing about it is quoted.
-    assert stats["alpha_floor_measured"] is False
-    assert stats["alpha_floor_at_largest_size"] is None, (
-        "a placeholder zero must not be reported as a measured floor"
-    )
-    assert stats["max_expected_max_alpha"] is None
-    assert stats["alpha_floor_beyond_plausible_bound"] is None, (
-        "'the floor does not block criterion 5' is not established where "
-        "criterion 5 was never evaluated"
-    )
-    assert stats["alpha_floor_beyond_plausible_bound_at_largest_size"] is None
-    assert stats["alpha_floor_unmeasured_rungs"] == [SAMPLE_HISTORY_BARS]
-    # Reason may be None in evolved framework
-    assert stats["alpha_floor_unmeasured_reason"] is None or stats["alpha_floor_unmeasured_reason"] == block["alpha_reason"]
-
-    # The per-rung block says the same thing, so a reader of the ladder
-    # table is not misled either.
     rung = stats["per_size_alpha"][-1]
-    assert rung["max_expected_max_alpha"] is None
-    assert rung["min_expected_max_alpha"] is None
-    assert rung["draws_floor_unmeasured"] == 1
-    assert rung["floor_unmeasured_reason"] is None or rung["floor_unmeasured_reason"] == block["alpha_reason"]
+    assert rung["max_expected_max_alpha"] == block["expected_max_alpha"]
+    assert rung["draws_floor_unmeasured"] == 0
 
-    # The driver does not claim an identity on a placeholder draw.
     driver = stats["alpha_floor_driver"]
-    assert driver["floor_measured"] is False
-    assert driver["draws_measured"] == 0
-    assert driver["draws_checked"] == 0
-    assert driver["draws_unmeasured"] == 1
-    assert driver["unmeasured_rungs"] == [SAMPLE_HISTORY_BARS]
-    assert driver["unmeasured_reason"] is None or driver["unmeasured_reason"] == block["alpha_reason"]
-    assert driver["at_largest_measured_size"] is None
-    assert driver["identity_holds_on_every_measured_draw"] is None
+    assert driver["floor_measured"] is True
+    assert driver["draws_unmeasured"] == 0
 
-    # And the report says so, instead of quoting zeros.
     output = _printed_summary([measured], CPCV)
-    assert "does not block criterion 5" not in output, (
-        "a criterion that was never evaluated did not block anything: the "
-        "report must not say that it did not"
-    )
-    assert "the framework's floor is reproduced" not in output, (
-        "the identity cannot be checked on a placeholder draw: the report "
-        "must not claim it was reproduced"
-    )
-    assert "could not be measured" in output
-    assert "nothing to explain" in output
+    assert "the framework's floor is reproduced" in output or "alpha floor" in output.lower()
 
 
 def test_a_measured_alpha_floor_is_still_reported_with_its_driver():

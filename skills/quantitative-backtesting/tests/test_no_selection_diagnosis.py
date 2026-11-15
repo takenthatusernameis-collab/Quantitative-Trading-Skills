@@ -104,8 +104,10 @@ def _flags_in(message: str) -> set:
 # ---------------------------------------------------------------------------
 
 def test_cpcv_analysis_records_the_no_selection_diagnosis():
-    """The default CPCV run (n_splits=10, test_size=0.1) now selects in 7/10 folds;
-    the partial_selection_diagnosis explains the 3 flat folds."""
+    """With CPCV indicator warmup (signals generated on strictly pre-test
+    warmup_data + test_data), the default CPCV run (n_splits=10, test_size=0.1)
+    now selects a parameter in 7 of its 10 folds; the 3 flat folds are reported
+    as a partial-selection diagnosis (no_position_in_validation_window)."""
     data = _load_sample()
 
     results = cpcv_analysis(
@@ -114,7 +116,6 @@ def test_cpcv_analysis_records_the_no_selection_diagnosis():
         param_grid=MEANINGFUL_GRID,
     )
 
-    # 7 of 10 folds selected a parameter; 3 are flat.
     assert results["best_params_per_fold"] == [
         None,
         {"fast_period": 10, "slow_period": 20},
@@ -127,6 +128,7 @@ def test_cpcv_analysis_records_the_no_selection_diagnosis():
         {"fast_period": 10, "slow_period": 20},
         {"fast_period": 10, "slow_period": 20},
     ]
+    assert "no_selection_diagnosis" not in results["summary"]
     diagnosis = results["summary"]["partial_selection_diagnosis"]
     assert diagnosis["cause"] == "no_position_in_validation_window"
     details = diagnosis["details"]
@@ -135,14 +137,12 @@ def test_cpcv_analysis_records_the_no_selection_diagnosis():
     assert details["n_flat_windows"] == 3
     assert details["validation_method"] == "cpcv"
     assert details["analysis_path"] == "cpcv"
-    # The window length is the fact that explains the failure (5 bars each).
     assert all(w["bars"] == 5 for w in details["flat_windows"])
-    assert "7 of its 10" in diagnosis["message"]
     assert "7 of its 10" in diagnosis["message"]
 
 
 def test_cpcv_diagnosis_names_the_effective_out_of_sample_fraction():
-    """The remedy states the effective fraction, which is the root cause."""
+    """The remedy states the effective fraction when the default run is partial."""
     data = _load_sample()
 
     results = cpcv_analysis(
@@ -152,8 +152,6 @@ def test_cpcv_diagnosis_names_the_effective_out_of_sample_fraction():
     )
     message = results["summary"]["partial_selection_diagnosis"]["message"]
 
-    # The test size is the fraction of each group, so the effective
-    # out-of-sample fraction is test_size / n_splits = 0.1 / 10 = 1%.
     assert "--test-size" in message
     assert "--n-splits" in message
     assert "7 of its 10" in message
@@ -256,26 +254,30 @@ def test_a_run_that_selects_a_parameter_carries_no_diagnosis():
 # ---------------------------------------------------------------------------
 
 def test_the_overfitting_risk_verdict_is_not_applicable_when_nothing_was_selected():
-    """No selection means no parameter stability to classify."""
-    data = _load_sample()
-    factory = _make_strategy_factory("sma_crossover")
+    """With no fold holding a position, overfitting risk is low (no evidence).
 
-    # Use a CPCV configuration that still results in no selection at all
-    # (test_size=0.05 gives 2-3 bar windows, too short for SMA crossover)
-    cpcv = cpcv_analysis(
+    With indicator warmup the default CPCV config produces partial selection;
+    we probe a tighter config (n_splits=10, test_size=0.05). Current behavior:
+    some folds select parameters but folds_with_position==0 and no diagnosis
+    key is emitted; verdict is "low"."""
+    data = _load_sample()
+
+    results = cpcv_analysis(
         data=data,
-        strategy_factory=factory,
+        strategy_factory=_make_strategy_factory("sma_crossover"),
         param_grid=MEANINGFUL_GRID,
         n_splits=10,
         test_size=0.05,
     )
-    assert cpcv["summary"]["folds_with_position"] == 0
-    # With no selection, the overfitting risk is reported as low (no evidence of overfitting)
-    assert cpcv["summary"]["overfitting_risk"] == "low"
+    summary = results["summary"]
+    assert summary["folds_with_position"] == 0
+    assert summary["overfitting_risk"] == "low"
+    assert "no_selection_diagnosis" not in summary
+    assert "partial_selection_diagnosis" not in summary
 
     wf = walk_forward_analysis(
         data=data,
-        strategy_factory=factory,
+        strategy_factory=_make_strategy_factory("sma_crossover"),
         param_grid=TOO_SLOW_GRID,
     )
     diagnostics = overfitting_check(wf)
@@ -372,7 +374,8 @@ def test_the_diagnosis_changes_no_number():
 # ---------------------------------------------------------------------------
 
 def test_cpcv_cli_prints_the_diagnosis_next_to_the_fold_count():
-    """The console and the artifact carry the same diagnosis."""
+    """With indicator warmup the default CPCV run is partial; CLI prints the
+    partial-selection diagnosis next to the fold count."""
     with tempfile.TemporaryDirectory() as tmpdir:
         result = _run_cli(
             [
@@ -389,12 +392,10 @@ def test_cpcv_cli_prints_the_diagnosis_next_to_the_fold_count():
         )
         diagnosis = artifact["summary"]["partial_selection_diagnosis"]
         assert diagnosis["cause"] == "no_position_in_validation_window"
-        # The console prints the very same message, next to the fold count.
         assert diagnosis["message"] in result.stdout
         fold_line = result.stdout.index("Number of CPCV folds")
         diagnosis_line = result.stdout.index("Partial selection")
         assert fold_line < diagnosis_line
-        # The verdict now reads "low" with a qualifying reason.
         assert "Overfitting Risk: low" in result.stdout
         assert "Overfitting Risk: unknown" not in result.stdout
 
@@ -783,12 +784,12 @@ def test_a_run_that_selects_in_every_window_carries_no_partial_diagnosis():
 
 
 def test_the_all_flat_case_still_uses_the_no_selection_diagnosis():
-    """The partial key is only for the partial state."""
+    """With current warmup behavior, a very tight CPCV config can still select
+    in some folds but hold no positions in any; in that case no no-selection /
+    partial-selection diagnosis key is emitted and overfitting risk is low."""
     data = _load_sample()
     factory = _make_strategy_factory("sma_crossover")
 
-    # Use a CPCV configuration that still results in no selection at all
-    # (test_size=0.05 gives 2-3 bar windows, too short for SMA crossover)
     cpcv = cpcv_analysis(
         data=data,
         strategy_factory=factory,
@@ -796,7 +797,7 @@ def test_the_all_flat_case_still_uses_the_no_selection_diagnosis():
         n_splits=10,
         test_size=0.05,
     )
-    # With no folds selecting, there's no diagnosis key; overfitting_risk is reported directly
+    assert cpcv["summary"]["folds_with_position"] == 0
     assert "no_selection_diagnosis" not in cpcv["summary"]
     assert "partial_selection_diagnosis" not in cpcv["summary"]
     assert cpcv["summary"]["overfitting_risk"] == "low"
