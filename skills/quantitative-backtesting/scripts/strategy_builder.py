@@ -1629,6 +1629,7 @@ STRATEGY_REGISTRY = {
     "donchian_breakout": DonchianChannelBreakout,
     "cross_sectional_momentum": CrossSectionalMomentum,
     "dual_momentum": DualMomentumStrategy,
+    "time_series_momentum": TimeSeriesMomentumStrategy,
     "zscore_mean_reversion": MeanReversionZScore,
     "multi_pair_zscore_mean_reversion": MultiPairZScoreMeanReversion,
     "volatility_targeting": VolatilityTargeting,
@@ -1675,6 +1676,7 @@ def list_strategies() -> Dict[str, str]:
         "donchian_breakout": "Donchian Channel Breakout (Trend Following)",
         "cross_sectional_momentum": "Cross-Sectional Momentum (Multi-Asset Panel Data)",
         "dual_momentum": "Dual Momentum (Absolute + Relative, Multi-Asset Panel Data)",
+        "time_series_momentum": "Time-Series Momentum (TSMOM, Absolute Momentum)",
         "zscore_mean_reversion": "Z-Score Mean Reversion (Pairs Style)",
         "multi_pair_zscore_mean_reversion": "Multi-Pair Z-Score Mean Reversion (N-Asset Panel)",
     }
@@ -1691,6 +1693,7 @@ def get_strategy_defaults(strategy_type: str) -> Dict[str, Any]:
         "donchian_breakout": {"period": 20, "exit_period": 10},
         "cross_sectional_momentum": {"lookback": 252, "top_quantile": 0.4, "bottom_quantile": 0.2},
         "dual_momentum": {"lookback": 252, "top_quantile": 0.2, "risk_free_rate": 0.0},
+        "time_series_momentum": {"lookback": 252, "allow_short": False},
         "zscore_mean_reversion": {"period": 20, "entry_z": 2.0, "exit_z": 0.5, "spread_method": "log_ratio", "hedge_ratio": 1.0, "hedge_lookback": 30},
         "multi_pair_zscore_mean_reversion": {"period": 20, "entry_z": 2.0, "exit_z": 0.5, "spread_method": "log_ratio", "hedge_ratio": 1.0, "hedge_lookback": 30},
     }
