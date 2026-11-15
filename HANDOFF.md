@@ -1,84 +1,111 @@
-# Handoff — stale-pin re-base continued; 116-file target batch now clean modulo judgment cases; new pre-existing CPCV integrity defect documented
+# Handoff — CPCV book-pricing diagnostic warmup fixed; 17 pre-existing CPCV behavior-pin failures remain (root cause identified)
 
 ## What changed (this session)
-- Resumed the prior session's committed baseline (`4115346`); working tree was clean at start.
-- Re-based the remaining stale pins the prior handoff enumerated across the 116-file
-  `walk_forward* / *benchmark_aware* / *param_sensitivity* / *elevated_cost*` batch.
-  Root cause unchanged: stale import pins / environmental drift, not a code regression
-  (deps numpy 2.5.4 / pandas 3.1.1 / scipy 1.18.1 on Python 3.14.4, offline committed fixtures).
-- 9 test files changed (all legitimate measured-value substitutions; verdict criteria untouched):
-  - `test_cpcv_cross_sectional_momentum_benchmark_aware_real_aapl_googl.py` (EXPECTED dict: returns, sharpe, alpha, dsr, n_trials 5→4, n_observations 490→232) → GREEN
-  - `test_rsi_mean_reversion_benchmark_aware_real_aapl.py` (sharpe_ratio, total_return) → GREEN
-  - `test_walk_forward_dual_momentum_real_{aapl_googl,aapl_msft,msft_googl}.py`
-    (n_periods 3→4; **manually kept periods_with_position == 3** — the multi-var struct bug) → GREEN (aapl_googl, msft_googl); aapl_msft still has 1 judgment-case failure
-  - `test_walk_forward_rsi_mean_reversion_real_aapl_googl.py` (dsr_p, n_periods_with_book 1488→793, charged_turnover) → judgment case remains red (ret_ok)
-  - `test_walk_forward_zscore_mean_reversion_real_aapl.py` (dsr_p, dsr_ratio) → GREEN
-  - `test_walk_forward_zscore_pair_real_aapl_googl.py` (dsr_p, n_periods_with_book 726→394, charged_turnover) → GREEN
-  - `test_zscore_elevated_cost_sensitivity_real_triple_aapl_msft_googl.py` (all 4 cost-level (sharpe, total_return) pairs) → GREEN
-- Reverted 3 unintended example-output files (`data_provenance.json`, `tear_sheet.html`,
-  `tear_sheet_summary.json`) that a test run regenerated with a new timestamp — not part of the task.
-- Nothing committed (per instructions).
+- Resumed at committed HEAD `94e003c` (working tree clean). The prior commit `94e003c`
+  added CPCV book-pricing code (`_window_book_diagnostic(..., warmup_data=...)`) and three
+  `test_cpcv.py` book-pricing tests, but left 2 of them failing.
+- Root cause of the 2 failures: in `cpcv_analysis`, the per-fold call
+  `_window_book_diagnostic(...)` at `skills/quantitative-backtesting/scripts/walk_forward.py:4220`
+  was NOT passing `warmup_data`, while the return calculator for the same fold DOES use
+  `warmup_data` (lines 4001-4011). So the diagnostic re-derived the target book on the bare
+  25-bar test window, where rolling indicators are still NaN -> the book read as flat
+  (`gross_book == 0.0`) and its `return_gap_total` did not match the measured
+  net-exposure-minus-book return gap.
+- Fix (1 file, +6 lines): pass `warmup_data=fold.get("warmup_data")` to
+  `_window_book_diagnostic` in the CPCV fold loop. The fold already carries `warmup_data`
+  (set at line 3931/3942). This makes the diagnostic measure the book on exactly the bars
+  the returns were computed on. Measurement-only change: no return, cost, impact or capacity
+  number is altered.
+- NOT committed (per instructions).
 
 ## What was actually verified (this session)
-- Final run of the 9 modified files: **15 passed, 2 failed** — both failures are documented
-  judgment cases (criterion flips), not stale pins.
-- `python3 -m compileall -q skills/quantitative-backtesting/tests/` → clean.
-- `regenerate_pins.py --check` on the full 116-file batch now reports **only 1 residual
-  "update"** = `test_walk_forward_zscore_benchmark_aware_real_aapl_googl.py` `assert 3 == 4`,
-  which is the falsification-criteria COUNT assertion (`len(failed) == len(criteria)`), i.e. a
-  judgment/verdict assertion, NOT a numeric pin. Correctly left red.
-- `regenerate_pins.py --check` on the 125 files OUTSIDE that batch found 4 candidate updates in
-  `test_cpcv.py`, `test_no_selection_diagnosis.py`, `test_resolution_vs_sample_size.py` — these
-  are **NOT** simple stale pins (see Unresolved); deliberately not touched.
+- `python3 -m pytest skills/quantitative-backtesting/tests/test_cpcv.py -p no:cacheprovider -q`
+  -> **30 passed** (was 28 passed, 2 failed). Both previously-red book-pricing tests now green:
+  - `test_cpcv_book_pricing_backtests_a_market_neutral_book`
+  - `test_cpcv_book_pricing_differs_by_the_measured_return_gap`
+  - `test_cpcv_pinned_number_is_reproducible_from_first_principles` passes (framework and
+    `_independent_cpcv_oos_return` both agree at the 0.024436091162034046 reference; the
+    prior session's warmup rewrite of the independent re-implementation is what made them agree).
+- `python3 -m pytest skills/quantitative-backtesting/tests/test_walk_forward.py
+  skills/quantitative-backtesting/tests/test_panel_reference_pinned.py -k "book or cpcv"`
+  -> **39 passed** (no regression in the non-CPCV walk-forward book-diagnostic path, whose
+  `_window_book_diagnostic` calls at lines 6495/6590 intentionally use the bare window because
+  that path also computes signals on the bare window).
+- `python3 -m compileall -q skills/quantitative-backtesting/` -> clean.
 
-## What remains unresolved
-### A. Documented judgment cases (criterion contradictions — MUST stay red; do NOT tune criteria)
-- `test_walk_forward_dual_momentum_real_aapl_msft.py`: `deflated_sharpe_pvalue_lt_0.10 is False` (DSR now < 0.10).
-- `test_walk_forward_rsi_mean_reversion_real_aapl_googl.py`: `ret_ok is True` fails (measured total_oos_return = -0.1414... is negative; test asserts > 0).
-- `test_walk_forward_zscore_benchmark_aware_real_aapl_googl.py` (2 failures): "all criteria must fail" (one now passes) and `oos_sharpe < 0.0` (now 0.0569 > 0).
-- Carried from prior handoff (HANDOFF_NEXT.md): macd benchmark_aware (aapl, triple), dual_momentum benchmark_aware aapl_googl, donchian benchmark_aware triple, kelly benchmark_aware aapl, walk_forward cross_sectional pair/triple, walk_forward kelly aapl.
+## What remains unresolved (pre-existing, NOT introduced by this session)
+### 17 failures, all tracing to ONE root cause: the CPCV indicator-warmup convention change
+The CPCV path now generates signals on `warmup_data + test_data` (indicator warmup from the
+bars immediately preceding the test window; strictly pre-test, so no leakage). This is
+methodologically sound, but it changed CPCV out-of-sample behavior and invalidated pinned
+expectations in two files (both last touched at baseline `c47a7c0`; they were already failing
+at `4115346` per the previous handoff):
 
-### B. NEW pre-existing CPCV integrity defect (high value — confirmed at committed baseline `4115346`, NOT introduced by this session)
-`test_cpcv.py` (synthetic-data CPCV) fails at baseline with a **framework vs independent
-re-implementation mismatch**:
-- `test_cpcv_pinned_number_is_reproducible_from_first_principles`:
-  `framework 0.024436091162034046 != independent re-implementation 0.005399536978800246` (rel_tol 1e-12).
-- `test_cpcv_normal_run_keeps_current_numbers` / `test_cpcv_book_pricing_*`: `summary['total_oos_return']`
-  is 0.0244 but the test expects 0.0054 ("this is a real change, not float noise").
-- `test_cpcv.py::test_cpcv_basic_structure`: `KeyError: 'no_selection_diagnosis'` — the CPCV summary
-  schema no longer emits that key (or the test predates a schema change).
-- Related: `test_no_selection_diagnosis.py` (multiple `assert N == M`, missing `no_selection_diagnosis` key)
-  and `test_resolution_vs_sample_size.py` (`assert 5000 == 2500`; `not_resolvable` vs `resolvable`).
-- This is a **methodology/integrity question, not a stale pin**: the CPCV framework and its own
-  independent re-implementation disagree on the headline out-of-sample return. Re-basing the pin would
-  mask it. It needs root-cause investigation of `cpcv_analysis()` vs `_independent_cpcv_oos_return()`
-  in `skills/quantitative-backtesting/tests/test_cpcv.py`.
+- `test_no_selection_diagnosis.py` — 15 failed / 96 total in the pair run:
+  `test_cpcv_analysis_records_the_no_selection_diagnosis`,
+  `test_cpcv_diagnosis_names_the_effective_out_of_sample_fraction`,
+  `test_cpcv_cli_prints_the_diagnosis_next_to_the_fold_count`,
+  `test_the_remedy_names_flags_the_path_actually_accepts`,
+  `test_the_overfitting_risk_verdict_is_not_applicable_when_nothing_was_selected`,
+  `test_the_diagnosis_changes_no_number`,
+  `test_the_all_flat_case_still_uses_the_no_selection_diagnosis`,
+  `test_the_partial_run_is_reproducible`,
+  `test_the_pre_fix_artifact_named_no_cause_for_the_flat_folds`,
+  `test_the_cpcv_partial_diagnosis_names_every_flat_fold`,
+  `test_the_overfitting_risk_verdict_is_qualified_but_unchanged`,
+  `test_the_partial_diagnosis_changes_no_number`,
+  `test_the_partial_run_carries_a_thin_evidence_warning`,
+  `test_the_thin_evidence_warning_changes_no_number`,
+  `test_min_position_fraction_rejects_the_partial_run`.
+  Evidence of the behavior shift (measured this session): the default CPCV run
+  (`n_splits=10, test_size=0.1`, 5-bar windows) that used to select NOTHING now reports
+  `n_folds=10, folds_with_position=7, total_oos_return=0.01885897762984934,
+  oos_sharpe=1.0180341648451239`. The canonical partial run (`n_splits=5, test_size=0.2`)
+  now selects in 4 of 5 folds (tests pin 2 of 5; `folds_with_position == 4` vs pinned `2`).
+- `test_resolution_vs_sample_size.py` — 2 failed:
+  `test_the_alpha_bound_is_crossed_later_than_the_sharpe_bound`
+  (`CPCV first_size_any_within_alpha_bound` now 5000, test pins 2500) and
+  `test_an_unpriceable_alpha_floor_is_reported_as_unpriceable` (CPCV Deflated Alpha criterion
+  is now `resolvable`, test expects `not_resolvable`). Same cause: more usable CPCV bars per
+  fold changes the resolution ladder.
+
+These are pinned-behavior tests that must be reconciled with the (sound) warmup convention:
+either re-pin to freshly measured values after confirming the warmup is the intended,
+non-leaky convention, or (only if evidence shows the warmup leaks) revert the warmup. Do NOT
+blindly re-pin to silence: re-derive each expected number from a measured run and record the
+convention in a comment.
 
 ## Approaches already tried / failed (do not repeat unchanged)
 - Blindly recalibrating pins to force green: REJECTED (weakens guards; not methodological progress).
 - Manually iterating pin-chase past judgment cases: STOPPED — those fail on verdict criteria, not pins.
-- Full gate `-n 4` / serial: times out in-session; defer to CI / adequate-budget environment.
+- Full gate `-n 4` / serial on the whole tests dir: times out in-session; defer to CI / adequate-budget env.
+- "Fix" the 2 book-pricing tests by re-deriving expected values: NOT NEEDED — the defect was a
+  real missing-argument bug, fixed at the source (see What changed).
 
 ## Known limitations of regenerate_pins.py (still apply)
-- Tolerance re-base skips when the exp literal appears >1× in a file (uniqueness guard) — fix manually with context (done this session for dsr_p/dsr_ratio lines where the literal doubles as the tolerance scale).
-- `_update_nested_dict` only handles nested `{key: {metric: val}}` dicts; flat tuple→tuple dicts
-  (`EXPECTED_METRICS = {(2,1): (sharpe, ret), ...}` in the `*_elevated_cost_sensitivity_*` files)
-  are NOT handled → fix manually (done this session by probing measured rows directly).
-- Multi-var structural asserts (n_periods vs periods_with_position sharing a source literal) still
-  need a manual split.
+- Tolerance re-base skips when the exp literal appears >1x in a file (uniqueness guard).
+- `_update_nested_dict` only handles nested `{key: {metric: val}}`; flat tuple->tuple dicts
+  (`EXPECTED_METRICS = {(2,1): (sharpe, ret), ...}`) are not handled.
+- Multi-var structural asserts (n_periods vs periods_with_position sharing a source literal)
+  still need a manual split.
 
 ## One precise next task (for the next agent)
-1. **Investigate the CPCV integrity defect (Section B) first** — it is the highest-value item:
-   compare `cpcv_analysis()` output `summary['total_oos_return']` (0.0244) against the test's
-   `_independent_cpcv_oos_return()` (0.0054) in `skills/quantitative-backtesting/tests/test_cpcv.py`
-   (read lines ~999-1045 and the `_independent_cpcv_oos_return` helper). Determine which side is
-   wrong (warmup/embargo convention, fold boundaries, cost/pricing, or product accumulation) and
-   fix the root cause — do NOT re-base the pin to silence it. Also resolve the missing
-   `no_selection_diagnosis` summary key (schema drift vs code defect).
-2. Leave ALL Section-A judgment cases red — do not tune criteria or fabricate folds/verdicts.
-3. Once baseline is green modulo Section-A judgment cases, run the full gate in CI / adequate-budget
-   env (`python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4`).
-4. Only then: pick the next bounded methodological gap per AGENTS.md mission (point-in-time /
+Reconcile the 17 pre-existing CPCV behavior-pin failures with the warmup convention, in this order:
+1. Confirm the warmup is causal (it is: `warmup_data = data.iloc[warmup_start_idx:test_start_idx]`,
+   strictly before the test window; used only to initialize rolling indicators). State this in a
+   short comment so a future reader does not "fix" it back.
+2. In `test_no_selection_diagnosis.py`, re-pin the CPCV default/partial-run expectations
+   (`folds_with_position`, `best_params_per_fold`, thin-evidence details, overfitting-risk reason
+   counts) to freshly measured values, keeping the tests' intent (they assert the diagnosis
+   schema, not specific numbers). The default run now selects 7/10 folds; the partial run 4/5.
+3. In `test_resolution_vs_sample_size.py`, re-pin the CPCV ladder expectations
+   (`first_size_any_within_alpha_bound`, `alpha_status`) to measured values; if CPCV is now
+   `resolvable` at the pinned history length, update the test to assert the resolvable case and
+   keep a separate reproducer that exercises the genuinely-unpriceable case (or drop that test's
+   premise if the framework can now always price it — document why).
+4. After green: run the full gate in CI / adequate-budget env
+   (`python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4`).
+5. Then pick the next bounded methodological gap per AGENTS.md mission (point-in-time /
    survivorship-bias controls, or a new falsifiable hypothesis with OOS evidence net of costs) —
    NOT another strategy falsification test.
-5. Do not commit unless explicitly asked.
+6. Do not commit unless explicitly asked.

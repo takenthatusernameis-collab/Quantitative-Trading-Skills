@@ -4229,6 +4229,12 @@ def cpcv_analysis(
             adv_window=adv_window,
             initial_capital=initial_capital,
             impact_aggregation=impact_aggregation,
+            # Same warmup history the return calculator used, so the
+            # diagnostic measures the book on exactly the bars the returns
+            # were computed on (otherwise the book is re-derived on the
+            # bare test window, where the rolling indicators are still NaN
+            # and the book reads as flat).
+            warmup_data=fold.get("warmup_data"),
         )
 
     # Combine all out-of-sample returns
