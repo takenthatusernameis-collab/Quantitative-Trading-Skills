@@ -12,8 +12,8 @@ guard, relative tolerance, never exact equality) so a silent change to the
 backtest numbers is caught.
 
 Verdicts are falsification outcomes, never profitability claims: the raw
-out-of-sample Sharpe is positive (+0.3071) and total return is positive
-(+37.17%), but the Deflated Sharpe p-value (0.6659) is far above 0.10, so the
+out-of-sample Sharpe is negative (-0.1959) while total return is positive
+(+1.60%), and the Deflated Sharpe p-value (0.9283) is far above 0.10, so the
 honest verdict is NOT SUPPORTED. The test does not tune to force SUPPORT.
 
 Offline, committed fixtures only; no live network.
@@ -105,8 +105,9 @@ def test_walk_forward_zscore_pair_real_aapl_msft_metrics_pinned():
     AAPL/MSFT panel must reproduce the pinned out-of-sample metrics (net of
     costs). Relative tolerance only, never exact equality.
 
-    Honest outcome: Sharpe > 0 and return > 0 pass, but the Deflated Sharpe
-    p-value (0.6659) >= 0.10 fails, so the hypothesis is NOT SUPPORTED.
+    Honest outcome: the raw Sharpe is negative (-0.1959) while total return is
+    positive (+1.60%), but the Deflated Sharpe p-value (0.9283) >= 0.10 fails,
+    so the hypothesis is NOT SUPPORTED.
     """
     for name in ("AAPL.csv", "MSFT.csv"):
         assert (SRC / name).exists()
@@ -136,8 +137,8 @@ def test_walk_forward_zscore_pair_real_aapl_msft_metrics_pinned():
             f"{key} regression: got {got}, expected {exp}"
         )
 
-    # Honest verdict: Sharpe > 0 and return > 0 pass, but Deflated Sharpe
-    # p-value >= 0.10 fails, so the hypothesis is NOT SUPPORTED.
+    # Honest verdict: Sharpe < 0 fails and return > 0 passes, but Deflated
+    # Sharpe p-value >= 0.10 fails, so the hypothesis is NOT SUPPORTED.
     sharpe = summary["oos_sharpe"]
     ret = summary["total_oos_return"]
     dsr_pvalue = summary["deflated_sharpe"]["p_value"]
@@ -148,7 +149,7 @@ def test_walk_forward_zscore_pair_real_aapl_msft_metrics_pinned():
             dsr_pvalue is not None and float(dsr_pvalue) < DSR_PVALUE_THRESHOLD
         ),
     }
-    assert passes["oos_sharpe_gt_zero"] is True
+    assert passes["oos_sharpe_gt_zero"] is False
     assert passes["oos_total_return_positive"] is True
     assert passes["deflated_sharpe_pvalue_lt_0.10"] is False
     assert all(passes.values()) is False

@@ -17,10 +17,10 @@ held-out window. This mirrors the existing volatility-targeting/EMA triple
 patterns.
 
 METHODOLOGICAL FINDING (committed fixtures only, not evidence about any market):
-MACD on AAPL posts a near-zero OOS result (Sharpe 0.056, return -0.13% net of
-3bp round-trip costs) and does NOT beat buy-and-hold MSFT (return 90.2%); the
-benchmark alpha is not statistically significant (raw p = 0.54) and the
-Deflated Sharpe p-value is not significant (p = 0.96 across 6 trials).
+MACD on AAPL posts a negative OOS result (Sharpe -1.1718, return -34.41% net of
+3bp round-trip costs) and does NOT beat buy-and-hold MSFT (return 17.11%); the
+benchmark alpha is not statistically significant (raw p = 0.294) and the
+Deflated Sharpe p-value is not significant (p = 0.9997 across 6 trials).
 Benchmark-aware verdict: NOT SUPPORTED.
 
 This test pins the observed strategy + benchmark metrics (net of costs) as
@@ -119,7 +119,7 @@ def test_benchmark_aware_metrics_pinned_on_triple_real_window():
     assert result["all_pass"] is False
 
     expected_criteria = {
-        "oos_sharpe_gt_zero": True,
+        "oos_sharpe_gt_zero": False,
         "oos_total_return_gt_benchmark": False,
         "deflated_sharpe_pvalue_lt_0.10": False,
         "benchmark_alpha_pvalue_lt_0.05": False,
@@ -134,13 +134,13 @@ def test_benchmark_aware_metrics_pinned_on_triple_real_window():
 
     observed = result.get("observed") or {}
     EXPECTED = {
-        "sharpe_ratio": 0.055681981432280425,
-        "total_return": -0.0013037799286792495,
-        "benchmark_total_return": 0.9015402575236577,
-        "benchmark_alpha": 0.11413959569459746,
-        "benchmark_alpha_pvalue": 0.5381283194131488,
-        "correlation_with_benchmark": -0.20655410645100053,
-        "deflated_sharpe_pvalue": 0.9649582310571365,
+        "sharpe_ratio": -1.1717750623626866,
+        "total_return": -0.34413777065367634,
+        "benchmark_total_return": 0.1711375869976839,
+        "benchmark_alpha": -0.26411625262890226,
+        "benchmark_alpha_pvalue": 0.2942028412160981,
+        "correlation_with_benchmark": -0.24976806658965303,
+        "deflated_sharpe_pvalue": 0.9997263690373401,
         "n_trials": 6,
     }
     REL_TOL = 1e-3

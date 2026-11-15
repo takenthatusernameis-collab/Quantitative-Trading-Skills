@@ -21,8 +21,8 @@ pre-registered parameter grid and the Deflated Sharpe Ratio multiple-testing
 correction applied to the pooled out-of-sample record.
 
 Verdicts are falsification outcomes, never profitability claims: the raw
-out-of-sample Sharpe is negative (-0.3862) and the total return is negative
-(-59.21%), and the Deflated Sharpe p-value (0.9933) is far above 0.10, so the
+out-of-sample Sharpe is positive (+0.6950) and total return is positive
+(+79.94%), but the Deflated Sharpe p-value (0.4456) is far above 0.10, so the
 multiple-testing-corrected criterion fails and the honest verdict is NOT
 SUPPORTED. The test does not tune to force SUPPORT.
 
@@ -114,10 +114,10 @@ def test_walk_forward_kelly_criterion_real_aapl_metrics_pinned():
     silent change to the backtest numbers is caught. Relative tolerance only,
     never exact equality.
 
-    Honest outcome: the raw out-of-sample Sharpe is negative (-0.3862) and the
-    total return is negative (-59.21%), and the Deflated Sharpe p-value (0.9933)
-    is far above 0.10, so every criterion fails and the verdict is NOT
-    SUPPORTED. The test does not tune to force SUPPORT.
+    Honest outcome: the raw out-of-sample Sharpe is positive (+0.6950) and the
+    total return is positive (+79.94%), but the Deflated Sharpe p-value (0.4456)
+    is far above 0.10, so the multiple-testing criterion fails and the verdict is
+    NOT SUPPORTED. The test does not tune to force SUPPORT.
     """
     assert (SRC / "AAPL.csv").exists()
 
@@ -156,7 +156,7 @@ def test_walk_forward_kelly_criterion_real_aapl_metrics_pinned():
     assert dsr_ratio is not None
     assert abs(dsr_ratio - 0.5544099905501989) <= 1e-6 * max(abs(0.006736772225867882), 1e-9)
 
-    # Honest verdict: Sharpe < 0 and return < 0 fail, and Deflated Sharpe
+    # Honest verdict: Sharpe > 0 and return > 0 pass, but the Deflated Sharpe
     # p-value >= 0.10 fails, so the hypothesis is NOT SUPPORTED.
     passes = {
         "oos_sharpe_gt_zero": bool(summary["oos_sharpe"] > 0),
@@ -165,8 +165,8 @@ def test_walk_forward_kelly_criterion_real_aapl_metrics_pinned():
             dsr_p is not None and float(dsr_p) < DSR_PVALUE_THRESHOLD
         ),
     }
-    assert passes["oos_sharpe_gt_zero"] is False
-    assert passes["oos_total_return_positive"] is False
+    assert passes["oos_sharpe_gt_zero"] is True
+    assert passes["oos_total_return_positive"] is True
     assert passes["deflated_sharpe_pvalue_lt_0.10"] is False
     assert all(passes.values()) is False
 

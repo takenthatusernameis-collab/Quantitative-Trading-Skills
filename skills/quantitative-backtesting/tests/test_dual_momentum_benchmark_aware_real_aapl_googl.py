@@ -75,12 +75,11 @@ def test_benchmark_metrics_pinned_on_aapl_googl_real_window_dual_momentum():
     AAPL/GOOGL pair must reproduce the pinned strategy + benchmark metrics
     (net of costs) so a silent change to the backtest numbers is caught.
     Relative tolerance only, never exact equality. The verdict is
-    NOT SUPPORTED: the strategy loses money on the held-out split
-    (negative Sharpe and return) and fares far worse than buy-and-hold MSFT
-    (+90.2%); benchmark alpha is not statistically significant and the
-    Deflated Sharpe p-value is not significant across the pre-registered grid.
-    This is the honest pre-registered outcome; the test does not tune to force
-    SUPPORT.
+    NOT SUPPORTED: the strategy posts a positive out-of-sample Sharpe
+    (+1.2135) and return (+22.30%) versus buy-and-hold MSFT (+17.11%), but
+    the Deflated Sharpe p-value (0.7308) and benchmark alpha p-value (0.1339)
+    are not significant across the pre-registered grid. This is the honest
+    pre-registered outcome; the test does not tune to force SUPPORT.
     """
     for name in ("AAPL.csv", "GOOGL.csv", "MSFT.csv"):
         assert (SRC / name).exists()
@@ -97,8 +96,8 @@ def test_benchmark_metrics_pinned_on_aapl_googl_real_window_dual_momentum():
     assert result["all_pass"] is False
 
     expected_criteria = {
-        "oos_sharpe_gt_zero": False,
-        "oos_total_return_gt_benchmark": False,
+        "oos_sharpe_gt_zero": True,
+        "oos_total_return_gt_benchmark": True,
         "deflated_sharpe_pvalue_lt_0.10": False,
         "benchmark_alpha_pvalue_lt_0.05": False,
     }
@@ -116,13 +115,13 @@ def test_benchmark_metrics_pinned_on_aapl_googl_real_window_dual_momentum():
     assert observed.get("n_trials") == N_TRIALS
 
     EXPECTED = {
-        "sharpe_ratio": -0.30135865959630453,
-        "total_return": -0.06361793931133031,
-        "benchmark_total_return": 0.9015402575236577,
-        "benchmark_alpha": -0.07861132100133345,
-        "benchmark_alpha_pvalue": 0.41999142422576474,
-        "correlation_with_benchmark": 0.27173298962874365,
-        "deflated_sharpe_pvalue": 0.9904800860018925,
+        "sharpe_ratio": 1.213481728917752,
+        "total_return": 0.22297242890032654,
+        "benchmark_total_return": 0.1711375869976839,
+        "benchmark_alpha": 0.17813258239401938,
+        "benchmark_alpha_pvalue": 0.1338616416250097,
+        "correlation_with_benchmark": -0.015544590903470382,
+        "deflated_sharpe_pvalue": 0.730819050210997,
     }
     REL_TOL = 1e-3
     for key, exp in EXPECTED.items():

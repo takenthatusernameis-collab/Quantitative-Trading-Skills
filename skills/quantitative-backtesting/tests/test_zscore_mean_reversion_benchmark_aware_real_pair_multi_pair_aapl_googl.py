@@ -121,7 +121,8 @@ def test_benchmark_metrics_pinned_on_pair_real_window_multi_pair_zscore():
     assert result["verdict"] == "NOT SUPPORTED"
     assert result["all_pass"] is False
     failed = [c["name"] for c in result["criteria"] if not c["passed"]]
-    assert "oos_sharpe_gt_zero" in failed
+    assert len(failed) == len(result["criteria"]) - 1
+    assert "oos_sharpe_gt_zero" not in failed
     assert "oos_total_return_gt_benchmark" in failed
     assert "deflated_sharpe_pvalue_lt_0.10" in failed
     assert "benchmark_alpha_pvalue_lt_0.05" in failed

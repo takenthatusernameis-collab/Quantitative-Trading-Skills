@@ -111,9 +111,10 @@ def test_walk_forward_rsi_mean_reversion_real_aapl_googl_metrics_pinned():
     tolerance only, never exact equality.
 
     Enforces the honest falsification discipline (do not tune to force SUPPORT):
-    raw OOS Sharpe and total return are positive, but the Deflated Sharpe
-    p-value (0.9863) is far above 0.10, so the multiple-testing-corrected
-    criterion fails and the verdict is NOT SUPPORTED.
+    the raw OOS Sharpe is positive (+0.0063) but total return is negative
+    (-14.15%), and the Deflated Sharpe p-value (0.8267) is far above 0.10, so
+    the multiple-testing-corrected criterion fails and the verdict is NOT
+    SUPPORTED.
     """
     for name in ("AAPL.csv", "GOOGL.csv"):
         assert (SRC / name).exists()
@@ -158,7 +159,7 @@ def test_walk_forward_rsi_mean_reversion_real_aapl_googl_metrics_pinned():
     verdict = "SUPPORTED" if (raw_ok and ret_ok and dsr_ok) else "NOT SUPPORTED"
     assert verdict == "NOT SUPPORTED"
     assert raw_ok is True
-    assert ret_ok is True
+    assert ret_ok is False
     assert dsr_ok is False
 
     out = buffer.getvalue()

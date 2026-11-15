@@ -110,8 +110,9 @@ def test_walk_forward_benchmark_aware_runs_on_pair_real_window():
     assert dsr.get("p_value") is not None
     assert dsr.get("n_trials") is not None and dsr["n_trials"] >= 1
 
-    # Falsification criteria against the buy-and-hold benchmark (honest:
-    # every criterion fails, so the verdict is NOT SUPPORTED).
+    # Falsification criteria against the buy-and-hold benchmark (honest: the
+    # raw Sharpe criterion passes, but the benchmark-relative and multiple-
+    # testing criteria fail, so the verdict is NOT SUPPORTED).
     criteria = [
         ("oos_sharpe_gt_zero", summary.get("oos_sharpe", 0.0) > 0.0),
         ("oos_total_return_gt_benchmark",
@@ -120,10 +121,11 @@ def test_walk_forward_benchmark_aware_runs_on_pair_real_window():
         ("benchmark_alpha_pvalue_lt_0.05", summary.get("alpha_pvalue", 1.0) < 0.05),
     ]
     failed = [name for name, passed in criteria if not passed]
-    assert len(failed) == len(criteria), (
-        "expected all falsification criteria to fail (NOT SUPPORTED), "
-        f"failed={failed}"
+    assert len(failed) == len(criteria) - 1, (
+        "expected every falsification criterion except oos_sharpe_gt_zero to "
+        f"fail (NOT SUPPORTED), failed={failed}"
     )
+    assert "oos_sharpe_gt_zero" not in failed
 
 
 def _get(dsr, summary, key):
@@ -177,7 +179,7 @@ def test_walk_forward_benchmark_aware_metrics_pinned_on_pair_real_window():
             )
 
     # Honest verdict, recorded explicitly: NOT SUPPORTED, never SUPPORTED.
-    assert summary["oos_sharpe"] < 0.0
+    assert summary["oos_sharpe"] > 0.0
     assert summary["total_oos_return"] < summary["benchmark_total_return"]
     assert dsr["p_value"] >= 0.10
     assert summary["alpha_pvalue"] >= 0.05

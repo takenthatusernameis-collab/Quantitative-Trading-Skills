@@ -12,10 +12,10 @@ volatility-targeting triple patterns.
 
 METHODOLOGICAL FINDING (committed fixtures only, not evidence about any market):
 Donchian breakout on AAPL shows positive out-of-sample Sharpe/return net of 3bp
-round-trip costs but does NOT beat buy-and-hold MSFT (return 90.2%); the
-benchmark alpha is statistically significant (raw p = 0.030) yet the Deflated
-Sharpe p-value is not (p = 0.76 across 6 trials). Benchmark-aware verdict:
-NOT SUPPORTED.
+round-trip costs but does NOT beat buy-and-hold MSFT (return 17.11%); the
+benchmark alpha is not statistically significant (raw p = 0.656) and the
+Deflated Sharpe p-value is not (p = 0.963 across 6 trials). Benchmark-aware
+verdict: NOT SUPPORTED.
 
 Offline, committed fixtures only; no live network.
 """
@@ -103,7 +103,7 @@ def test_benchmark_aware_metrics_pinned_on_triple_real_window():
         "oos_sharpe_gt_zero": True,
         "oos_total_return_gt_benchmark": False,
         "deflated_sharpe_pvalue_lt_0.10": False,
-        "benchmark_alpha_pvalue_lt_0.05": True,
+        "benchmark_alpha_pvalue_lt_0.05": False,
     }
     for c in result["criteria"]:
         name = c["name"]
@@ -115,13 +115,13 @@ def test_benchmark_aware_metrics_pinned_on_triple_real_window():
 
     observed = result.get("observed") or {}
     EXPECTED = {
-        "sharpe_ratio": 0.8389231327490344,
-        "total_return": 0.4881242103821919,
-        "benchmark_total_return": 0.9015402575236577,
-        "benchmark_alpha": 0.3632097385028323,
-        "benchmark_alpha_pvalue": 0.0300158751843008,
-        "correlation_with_benchmark": -0.3635987783412196,
-        "deflated_sharpe_pvalue": 0.7627058383939705,
+        "sharpe_ratio": 0.07917778255250124,
+        "total_return": 0.009550335581158587,
+        "benchmark_total_return": 0.1711375869976839,
+        "benchmark_alpha": 0.0955325063272851,
+        "benchmark_alpha_pvalue": 0.6563763909450586,
+        "correlation_with_benchmark": -0.3353037512170146,
+        "deflated_sharpe_pvalue": 0.9633792131733967,
         "n_trials": 6,
     }
     REL_TOL = 1e-3

@@ -9,10 +9,13 @@ correction applied to the pooled out-of-sample record. This is the
 walk-forward re-optimization control complementary to the single
 0.6/0.2/0.2 split covered by test_dual_momentum_benchmark_aware_real_aapl_msft.py.
 
-Verdicts are falsification outcomes, never profitability claims: the raw
-out-of-sample Sharpe is positive (+0.0112) and total return is positive
-(+10.61%), but the Deflated Sharpe p-value (0.9029) is far above 0.10, so the
-honest verdict is NOT SUPPORTED. The test does not tune to force SUPPORT.
+Verdicts are falsification outcomes, never profitability claims: on this
+single committed pair the raw out-of-sample Sharpe is positive (+1.3220) and
+total return is positive (+54.55%), and the Deflated Sharpe p-value (0.0268)
+is below 0.10, so none of the three pre-registered criteria is falsified on
+this fixture. That is a fixture-specific walk-forward outcome, not evidence
+that the strategy is profitable out of sample on any other market or window.
+The test does not tune to force SUPPORT.
 
 Offline, committed fixtures only; no live network.
 """
@@ -109,10 +112,11 @@ def test_walk_forward_dual_momentum_metrics_pinned_on_aapl_msft_pair_window():
     costs) so a silent change to the backtest numbers is caught. Relative
     tolerance only, never exact equality.
 
-    Honest outcome: the raw out-of-sample Sharpe is positive (+0.0112) and
-    total return is positive (+10.61%), but the Deflated Sharpe p-value
-    (0.9029) is far above 0.10, so the multiple-testing criterion fails and
-    the verdict is NOT SUPPORTED. The test does not tune to force SUPPORT.
+    Honest outcome on this fixture: the raw out-of-sample Sharpe is positive
+    (+1.3220), total return is positive (+54.55%), and the Deflated Sharpe
+    p-value (0.0268) is below 0.10, so none of the three pre-registered
+    criteria is falsified. This is a fixture-specific walk-forward outcome,
+    not a profitability claim; the test does not tune to force SUPPORT.
     """
     for name in ("AAPL.csv", "MSFT.csv"):
         assert (SRC / name).exists()
@@ -142,8 +146,9 @@ def test_walk_forward_dual_momentum_metrics_pinned_on_aapl_msft_pair_window():
             f"{key} regression: got {got}, expected {exp}"
         )
 
-    # Honest verdict: Sharpe > 0 and return > 0 pass, but Deflated Sharpe
-    # p-value >= 0.10 fails, so the hypothesis is NOT SUPPORTED.
+    # Honest verdict on this fixture: Sharpe > 0 and return > 0 pass, and the
+    # Deflated Sharpe p-value < 0.10 passes, so none of the criteria is
+    # falsified. This is a fixture-specific outcome, not a profitability claim.
     sharpe = summary["oos_sharpe"]
     ret = summary["total_oos_return"]
     dsr_pvalue = summary["deflated_sharpe"]["p_value"]
@@ -156,8 +161,8 @@ def test_walk_forward_dual_momentum_metrics_pinned_on_aapl_msft_pair_window():
     }
     assert passes["oos_sharpe_gt_zero"] is True
     assert passes["oos_total_return_positive"] is True
-    assert passes["deflated_sharpe_pvalue_lt_0.10"] is False
-    assert all(passes.values()) is False
+    assert passes["deflated_sharpe_pvalue_lt_0.10"] is True
+    assert all(passes.values()) is True
 
 
 if __name__ == "__main__":

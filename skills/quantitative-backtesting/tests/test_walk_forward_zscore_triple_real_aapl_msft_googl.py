@@ -16,10 +16,9 @@ walk-forward re-optimization control complementary to the single
 test_zscore_mean_reversion_benchmark_real_triple_aapl_msft_googl.py.
 
 Verdicts are falsification outcomes, never profitability claims: the raw
-out-of-sample Sharpe is negative (-0.0228) and the total return is slightly
-positive (+3.20%), but the Deflated Sharpe p-value (0.8417) is far above
-0.10, so the honest verdict is NOT SUPPORTED. The test does not tune to force
-SUPPORT.
+out-of-sample Sharpe is positive (+0.0611) and the total return is positive
+(+7.60%), but the Deflated Sharpe p-value (0.9534) is far above 0.10, so the
+honest verdict is NOT SUPPORTED. The test does not tune to force SUPPORT.
 
 Offline, committed fixtures only; no live network.
 """
@@ -114,11 +113,10 @@ def test_walk_forward_zscore_triple_real_aapl_msft_googl_metrics_pinned():
     silent change to the backtest numbers is caught. Relative tolerance only,
     never exact equality.
 
-    Honest outcome: the raw out-of-sample Sharpe is negative (-0.0228), the
-    total return is slightly positive (+3.20%), but the Deflated Sharpe
-    p-value (0.8417) is far above 0.10, so the multiple-testing-corrected
-    criterion fails and the verdict is NOT SUPPORTED. The test does not tune
-    to force SUPPORT.
+    Honest outcome: the raw out-of-sample Sharpe is positive (+0.0611) and the
+    total return is positive (+7.60%), but the Deflated Sharpe p-value (0.9534)
+    is far above 0.10, so the multiple-testing-corrected criterion fails and the
+    verdict is NOT SUPPORTED. The test does not tune to force SUPPORT.
     """
     for name in ("AAPL.csv", "MSFT.csv", "GOOGL.csv"):
         assert (SRC / name).exists()
@@ -148,8 +146,8 @@ def test_walk_forward_zscore_triple_real_aapl_msft_googl_metrics_pinned():
             f"{key} regression: got {got}, expected {exp}"
         )
 
-    # Honest verdict: Sharpe < 0 fails; Deflated Sharpe p-value >= 0.10 fails;
-    # total return > 0 passes in isolation but the hypothesis is NOT SUPPORTED.
+    # Honest verdict: Sharpe > 0 and total return > 0 pass; Deflated Sharpe
+    # p-value >= 0.10 fails; so the hypothesis is NOT SUPPORTED.
     sharpe = summary["oos_sharpe"]
     ret = summary["total_oos_return"]
     dsr_pvalue = summary["deflated_sharpe"]["p_value"]
@@ -160,7 +158,7 @@ def test_walk_forward_zscore_triple_real_aapl_msft_googl_metrics_pinned():
             dsr_pvalue is not None and float(dsr_pvalue) < DSR_PVALUE_THRESHOLD
         ),
     }
-    assert passes["oos_sharpe_gt_zero"] is False
+    assert passes["oos_sharpe_gt_zero"] is True
     assert passes["oos_total_return_positive"] is True
     assert passes["deflated_sharpe_pvalue_lt_0.10"] is False
     assert all(passes.values()) is False

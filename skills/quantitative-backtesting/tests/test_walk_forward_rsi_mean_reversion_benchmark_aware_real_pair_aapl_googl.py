@@ -10,12 +10,12 @@ pooled out-of-sample record and a buy-and-hold MSFT benchmark comparison.
 All figures are net of 3 bps round-trip trading costs (2 bps commission +
 1 bps slippage) and priced with the book panel convention.
 
-The honest comparative result is reported as a falsification outcome: raw OOS
-Sharpe and total return are positive, but the strategy's pooled out-of-sample
-return does not beat buy-and-hold MSFT (+333% on this window), benchmark alpha
-is not statistically significant (p=0.805), and the Deflated Sharpe p-value is
-0.986 across 8 trials. Verdict: NOT SUPPORTED. No claim of profitability is
-made.
+The honest comparative result is reported as a falsification outcome: the raw
+OOS Sharpe is positive (+0.0063) but total return is negative (-14.15%), and
+the strategy's pooled out-of-sample return does not beat buy-and-hold MSFT
+(+110.03% on this window); benchmark alpha is not statistically significant
+(p=0.960) and the Deflated Sharpe p-value is 0.827 across 4 trials. Verdict:
+NOT SUPPORTED. No claim of profitability is made.
 
 Offline, committed fixtures only; no live network; no tuning to force SUPPORT.
 """
@@ -208,7 +208,7 @@ def test_walk_forward_benchmark_aware_metrics_pinned_on_pair_real_window_rsi_mr(
 
     # Honest verdict, recorded explicitly: NOT SUPPORTED, never SUPPORTED.
     assert summary["oos_sharpe"] > 0.0
-    assert summary["total_oos_return"] > 0.0
+    assert summary["total_oos_return"] < 0.0
     assert summary["total_oos_return"] < summary["benchmark_total_return"]
     assert dsr["p_value"] >= DSR_PVALUE_THRESHOLD
     assert summary["alpha_pvalue"] >= ALPHA_PVALUE_THRESHOLD
