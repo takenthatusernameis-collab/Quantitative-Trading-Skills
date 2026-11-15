@@ -54,7 +54,7 @@
   "panel_pricing": "net-exposure",
   "data_provenance": {
     "source_path": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/skills/quantitative-backtesting/assets/example_data/sample_ohlcv.csv",
-    "load_timestamp": "2026-11-15T13:51:36.841547Z",
+    "load_timestamp": "2026-11-15T19:46:52.306319Z",
     "file_format": ".csv",
     "file_size_bytes": 46812,
     "symbol_filter": "SPY",

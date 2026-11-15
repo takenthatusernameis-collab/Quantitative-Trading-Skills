@@ -573,6 +573,7 @@ _AUDIT_PARAMS = {
     "donchian_breakout": None,
     "cross_sectional_momentum": '{"lookback": 21}',
     "dual_momentum": '{"lookback": 21}',
+    "time_series_momentum": '{"lookback": 21}',
     "zscore_mean_reversion": None,
     "macd": None,
     "multi_pair_zscore_mean_reversion": None,
