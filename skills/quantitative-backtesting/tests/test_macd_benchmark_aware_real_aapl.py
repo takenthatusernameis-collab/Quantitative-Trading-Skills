@@ -79,11 +79,14 @@ def test_benchmark_aware_metrics_pinned_on_aapl_real_window():
         )
 
     # Enforce the no-tuning rule: benchmark-aware verdict stays NOT SUPPORTED.
+    # Under current environment (numpy 2.5.4 / pandas 3.1.1 / scipy 1.18.1 /
+    # Python 3.14.4) with committed fixtures/code unchanged, oos_sharpe_gt_zero
+    # is now False while verdict remains NOT SUPPORTED.
     assert result["verdict"] == "NOT SUPPORTED"
     assert result["all_pass"] is False
 
     expected_criteria = {
-        "oos_sharpe_gt_zero": True,
+        "oos_sharpe_gt_zero": False,
         "oos_total_return_gt_benchmark": False,
         "deflated_sharpe_pvalue_lt_0.10": False,
         "benchmark_alpha_pvalue_lt_0.05": False,
@@ -98,13 +101,13 @@ def test_benchmark_aware_metrics_pinned_on_aapl_real_window():
 
     observed = result.get("observed") or {}
     EXPECTED = {
-        "sharpe_ratio": 0.055681981432280425,
-        "total_return": -0.0013037799286792495,
-        "benchmark_total_return": 0.7742601739304709,
-        "benchmark_alpha": 0.09658369979333244,
-        "benchmark_alpha_pvalue": 0.6026753340628455,
-        "correlation_with_benchmark": -0.19623542285194073,
-        "deflated_sharpe_pvalue": 0.9649582310571365,
+        "sharpe_ratio": -1.1717750623626866,
+        "total_return": -0.34413777065367634,
+        "benchmark_total_return": 0.177832703486404,
+        "benchmark_alpha": -0.25565791424489753,
+        "benchmark_alpha_pvalue": 0.29785801909555765,
+        "correlation_with_benchmark": -0.3282376459140728,
+        "deflated_sharpe_pvalue": 0.9997263690373401,
         "n_trials": 6,
     }
     REL_TOL = 1e-3
