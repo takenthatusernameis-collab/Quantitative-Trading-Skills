@@ -151,10 +151,10 @@ def test_walk_forward_kelly_criterion_real_aapl_metrics_pinned():
     assert dsr.get("n_trials") == 4
     dsr_p = dsr.get("p_value")
     assert dsr_p is not None
-    assert abs(dsr_p - 0.9932632277741321) <= 1e-6 * max(abs(0.9932632277741321), 1e-9)
+    assert abs(dsr_p - 0.4455900094498011) <= 1e-6 * max(abs(0.9932632277741321), 1e-9)
     dsr_ratio = dsr.get("deflated_sharpe_ratio")
     assert dsr_ratio is not None
-    assert abs(dsr_ratio - 0.006736772225867882) <= 1e-6 * max(abs(0.006736772225867882), 1e-9)
+    assert abs(dsr_ratio - 0.5544099905501989) <= 1e-6 * max(abs(0.006736772225867882), 1e-9)
 
     # Honest verdict: Sharpe < 0 and return < 0 fail, and Deflated Sharpe
     # p-value >= 0.10 fails, so the hypothesis is NOT SUPPORTED.

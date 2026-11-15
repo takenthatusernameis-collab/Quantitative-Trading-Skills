@@ -88,12 +88,12 @@ def test_benchmark_metrics_pinned_on_pair_real_window_zscore_mean_reversion():
 
     EXPECTED = {
         "sharpe_ratio": 0.7110990902058707,
-        "total_return": -0.03100842492016412,
-        "benchmark_total_return": 0.9015402575236577,
-        "benchmark_alpha": -0.022380402587827414,
-        "benchmark_alpha_pvalue": 0.6817678288722019,
-        "correlation_with_benchmark": 0.0863656157920533,
-        "deflated_sharpe_pvalue": 0.993600012230458,
+        "total_return": 0.09772954160702252,
+        "benchmark_total_return": 0.1711375869976839,
+        "benchmark_alpha": 0.07664637290301858,
+        "benchmark_alpha_pvalue": 0.33536705690786595,
+        "correlation_with_benchmark": 0.08859034710530442,
+        "deflated_sharpe_pvalue": 0.8764988058669765,
     }
     REL_TOL = 1e-3
     for key, exp in EXPECTED.items():

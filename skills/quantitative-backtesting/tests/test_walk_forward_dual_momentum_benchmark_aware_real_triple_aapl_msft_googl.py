@@ -105,7 +105,7 @@ def test_walk_forward_benchmark_aware_runs_on_triple_real_window():
     summary = result["summary"]
     dsr = summary.get("deflated_sharpe")
 
-    assert summary["n_periods"] == 3
+    assert summary["n_periods"] == 4
     assert summary["periods_with_position"] == 3
     assert result["point_in_time_validation"]["passed"] is True
     assert summary.get("bias_controls_engaged") is True

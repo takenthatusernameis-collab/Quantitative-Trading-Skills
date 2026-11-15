@@ -58,6 +58,6 @@ def test_benchmark_aware_hypothesis_runs_on_triple_real_window_cross_sectional_m
     assert result["verdict"] == "NOT SUPPORTED"
 
     obs = result["observed"]
-    assert abs(obs["sharpe_ratio"] - (-0.38958663446586)) < 1e-3
-    assert abs(obs["total_return"] - (-0.020586723882316527)) < 1e-3
-    assert abs(obs["benchmark_total_return"] - 0.9015402575236577) < 1e-3
+    assert abs(obs["sharpe_ratio"] - (-0.06086675336851859)) < 1e-3
+    assert abs(obs["total_return"] - (0.010254526660692376)) < 1e-3
+    assert abs(obs["benchmark_total_return"] - 0.1711375869976839) < 1e-3

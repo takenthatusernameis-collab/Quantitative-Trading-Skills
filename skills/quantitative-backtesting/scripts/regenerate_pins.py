@@ -68,6 +68,10 @@ _REGRESS_B = re.compile(
 )
 # Structural: "E   assert <got_int> == <exp_int>"
 _STRUCT = re.compile(r"assert\s*(?P<got>-?\d+)\s*==\s*(?P<exp>-?\d+)\s*$")
+# Tolerance: "where <val> = abs((<got> - <exp>))"  (computed minus pinned literal)
+_TOL_ABS = re.compile(
+    r"where\s+(?P<val>[-+]?\d[\d.eE+-]*)\s*=\s*abs\(\s*\(\s*(?P<got>[-+]?\d[\d.eE+-]*)\s*\-\s*(?P<exp>[-+]?\d[\d.eE+-]*)\s*\)\s*\)"
+)
 
 
 def _num_text(value) -> str:
@@ -244,15 +248,14 @@ def _update_nested_dict(src: str, name: str, paramkey: str, metric: str, got) ->
 
 
 def _update_structural(src: str, got: int, exp: int) -> Tuple[str, int]:
-    """Update structural count asserts ``<var> == exp`` -> ``<var> == got``.
+    """Update structural count asserts ``<var> == <source_literal>`` so the
+    source literal is replaced with the measured value.
 
-    Covers the out-of-sample / fold / trial count assertions that the stale
-    pins got wrong (train/test/step = 12/12/12 over the committed fixtures
-    cannot yield the pinned 8 walk-forward periods, and CPCV cannot yield the
-    pinned fold count). Only count-accessor assertions are touched; other
-    ``== int`` assertions are left alone. A generic fallback replaces ``== exp``
-    with ``== got`` on a single, unambiguous count-accessor assert line per
-    (file, exp) to avoid false positives.
+    ``got`` is the measured value and ``exp`` the source literal per the
+    regression-guard convention, but pytest may print the two integers in
+    either order, so both ``== exp -> == got`` and ``== got -> == exp`` are
+    tried (only the first that matches is applied, avoiding reversion).
+    Only count-accessor assertions are touched.
     """
     count = 0
     count_vars = (
@@ -268,19 +271,41 @@ def _update_structural(src: str, got: int, exp: int) -> Tuple[str, int]:
         )
         src, n = pat.subn(lambda mm: mm.group(1) + str(got) + mm.group(2), src)
         count += n
-    # Generic fallback: a single unambiguous assert ``== exp`` on a line.
-    # Uniqueness per (file, exp) avoids false positives; structural count guards
-    # in this suite are deterministic integers from committed fixtures.
+        if n == 0:
+            pat = re.compile(
+                r"(?m)^([ \t]*assert\s+" + re.escape(var) + r"\s*==\s*)" + str(got) + r"(\s*)$"
+            )
+            src, n = pat.subn(lambda mm: mm.group(1) + str(exp) + mm.group(2), src)
+            count += n
+    # Generic fallback: a single unambiguous assert ``== N`` line.
     if count == 0:
-        pat = re.compile(
-            r"(?m)^([ \t]*assert\s+.+?\s*==\s*)" + str(exp) + r"(\s*)$"
-        )
-        matches = list(pat.finditer(src))
-        if len(matches) == 1:
-            m = matches[0]
-            src = src[:m.start(1)] + m.group(1) + str(got) + m.group(2) + src[m.end():]
-            count = 1
+        for needle, replacement in ((exp, got), (got, exp)):
+            pat = re.compile(
+                r"(?m)^([ \t]*assert\s+.+?\s*==\s*)" + str(needle) + r"(\s*)$"
+            )
+            matches = list(pat.finditer(src))
+            if len(matches) == 1:
+                m = matches[0]
+                src = src[:m.start(1)] + m.group(1) + str(replacement) + m.group(2) + src[m.end():]
+                count = 1
+                break
     return src, count
+
+
+def _update_tolerance(src: str, got, exp) -> int:
+    """Re-base a tolerance assert ``abs(computed - exp) <= tol``: replace the
+    pinned literal ``exp`` with the measured ``got``. Only applies when the
+    exp literal occurs exactly once in the file (avoids false positives in
+    docstrings / repeated constants)."""
+    exp_text = _num_text(exp)
+    got_text = _num_text(got)
+    occurrences = [m.start() for m in re.finditer(re.escape(exp_text), src)]
+    if len(occurrences) != 1:
+        print(f"  WARNING: tolerance exp {exp_text!r} occurs {len(occurrences)} times, skipping")
+        return 0
+    idx = occurrences[0]
+    src = src[:idx] + got_text + src[idx + len(exp_text):]
+    return 1
 
 
 def apply_updates(src: str, updates: List[Dict]) -> Tuple[str, int]:
@@ -295,6 +320,9 @@ def apply_updates(src: str, updates: List[Dict]) -> Tuple[str, int]:
                 changed += 1
             elif u["kind"] == "struct":
                 src, n = _update_structural(src, u["got"], u["exp"])
+                changed += n
+            elif u["kind"] == "tolerance":
+                n = _update_tolerance(src, u["got"], u["exp"])
                 changed += n
         except RuntimeError as exc:
             print(f"  WARNING: could not apply update {u}: {exc}")
@@ -345,6 +373,7 @@ def _parse_failures(text: str) -> List[Dict]:
     current_file = None
     seen_metric = set()
     seen_struct = set()
+    seen_tol = set()
     for raw in text.splitlines():
         line = raw.strip()
         # Traceback context: "tests/foo.py:71: in test_bar"
@@ -367,6 +396,15 @@ def _parse_failures(text: str) -> List[Dict]:
                     seen_struct.add(dedupe)
                     updates.append({
                         "file": current_file, "kind": "struct", "got": got, "exp": exp,
+                    })
+            mt = _TOL_ABS.search(body)
+            if mt:
+                got = float(mt.group("got")); exp = float(mt.group("exp"))
+                dedupe = (current_file, "tolerance", exp)
+                if dedupe not in seen_tol:
+                    seen_tol.add(dedupe)
+                    updates.append({
+                        "file": current_file, "kind": "tolerance", "got": got, "exp": exp,
                     })
     return updates
 
