@@ -535,6 +535,7 @@ def validate_point_in_time(
     df: pd.DataFrame,
     signal_column: Optional[str] = None,
     lookback_windows: Optional[List[int]] = None,
+    lookahead_threshold: float = 0.3,
 ) -> Dict[str, Any]:
     """
     Validate that no look-ahead bias exists in the data or signals.
@@ -548,6 +549,9 @@ def validate_point_in_time(
         df: DataFrame with OHLCV data and optionally signals
         signal_column: Name of signal column to check (if present)
         lookback_windows: List of window sizes used in rolling calculations
+        lookahead_threshold: Correlation threshold for look-ahead detection.
+            A signal whose changes correlate with next-period returns above this
+            threshold is flagged as a potential look-ahead bias. Default 0.3.
 
     Returns:
         Dictionary with validation results:
@@ -583,10 +587,10 @@ def validate_point_in_time(
             if valid.sum() > 10:
                 corr = price_changes[valid].corr(signal_changes[valid])
                 # High correlation suggests signal uses future price info
-                if abs(corr) > 0.3:
+                if abs(corr) > lookahead_threshold:
                     violations.append(
                         f"Signal '{signal_column}' correlates with next-period returns "
-                        f"(corr={corr:.3f}); potential look-ahead bias"
+                        f"(corr={corr:.3f}, threshold={lookahead_threshold:.3f}); potential look-ahead bias"
                     )
 
     # Check 4: Rolling window calculations - verify lookback windows are valid.
