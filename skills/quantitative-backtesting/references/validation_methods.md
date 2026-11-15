@@ -2699,3 +2699,25 @@ with the aggregate's -- so what the aggregate line adds is the ratio itself,
 the expected maximum alpha and the benchmark count, none of which the
 per-benchmark print carries.
 
+
+### Pin/criteria consistency guard for benchmark-aware tests
+
+The benchmark-aware falsification tests pin two redundant things: an
+`EXPECTED` dict of measured out-of-sample metrics and an `expected_criteria`
+dict of boolean verdicts. Every criterion is a threshold comparison of a
+metric in `EXPECTED` (`oos_sharpe > 0`, `total_return > benchmark_total_return`,
+`deflated_sharpe_pvalue < 0.10`, `benchmark_alpha_pvalue < 0.05`). Refreshing
+one without the other makes the test assert a verdict its own pinned evidence
+refutes. `regenerate_pins.py` deliberately re-bases metric dicts and structural
+counts but never verdict criteria, so this contradiction can reappear after a
+re-baseline; it was reconciled by hand in session 116.
+
+`tests/test_pin_criteria_consistency.py` is a static AST guard (standard
+library only, no backtests) that checks the redundant pair in every
+`test_*benchmark_aware*.py` file which pins both dicts. It also fails if the
+statically checkable set drops below 15 files, so the guard cannot silently
+become vacuous. Its scope is the `expected_criteria` pattern: tests that pin
+metrics inline or build the criteria dict at runtime from the summary are
+reported as skipped, not checked. The guard is a consistency check, not a
+profitability claim: it never decides whether a strategy is good, only whether
+the pinned verdict is the one the pinned numbers imply.
