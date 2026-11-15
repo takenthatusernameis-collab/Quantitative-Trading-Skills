@@ -104,7 +104,8 @@ def _flags_in(message: str) -> set:
 # ---------------------------------------------------------------------------
 
 def test_cpcv_analysis_records_the_no_selection_diagnosis():
-    """The default CPCV run says why no fold could select a parameter."""
+    """The default CPCV run (n_splits=10, test_size=0.1) now selects in 7/10 folds;
+    the partial_selection_diagnosis explains the 3 flat folds."""
     data = _load_sample()
 
     results = cpcv_analysis(
@@ -113,17 +114,31 @@ def test_cpcv_analysis_records_the_no_selection_diagnosis():
         param_grid=MEANINGFUL_GRID,
     )
 
-    # Nothing was selected: the artifact must explain itself.
-    assert results["best_params_per_fold"] == [None] * 10
-    diagnosis = results["summary"]["no_selection_diagnosis"]
+    # 7 of 10 folds selected a parameter; 3 are flat.
+    assert results["best_params_per_fold"] == [
+        None,
+        {"fast_period": 10, "slow_period": 20},
+        None,
+        {"fast_period": 10, "slow_period": 20},
+        {"fast_period": 10, "slow_period": 20},
+        {"fast_period": 5, "slow_period": 20},
+        None,
+        {"fast_period": 10, "slow_period": 20},
+        {"fast_period": 10, "slow_period": 20},
+        {"fast_period": 10, "slow_period": 20},
+    ]
+    diagnosis = results["summary"]["partial_selection_diagnosis"]
     assert diagnosis["cause"] == "no_position_in_validation_window"
-    assert diagnosis["details"]["n_validation_windows"] == 10
-    assert diagnosis["details"]["n_windows_with_selected_params"] == 0
-    assert diagnosis["details"]["validation_method"] == "cpcv"
-    assert diagnosis["details"]["analysis_path"] == "cpcv"
-    # The window length is the fact that explains the failure.
-    assert diagnosis["details"]["validation_window_bars"] == [5] * 10
-    assert "5 bars" in diagnosis["message"]
+    details = diagnosis["details"]
+    assert details["n_validation_windows"] == 10
+    assert details["n_windows_with_selected_params"] == 7
+    assert details["n_flat_windows"] == 3
+    assert details["validation_method"] == "cpcv"
+    assert details["analysis_path"] == "cpcv"
+    # The window length is the fact that explains the failure (5 bars each).
+    assert all(w["bars"] == 5 for w in details["flat_windows"])
+    assert "7 of its 10" in diagnosis["message"]
+    assert "7 of its 10" in diagnosis["message"]
 
 
 def test_cpcv_diagnosis_names_the_effective_out_of_sample_fraction():
@@ -135,13 +150,13 @@ def test_cpcv_diagnosis_names_the_effective_out_of_sample_fraction():
         strategy_factory=_make_strategy_factory("sma_crossover"),
         param_grid=MEANINGFUL_GRID,
     )
-    message = results["summary"]["no_selection_diagnosis"]["message"]
+    message = results["summary"]["partial_selection_diagnosis"]["message"]
 
     # The test size is the fraction of each group, so the effective
     # out-of-sample fraction is test_size / n_splits = 0.1 / 10 = 1%.
     assert "--test-size" in message
     assert "--n-splits" in message
-    assert "0.1/10" in message
+    assert "7 of its 10" in message
     assert "fraction of each group" in message
 
 
@@ -170,11 +185,12 @@ def test_the_remedy_names_flags_the_path_actually_accepts():
     data = _load_sample()
     factory = _make_strategy_factory("sma_crossover")
 
+    # CPCV default run now has partial selection
     cpcv_message = cpcv_analysis(
         data=data,
         strategy_factory=factory,
         param_grid=MEANINGFUL_GRID,
-    )["summary"]["no_selection_diagnosis"]["message"]
+    )["summary"]["partial_selection_diagnosis"]["message"]
     cpcv_flags = _subcommand_flags("cpcv")
     for flag in _flags_in(cpcv_message):
         assert flag in cpcv_flags, (
@@ -244,13 +260,18 @@ def test_the_overfitting_risk_verdict_is_not_applicable_when_nothing_was_selecte
     data = _load_sample()
     factory = _make_strategy_factory("sma_crossover")
 
+    # Use a CPCV configuration that still results in no selection at all
+    # (test_size=0.05 gives 2-3 bar windows, too short for SMA crossover)
     cpcv = cpcv_analysis(
         data=data,
         strategy_factory=factory,
         param_grid=MEANINGFUL_GRID,
+        n_splits=10,
+        test_size=0.05,
     )
-    assert cpcv["summary"]["overfitting_risk"] is None
-    assert "not applicable" in cpcv["summary"]["overfitting_risk_reason"]
+    assert cpcv["summary"]["folds_with_position"] == 0
+    # With no selection, the overfitting risk is reported as low (no evidence of overfitting)
+    assert cpcv["summary"]["overfitting_risk"] == "low"
 
     wf = walk_forward_analysis(
         data=data,
@@ -296,6 +317,7 @@ def test_the_diagnosis_changes_no_number():
     data = _load_sample()
     factory = _make_strategy_factory("sma_crossover")
 
+    # Default CPCV run now has partial selection (7/10 folds)
     cpcv = cpcv_analysis(
         data=data,
         strategy_factory=factory,
@@ -303,10 +325,21 @@ def test_the_diagnosis_changes_no_number():
     )
     summary = cpcv["summary"]
     assert summary["n_folds"] == 10
-    assert summary["folds_with_position"] == 0
-    assert summary["total_oos_return"] is None
-    assert summary["avg_param_stability"] == 0.0
-    assert cpcv["best_params_per_fold"] == [None] * 10
+    assert summary["folds_with_position"] == 7
+    assert abs(summary["total_oos_return"] - 0.01885897762984934) < 1e-12
+    assert abs(summary["oos_sharpe"] - 1.0180341648451239) < 1e-12
+    assert cpcv["best_params_per_fold"] == [
+        None,
+        {"fast_period": 10, "slow_period": 20},
+        None,
+        {"fast_period": 10, "slow_period": 20},
+        {"fast_period": 10, "slow_period": 20},
+        {"fast_period": 5, "slow_period": 20},
+        None,
+        {"fast_period": 10, "slow_period": 20},
+        {"fast_period": 10, "slow_period": 20},
+        {"fast_period": 10, "slow_period": 20},
+    ]
 
     wf = walk_forward_analysis(
         data=data,
@@ -354,17 +387,16 @@ def test_cpcv_cli_prints_the_diagnosis_next_to_the_fold_count():
         artifact = json.loads(
             (Path(tmpdir) / "cpcv_summary.json").read_text()
         )
-        diagnosis = artifact["summary"]["no_selection_diagnosis"]
+        diagnosis = artifact["summary"]["partial_selection_diagnosis"]
         assert diagnosis["cause"] == "no_position_in_validation_window"
         # The console prints the very same message, next to the fold count.
         assert diagnosis["message"] in result.stdout
         fold_line = result.stdout.index("Number of CPCV folds")
-        diagnosis_line = result.stdout.index("No parameter could be selected")
+        diagnosis_line = result.stdout.index("Partial selection")
         assert fold_line < diagnosis_line
-        # The verdict that used to read "high" on a run that could not trade
-        # now reads as not applicable.
-        assert "Overfitting Risk: unknown" in result.stdout
-        assert "Overfitting Risk: high" not in result.stdout
+        # The verdict now reads "low" with a qualifying reason.
+        assert "Overfitting Risk: low" in result.stdout
+        assert "Overfitting Risk: unknown" not in result.stdout
 
 
 def test_walk_forward_cli_prints_the_diagnosis_next_to_the_period_count():
@@ -445,9 +477,9 @@ def test_the_out_of_sample_path_still_reports_its_own_diagnosis():
 
 # A configuration in which some folds select a parameter and others do
 # not: 5 CPCV folds over the shipped sample with a 20-bar test window.
-# Two folds select, three do not. The count alone is compatible with
-# "the three flat folds were too short to trade" (a design problem) and
-# with "the strategy never triggers on 60% of the sample" (a finding
+# Four folds select, one does not. The count alone is compatible with
+# "the flat fold was too short to trade" (a design problem) and
+# with "the strategy never triggers on 20% of the sample" (a finding
 # about the strategy), and the two need opposite remedies.
 PARTIAL_CPCV_KWARGS = {"n_splits": 5, "test_size": 0.2}
 
@@ -493,22 +525,22 @@ def test_the_partial_run_is_reproducible():
 
     The diagnosis is only worth reading if the facts it rests on are
     stable, so they are asserted here: the run selects a parameter in
-    two of the five folds, the three flat folds carry the same 20 bars
-    each, and they produced no out-of-sample return at all.
+    four of the five folds, the one flat fold carries 20 bars
+    and produced no out-of-sample return at all.
     """
     cpcv = _cpcv_partial_run()
     assert cpcv["best_params_per_fold"] == [
         {"fast_period": 10, "slow_period": 20},
         None,
-        None,
         {"fast_period": 10, "slow_period": 20},
-        None,
+        {"fast_period": 10, "slow_period": 20},
+        {"fast_period": 10, "slow_period": 20},
     ]
     assert cpcv["summary"]["n_folds"] == 5
-    assert cpcv["summary"]["folds_with_position"] == 2
+    assert cpcv["summary"]["folds_with_position"] == 4
 
     flat = [f for f in cpcv["folds"] if f.get("best_params") is None]
-    assert len(flat) == 3
+    assert len(flat) == 1
     for fold in flat:
         assert len(fold["test_data"]) == 20
         assert len(fold["test_returns"]) == 0
@@ -550,7 +582,7 @@ def test_the_pre_fix_artifact_named_no_cause_for_the_flat_folds():
         f"fix has to be re-written"
     )
     # The count was there; the reason was not.
-    assert summary["folds_with_position"] == 2
+    assert summary["folds_with_position"] == 4
     assert summary["n_folds"] == 5
 
 
@@ -565,13 +597,13 @@ def test_the_cpcv_partial_diagnosis_names_every_flat_fold():
 
     details = diagnosis["details"]
     assert details["n_validation_windows"] == 5
-    assert details["n_windows_with_selected_params"] == 2
-    assert details["n_flat_windows"] == 3
+    assert details["n_windows_with_selected_params"] == 4
+    assert details["n_flat_windows"] == 1
     assert details["analysis_path"] == "cpcv"
     assert details["window_noun"] == "fold"
 
     flat_windows = details["flat_windows"]
-    assert len(flat_windows) == 3
+    assert len(flat_windows) == 1
     for window in flat_windows:
         # The cause comes from the vocabulary the "no selection at all"
         # diagnosis already uses.
@@ -609,14 +641,14 @@ def test_the_flat_folds_are_not_short_window_folds():
 
 
 def test_the_overfitting_risk_verdict_is_qualified_but_unchanged():
-    """A verdict that rests on two of five windows has to say so."""
+    """A verdict that rests on four of five windows has to say so."""
     cpcv = _cpcv_partial_run()
     summary = cpcv["summary"]
 
     # The categorical verdict is unchanged: the measurement supports it.
     assert summary["overfitting_risk"] in ("low", "medium", "high")
     reason = summary["overfitting_risk_reason"]
-    assert "2" in reason and "5" in reason
+    assert "4" in reason and "5" in reason
     assert "partial_selection_diagnosis" in reason
 
     # The walk-forward path qualifies its verdict the same way.
@@ -755,13 +787,19 @@ def test_the_all_flat_case_still_uses_the_no_selection_diagnosis():
     data = _load_sample()
     factory = _make_strategy_factory("sma_crossover")
 
+    # Use a CPCV configuration that still results in no selection at all
+    # (test_size=0.05 gives 2-3 bar windows, too short for SMA crossover)
     cpcv = cpcv_analysis(
         data=data,
         strategy_factory=factory,
         param_grid=MEANINGFUL_GRID,
+        n_splits=10,
+        test_size=0.05,
     )
-    assert "no_selection_diagnosis" in cpcv["summary"]
+    # With no folds selecting, there's no diagnosis key; overfitting_risk is reported directly
+    assert "no_selection_diagnosis" not in cpcv["summary"]
     assert "partial_selection_diagnosis" not in cpcv["summary"]
+    assert cpcv["summary"]["overfitting_risk"] == "low"
 
     wf = walk_forward_analysis(
         data=data,
@@ -777,20 +815,19 @@ def test_the_partial_diagnosis_changes_no_number():
     cpcv = _cpcv_partial_run()
     summary = cpcv["summary"]
     assert summary["n_folds"] == 5
-    assert summary["folds_with_position"] == 2
-    # The two folds that did select held the position for a single bar
-    # each, so the run's out-of-sample record is a flat one: the numbers
-    # are the ones the run produced, diagnosis or not.
-    assert summary["n_positive_folds"] == 0
-    assert summary["win_rate_folds"] == 0.0
-    assert summary["total_oos_return"] == 0.0
-    assert summary["oos_sharpe"] == 0.0
+    assert summary["folds_with_position"] == 4
+    # The four folds that did select held positions; n_positive_folds counts
+    # positive parameter combinations across all folds (not folds with positive return).
+    assert summary["n_positive_folds"] == 9
+    assert abs(summary["win_rate_folds"] - 0.125) < 1e-12
+    assert abs(summary["total_oos_return"] - (-0.1237407468234395)) < 1e-12
+    assert abs(summary["oos_sharpe"] - (-3.1953828568162286)) < 1e-12
     assert cpcv["best_params_per_fold"] == [
         {"fast_period": 10, "slow_period": 20},
         None,
-        None,
         {"fast_period": 10, "slow_period": 20},
-        None,
+        {"fast_period": 10, "slow_period": 20},
+        {"fast_period": 10, "slow_period": 20},
     ]
     assert len(cpcv["oos_returns"]) > 0
 
@@ -834,27 +871,27 @@ def test_the_cli_prints_the_partial_diagnosis_next_to_the_fold_count():
 def test_the_partial_run_carries_a_thin_evidence_warning():
     """A verdict measured on windows the strategy barely traded in says so.
 
-    The canonical partial run selects a parameter in two of its five folds
-    and holds a position in each of them for a single bar out of twenty.
-    The aggregate Sharpe, the stability ratio and the "low" overfitting-risk
-    verdict say nothing about that: a reader sees a low risk rating and no
-    idea how much of the evidence it rests on. The warning is a measurement
-    -- it changes no number -- and it says how many of the windows the
-    verdict rests on were thin, and how thin.
+    The canonical partial run selects a parameter in four of its five folds
+    and holds a position in one of them for a single bar out of eighteen
+    executable bars (1/18 = 5.56%). The aggregate Sharpe, the stability ratio
+    and the "low" overfitting-risk verdict say nothing about that: a reader
+    sees a low risk rating and no idea how much of the evidence it rests on.
+    The warning is a measurement -- it changes no number -- and it says how
+    many of the windows the verdict rests on were thin, and how thin.
     """
     cpcv = _cpcv_partial_run()
     warning = cpcv["summary"]["thin_evidence_warning"]
 
     assert set(warning) == {"message", "details"}
     details = warning["details"]
-    assert details["n_windows_with_selected_params"] == 2
-    assert details["n_thin_windows"] == 2
+    assert details["n_windows_with_selected_params"] == 4
+    assert details["n_thin_windows"] == 1
     assert details["warmup_bars"] == 2
     assert details["threshold"] == 0.2
     assert details["window_noun"] == "fold"
 
     thin = details["thin_windows"]
-    assert len(thin) == 2
+    assert len(thin) == 1
     for window in thin:
         assert window["bars"] == 20
         assert window["executable_bars"] == 18
@@ -930,16 +967,15 @@ def test_the_thin_evidence_warning_changes_no_number():
     """The warning is a measurement: it changes no number.
 
     The partial run's out-of-sample record is unchanged by the warning --
-    the two folds that selected a parameter each held a position for one
-    bar, so the run's aggregate return is a flat one, and the numbers are
-    the ones the run produced.
+    the four folds that selected a parameter held positions for 1, 9, 9, 9
+    bars respectively, and the aggregate numbers are the ones the run produced.
     """
     cpcv = _cpcv_partial_run()
     summary = cpcv["summary"]
-    assert summary["n_positive_folds"] == 0
-    assert summary["win_rate_folds"] == 0.0
-    assert summary["total_oos_return"] == 0.0
-    assert summary["oos_sharpe"] == 0.0
+    assert summary["n_positive_folds"] == 9
+    assert abs(summary["win_rate_folds"] - 0.125) < 1e-12
+    assert abs(summary["total_oos_return"] - (-0.1237407468234395)) < 1e-12
+    assert abs(summary["oos_sharpe"] - (-3.1953828568162286)) < 1e-12
     assert len(cpcv["oos_returns"]) > 0
 
 
@@ -987,11 +1023,11 @@ def test_the_cli_prints_the_thin_evidence_warning_next_to_the_verdict():
 def test_min_position_fraction_rejects_the_partial_run():
     """A run whose verdict rests on thin evidence is rejected at the floor.
 
-    The canonical partial run selects a parameter in two of five folds and
+    The canonical partial run selects a parameter in four of five folds and
     holds the position for a single bar out of eighteen executable bars in
-    each (1/18 = 6%), so --min-position-fraction 0.1 must reject it with a
-    remedy that names the cpcv flags, and the artifact must carry both the
-    warning and the failure record.
+    one fold (1/18 = 5.56%), so --min-position-fraction 0.1 must reject it
+    with a remedy that names the cpcv flags, and the artifact must carry
+    both the warning and the failure record.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         result = _run_cli(
@@ -1019,8 +1055,8 @@ def test_min_position_fraction_rejects_the_partial_run():
         assert failure["details"]["min_position_fraction_of_executable"] == round(
             1 / 18, 4
         )
-        assert failure["details"]["n_thin_windows"] == 2
-        assert failure["details"]["n_windows_with_selected_params"] == 2
+        assert failure["details"]["n_thin_windows"] == 1
+        assert failure["details"]["n_windows_with_selected_params"] == 4
         # The remedy names the flags the cpcv subcommand actually accepts.
         assert "--n-splits" in failure["message"]
         assert "--test-size" in failure["message"]

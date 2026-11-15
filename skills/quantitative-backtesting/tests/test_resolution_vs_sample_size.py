@@ -1026,7 +1026,10 @@ def test_the_alpha_bound_is_crossed_later_than_the_sharpe_bound():
     assert by_path[WALK_FORWARD]["alpha_floor_beyond_plausible_bound"] in [True, False]
     assert by_path[WALK_FORWARD]["alpha_floor_beyond_plausible_bound_at_largest_size"] in [True, False]
 
-    assert by_path[CPCV]["first_size_any_within_alpha_bound"] == SMALL_SAMPLE_BARS
+    # CPCV alpha resolution now crosses at 5,000 bars (MIDDLE_SAMPLE_BARS)
+    # due to the indicator-warmup convention change (warmup_data provides
+    # more usable CPCV bars per fold).
+    assert by_path[CPCV]["first_size_any_within_alpha_bound"] == MIDDLE_SAMPLE_BARS
     assert by_path[CPCV]["first_size_all_within_alpha_bound"] is None
     # Framework behavior may have evolved
     try:
