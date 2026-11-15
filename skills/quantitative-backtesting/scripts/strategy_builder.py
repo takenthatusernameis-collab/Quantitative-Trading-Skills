@@ -899,6 +899,163 @@ class DualMomentumStrategy(StrategyBase):
         return signals
 
 
+class TimeSeriesMomentumStrategy(StrategyBase):
+    """Time-Series Momentum (TSMOM) Strategy.
+
+    Long when the trailing return over the lookback period is positive,
+    flat when negative (or short if ``allow_short=True``).
+
+    This is a single-asset trend-following signal: it measures the momentum
+    of an asset's own past returns (absolute momentum), without any
+    cross-sectional comparison. It is the building block used internally by
+    ``VolatilityTargeting`` and ``KellyCriterion`` as their standalone base
+    signal.
+
+    Parameters:
+        lookback: Trailing window for return calculation (default: 252, ~12 months)
+        allow_short: If True, go short when trailing return < 0; if False,
+            go flat (0) when trailing return < 0 (default: False)
+
+    For multi-asset panel data (dict or MultiIndex columns), the strategy
+    computes the TSMOM signal per asset and returns the equal-weighted mean
+    signal as the portfolio-level scalar. The per-asset positions are exposed
+    via ``generate_target_weights`` for book pricing.
+
+    For single-asset DataFrame (backward compatible): returns the scalar
+    long/flat (or long/short) signal directly.
+    """
+
+    def generate_signals(self, data: pd.DataFrame | dict) -> pd.Series:
+        lookback = self.parameters.get("lookback", 252)
+        allow_short = self.parameters.get("allow_short", False)
+
+        if isinstance(data, dict):
+            return self._generate_multi_asset_signals_dict(data, lookback, allow_short)
+        elif isinstance(data.columns, pd.MultiIndex):
+            return self._generate_multi_asset_signals_multiindex(data, lookback, allow_short)
+        else:
+            # Single-asset path
+            return self._generate_single_asset_signals(data, lookback, allow_short)
+
+    def _generate_multi_asset_signals_dict(
+        self,
+        data_dict: dict,
+        lookback: int,
+        allow_short: bool,
+    ) -> pd.Series:
+        """Generate signals from dict of symbol -> DataFrame."""
+        if not data_dict:
+            return pd.Series(dtype=float)
+
+        # Align all symbols to common date index
+        common_index = None
+        for df in data_dict.values():
+            if common_index is None:
+                common_index = df.index
+            else:
+                common_index = common_index.intersection(df.index)
+
+        if common_index is None or len(common_index) == 0:
+            return pd.Series(dtype=float)
+
+        common_index = common_index.sort_values()
+
+        # Compute trailing returns for each symbol
+        signals_per_asset = pd.DataFrame(0.0, index=common_index, columns=list(data_dict.keys()))
+        for symbol, df in data_dict.items():
+            df_aligned = df.reindex(common_index)
+            close = df_aligned["close"]
+            returns = close.pct_change(lookback)
+            if allow_short:
+                signals_per_asset[symbol] = np.sign(returns)
+            else:
+                signals_per_asset[symbol] = (returns > 0).astype(float)
+
+        # Portfolio signal: equal-weighted mean of per-asset signals
+        return signals_per_asset.mean(axis=1)
+
+    def _generate_multi_asset_signals_multiindex(
+        self,
+        data: pd.DataFrame,
+        lookback: int,
+        allow_short: bool,
+    ) -> pd.Series:
+        """Generate signals from DataFrame with MultiIndex columns (field, symbol)."""
+        if "close" not in data.columns.get_level_values(0):
+            raise ValueError("MultiIndex data must have 'close' as first level column")
+
+        close_data = data["close"]  # DataFrame with symbols as columns
+        returns = close_data.pct_change(lookback)
+
+        if allow_short:
+            signals_per_asset = np.sign(returns)
+        else:
+            signals_per_asset = (returns > 0).astype(float)
+
+        # Portfolio signal: equal-weighted mean of per-asset signals
+        return signals_per_asset.mean(axis=1)
+
+    def _generate_single_asset_signals(
+        self,
+        data: pd.DataFrame,
+        lookback: int,
+        allow_short: bool,
+    ) -> pd.Series:
+        """Single-asset TSMOM signal."""
+        returns = data["close"].pct_change(lookback)
+        if allow_short:
+            return np.sign(returns).fillna(0)
+        else:
+            return (returns > 0).astype(float)
+
+    def generate_target_weights(self, data) -> Optional[pd.DataFrame]:
+        """Per-asset target book implied by the TSMOM signal.
+
+        Each asset carries its own position (+1 long, -1 short if
+        ``allow_short=True``, or 0 flat), so the book's net exposure is the
+        equal-weighted mean of the per-asset signals (matching the scalar
+        signal from ``generate_signals``).
+
+        Returns ``None`` for single-asset data.
+        """
+        lookback = self.parameters.get("lookback", 252)
+        allow_short = self.parameters.get("allow_short", False)
+
+        if isinstance(data, dict):
+            if not data:
+                return None
+            common_index = None
+            for df in data.values():
+                common_index = (
+                    df.index if common_index is None else common_index.intersection(df.index)
+                )
+            if common_index is None or len(common_index) == 0:
+                return None
+            common_index = common_index.sort_values()
+            weights = pd.DataFrame(0.0, index=common_index, columns=list(data.keys()), dtype=float)
+            for symbol, df in data.items():
+                df_aligned = df.reindex(common_index)
+                close = df_aligned["close"]
+                returns = close.pct_change(lookback)
+                if allow_short:
+                    weights[symbol] = np.sign(returns)
+                else:
+                    weights[symbol] = (returns > 0).astype(float)
+            return weights
+
+        if isinstance(data.columns, pd.MultiIndex):
+            if "close" not in data.columns.get_level_values(0):
+                return None
+            close_data = data["close"]
+            returns = close_data.pct_change(lookback)
+            if allow_short:
+                return np.sign(returns)
+            else:
+                return (returns > 0).astype(float)
+
+        return None
+
+
 class MeanReversionZScore(StrategyBase):
     """Z-Score Mean Reversion (Pairs Trading style).
 
