@@ -182,8 +182,13 @@ def run_hypothesis_test(data_path, label):
 
 
 def main():
-    data_path = ASSETS_DIR / "real_market_data" / "AAPL.csv"
-    run_hypothesis_test(data_path, "TSMOM (12m lookback grid) on AAPL, walk-forward")
+    for symbol in ("AAPL", "MSFT", "GOOGL"):
+        data_path = ASSETS_DIR / "real_market_data" / f"{symbol}.csv"
+        run_hypothesis_test(
+            data_path,
+            f"TSMOM (12m lookback grid) on {symbol}, walk-forward",
+        )
+        print()
 
 
 if __name__ == "__main__":

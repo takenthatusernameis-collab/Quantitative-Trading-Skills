@@ -1,20 +1,27 @@
-# Handoff: next task (session ending 2026-11-15, session 120)
+# Handoff: next task (session ending 2026-11-15, session 121)
 
 ## State of baseline
-- **Focused verification GREEN (session 120):** `pytest skills/quantitative-backtesting/tests/test_time_series_momentum_hypothesis_real_aapl.py skills/quantitative-backtesting/tests/test_walk_forward_time_series_momentum_real_aapl.py skills/quantitative-backtesting/tests/test_pin_criteria_consistency.py -q` -> **9 passed**.
-- **Full gate NOT re-run this session.** Last known green: session 119 `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` -> **1453 passed, 0 failed, EXIT 0** (32:19). With session 120 additions expect **1457 passed** — must be confirmed.
-- Session 120 added (uncommitted): registered `time_series_momentum` in `skills/quantitative-backtesting/scripts/strategy_builder.py` (registry + list + defaults), `skills/quantitative-backtesting/examples/time_series_momentum_hypothesis.py`, and 2 tests (`test_time_series_momentum_hypothesis_real_aapl.py`, `test_walk_forward_time_series_momentum_real_aapl.py`). Honest walk-forward verdict on committed AAPL (train24/test12/step12, grid [126,189,252], 3bp): **NOT SUPPORTED** (oos_sharpe -0.3885, total_oos_return -0.0598, DSR p=0.9746). Criteria pinned before inspection; not tuned.
-- Environment: `pytest-xdist` may be missing in fresh containers (`pip install pytest-xdist`). Serial gate times out (~60 min) — use `-n 4`. Gate dirties `examples/example_output/*`, `scripts/results/*`; revert with `git checkout -- .`.
+- **Full gate GREEN (this session):** `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` -> **1465 passed, 0 failed, EXIT 0** (32:28). Includes the 8 new MSFT/GOOGL TSMOM tests (1457 + 8).
+- **TSMOM extended to MSFT and GOOGL** (committed fixtures only, not profitability claims):
+  - AAPL: oos_sharpe -0.3885, total_return -0.0598, DSR p=0.9746 -> NOT SUPPORTED
+  - MSFT: oos_sharpe -0.4138, total_return -0.1018, DSR p=0.9569 -> NOT SUPPORTED
+  - GOOGL: oos_sharpe -0.1162, total_return -0.0245, DSR p=0.6223 -> NOT SUPPORTED (4 DSR trials)
+- Pre-registered criteria identical across symbols (oos_sharpe > 0, oos_total_return > 0, deflated_sharpe_pvalue < 0.10, net of 3 bps); not tuned to force SUPPORT.
+- New files: 4 test files + 1 modified example script. Nothing committed.
+- Environment: pytest-xdist 3.8.0 available. Serial gate times out (~60 min) — use `-n 4`. Gate dirties `examples/example_output/*`, `scripts/results/*`; revert with `git checkout -- .`.
 
 ## One precise next task
-1. Run the **full gate** and confirm green including the new TSMOM coverage:
-   ```bash
-   python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4
-   ```
-   Require EXIT 0; expect ~1457 passed. Revert generated artifacts with `git checkout -- .` after.
-2. If green, extend **standalone TSMOM evidence** to the other committed real fixtures (MSFT, GOOGL) as a bounded, falsifiable follow-up: pin criteria before running (anti-tuning), evaluate via walk-forward with appropriate window sizing (252d lookback needs sufficient test/train length), net of existing cost models, report honest verdicts/`test_resolution` (SUPPORT/NOT SUPPORTED), and add pinned regression tests following the session-120 AAPL pattern. Do not flip criteria to force SUPPORT.
+Reconcile the 17 pre-existing CPCV behavior-pin failures with the warmup convention, per HANDOFF.md:
+1. Confirm the warmup is causal (strictly pre-test, no leakage) and document it in a comment so future readers don't "fix" it back.
+2. In `test_no_selection_diagnosis.py`, re-pin CPCV default/partial-run expectations (`folds_with_position`, `best_params_per_fold`, thin-evidence details, overfitting-risk reason counts) to freshly measured values. Default run now selects 7/10 folds; partial run 4/5.
+3. In `test_resolution_vs_sample_size.py`, re-pin CPCV ladder expectations (`first_size_any_within_alpha_bound`, `alpha_status`) to measured values; if CPCV is now `resolvable`, update accordingly and keep a separate reproducer for the genuinely-unpriceable case.
+4. After green: run the full gate (`-n 4`, EXIT 0, ~1465+ passed). Revert artifacts with `git checkout -- .`.
+5. Then select the next bounded methodological gap per AGENTS.md mission (point-in-time/survivorship-bias controls, or a new falsifiable hypothesis with OOS evidence net of costs).
+6. Do not commit unless explicitly asked.
 
 ## Constraints and evidence
 - Do not flip criterion/verdict assertions to force green (honesty / anti-tuning rule).
-- Prior failures: serial gate timeout; 12m-test walk-forward with 252d lookback yields no positions (`no_selection_diagnosis`) — use >=24m train / 12m test or shorter lookbacks evidenced by probing. See `HANDOFF_SESSION120.md`.
+- Do not blindly re-pin CPCV pins to silence failures; re-derive each expected number from a measured run and record the convention in a comment.
 - Do not commit unless explicitly asked. Preserve marketplace compatibility; quant-skill changes only.
+
+(End of file)
