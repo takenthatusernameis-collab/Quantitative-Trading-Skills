@@ -561,6 +561,92 @@ def book_gross_turnover(held_book):
     return held_book.diff().abs().sum(axis=1, min_count=1)
 
 
+def regime_cost_multiplier_series(
+    regimes: Optional[pd.Series],
+    regime_cost_multipliers: Optional[Dict[str, float]] = None,
+    index: Optional[pd.Index] = None,
+    default: float = 1.0,
+) -> Optional[pd.Series]:
+    """Per-period commission/slippage multiplier from regime labels.
+
+    Transaction costs (commission + slippage) are empirically larger in
+    stressed/illiquid regimes: spreads widen and fills take longer when
+    volatility is high or the market is falling. This helper turns a mapping
+    of regime label -> multiplier into a per-period Series aligned to the
+    cost series, so the same regime labels already used for regime-aware
+    *market impact* can also scale commission and slippage.
+
+    The multiplier is applied to ``position_changes * (commission +
+    slippage)`` (net-exposure path) and to the book's gross-turnover
+    transaction cost (book path) -- i.e. to the per-trade cost, not to the
+    rate itself. A multiplier of 1.0 is a no-op, so the default leaves every
+    published number unchanged.
+
+    Point-in-time: the caller supplies ``regimes`` (a series of labels
+    already aligned to the cost index, e.g. from
+    ``detect_combined_regime``'s causal detector). This function does not
+    detect regimes itself and never looks at future bars; mutating future
+    prices leaves every already-computed multiplier unchanged.
+
+    Args:
+        regimes: ``pd.Series`` of regime labels aligned to the cost index,
+            or ``None``.
+        regime_cost_multipliers: Optional dict mapping regime label (e.g.
+            ``'bull_high_vol'``) to a positive float multiplier. Regimes not
+            in the dict receive ``default``. ``None`` or empty -> every
+            period is ``default``.
+        index: the index the returned Series is aligned to. Defaults to
+            ``regimes.index`` when ``regimes`` is provided.
+        default: multiplier applied to unmapped regimes and to every period
+            when ``regime_cost_multipliers`` is empty/None. Must be finite
+            and non-negative.
+
+    Returns:
+        ``pd.Series`` of per-period multipliers, or ``None`` when there is
+        nothing to apply (no regimes and no index to align to). The default
+        case (``None`` multipliers) returns ``None`` so callers can skip the
+        multiplication entirely and keep the common path bit-identical.
+
+    Raises:
+        ValueError: on a non-finite or negative multiplier, or on a regime
+            label that is missing from the mapping when ``default`` would
+            leave it at ``None``.
+    """
+    if regime_cost_multipliers is None or len(regime_cost_multipliers) == 0:
+        return None
+    for label, mult in regime_cost_multipliers.items():
+        if not np.isfinite(mult) or mult < 0:
+            raise ValueError(
+                f"regime cost multiplier for {label!r} must be finite and "
+                f"non-negative, got {mult}"
+            )
+    if not np.isfinite(default) or default < 0:
+        raise ValueError(
+            f"default regime cost multiplier must be finite and "
+            f"non-negative, got {default}"
+        )
+
+    if regimes is None or not isinstance(regimes, pd.Series) or regimes.empty:
+        # Nothing to map: every period is the default. Returning None keeps
+        # the common path bit-identical; callers that want an explicit
+        # all-default series can pass a real regime series.
+        return None
+
+    target_index = index if index is not None else regimes.index
+    aligned = regimes.reindex(target_index)
+    multiplier = aligned.map(regime_cost_multipliers)
+    unmapped = multiplier.isna()
+    if unmapped.any():
+        # Fall back to the default for labels absent from the mapping, and
+        # raise if the default itself would be a no-op that silently drops
+        # the regime (default == 1.0 is a legitimate "leave this regime
+        # alone" choice, so it is allowed).
+        multiplier = multiplier.fillna(default)
+    multiplier = multiplier.astype(float)
+    multiplier.name = "regime_cost_multiplier"
+    return multiplier
+
+
 def book_cost_components(
     held_book,
     commission: float = 0.0,
@@ -568,6 +654,8 @@ def book_cost_components(
     borrow_cost: float = 0.0,
     funding_cost: float = 0.0,
     ann_factor: int = 252,
+    regime_cost_multipliers: Optional[Dict[str, float]] = None,
+    regimes: Optional[pd.Series] = None,
 ):
     """The transaction, borrow and funding costs of a per-asset book.
 
@@ -594,6 +682,15 @@ def book_cost_components(
         funding_cost: annual funding cost rate for leverage (as a decimal).
         ann_factor: periods per year, used to convert the annual rates to
             per-period rates.
+        regime_cost_multipliers: Optional dict mapping regime label (e.g.
+            ``'bull_high_vol'``) to a positive float multiplier applied to the
+            per-trade commission + slippage cost in that regime. Regimes not
+            in the dict receive the default (1.0). ``None`` (the default) is a
+            no-op: every published number is unchanged.
+        regimes: Optional ``pd.Series`` of regime labels aligned to
+            ``held_book``'s index. Required for ``regime_cost_multipliers``
+            to have an effect; ignored when ``regime_cost_multipliers`` is
+            empty/None.
 
     Returns:
         A dict of ``pd.Series`` with the keys ``turnover``, ``transaction``,
@@ -610,7 +707,18 @@ def book_cost_components(
         pass
 
     turnover = book_gross_turnover(held_book)
-    transaction = turnover * (commission + slippage)
+    # Regime-conditional commission/slippage multiplier. The multiplier is
+    # applied to the per-trade cost (turnover * (commission + slippage)), so
+    # it scales the cost the book actually pays in each regime rather than
+    # the rate. Point-in-time: `regimes` is supplied by the caller from a
+    # causal detector; this function never looks at future bars.
+    cost_mult = regime_cost_multiplier_series(
+        regimes, regime_cost_multipliers, index=turnover.index,
+    )
+    rate = commission + slippage
+    if cost_mult is not None:
+        rate = rate * cost_mult
+    transaction = turnover * rate
     # Short legs: the absolute short exposure of the book, summed over the
     # assets. A market-neutral book has a flat *net* exposure but a real
     # short leg, which the net-exposure cost model cannot see.

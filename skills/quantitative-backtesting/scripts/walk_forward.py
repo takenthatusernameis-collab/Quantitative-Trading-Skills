@@ -575,6 +575,7 @@ def walk_forward_analysis(
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     impact_model=DEFAULT_IMPACT_MODEL,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
+    regime_cost_multipliers: Optional[Dict[str, float]] = None,
     max_impact: Optional[float] = None,
     family_returns: Optional[pd.DataFrame] = None,
     family_stepdown: bool = False,
@@ -646,6 +647,19 @@ def walk_forward_analysis(
             back to the base `impact_coefficient`. This captures the empirical
             fact that market impact varies across market regimes (e.g., higher
             impact in high-volatility/bear regimes due to lower liquidity).
+        regime_cost_multipliers: Optional dict mapping regime name (e.g.
+            'bull_high_vol') to a positive float multiplier applied to the
+            per-trade commission + slippage cost in that regime. Mirrors
+            `regime_impact_coefficients` but for the transaction-cost leg:
+            commission and slippage are empirically larger in stressed/
+            illiquid regimes (wider spreads, slower fills), so the
+            multiplier scales `position_changes * (commission + slippage)`
+            (net-exposure path) and the book's gross-turnover transaction
+            cost (book path) per period. Regimes not in the dict fall back
+            to 1.0 (no change). `None` (the default) is a no-op: every
+            published number is unchanged. Point-in-time: the regime labels
+            are supplied by the caller from a causal detector; this function
+            never looks at future bars.
         impact_model: ``"linear"`` (default) or ``"sqrt"``. The square-root model
             computes impact as ``coefficient * sqrt(participation_rate)`` instead
             of ``coefficient * participation_rate``. The square-root model is
@@ -1417,6 +1431,7 @@ def parameter_optimization(
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     impact_model: str = DEFAULT_IMPACT_MODEL,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
+    regime_cost_multipliers: Optional[Dict[str, float]] = None,
     max_impact: Optional[float] = None,
     inert_grid_report: Optional[Dict[str, Any]] = None,
     **kwargs,
@@ -1480,6 +1495,19 @@ def parameter_optimization(
             back to the base `impact_coefficient`. This captures the empirical
             fact that market impact varies across market regimes (e.g., higher
             impact in high-volatility/bear regimes due to lower liquidity).
+        regime_cost_multipliers: Optional dict mapping regime name (e.g.
+            'bull_high_vol') to a positive float multiplier applied to the
+            per-trade commission + slippage cost in that regime. Mirrors
+            `regime_impact_coefficients` but for the transaction-cost leg:
+            commission and slippage are empirically larger in stressed/
+            illiquid regimes (wider spreads, slower fills), so the
+            multiplier scales `position_changes * (commission + slippage)`
+            (net-exposure path) and the book's gross-turnover transaction
+            cost (book path) per period. Regimes not in the dict fall back
+            to 1.0 (no change). `None` (the default) is a no-op: every
+            published number is unchanged. Point-in-time: the regime labels
+            are supplied by the caller from a causal detector; this function
+            never looks at future bars.
         max_impact: Optional maximum acceptable market impact per trade (as
             decimal, e.g., 0.0005 = 5 bps). When provided and impact_coefficient
             > 0, the target position is scaled so that the estimated market
@@ -2851,6 +2879,7 @@ def _calculate_strategy_returns(
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     impact_model=DEFAULT_IMPACT_MODEL,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
+    regime_cost_multipliers: Optional[Dict[str, float]] = None,
     max_impact: Optional[float] = None,
 ) -> pd.Series:
     """Calculate strategy returns from signals and market data.
@@ -2927,6 +2956,32 @@ def _calculate_strategy_returns(
             back to the base `impact_coefficient`. This captures the empirical
             fact that market impact varies across market regimes (e.g., higher
             impact in high-volatility/bear regimes due to lower liquidity).
+        regime_cost_multipliers: Optional dict mapping regime name (e.g.
+            'bull_high_vol') to a positive float multiplier applied to the
+            per-trade commission + slippage cost in that regime. Mirrors
+            `regime_impact_coefficients` but for the transaction-cost leg:
+            commission and slippage are empirically larger in stressed/
+            illiquid regimes (wider spreads, slower fills), so the
+            multiplier scales `position_changes * (commission + slippage)`
+            (net-exposure path) and the book's gross-turnover transaction
+            cost (book path) per period. Regimes not in the dict fall back
+            to 1.0 (no change). `None` (the default) is a no-op: every
+            published number is unchanged. Point-in-time: the regime labels
+            are supplied by the caller from a causal detector; this function
+            never looks at future bars.
+        regime_cost_multipliers: Optional dict mapping regime name (e.g.
+            'bull_high_vol') to a positive float multiplier applied to the
+            per-trade commission + slippage cost in that regime. Mirrors
+            `regime_impact_coefficients` but for the transaction-cost leg:
+            commission and slippage are empirically larger in stressed/
+            illiquid regimes (wider spreads, slower fills), so the
+            multiplier scales `position_changes * (commission + slippage)`
+            (net-exposure path) and the book's gross-turnover transaction
+            cost (book path) per period. Regimes not in the dict fall back
+            to 1.0 (no change). `None` (the default) is a no-op: every
+            published number is unchanged. Point-in-time: the regime labels
+            are supplied by the caller from a causal detector; this function
+            never looks at future bars.
         max_impact: Optional maximum acceptable market impact per trade (as
             decimal, e.g., 0.0005 = 5 bps). When provided and impact_coefficient
             > 0, the target position is scaled so that the estimated market
@@ -2961,11 +3016,24 @@ def _calculate_strategy_returns(
     volume = market["volume"]
     is_panel = market["is_panel"]
 
-    # Regime detection for regime-aware market impact modeling.
+    # Regime detection for regime-aware cost modeling.
     # Detect combined trend+volatility regimes on the market close prices.
     # For panels, use the first asset's close prices.
+    #
+    # One regime series serves both legs of the cost model:
+    #   * regime_impact_coefficients scales the market-impact coefficient
+    #   * regime_cost_multipliers scale the per-trade commission + slippage
+    # The regime labels are the same causal combined-regime labels in both
+    # cases, so a reader sees one "what cost did this regime pay" answer.
+    # The detection itself is point-in-time (see regime_detection.py): it
+    # uses only bars up to and including the current bar, so the labels
+    # known at trade time are the ones applied to the trade's cost.
     regimes = None
-    if regime_impact_coefficients is not None and len(regime_impact_coefficients) > 0:
+    if (
+        regime_impact_coefficients is not None and len(regime_impact_coefficients) > 0
+    ) or (
+        regime_cost_multipliers is not None and len(regime_cost_multipliers) > 0
+    ):
         if is_panel:
             # For panel data, use the first asset's close for regime detection
             regime_close = close.iloc[:, 0] if isinstance(close, pd.DataFrame) and close.shape[1] > 0 else close
@@ -3098,6 +3166,8 @@ def _calculate_strategy_returns(
             borrow_cost=borrow_cost,
             funding_cost=funding_cost,
             ann_factor=ann_factor,
+            regime_cost_multipliers=regime_cost_multipliers,
+            regimes=regimes,
         )
         costs = _book_costs["total"]
         market_impact = book_market_impact_cost(
@@ -3122,7 +3192,21 @@ def _calculate_strategy_returns(
         # propagation through the cost term.
         position_changes = positions.diff().abs()
         position_changes.iloc[:EXECUTION_WARMUP_BARS] = float("nan")
-        costs = position_changes * (commission + slippage)
+        # Regime-conditional commission/slippage multiplier (opt-in). When
+        # `regime_cost_multipliers` is provided, the per-trade cost is scaled
+        # per period by the multiplier of the regime the trade was made in,
+        # so a stressed/illiquid regime pays more for the same turnover.
+        # Regimes not in the dict fall back to 1.0 (no change), so the
+        # default leaves every published number unchanged. The multiplier
+        # is applied to the cost, not the rate, and is point-in-time: the
+        # regime labels come from the causal detector above.
+        _cost_mult = regime_cost_multiplier_series(
+            regimes, regime_cost_multipliers, index=position_changes.index,
+        )
+        _rate = commission + slippage
+        if _cost_mult is not None:
+            _rate = _rate * _cost_mult
+        costs = position_changes * _rate
 
         # Market impact model: impact = (position_notional / ADV) * impact_coefficient
         # Position notional = |position| * equity, where equity is the current
@@ -3679,6 +3763,7 @@ def cpcv_analysis(
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     impact_model: str = DEFAULT_IMPACT_MODEL,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
+    regime_cost_multipliers: Optional[Dict[str, float]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -3754,6 +3839,19 @@ def cpcv_analysis(
             back to the base `impact_coefficient`. This captures the empirical
             fact that market impact varies across market regimes (e.g., higher
             impact in high-volatility/bear regimes due to lower liquidity).
+        regime_cost_multipliers: Optional dict mapping regime name (e.g.
+            'bull_high_vol') to a positive float multiplier applied to the
+            per-trade commission + slippage cost in that regime. Mirrors
+            `regime_impact_coefficients` but for the transaction-cost leg:
+            commission and slippage are empirically larger in stressed/
+            illiquid regimes (wider spreads, slower fills), so the
+            multiplier scales `position_changes * (commission + slippage)`
+            (net-exposure path) and the book's gross-turnover transaction
+            cost (book path) per period. Regimes not in the dict fall back
+            to 1.0 (no change). `None` (the default) is a no-op: every
+            published number is unchanged. Point-in-time: the regime labels
+            are supplied by the caller from a causal detector; this function
+            never looks at future bars.
 
     Returns:
         Dictionary with CPCV results including:
@@ -6072,6 +6170,7 @@ def out_of_sample_validation(
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     impact_model: str = DEFAULT_IMPACT_MODEL,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
+    regime_cost_multipliers: Optional[Dict[str, float]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -7082,8 +7181,9 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
                                     bench_commission, bench_slippage, bench_expense_ratio,
                                     impact_coefficient, borrow_cost=None, funding_cost=None,
                                     commission=None, slippage=None, latency=None, fill_rate=None,
-                                    survivorship=None, pit_strict=None,
-                                    regime_impact_coefficients: Optional[Dict[str, float]] = None):
+survivorship=None, pit_strict=None,
+                                     regime_impact_coefficients: Optional[Dict[str, float]] = None,
+                                     regime_cost_multipliers: Optional[Dict[str, float]] = None):
     """Run walk-forward for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -7113,6 +7213,10 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         commission = args.commission
     if slippage is None:
         slippage = args.slippage
+    if regime_cost_multipliers is None:
+        regime_cost_multipliers = _parse_regime_cost_multipliers(
+            getattr(args, "regime_cost_multipliers", None)
+        )
     if latency is None:
         latency = getattr(args, "latency", 0)
     if latency is None:
@@ -7158,6 +7262,7 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         pit_strict=pit_strict,
         regime_impact_coefficients=regime_impact_coefficients,
+        regime_cost_multipliers=regime_cost_multipliers,
         max_impact=max_impact,
     )
     summary = results["summary"]
@@ -7253,6 +7358,10 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         commission = args.commission
     if slippage is None:
         slippage = args.slippage
+    if regime_cost_multipliers is None:
+        regime_cost_multipliers = _parse_regime_cost_multipliers(
+            getattr(args, "regime_cost_multipliers", None)
+        )
     if latency is None:
         latency = getattr(args, "latency", 0)
     if latency is None:
@@ -7296,6 +7405,7 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         inert_grid_report=inert_report,
         regime_impact_coefficients=regime_impact_coefficients,
+        regime_cost_multipliers=regime_cost_multipliers,
         max_impact=max_impact,
     )
     top = results[0] if results else None
@@ -7432,6 +7542,7 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
+        regime_cost_multipliers=regime_cost_multipliers,
     )
     test_perf = results.get("test_performance") or {}
     summary = results.get("summary") or {}
@@ -7485,8 +7596,9 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                             bench_commission, bench_slippage, bench_expense_ratio,
                             impact_coefficient, borrow_cost=None, funding_cost=None,
                             commission=None, slippage=None, latency=None, fill_rate=None,
-                            survivorship=None,
-                            regime_impact_coefficients: Optional[Dict[str, float]] = None):
+survivorship=None,
+                             regime_impact_coefficients: Optional[Dict[str, float]] = None,
+                             regime_cost_multipliers: Optional[Dict[str, float]] = None):
     """Run CPCV for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
