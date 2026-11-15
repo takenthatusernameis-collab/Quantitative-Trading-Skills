@@ -46,13 +46,22 @@ from walk_forward import (  # noqa: E402
 # and the structural assertions in the tests below (fold count, selected
 # parameters, number of usable OOS bars) pin the conventions that produce it
 # in a way that is exactly reproducible.
-CPCV_OOS_RETURN_REFERENCE = 0.005399536978800024
+#
+# The pinned configuration: 5-asset panel, 504 bars (seed 42),
+# cross_sectional_momentum, lookback in {15, 20, 30}, top_quantile 0.4,
+# bottom_quantile 0.2, 4 splits, test_size 0.2, latency 0.
+# Warmup convention: indicator warmup uses max(lookbacks)=30 bars from the
+# same group preceding the test window; execution warmup drops latency+2=2
+# bars. Each 25-bar test window contributes 23 usable bars (4 folds x 23 = 92).
+CPCV_OOS_RETURN_REFERENCE = 0.024436091162034046
 CPCV_OOS_RETURN_REL_TOL = 1e-9
 
-# The OOS series of the pinned configuration: 4 folds x 23 usable bars. A
-# window's first two bars are dropped (the lagged position series is undefined
-# there, and the cost term inherits that NaN), so a 25-bar test window
-# contributes 23 bars.
+# The OOS series of the pinned configuration: 4 folds x 23 usable bars.
+# Indicator warmup uses max(lookbacks)=30 bars from the same group preceding
+# the test window (so signals are defined from the first test bar). Execution
+# warmup then drops the first latency+2=2 bars (lagged position undefined on
+# bar 1, cost term inherits NaN on bar 2). A 25-bar test window therefore
+# contributes 23 usable bars.
 CPCV_OOS_BAR_COUNT = 92
 # The selected lookback per fold. Note that fold 0 is a close call: its
 # training Sharpes are 2.681 (lookback 15), 2.747 (20) and 2.738 (30), a
@@ -186,7 +195,7 @@ def test_cpcv_basic_structure():
     # applicable', and there is no all-flat no-selection diagnosis.
     assert summary["folds_with_position"] == 4
     assert summary["overfitting_risk"] == "low"
-    assert summary["no_selection_diagnosis"] is None
+    assert summary.get("no_selection_diagnosis") is None
 
 
 def test_cpcv_uses_each_fold_own_warmup_history():
@@ -479,7 +488,8 @@ def test_cpcv_aggregate_deflation_uses_pooled_trial_sharpes():
     agg_dsr = results["summary"]["deflated_sharpe"]
 
     # Collect pooled trial Sharpes by re-running grid search on each fold's
-    # training data.
+    # training data. Must mirror the framework's warmup handling for test
+    # signals to get the same set of eligible combinations.
     from itertools import product
 
     pooled_trial_sharpes = []
@@ -488,6 +498,7 @@ def test_cpcv_aggregate_deflation_uses_pooled_trial_sharpes():
             continue
         train_data = fold["train_data"]
         test_data = fold["test_data"]
+        warmup_data = fold.get("warmup_data", pd.DataFrame())
         param_names = list(param_grid.keys())
         param_values = list(param_grid.values())
         for combo in product(*param_values):
@@ -495,7 +506,13 @@ def test_cpcv_aggregate_deflation_uses_pooled_trial_sharpes():
             try:
                 strategy = strategy_factory(params)
                 train_signals = strategy.generate_signals(train_data)
-                test_signals = strategy.generate_signals(test_data)
+                # Generate test signals with warmup data, matching the framework
+                if len(warmup_data) > 0:
+                    sig_input = pd.concat([warmup_data, test_data])
+                    test_signals_full = strategy.generate_signals(sig_input)
+                    test_signals = test_signals_full.loc[test_data.index]
+                else:
+                    test_signals = strategy.generate_signals(test_data)
                 if not signals_active(test_signals):
                     continue
                 train_returns = _calculate_strategy_returns(
@@ -889,7 +906,8 @@ def test_cpcv_normal_run_keeps_current_numbers():
 
 def _independent_cpcv_oos_return(panel, n_splits=4, test_size=0.2, lookbacks=(15, 20, 30),
                                   top_quantile=0.4, bottom_quantile=0.2,
-                                  commission=0.0002, slippage=0.0001):
+                                  commission=0.0002, slippage=0.0001,
+                                  latency: int = 0):
     """Recompute the CPCV out-of-sample return from first principles.
 
     Deliberately does NOT use the framework's return calculator, its strategy
@@ -907,16 +925,21 @@ def _independent_cpcv_oos_return(panel, n_splits=4, test_size=0.2, lookbacks=(15
       ``(n_long - n_short) / n_assets`` of the top/bottom quantile buckets,
       with ``n_long = ceil(n_assets * top_quantile)`` and
       ``n_short = ceil(n_assets * bottom_quantile)``.
-    * **Execution**: positions are the signal lagged by one period.
+    * **Execution**: positions are the signal lagged by ``1 + latency`` periods.
     * **Pricing**: the portfolio return is the position times the *mean of
       the per-asset returns* (not the return of the mean price).
     * **Costs**: commission and slippage charged on ``|d position|``.
-    * **Warmup**: the first two bars of every window are dropped (the lagged
-      position is undefined on the first bar and the cost term inherits that
-      NaN on the second). The number of usable bars is returned alongside the
-      return because the warmup convention is *not* observable in the return
-      itself: the dropped bar is a flat-position bar, so it contributes a
-      factor of 1.0 to the product. The bar count is what pins it.
+    * **Warmup**: the strategy's indicator warmup uses the largest numeric
+      parameter in the grid (here ``max(lookbacks)``) bars of history
+      immediately preceding the test window (within the same group), so that
+      rolling indicators are defined from the first bar of the test window.
+      The execution warmup then drops the first ``latency + 2`` bars of the
+      test window (lagged position undefined on first ``1 + latency`` bars,
+      cost term inherits NaN on the next bar). The number of usable bars is
+      returned alongside the return because the warmup convention is *not*
+      observable in the return itself: the dropped bars are flat-position
+      bars, so they contribute a factor of 1.0 to the product. The bar count
+      is what pins it.
     * **Selection**: the combination with the best *training* Sharpe wins;
       combinations that take no position in the test window are skipped.
 
@@ -930,6 +953,13 @@ def _independent_cpcv_oos_return(panel, n_splits=4, test_size=0.2, lookbacks=(15
         (i * group_size, (i + 1) * group_size if i < n_splits - 1 else n_obs)
         for i in range(n_splits)
     ]
+
+    # Execution warmup bars (latency + 2), matching WARMUP_CONVENTION_WALK_FORWARD
+    execution_warmup_bars = latency + 2
+    # Indicator warmup: largest numeric parameter in the grid
+    indicator_warmup_bars = max(lookbacks)
+    # Total warmup bars needed before test window
+    warmup_bars = max(execution_warmup_bars, indicator_warmup_bars)
 
     def net_signal(close, lookback):
         lookback_returns = close.pct_change(lookback)
@@ -948,16 +978,23 @@ def _independent_cpcv_oos_return(panel, n_splits=4, test_size=0.2, lookbacks=(15
         return signal
 
     def window_returns(close, signal):
-        positions = signal.shift(1)
+        # Execution: positions are signal lagged by 1 + latency
+        positions = signal.shift(1 + latency)
         asset_returns = close.pct_change().mean(axis=1)
         costs = positions.diff().abs() * (commission + slippage)
-        return (positions * asset_returns - costs).dropna()
+        returns = positions * asset_returns - costs
+        # Execution warmup: drop first (latency + 2) bars
+        returns.iloc[:execution_warmup_bars] = np.nan
+        return returns.dropna()
 
     oos_series = []
     for test_group in range(n_splits):
         test_start, test_end = groups[test_group]
         test_len = int((test_end - test_start) * test_size)
-        test_indices = list(range(test_start, test_start + test_len))
+        test_start_idx = test_start
+        test_end_idx = test_start + test_len
+        test_indices = list(range(test_start_idx, test_end_idx))
+
         train_indices = []
         for train_group in range(n_splits):
             if train_group == test_group:
@@ -965,22 +1002,36 @@ def _independent_cpcv_oos_return(panel, n_splits=4, test_size=0.2, lookbacks=(15
             group_start, group_end = groups[train_group]
             if train_group < test_group:
                 # purge the end of the earlier groups
-                purged_end = min(group_end, test_start)
+                purged_end = min(group_end, test_start_idx)
                 if purged_end > group_start:
                     train_indices.extend(range(group_start, purged_end))
             else:
                 # embargo the start of the later groups
-                purged_start = max(group_start, test_start + test_len)
+                purged_start = max(group_start, test_end_idx)
                 if purged_start < group_end:
                     train_indices.extend(range(purged_start, group_end))
         train_close = close_all.iloc[train_indices]
         test_close = close_all.iloc[test_indices]
 
+        # Warmup data: bars immediately preceding test window within the same group
+        warmup_start_idx = max(0, test_start_idx - warmup_bars)
+        if warmup_start_idx < test_start_idx:
+            warmup_close = close_all.iloc[warmup_start_idx:test_start_idx]
+        else:
+            warmup_close = close_all.iloc[0:0]
+
         best_sharpe = -np.inf
         best_returns = None
         for lookback in lookbacks:
             train_signal = net_signal(train_close, lookback)
-            test_signal = net_signal(test_close, lookback)
+            # Generate signals on warmup + test data, then slice to test window
+            if len(warmup_close) > 0:
+                sig_input = pd.concat([warmup_close, test_close])
+                test_signal_full = net_signal(sig_input, lookback)
+                test_signal = test_signal_full.loc[test_close.index]
+            else:
+                test_signal = net_signal(test_close, lookback)
+
             if not bool((test_signal.notna() & (test_signal != 0)).any()):
                 # takes no position in the test window -> skipped
                 continue
@@ -1024,7 +1075,7 @@ def test_cpcv_pinned_number_is_reproducible_from_first_principles():
         test_size=0.2,
     )
 
-    independent, independent_bars = _independent_cpcv_oos_return(data)
+    independent, independent_bars = _independent_cpcv_oos_return(data, latency=0)
     framework = results["summary"]["total_oos_return"]
 
     assert math.isclose(framework, independent, rel_tol=1e-12), (

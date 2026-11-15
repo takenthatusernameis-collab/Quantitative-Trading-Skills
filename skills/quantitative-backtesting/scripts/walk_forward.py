@@ -3535,6 +3535,7 @@ def _window_book_diagnostic(
     adv_window: int = 20,
     initial_capital: float = 100000.0,
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
+    warmup_data=None,
 ) -> Optional[Dict[str, Any]]:
     """Panel book diagnostic for one validation window.
 
@@ -3554,11 +3555,19 @@ def _window_book_diagnostic(
         return None
 
     strategy = strategy_factory(best_params)
-    weights = strategy_target_weights(strategy, window_data)
+    # Generate weights with warmup data if provided (for CPCV indicator warmup)
+    if warmup_data is not None and len(warmup_data) > 0:
+        sig_input = pd.concat([warmup_data, window_data])
+        weights_full = strategy_target_weights(strategy, sig_input)
+        weights = weights_full.loc[window_data.index] if weights_full is not None and len(weights_full) == len(sig_input) else None
+        signals_full = strategy.generate_signals(sig_input)
+        signals = signals_full.loc[window_data.index]
+    else:
+        weights = strategy_target_weights(strategy, window_data)
+        signals = strategy.generate_signals(window_data)
     if weights is None:
         return None
 
-    signals = strategy.generate_signals(window_data)
     market = build_market_model(window_data)
     # Same position convention as `_calculate_strategy_returns`: the signal
     # is executed with a one-period delay (plus the execution latency) and
