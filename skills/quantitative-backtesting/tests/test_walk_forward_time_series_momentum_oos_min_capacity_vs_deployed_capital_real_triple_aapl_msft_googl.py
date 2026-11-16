@@ -26,12 +26,18 @@ def test_report_runs_on_triple_real_window_time_series_momentum():
     assert isinstance(report, list) and len(report) == len(CAPACITY_SENSITIVITY_LEVELS)
     assert report[0]["impact_coefficient"] == 0.0
     assert report[0]["oos_min_capacity"] is None
+    assert report[0]["oos_min_capacity_book"] is None
     assert report[0]["capacity_constrained"] is None
+    assert report[0]["capacity_constrained_book"] is None
     assert report[0]["flag"] == "UNMEASURABLE (impact off)"
+    assert report[0]["flag_book"] == "UNMEASURABLE (impact off)"
     for r in report[1:]:
         assert r["deployed_capital"] == DEPLOYED_CAPITAL_REFERENCE
         assert r["flag"] in ("CAPACITY-CONSTRAINED", "NOT CAPACITY-CONSTRAINED")
         assert r["capacity_constrained"] == (r["flag"] == "CAPACITY-CONSTRAINED")
+        assert r["oos_min_capacity_book"] is not None
+        assert r["flag_book"] in ("CAPACITY-CONSTRAINED", "NOT CAPACITY-CONSTRAINED")
+        assert r["capacity_constrained_book"] == (r["flag_book"] == "CAPACITY-CONSTRAINED")
 
     out = buffer.getvalue()
     assert "CAPACITY-CONSTRAINED" in out or "NOT CAPACITY-CONSTRAINED" in out

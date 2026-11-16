@@ -403,6 +403,7 @@ def run_capacity_sensitivity_sweep(grid=CAPACITY_SENSITIVITY_LEVELS):
         capacity_book = summary.get("capacity_book")
         capacity_nw = summary.get("capacity_notional_weighted")
         oos_min_capacity = summary.get("oos_min_capacity")
+        oos_min_capacity_book = summary.get("oos_min_capacity_book")
 
         finite = capacity is not None
         verdict = "MEASURABLE" if finite else "UNMEASURABLE (impact off)"
@@ -412,6 +413,7 @@ def run_capacity_sensitivity_sweep(grid=CAPACITY_SENSITIVITY_LEVELS):
             "capacity_book": capacity_book,
             "capacity_notional_weighted": capacity_nw,
             "oos_min_capacity": oos_min_capacity,
+            "oos_min_capacity_book": oos_min_capacity_book,
             "verdict": verdict,
         })
         cap_str = "None (impact disabled)" if capacity is None else f"${capacity:,.0f}"
@@ -476,21 +478,34 @@ def run_oos_min_capacity_vs_deployed_capital_report(grid=CAPACITY_SENSITIVITY_LE
     report = []
     for r in rows:
         oos_min = r["oos_min_capacity"]
+        oos_min_book = r.get("oos_min_capacity_book")
         if oos_min is None or r["capacity"] is None:
             constrained = None
             flag = "UNMEASURABLE (impact off)"
+            constrained_book = None
+            flag_book = "UNMEASURABLE (impact off)"
         else:
             constrained = float(oos_min) < float(deployed_capital)
             flag = "CAPACITY-CONSTRAINED" if constrained else "NOT CAPACITY-CONSTRAINED"
+            if oos_min_book is None:
+                constrained_book = None
+                flag_book = "UNMEASURABLE (impact off)"
+            else:
+                constrained_book = float(oos_min_book) < float(deployed_capital)
+                flag_book = "CAPACITY-CONSTRAINED" if constrained_book else "NOT CAPACITY-CONSTRAINED"
         report.append({
             "impact_coefficient": r["impact_coefficient"],
             "oos_min_capacity": oos_min,
+            "oos_min_capacity_book": oos_min_book,
             "deployed_capital": float(deployed_capital),
             "capacity_constrained": constrained,
+            "capacity_constrained_book": constrained_book,
             "flag": flag,
+            "flag_book": flag_book,
         })
         print(f"  impact={r['impact_coefficient']:.4f} oos_min_capacity={oos_min} "
-              f"deployed={deployed_capital:,.0f} -> {flag}")
+              f"oos_min_capacity_book={oos_min_book} deployed={deployed_capital:,.0f} "
+              f"-> {flag} / book {flag_book}")
     assert len(report) == len(grid)
     assert report[0]["impact_coefficient"] == 0.0
     return report
