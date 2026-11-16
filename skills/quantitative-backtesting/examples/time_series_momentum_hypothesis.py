@@ -462,6 +462,40 @@ def run_capacity_sensitivity_sweep(grid=CAPACITY_SENSITIVITY_LEVELS):
     return rows
 
 
+DEPLOYED_CAPITAL_REFERENCE = 100000.0
+
+
+def run_oos_min_capacity_vs_deployed_capital_report(grid=CAPACITY_SENSITIVITY_LEVELS,
+                                                   deployed_capital=DEPLOYED_CAPITAL_REFERENCE):
+    """Bounded, falsifiable report: per impact level, does worst-OOS-window
+    capacity exceed a pinned deployed-capital reference? Flags
+    NOT CAPACITY-CONSTRAINED vs CAPACITY-CONSTRAINED honestly per level.
+    Additive; no default/verdict changes.
+    """
+    rows = run_capacity_sensitivity_sweep(grid)
+    report = []
+    for r in rows:
+        oos_min = r["oos_min_capacity"]
+        if oos_min is None or r["capacity"] is None:
+            constrained = None
+            flag = "UNMEASURABLE (impact off)"
+        else:
+            constrained = float(oos_min) < float(deployed_capital)
+            flag = "CAPACITY-CONSTRAINED" if constrained else "NOT CAPACITY-CONSTRAINED"
+        report.append({
+            "impact_coefficient": r["impact_coefficient"],
+            "oos_min_capacity": oos_min,
+            "deployed_capital": float(deployed_capital),
+            "capacity_constrained": constrained,
+            "flag": flag,
+        })
+        print(f"  impact={r['impact_coefficient']:.4f} oos_min_capacity={oos_min} "
+              f"deployed={deployed_capital:,.0f} -> {flag}")
+    assert len(report) == len(grid)
+    assert report[0]["impact_coefficient"] == 0.0
+    return report
+
+
 def run_hypothesis_test(data_path, label):
     data_path = Path(data_path)
     print("=" * 80)
