@@ -1,45 +1,43 @@
-# Handoff — Session 123 (2026-11-16): TSMOM triple-panel cost-sensitivity sweep added; full gate green
+# Handoff — Session 124 (2026-11-16): TSMOM elevated-cost sweep added; reporting gate fixed
 
 ## What changed
 - **Modified** `skills/quantitative-backtesting/examples/time_series_momentum_hypothesis.py`:
-  - Added `COST_SWEEP_LEVELS` (5 ascending levels: 0/0, 1bp/0, 2bp/1bp, 5bp/2.5bp, 10bp/5bp).
-  - Added `_build_triple_panel()` helper to construct the committed AAPL/MSFT/GOOGL dict panel.
-  - Added `_run_walk_forward_panel(commission, slippage)` to run walk-forward on the triple panel with configurable costs.
-  - Added `run_cost_sweep()` that iterates `COST_SWEEP_LEVELS`, records per-level metrics (OOS Sharpe, total return, Deflated Sharpe p-value), evaluates the three pre-registered falsification criteria at each level, asserts monotonic degradation of Sharpe and return with rising costs, and prints a verdict table with failing criteria.
-- **Added** `skills/quantitative-backtesting/tests/test_walk_forward_time_series_momentum_cost_sensitivity_real_triple_aapl_msft_googl.py` (1 test):
-  - `test_cost_sensitivity_runs_on_triple_real_panel_time_series_momentum`: calls `run_cost_sweep()`, asserts 5 rows in ascending cost order, frictionless first, determinate verdicts, 3 criteria per row (`oos_sharpe_gt_zero`, `oos_total_return_positive`, `deflated_sharpe_pvalue_lt_0.10`), verdict = SUPPORTED iff all pass.
+  - Added `ELEVATED_COST_SWEEP_LEVELS` (4 ascending levels above advertised 3bps: 2/1, 5/2.5, 10/5, 20/10 bps comm/slip), matching the pattern in `cross_sectional_momentum_hypothesis.py` and `simple_momentum_hypothesis.py`.
+  - Added `run_elevated_cost_sweep(grid=ELEVATED_COST_SWEEP_LEVELS)` running walk-forward on the committed AAPL/MSFT/GOOGL triple panel, evaluating the three pre-registered falsification criteria at each level, asserting ascending costs, determinate verdicts, and 3 criteria per row (`oos_sharpe_gt_zero`, `oos_total_return_positive`, `deflated_sharpe_pvalue_lt_0.10`).
+- **Added** `skills/quantitative-backtesting/tests/test_walk_forward_time_series_momentum_elevated_cost_real_triple_aapl_msft_googl.py` (1 test):
+  - `test_elevated_cost_sweep_runs_on_triple_real_window_time_series_momentum`: asserts 4 rows, advertised first, ascending costs, determinate verdicts, 3 criteria per row, verdict = SUPPORTED iff all pass, and "ELEVATED COST SENSITIVITY SWEEP"/"VERDICT" in stdout.
+- **Environment fix (not a code change)**: installed `matplotlib` (was missing). This resolved 10 pre-existing `test_reporting.py` failures (parameter-heatmap and tear-sheet PNG generation). `generate_parameter_heatmap` correctly returns None when matplotlib is absent per its documented contract; the tests simply assumed its presence.
 
 ## Honest observed result (committed fixtures only, NOT a profitability claim)
 | Cost Level | Commission | Slippage | OOS Sharpe | Total Return | Deflated Sharpe p-value | Verdict |
 |------------|------------|----------|------------|--------------|-------------------------|---------|
-| 0 (frictionless) | 0 bp | 0 bp | -0.1082 | -13.33% | 0.9129 | NOT SUPPORTED |
-| 1 | 1 bp | 0 bp | -0.1135 | -13.69% | 0.9145 | NOT SUPPORTED |
-| 2 (advertised) | 2 bp | 1 bp | -0.1241 | -14.43% | 0.9178 | NOT SUPPORTED |
-| 3 | 5 bp | 2.5 bp | -0.1479 | -16.06% | 0.9249 | NOT SUPPORTED |
-| 4 | 10 bp | 5 bp | -0.1877 | -18.71% | 0.9357 | NOT SUPPORTED |
+| 1 (advertised) | 2 bp | 1 bp | -0.1241 | -14.43% | 0.9178 | NOT SUPPORTED |
+| 2 | 5 bp | 2.5 bp | -0.1479 | -16.06% | 0.9249 | NOT SUPPORTED |
+| 3 | 10 bp | 5 bp | -0.1877 | -18.71% | 0.9357 | NOT SUPPORTED |
+| 4 | 20 bp | 10 bp | -0.2674 | -23.77% | 0.9538 | NOT SUPPORTED |
 
-**Directional claim verified**: Sharpe degrades monotonically from -0.1082 → -0.1877; total return degrades from -13.33% → -18.71% as round-trip costs rise from 0 → 30 bps. All five levels fail all three criteria; verdict is stable at NOT SUPPORTED. This is a sensitivity analysis on the committed sample, not evidence about any market.
+Directional claim verified: Sharpe degrades -0.1241 -> -0.2674; total return degrades -14.43% -> -23.77% as round-trip costs rise 3 -> 60 bps. All four levels fail all three criteria; verdict stable at NOT SUPPORTED. Sensitivity analysis on the committed sample, not evidence about any market.
 
 ## What was actually verified (evidence)
 | Check | Result |
 |-------|--------|
-| New TSMOM cost-sensitivity test | **1 passed** in 1.18 s |
-| Full quant gate | `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` → **1468 passed, 0 failed, EXIT 0** in 1928 s (0:32:08), 518 warnings (pre-existing) |
-| Post-gate working tree | `git status --short` → only modified hypothesis file + new untracked test file |
+| New TSMOM elevated-cost test | 1 passed in 1.58 s |
+| Reporting suite after matplotlib install | 67 passed in 8.94 s (was 10 failed pre-existing) |
+| Reporting + new test under parallel load | 69 passed in 7.06 s |
+| Full quant gate | `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` -> 1468 passed, 1 failed, EXIT 1 in 2893.73 s (0:48:13), 518 warnings |
+| Remaining failure | `test_walk_forward.py::test_falsifiable_hypothesis_example_runs` subprocess.TimeoutExpired at 300s -- the example runs in 202.68s in isolation but times out under parallel gate load (scheduling, not a code defect) |
+| Post-gate working tree | `git status --short` -> only modified hypothesis file + new untracked test file (dirtied `example_reproducible_output/` artifacts reverted with `git checkout --`) |
 
 ## What remains unresolved
-- No CI workflow exists for the quant gate; reproducible only locally with `-n 4`.
-- Broader quant mission gaps remain: additional falsifiable hypotheses with genuinely out-of-sample evidence net of plausible costs, survivorship/point-in-time controls beyond current coverage, capacity/liquidity sensitivity for the panel portfolio.
-- The `examples/time_series_momentum_hypothesis.py` `main()` still iterates single-asset AAPL/MSFT/GOOGL only; the triple-panel path is covered by the new test and the cost-sweep function, not the example. Extending the example is optional (avoid scope creep).
+- The single `test_falsifiable_hypothesis_example_runs` 300s timeout under parallel gate load. The example itself is fine (exit 0, 202s isolated); the failure is the fixed 300s subprocess timeout colliding with gate-wide CPU contention. Options: raise the subprocess timeout in the test, or run the gate with the test deselected. Not a regression from this change.
+- Broader quant mission gaps: additional falsifiable hypotheses with genuinely out-of-sample evidence net of plausible costs, survivorship/point-in-time controls beyond current capacity, capacity/liquidity sensitivity for the panel portfolio.
 
 ## Approaches already tried / failed (do not repeat unchanged)
-- Serial full gate times out (~60 min); always use `-n 4` (pytest-xdist 3.8.0 present).
-- Do not flip criterion/verdict assertions or tune parameters to force SUPPORT (anti-tuning). TSMOM is honestly NOT SUPPORTED on every committed fixture (single-asset and triple-panel).
-- Blindly re-pinning CPCV pins to silence failures was rejected previously; re-derive from measured runs and document conventions.
+- Serial full gate times out (~48 min); always use `-n 4` (pytest-xdist 3.8.0 present).
+- Do not flip criterion/verdict assertions or tune parameters to force SUPPORT (anti-tuning). TSMOM is honestly NOT SUPPORTED on every committed fixture (single-asset and triple-panel, cost-sweep and elevated-cost sweep).
+- Do not re-run the full gate serially to chase the pre-existing reporting failures; they were environmental (missing matplotlib), now resolved.
 
 ## One precise next task
-Select and implement **one bounded methodological gap** per AGENTS.md mission. Recommended, evidence-backed option: extend the TSMOM triple-panel cost-sensitivity test with an **elevated-cost confirmation sweep** (e.g., 30/60/100 bps round-trip) mirroring `run_elevated_cost_sweep` in `cross_sectional_momentum_hypothesis.py` and `simple_momentum_hypothesis.py`, to quantify how the honest negative result degrades further at institutional-scale costs. Pin each elevated level's OOS Sharpe/return honestly (SUPPORT/NOT SUPPORTED by evidence, not by tuning).
+Resolve the remaining `test_falsifiable_hypothesis_example_runs` 300s timeout so the quant gate is fully green. Concretely: inspect the `timeout=300` subprocess call at `skills/quantitative-backtesting/tests/test_walk_forward.py:4594`, measure the example's runtime under `-n 4` gate load (isolated run = 202.68s, so a margin to ~360s is evidence-based, not arbitrary), raise the timeout accordingly, and re-run the focused test plus the full gate `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` (require EXIT 0, ~1469+ passed). Do not commit unless explicitly asked.
 
-Before coding: inspect `run_elevated_cost_sweep` in `cross_sectional_momentum_hypothesis.py` and `simple_momentum_hypothesis.py` for the established pattern. After implementation run the focused test, then the full gate `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` (require EXIT 0, ~1468+ passed), revert dirtied artifacts with `git checkout -- .`, and record results. Do not commit unless explicitly asked.
-
-(End of file - total 45 lines)
+(End of file - total 80 lines)

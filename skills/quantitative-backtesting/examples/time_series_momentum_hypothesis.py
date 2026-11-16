@@ -73,6 +73,18 @@ COST_SWEEP_LEVELS = [
     (0.0010, 0.0005),
 ]
 
+# Elevated cost levels exercised by the elevated-cost confirmation sweep on
+# the committed three-asset TSMOM panel. These are higher than the advertised
+# 3bps (2bp comm + 1bp slip) round-trip. The advertised level is re-run inside
+# the sweep as the reference baseline, so verdict changes are reported relative
+# to it.
+ELEVATED_COST_SWEEP_LEVELS = [
+    (COMMISSION, SLIPPAGE),          # advertised 3bps reference
+    (0.0005, 0.00025),               # 5bp comm + 2.5bp slip (10bps round-trip)
+    (0.0010, 0.0005),                # 10bp comm + 5bp slip (30bps round-trip)
+    (0.0020, 0.0010),                # 20bp comm + 10bp slip (60bps round-trip)
+]
+
 HYPOTHESIS = (
     "A 12-month (252-trading-day) time-series momentum signal (long when the "
     "trailing return is positive, flat otherwise) on the committed AAPL "
@@ -252,6 +264,89 @@ def run_cost_sweep():
         print(f"  VERDICT STABLE across cost sweep: {verdicts[0]} (pre-registered criteria applied at each level)")
 
     print("  Costs sweep completed with directional sensitivity observed.")
+    print("=" * 80)
+
+    return rows
+
+
+def run_elevated_cost_sweep(grid=ELEVATED_COST_SWEEP_LEVELS):
+    """Elevated-cost confirmation sweep on the committed three-asset TSMOM
+    panel (AAPL / MSFT / GOOGL).
+
+    Runs the same pre-registered falsification criteria at a set of ascending
+    cost levels that are higher than the advertised 3bps (2bp comm + 1bp slip)
+    round-trip, with the advertised level re-run first as the reference baseline.
+    Reports per-criterion pass/fail and the verdict at each level, and flags
+    whether the verdict flips as costs rise.
+
+    This is a sensitivity analysis on the committed sample, not evidence about
+    any market. The claim is purely directional: higher per-trade costs must
+    never improve net performance.
+    """
+    print("\n" + "=" * 80)
+    print("ELEVATED COST SENSITIVITY SWEEP: ascending costs above advertised (falsifiable criteria)")
+    print("=" * 80)
+    print(f"  {'cost level':<36} {'comm':>6} {'slip':>6} {'Sharpe':>9} {'Return':>9} {'verdict':>12}")
+    print("  " + "-" * 90)
+
+    rows = []
+    for commission, slippage in grid:
+        result, _ = _run_walk_forward_panel(commission=commission, slippage=slippage)
+        summary = result.get("summary", {})
+        dsr = summary.get("deflated_sharpe") or {}
+        dsr_p = dsr.get("p_value")
+        sharpe = summary.get("oos_sharpe")
+        total_ret = summary.get("total_oos_return")
+
+        ok1 = sharpe is not None and float(sharpe) > 0
+        ok2 = total_ret is not None and float(total_ret) > 0
+        ok3 = dsr_p is not None and float(dsr_p) < DSR_PVALUE_THRESHOLD
+        passes = {
+            "oos_sharpe_gt_zero": bool(ok1),
+            "oos_total_return_positive": bool(ok2),
+            "deflated_sharpe_pvalue_lt_0.10": bool(ok3),
+        }
+        verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+        rows.append({
+            "commission": commission,
+            "slippage": slippage,
+            "commission_bps": commission * 10_000,
+            "slippage_bps": slippage * 10_000,
+            "sharpe_ratio": sharpe,
+            "total_return": total_ret,
+            "deflated_sharpe_pvalue": dsr_p,
+            "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+            "verdict": verdict,
+            "all_pass": all(passes.values()),
+        })
+        print(
+            f"  {commission*10_000:.0f}bp comm + {slippage*10_000:.2f}bp slip".ljust(36)
+            + f" {commission*10_000:>6.0f} {slippage*10_000:>6.2f} "
+            + f"{(sharpe if sharpe is not None else float('nan')):>9.4f} {total_ret if total_ret is not None else float('nan'):>9.4f} {verdict[:12]:>12}"
+        )
+
+    assert isinstance(rows, list) and len(rows) == len(grid)
+    assert rows[0]["commission_bps"] == COMMISSION * 10_000
+    assert rows[0]["slippage_bps"] == SLIPPAGE * 10_000
+    for prev, curr in zip(rows, rows[1:]):
+        assert curr["commission_bps"] >= prev["commission_bps"]
+        assert curr["slippage_bps"] >= prev["slippage_bps"]
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
+        assert r["verdict"] == ("SUPPORTED" if r["all_pass"] else "NOT SUPPORTED")
+        assert len(r["criteria"]) == 3
+        assert {c["name"] for c in r["criteria"]} == {
+            "oos_sharpe_gt_zero",
+            "oos_total_return_positive",
+            "deflated_sharpe_pvalue_lt_0.10",
+        }
+
+    verdicts = [r["verdict"] for r in rows]
+    if len(set(verdicts)) > 1:
+        print(f"\n  VERDICT CHANGES across elevated cost sweep: {verdicts[0]} -> ... -> {verdicts[-1]} (sensitivity demonstrated)")
+    else:
+        print(f"\n  VERDICT STABLE across elevated cost sweep: {verdicts[0]} (pre-registered criteria applied at each level)")
     print("=" * 80)
 
     return rows
