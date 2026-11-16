@@ -85,6 +85,19 @@ ELEVATED_COST_SWEEP_LEVELS = [
     (0.0020, 0.0010),                # 20bp comm + 10bp slip (60bps round-trip)
 ]
 
+# Market-impact coefficients exercised by the capacity sensitivity sweep on the
+# committed three-asset TSMOM panel, in ascending order. Capacity scales
+# inversely with impact_coefficient (capacity = max_impact * ADV_notional /
+# impact_coefficient for the linear model), so as the market-impact assumption
+# rises the strategy's tradable capacity must fall. The first level disables
+# impact (capacity unmeasurable / None); later levels must each produce a finite
+# positive estimate that is strictly lower than the previous one. Sweeping
+# several levels -- rather than one advertised point plus impact-disabled --
+# guards the capacity path against a silent no-op and reports how far the
+# estimate falls as impact rises. Honest NOT-SUPPORTED outcomes are allowed;
+# defaults are unchanged.
+CAPACITY_SENSITIVITY_LEVELS = [0.0, 0.05, 0.1, 0.2]
+
 HYPOTHESIS = (
     "A 12-month (252-trading-day) time-series momentum signal (long when the "
     "trailing return is positive, flat otherwise) on the committed AAPL "
@@ -117,7 +130,7 @@ def _build_triple_panel():
     return panel
 
 
-def _run_walk_forward_panel(commission=COMMISSION, slippage=SLIPPAGE):
+def _run_walk_forward_panel(commission=COMMISSION, slippage=SLIPPAGE, impact_coefficient=0.0):
     """Run walk-forward analysis on the triple panel with given costs."""
     sys.path.insert(0, str(SCRIPTS_DIR))
     from walk_forward import walk_forward_analysis
@@ -137,6 +150,7 @@ def _run_walk_forward_panel(commission=COMMISSION, slippage=SLIPPAGE):
             step_months=STEP_MONTHS,
             commission=commission,
             slippage=slippage,
+            impact_coefficient=impact_coefficient,
             panel_pricing="book",
             apply_deflation=True,
             validate_pit=True,
@@ -347,6 +361,102 @@ def run_elevated_cost_sweep(grid=ELEVATED_COST_SWEEP_LEVELS):
         print(f"\n  VERDICT CHANGES across elevated cost sweep: {verdicts[0]} -> ... -> {verdicts[-1]} (sensitivity demonstrated)")
     else:
         print(f"\n  VERDICT STABLE across elevated cost sweep: {verdicts[0]} (pre-registered criteria applied at each level)")
+    print("=" * 80)
+
+    return rows
+
+
+def run_capacity_sensitivity_sweep(grid=CAPACITY_SENSITIVITY_LEVELS):
+    """Market-impact capacity sensitivity sweep on the committed three-asset
+    TSMOM walk-forward panel (AAPL / MSFT / GOOGL).
+
+    Sweeps the market-impact coefficient across ascending levels at the
+    advertised 3bps (2bp comm + 1bp slip) round-trip costs and reports how the
+    framework's estimated strategy capacity (notional) behaves. Capacity scales
+    inversely with impact_coefficient (capacity = max_impact * ADV_notional /
+    impact_coefficient for the linear model), so as the market-impact
+    assumption rises the strategy's tradable capacity must fall.
+
+    This is a sensitivity analysis on the committed sample, not evidence about
+    any market, and not a profitability or capacity claim. The claim is purely
+    directional: higher market impact must never increase estimated capacity,
+    the impact-disabled level must report capacity=None (impact path off), and
+    every impact-enabled level must produce a finite positive estimate that is
+    strictly lower than the previous one. Honest outcomes are allowed;
+    defaults are unchanged.
+    """
+    print("\n" + "=" * 80)
+    print("CAPACITY SENSITIVITY SWEEP: rising market impact, falling capacity")
+    print("=" * 80)
+    print(f"  {'impact coeff':>14} {'capacity (notional)':>26} {'book':>20} {'verdict':>14}")
+    print("  " + "-" * 82)
+
+    rows = []
+    for impact_coefficient in grid:
+        result, _ = _run_walk_forward_panel(
+            commission=COMMISSION,
+            slippage=SLIPPAGE,
+            impact_coefficient=impact_coefficient,
+        )
+        summary = result.get("summary", {})
+        capacity = summary.get("capacity")
+        capacity_book = summary.get("capacity_book")
+        capacity_nw = summary.get("capacity_notional_weighted")
+        oos_min_capacity = summary.get("oos_min_capacity")
+
+        finite = capacity is not None
+        verdict = "MEASURABLE" if finite else "UNMEASURABLE (impact off)"
+        rows.append({
+            "impact_coefficient": impact_coefficient,
+            "capacity": capacity,
+            "capacity_book": capacity_book,
+            "capacity_notional_weighted": capacity_nw,
+            "oos_min_capacity": oos_min_capacity,
+            "verdict": verdict,
+        })
+        cap_str = "None (impact disabled)" if capacity is None else f"${capacity:,.0f}"
+        book_str = "N/A" if capacity_book is None else f"${capacity_book:,.0f}"
+        print(
+            f"  {impact_coefficient:>14.4f} {cap_str:>26} {book_str:>20} {verdict[:14]:>14}"
+        )
+
+    assert isinstance(rows, list) and len(rows) == len(grid)
+    assert [r["impact_coefficient"] for r in rows] == list(grid), (
+        "capacity sensitivity levels are not recorded in ascending order"
+    )
+    assert rows[0]["impact_coefficient"] == 0.0, (
+        "first capacity sensitivity level must be impact disabled"
+    )
+    assert rows[0]["capacity"] is None, (
+        "impact-disabled setting must report capacity=None, got "
+        f"{rows[0]['capacity']}"
+    )
+
+    finite = [r for r in rows if r["capacity"] is not None]
+    assert len(finite) >= 2, (
+        "capacity sensitivity sweep must produce at least two finite readings"
+    )
+    for r in finite:
+        assert float(r["capacity"]) > 0, (
+            "capacity estimate must be positive: " f"{r['capacity']}"
+        )
+    # Capacity must fall monotonically as impact_coefficient rises.
+    for prev, curr in zip(finite, finite[1:]):
+        assert curr["capacity"] < prev["capacity"], (
+            "capacity does not fall as market impact rises: "
+            f"impact {prev['impact_coefficient']} -> {prev['capacity']:,.0f}, "
+            f"impact {curr['impact_coefficient']} -> {curr['capacity']:,.0f}"
+        )
+
+    first = finite[0]
+    last = finite[-1]
+    print()
+    print(
+        f"  Capacity falls with market impact: ${first['capacity']:,.0f} at "
+        f"impact_coefficient={first['impact_coefficient']} -> "
+        f"${last['capacity']:,.0f} at impact_coefficient={last['impact_coefficient']}."
+    )
+    print("  Capacity path verified live: the estimate moves with impact_coefficient.")
     print("=" * 80)
 
     return rows
