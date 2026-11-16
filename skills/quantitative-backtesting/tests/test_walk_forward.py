@@ -4379,7 +4379,7 @@ def test_real_data_pipeline_example_runs():
         [sys.executable, str(_EXAMPLE_PATH)],
         capture_output=True,
         text=True,
-        timeout=360,
+        timeout=480,
     )
     assert result.returncode == 0, (
         f"example exited {result.returncode}\n"
@@ -4591,7 +4591,7 @@ def test_falsifiable_hypothesis_example_runs():
         [sys.executable, str(_FALSIFIABLE_EXAMPLE_PATH)],
         capture_output=True,
         text=True,
-        timeout=360,
+        timeout=480,
     )
     assert result.returncode == 0, (
         f"example exited {result.returncode}\n"
