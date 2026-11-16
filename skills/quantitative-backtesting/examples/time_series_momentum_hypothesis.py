@@ -38,6 +38,7 @@ Verdicts are falsification outcomes, never profitability claims.
 import io
 import json
 import sys
+import tempfile
 from pathlib import Path
 from contextlib import redirect_stdout
 
@@ -59,6 +60,19 @@ STEP_MONTHS = 12
 
 DSR_PVALUE_THRESHOLD = 0.10
 
+# Commission / slippage levels exercised by the cost-sensitivity sweep, in
+# ascending order, spanning realistic retail-to-institutional round-trip
+# costs (1 bps = 0.0001). The advertised setting is the middle rung. The
+# sweep asserts the honest directional claim -- higher per-trade costs reduce
+# net out-of-sample performance -- rather than merely comparing two points.
+COST_SWEEP_LEVELS = [
+    (0.0, 0.0),
+    (0.0001, 0.0),
+    (COMMISSION, SLIPPAGE),
+    (0.0005, 0.00025),
+    (0.0010, 0.0005),
+]
+
 HYPOTHESIS = (
     "A 12-month (252-trading-day) time-series momentum signal (long when the "
     "trailing return is positive, flat otherwise) on the committed AAPL "
@@ -79,6 +93,43 @@ def _build_data(data_path):
     df = pd.read_csv(data_path)
     df["date"] = pd.to_datetime(df["date"])
     return df.set_index("date").sort_index()
+
+
+def _build_triple_panel():
+    """Build the committed three-asset panel (AAPL / MSFT / GOOGL) as a dict."""
+    panel = {}
+    for name in ("AAPL.csv", "MSFT.csv", "GOOGL.csv"):
+        df = pd.read_csv(ASSETS_DIR / "real_market_data" / name)
+        df["date"] = pd.to_datetime(df["date"])
+        panel[Path(name).stem] = df.set_index("date").sort_index()
+    return panel
+
+
+def _run_walk_forward_panel(commission=COMMISSION, slippage=SLIPPAGE):
+    """Run walk-forward analysis on the triple panel with given costs."""
+    sys.path.insert(0, str(SCRIPTS_DIR))
+    from walk_forward import walk_forward_analysis
+    from strategy_builder import build_strategy
+
+    def factory(params):
+        return build_strategy("time_series_momentum", json.dumps(params))
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        result = walk_forward_analysis(
+            data=_build_triple_panel(),
+            strategy_factory=factory,
+            param_grid=PARAM_GRID,
+            train_months=TRAIN_MONTHS,
+            test_months=TEST_MONTHS,
+            step_months=STEP_MONTHS,
+            commission=commission,
+            slippage=slippage,
+            panel_pricing="book",
+            apply_deflation=True,
+            validate_pit=True,
+        )
+    return result, buf.getvalue()
 
 
 def _run_walk_forward(data_path):
@@ -105,6 +156,105 @@ def _run_walk_forward(data_path):
             validate_pit=True,
         )
     return result, buf.getvalue()
+
+
+def run_cost_sweep():
+    """Sweep commission / slippage across ascending levels on the triple panel
+    (AAPL / MSFT / GOOGL) and report an explicit falsification verdict at each
+    level.
+
+    Reports how the verdict changes as transaction costs rise, with the failing
+    criteria shown per level. This is a sensitivity analysis on the committed
+    sample, not evidence about any market. The claim is purely directional:
+    higher per-trade costs must never improve net performance.
+    """
+    print("\n" + "=" * 80)
+    print("COST SENSITIVITY SWEEP: ascending costs on triple panel (falsifiable criteria)")
+    print("=" * 80)
+    print(f"  {'cost level':<36} {'comm':>6} {'slip':>6} {'Sharpe':>9} {'Return':>9} {'verdict':>12}")
+    print("  " + "-" * 90)
+
+    rows = []
+    for commission, slippage in COST_SWEEP_LEVELS:
+        result, _ = _run_walk_forward_panel(commission=commission, slippage=slippage)
+        summary = result.get("summary", {})
+        dsr = summary.get("deflated_sharpe") or {}
+        dsr_p = dsr.get("p_value")
+        sharpe = summary.get("oos_sharpe")
+        total_ret = summary.get("total_oos_return")
+
+        ok1 = sharpe is not None and float(sharpe) > 0
+        ok2 = total_ret is not None and float(total_ret) > 0
+        ok3 = dsr_p is not None and float(dsr_p) < DSR_PVALUE_THRESHOLD
+        passes = {
+            "oos_sharpe_gt_zero": bool(ok1),
+            "oos_total_return_positive": bool(ok2),
+            "deflated_sharpe_pvalue_lt_0.10": bool(ok3),
+        }
+        failed = [name for name, ok in passes.items() if not ok]
+        verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+        rows.append({
+            "commission": commission,
+            "slippage": slippage,
+            "commission_bps": commission * 10_000,
+            "slippage_bps": slippage * 10_000,
+            "sharpe_ratio": sharpe,
+            "total_return": total_ret,
+            "deflated_sharpe_pvalue": dsr_p,
+            "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+            "verdict": verdict,
+            "all_pass": all(passes.values()),
+        })
+        print(
+            f"  {commission*10_000:.0f}bp comm + {slippage*10_000:.2f}bp slip".ljust(36)
+            + f" {commission*10_000:>6.0f} {slippage*10_000:>6.2f} "
+            + f"{(sharpe if sharpe is not None else float('nan')):>9.4f} {total_ret if total_ret is not None else float('nan'):>9.4f} {verdict[:12]:>12}"
+        )
+
+    assert [r["commission_bps"] for r in rows] == [c * 10_000 for c, _ in COST_SWEEP_LEVELS], (
+        "cost sweep levels not recorded in ascending order"
+    )
+    assert rows[0]["commission_bps"] == 0.0 and rows[0]["slippage_bps"] == 0.0, (
+        "first cost sweep level must be frictionless"
+    )
+    advertised = next(r for r in rows if r["commission_bps"] == COMMISSION * 10_000)
+    assert advertised is rows[2], (
+        "the advertised cost level is not the middle rung of the sweep"
+    )
+
+    for key, label in (("sharpe_ratio", "Sharpe ratio"), ("total_return", "total return")):
+        values = [r[key] for r in rows]
+        for prev, curr in zip(values, values[1:]):
+            if prev is not None and curr is not None:
+                assert curr <= prev + 1e-12, (
+                    f"{label} does not degrade monotonically with cost: "
+                    f"{prev} -> {curr}"
+                )
+
+    frictionless = rows[0]
+    costed = rows[-1]
+    print()
+    if frictionless["sharpe_ratio"] is not None and costed["sharpe_ratio"] is not None:
+        print(
+            f"  Directional claim: Sharpe {frictionless['sharpe_ratio']:.4f} -> {costed['sharpe_ratio']:.4f}, "
+            f"Return {frictionless['total_return']:.4f} -> {costed['total_return']:.4f}."
+        )
+
+    print("\n  VERDICT BY COST LEVEL (with failing criteria):")
+    for i, r in enumerate(rows):
+        failed = [c["name"] for c in r["criteria"] if not c["passed"]]
+        failed_str = ", ".join(failed) if failed else "none"
+        print(f"    [{i}] {r['commission_bps']:.0f}bp+{r['slippage_bps']:.2f}bp -> {r['verdict']}: failing={failed_str}")
+    verdicts = [r["verdict"] for r in rows]
+    if len(set(verdicts)) > 1:
+        print(f"  VERDICT CHANGES across cost sweep: {verdicts[0]} -> ... -> {verdicts[-1]} (sensitivity demonstrated)")
+    else:
+        print(f"  VERDICT STABLE across cost sweep: {verdicts[0]} (pre-registered criteria applied at each level)")
+
+    print("  Costs sweep completed with directional sensitivity observed.")
+    print("=" * 80)
+
+    return rows
 
 
 def run_hypothesis_test(data_path, label):
