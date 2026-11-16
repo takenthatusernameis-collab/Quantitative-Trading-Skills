@@ -732,6 +732,119 @@ def run_elevated_cost_sweep(data_path, grid=ELEVATED_COST_SWEEP_LEVELS, strategy
     return rows
 
 
+def run_walk_forward_borrow_cost_sweep(
+    data_path,
+    grid=BORROW_COST_SWEEP_LEVELS,
+    strategy="multi_pair_zscore_mean_reversion",
+):
+    """Walk-forward borrow-cost sensitivity sweep on a real-market pair.
+
+    Runs the pre-registered falsification criteria through the committed
+    chronological walk-forward path (train 12 / test 12 months, stepping 12
+    months, book pricing, Deflated Sharpe correction) at a set of ascending
+    annual borrow-cost levels on the short legs of the book, with the
+    advertised frictionless run (borrow_cost=0.0) re-run first as the reference
+    baseline. Reports per-criterion pass/fail and the verdict at each level,
+    and flags whether the verdict flips as borrow costs rise. This is a
+    sensitivity analysis on committed fixtures, not evidence about any market.
+    No claim is made about profitability; verdict flips are the signal that
+    the result is not robust to borrow costs.
+
+    The directional claim is monotonic degradation: higher borrow costs must
+    never improve net out-of-sample performance.
+
+    Returns a list of rows, one per borrow-cost level, each with the borrow
+    cost, the out-of-sample Sharpe / total return, per-criterion pass/fail,
+    and the overall verdict.
+    """
+    data_path = Path(data_path)
+
+    print("\n" + "=" * 80)
+    print("WALK-FORWARD BORROW-COST SENSITIVITY SWEEP: ascending borrow costs (falsifiable criteria)")
+    print("=" * 80)
+    print(f"  {'borrow cost':<12} {'Sharpe':>9} {'Return':>9} {'verdict':>12}")
+    print("  " + "-" * 50)
+
+    rows = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for borrow_cost in grid:
+            with contextlib.redirect_stdout(io.StringIO()):
+                summary = _run_walk_forward_metrics(
+                    data_path, borrow_cost=borrow_cost, strategy=strategy
+                )["summary"]
+            sharpe = summary.get("oos_sharpe")
+            ret = summary.get("total_oos_return")
+            raw_ok = sharpe is not None and float(sharpe) > RAW_SHARPE_THRESHOLD
+            ret_ok = ret is not None and float(ret) > TOTAL_RETURN_THRESHOLD
+            dsr = summary.get("deflated_sharpe") or {}
+            dsr_p = dsr.get("p_value")
+            dsr_ok = dsr_p is not None and float(dsr_p) < DSR_PVALUE_THRESHOLD
+            passes = {
+                "oos_sharpe_gt_zero": bool(raw_ok),
+                "oos_total_return_positive": bool(ret_ok),
+                "deflated_sharpe_pvalue_lt_0.10": bool(dsr_ok),
+            }
+            verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+            rows.append({
+                "borrow_cost": borrow_cost,
+                "oos_sharpe": sharpe,
+                "total_oos_return": ret,
+                "deflated_sharpe_pvalue": dsr_p,
+                "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+                "verdict": verdict,
+                "all_pass": all(passes.values()),
+            })
+            print(
+                f"  {borrow_cost:<12.2f} "
+                + f"{_fmt_num(sharpe):>9} {_fmt_pct(ret):>9} {verdict[:12]:>12}"
+            )
+
+    # Structural sanity: every level produced a determinate row with
+    # consistent per-criterion reporting; the first level is the advertised
+    # frictionless reference.
+    assert len(rows) == len(grid), "borrow-cost sweep did not cover every level"
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
+        assert r["verdict"] == ("SUPPORTED" if r["all_pass"] else "NOT SUPPORTED")
+        assert len(r["criteria"]) == 3
+    assert rows[0]["borrow_cost"] == 0.0, (
+        "first level of borrow sweep must be the frictionless reference"
+    )
+    # Ascending borrow costs.
+    for prev, curr in zip(rows, rows[1:]):
+        assert curr["borrow_cost"] >= prev["borrow_cost"]
+
+    # Honest directional claim: higher borrow cost never improves net
+    # out-of-sample Sharpe or total return.
+    for key, label in (("oos_sharpe", "out-of-sample Sharpe"),
+                       ("total_oos_return", "out-of-sample total return")):
+        for prev, curr in zip(rows, rows[1:]):
+            assert curr[key] <= prev[key] + 1e-12, (
+                f"{label} does not degrade monotonically with borrow cost: "
+                f"{prev[key]} -> {curr[key]}"
+            )
+
+    # Report verdict changes relative to the advertised reference.
+    print("\n  VERDICT BY BORROW-COST LEVEL (with failing criteria):")
+    for i, r in enumerate(rows):
+        failed = [c["name"] for c in r["criteria"] if not c["passed"]]
+        failed_str = ", ".join(failed) if failed else "none"
+        tag = " [advertised frictionless reference]" if i == 0 else ""
+        print(f"    [{i}] borrow_cost={r['borrow_cost']:.2f} -> {r['verdict']}: failing={failed_str}{tag}")
+    verdicts = [r["verdict"] for r in rows]
+    if len(set(verdicts)) > 1:
+        print(f"  VERDICT FLIPS under borrow costs: {verdicts[0]} -> ... -> {verdicts[-1]} (result not robust to borrow costs)")
+    else:
+        print(f"  VERDICT STABLE under borrow costs: {verdicts[0]} (holds at all tested borrow-cost levels)")
+
+    print("  Borrow-cost sweep completed.")
+    print("=" * 80)
+
+    return rows
+
+
 def main():
     import argparse
 

@@ -173,7 +173,109 @@ def test_walk_forward_zscore_pair_real_aapl_googl_metrics_pinned():
     assert "Point-in-time validation passed" in out
 
 
+# Annual borrow-cost levels exercised by the borrow-cost sensitivity sweep on
+# the committed AAPL/GOOGL multi-pair z-score walk-forward path. Ascending,
+# pre-registered, starting at the advertised frictionless reference (borrow
+# disabled). The advertised run (borrow_cost=0.0) is re-run inside the sweep as
+# the reference baseline, so verdict changes are reported relative to it.
+BORROW_COST_SWEEP_LEVELS = [0.0, 0.01, 0.03, 0.05]
+
+
+def _run_walk_forward_borrow(borrow_cost):
+    return walk_forward_analysis(
+        data=_build_panel(),
+        strategy_factory=_factory,
+        param_grid=PARAM_GRID,
+        train_months=TRAIN_MONTHS,
+        test_months=TEST_MONTHS,
+        step_months=STEP_MONTHS,
+        commission=COMMISSION,
+        slippage=SLIPPAGE,
+        borrow_cost=borrow_cost,
+        panel_pricing="book",
+        apply_deflation=True,
+        validate_pit=True,
+    )
+
+
+def test_walk_forward_zscore_pair_real_aapl_googl_borrow_cost_sweep():
+    """Borrow-cost sensitivity sweep for the committed AAPL/GOOGL multi-pair
+    z-score walk-forward path.
+
+    Re-runs the pre-registered falsification criteria at ascending annual
+    borrow-cost levels on the short legs of the book, with the advertised
+    frictionless run (borrow_cost=0.0) re-run first as the reference baseline.
+    Reports per-criterion pass/fail and the verdict at each level, and flags
+    whether the verdict flips as borrow costs rise. Verdict flips are the
+    signal that the result is not robust to borrow costs -- this test never
+    asserts SUPPORTED as a profitability claim.
+
+    Directional claim: higher borrow costs must never improve net out-of-
+    sample performance (monotonic degradation of Sharpe and total return).
+
+    Offline, committed fixtures only; no live network.
+    """
+    for name in ("AAPL.csv", "GOOGL.csv"):
+        assert (SRC / name).exists()
+
+    rows = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for cost in BORROW_COST_SWEEP_LEVELS:
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                summary = _run_walk_forward_borrow(cost)["summary"]
+            rows.append({
+                "borrow_cost": cost,
+                "oos_sharpe": summary["oos_sharpe"],
+                "total_oos_return": summary["total_oos_return"],
+            })
+
+    assert len(rows) == len(BORROW_COST_SWEEP_LEVELS)
+    assert [r["borrow_cost"] for r in rows] == BORROW_COST_SWEEP_LEVELS
+    # First level is the advertised frictionless reference.
+    assert rows[0]["borrow_cost"] == 0.0
+    # Ascending borrow costs.
+    for prev, curr in zip(rows, rows[1:]):
+        assert curr["borrow_cost"] >= prev["borrow_cost"]
+    # Determinate readings at every level.
+    for r in rows:
+        assert r["oos_sharpe"] is not None
+        assert r["total_oos_return"] is not None
+    # Honest directional claim: higher borrow cost never improves net
+    # out-of-sample Sharpe or total return.
+    for key in ("oos_sharpe", "total_oos_return"):
+        for prev, curr in zip(rows, rows[1:]):
+            assert curr[key] <= prev[key] + 1e-12, (
+                f"{key} does not degrade monotonically with borrow cost: "
+                f"{prev[key]} -> {curr[key]}"
+            )
+
+    # Regression guard: pin the observed out-of-sample metrics per borrow-cost
+    # level so the sensitivity evidence is reproducible and any silent change
+    # to the backtest numbers is caught. Relative tolerance only, never exact
+    # equality. Honest outcome: every level is NOT SUPPORTED (negative Sharpe,
+    # negative return, DSR p-value far above 0.10); borrow costs only deepen
+    # the failure, they never rescue it.
+    EXPECTED_METRICS = {
+        0.0:  {"oos_sharpe": -0.28894378705362195, "total_oos_return": -0.029813005194749165},
+        0.01: {"oos_sharpe": -0.3125672385046277,  "total_oos_return": -0.0373685669506677},
+        0.03: {"oos_sharpe": -0.3598102008328013,  "total_oos_return": -0.05230406761889961},
+        0.05: {"oos_sharpe": -0.40704630671365727, "total_oos_return": -0.06700841881285613},
+    }
+    REL_TOL = 1e-3
+    for r in rows:
+        cost = r["borrow_cost"]
+        assert cost in EXPECTED_METRICS, f"unexpected borrow cost level {cost}"
+        exp = EXPECTED_METRICS[cost]
+        for k, expv in exp.items():
+            assert abs(r[k] - expv) <= REL_TOL * max(abs(expv), 1e-9), (
+                f"{k} regression at borrow_cost={cost}: got {r[k]}, expected {expv}"
+            )
+
+
 if __name__ == "__main__":
     test_walk_forward_zscore_pair_real_aapl_googl_runs()
     test_walk_forward_zscore_pair_real_aapl_googl_metrics_pinned()
+    test_walk_forward_zscore_pair_real_aapl_googl_borrow_cost_sweep()
     print("OK")
