@@ -1437,6 +1437,7 @@ def parameter_optimization(
     regime_cost_multipliers: Optional[Dict[str, float]] = None,
     max_impact: Optional[float] = None,
     inert_grid_report: Optional[Dict[str, Any]] = None,
+    regime_report: Optional[Dict[str, Any]] = None,
     **kwargs,
 ) -> List[Dict[str, Any]]:
     """
@@ -1525,6 +1526,14 @@ def parameter_optimization(
             experiment, so the caller can record the finding in its artifact
             and print it next to the ranking. This function never prints, so
             a cost sweep does not repeat the warning once per coefficient.
+        regime_report: Optional dict that receives a regime-dependent
+            performance disclosure for the top-ranked parameter combination
+            (``scope``, ``regime_analysis``, ``regime_robustness``,
+            ``top_params``, ``top_sharpe_ratio`` and ``message``). The
+            ranking is an *in-sample* selection over the full sample, so the
+            disclosure is explicitly labelled as descriptive of that in-sample
+            choice and not as out-of-sample evidence; it changes no ranking
+            number and never makes a cost sweep repeat the analysis.
 
     Returns:
         List of result dictionaries sorted by Sharpe ratio (descending)
@@ -1573,6 +1582,12 @@ def parameter_optimization(
     param_values = list(param_grid.values())
 
     results = []
+    # Return series of the current top-ranked combination, tracked so the
+    # optional regime disclosure describes the same combination the ranking
+    # artifact puts first. Strict `>` keeps the first of equal-Sharpe ties,
+    # matching the stable descending sort below.
+    best_returns = None
+    best_sharpe = -np.inf
 
     for combo in product(*param_values):
         params = dict(zip(param_names, combo))
@@ -1630,6 +1645,10 @@ def parameter_optimization(
                     "total_return": float(total_return),
                     "n_periods": len(returns),
                 }
+
+                if regime_report is not None and sharpe > best_sharpe:
+                    best_sharpe = sharpe
+                    best_returns = returns
 
                 # Add benchmark comparison metrics if benchmark provided
                 if benchmark is not None:
@@ -1693,6 +1712,56 @@ def parameter_optimization(
                 n_trials=n_trials,
                 trial_sharpes=trial_sharpes,
             )
+
+    # Regime disclosure for the top-ranked combination. The ranking is an
+    # in-sample selection over the full sample, so this describes the chosen
+    # combination's in-sample regime profile -- it is not out-of-sample
+    # evidence and must be read as a red-flag diagnostic (is the in-sample
+    # edge concentrated in one regime?), never as validation. A measurement
+    # only: it changes no ranking number and never prints.
+    if regime_report is not None:
+        regime_analysis = None
+        regime_robustness = None
+        regime_error = None
+        try:
+            # add_regime_analysis_to_results reads a single close series. For
+            # a MultiIndex panel, use the first asset's OHLCV frame, matching
+            # the function's own dict-panel convention, instead of passing the
+            # panel and failing on the (field, symbol) columns.
+            regime_data = data
+            if isinstance(data, pd.DataFrame) and isinstance(data.columns, pd.MultiIndex):
+                first_symbol = data.columns.get_level_values(-1)[0]
+                regime_data = data.xs(first_symbol, axis=1, level=-1)
+            regime_results = add_regime_analysis_to_results(
+                {"returns": best_returns} if best_returns is not None else {},
+                regime_data,
+                returns_key="returns",
+                close_key="close",
+                config=RegimeConfig(),
+            )
+            regime_analysis = regime_results.get("regime_analysis")
+            if regime_analysis is not None:
+                regime_robustness = regime_concentration_diagnostic(regime_analysis)
+        except Exception as exc:  # pragma: no cover - defensive
+            regime_error = f"{type(exc).__name__}: {exc}"
+
+        top = results[0] if results else None
+        regime_report.update({
+            "scope": "in_sample_parameter_selection",
+            "regime_analysis": regime_analysis,
+            "regime_robustness": regime_robustness,
+            "regime_error": regime_error,
+            "top_params": (top.get("params") if isinstance(top, dict) else None),
+            "top_sharpe_ratio": (
+                float(top.get("sharpe_ratio")) if isinstance(top, dict) else None
+            ),
+            "message": (
+                "Descriptive regime profile of the top-ranked in-sample parameter "
+                "combination. The ranking is an in-sample selection over the full "
+                "sample; this is not out-of-sample evidence and does not validate "
+                "the strategy."
+            ),
+        })
 
     return results
 
@@ -9812,6 +9881,7 @@ def run_parameter_optimization(args) -> int:
     # The inert-grid measurement is requested from the analysis function so
     # the ranking artifact can record it. The function itself never prints.
     inert_report: Dict[str, Any] = {}
+    regime_report: Dict[str, Any] = {}
     results = parameter_optimization(
         data=data,
         strategy_factory=strategy_factory,
@@ -9834,6 +9904,7 @@ def run_parameter_optimization(args) -> int:
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         inert_grid_report=inert_report,
+        regime_report=regime_report,
         regime_impact_coefficients=regime_impact_coefficients,
         regime_cost_multipliers=regime_cost_multipliers,
     )
@@ -9961,6 +10032,18 @@ def run_parameter_optimization(args) -> int:
             default=str,
         )
     print(f"Inert-grid record saved to: {inert_path}")
+
+    # Persist the regime disclosure next to the ranking. It describes the
+    # top-ranked combination's in-sample regime profile and is explicitly
+    # labelled as descriptive, not out-of-sample evidence, so a reader of the
+    # ranking artifact cannot mistake it for validation. Written as a separate
+    # record so the ranked list itself stays a plain list (the same pattern as
+    # the inert-grid record) and no consumer of the ranking sees new keys.
+    if regime_report:
+        regime_path = output_dir / "parameter_optimization_regime.json"
+        with open(regime_path, "w") as f:
+            json.dump(regime_report, f, indent=2, default=str)
+        print(f"Regime record saved to: {regime_path}")
 
     # Persist PIT validation results alongside the optimization artifact
     # so the data-integrity baseline is reproducible with the search.
