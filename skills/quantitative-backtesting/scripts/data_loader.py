@@ -414,6 +414,13 @@ def load_data(
             df[col] = pd.to_numeric(df[col], errors="coerce")
     provenance.transformations_applied.append("coerced_numeric_types")
 
+    # Adjustment integrity: adj_close must be point-in-time consistent with
+    # close and the recorded split/dividend factors (no future leakage).
+    # Run on the original data BEFORE split adjustment so the guard validates
+    # the vendor's adj_close against the vendor's close and splits columns.
+    # Advisory only: stored on the provenance, never flips validation_passed.
+    provenance.adjustment_integrity = adjustment_integrity_guard(df)
+
     # Apply split adjustments if requested
     if adjust_splits and "splits" in df.columns:
         df = _adjust_for_splits(df)
@@ -428,11 +435,6 @@ def load_data(
 
     # Validate data and update provenance
     validate_data(df, provenance=provenance)
-
-    # Adjustment integrity: adj_close must be point-in-time consistent with
-    # close and the recorded split/dividend factors (no future leakage).
-    # Advisory only: stored on the provenance, never flips validation_passed.
-    provenance.adjustment_integrity = adjustment_integrity_guard(df)
 
     if return_provenance:
         return df, provenance
@@ -826,6 +828,8 @@ def load_multi_symbol(
     for sym in unique_symbols:
         sym_df = df[df[sym_col] == sym].drop(columns=[sym_col])
         if validate_data(sym_df):
+            # Adjustment integrity: run on original data BEFORE split adjustment
+            adj_integrity = adjustment_integrity_guard(sym_df)
             if adjust_splits and "splits" in sym_df.columns:
                 sym_df = _adjust_for_splits(sym_df)
             result[sym] = sym_df
@@ -852,7 +856,7 @@ def load_multi_symbol(
                     prov.date_range_final = (
                         str(result[sym].index.min()), str(result[sym].index.max())
                     )
-                prov.adjustment_integrity = adjustment_integrity_guard(result[sym])
+                prov.adjustment_integrity = adj_integrity
                 provenance_dict[sym] = prov
         else:
             dropped_symbols.append(sym)
