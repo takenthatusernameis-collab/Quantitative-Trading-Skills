@@ -85,6 +85,19 @@ ELEVATED_COST_SWEEP_LEVELS = [
     (0.0020, 0.0010),                # 20bp comm + 10bp slip (60bps round-trip)
 ]
 
+# Borrow / funding cost levels exercised by the borrow/funding sensitivity
+# sweep on the committed three-asset TSMOM panel, annualized as decimals,
+# ascending. Borrow applies to short exposure; the long/flat TSMOM path never
+# shorts, so borrow is inert for it. Funding applies to gross exposure above
+# 1x leverage; on the triple panel several assets can be long concurrently, so
+# funding can bite and must never improve net performance as it rises.
+BORROW_FUNDING_COST_SWEEP_LEVELS = [
+    (0.0, 0.0),           # frictionless reference
+    (0.01, 0.01),         # 1%/yr borrow + 1%/yr funding
+    (0.03, 0.03),         # 3%/yr borrow + 3%/yr funding
+    (0.05, 0.05),         # 5%/yr borrow + 5%/yr funding
+]
+
 # Market-impact coefficients exercised by the capacity sensitivity sweep on the
 # committed three-asset TSMOM panel, in ascending order. Capacity scales
 # inversely with impact_coefficient (capacity = max_impact * ADV_notional /
@@ -130,7 +143,8 @@ def _build_triple_panel():
     return panel
 
 
-def _run_walk_forward_panel(commission=COMMISSION, slippage=SLIPPAGE, impact_coefficient=0.0):
+def _run_walk_forward_panel(commission=COMMISSION, slippage=SLIPPAGE, impact_coefficient=0.0,
+                            borrow_cost=0.0, funding_cost=0.0):
     """Run walk-forward analysis on the triple panel with given costs."""
     sys.path.insert(0, str(SCRIPTS_DIR))
     from walk_forward import walk_forward_analysis
@@ -151,6 +165,8 @@ def _run_walk_forward_panel(commission=COMMISSION, slippage=SLIPPAGE, impact_coe
             commission=commission,
             slippage=slippage,
             impact_coefficient=impact_coefficient,
+            borrow_cost=borrow_cost,
+            funding_cost=funding_cost,
             panel_pricing="book",
             apply_deflation=True,
             validate_pit=True,
@@ -361,6 +377,125 @@ def run_elevated_cost_sweep(grid=ELEVATED_COST_SWEEP_LEVELS):
         print(f"\n  VERDICT CHANGES across elevated cost sweep: {verdicts[0]} -> ... -> {verdicts[-1]} (sensitivity demonstrated)")
     else:
         print(f"\n  VERDICT STABLE across elevated cost sweep: {verdicts[0]} (pre-registered criteria applied at each level)")
+    print("=" * 80)
+
+    return rows
+
+
+def run_borrow_funding_cost_sweep(grid=BORROW_FUNDING_COST_SWEEP_LEVELS):
+    """Borrow / funding cost sensitivity sweep on the committed triple panel
+    (AAPL / MSFT / GOOGL) for the existing long/flat time-series momentum
+    path.
+
+    Sweeps annualized borrow_cost and funding_cost across ascending levels and
+    reports the pre-registered falsification criteria at each level. This is a
+    sensitivity analysis on the committed sample, not evidence about any market,
+    and not a profitability or capacity claim.
+
+    Cost mechanics:
+      - borrow cost applies to short exposure (sum_i max(-w_i, 0)). The long/flat
+        TSMOM path never shorts, so borrow cost is inert for it.
+      - funding cost applies to gross exposure in excess of 1x leverage. On the
+        triple panel several assets can be long simultaneously, so funding cost
+        can bite; it must never improve net performance as it rises.
+
+    Directional claim: higher borrow/funding must never improve net
+    out-of-sample performance (Sharpe and total return are non-increasing with
+    cost). Honest outcomes are allowed; defaults are unchanged.
+    """
+    print("\n" + "=" * 80)
+    print("BORROW / FUNDING COST SENSITIVITY SWEEP: ascending annualized rates")
+    print("=" * 80)
+    print(f"  {'level':<8} {'borrow /yr':>11} {'funding /yr':>12} {'Sharpe':>9} {'Return':>9} {'verdict':>12}")
+    print("  " + "-" * 70)
+
+    rows = []
+    for borrow_cost, funding_cost in grid:
+        result, _ = _run_walk_forward_panel(
+            commission=COMMISSION,
+            slippage=SLIPPAGE,
+            borrow_cost=borrow_cost,
+            funding_cost=funding_cost,
+        )
+        summary = result.get("summary", {})
+        dsr = summary.get("deflated_sharpe") or {}
+        dsr_p = dsr.get("p_value")
+        sharpe = summary.get("oos_sharpe")
+        total_ret = summary.get("total_oos_return")
+
+        ok1 = sharpe is not None and float(sharpe) > 0
+        ok2 = total_ret is not None and float(total_ret) > 0
+        ok3 = dsr_p is not None and float(dsr_p) < DSR_PVALUE_THRESHOLD
+        passes = {
+            "oos_sharpe_gt_zero": bool(ok1),
+            "oos_total_return_positive": bool(ok2),
+            "deflated_sharpe_pvalue_lt_0.10": bool(ok3),
+        }
+        verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+        rows.append({
+            "borrow_cost": borrow_cost,
+            "funding_cost": funding_cost,
+            "borrow_cost_bps_per_year": borrow_cost * 10_000,
+            "funding_cost_bps_per_year": funding_cost * 10_000,
+            "sharpe_ratio": sharpe,
+            "total_return": total_ret,
+            "deflated_sharpe_pvalue": dsr_p,
+            "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+            "verdict": verdict,
+            "all_pass": all(passes.values()),
+        })
+        print(
+            f"  {len(rows):<8} {borrow_cost*10_000:>11.2f}bp {funding_cost*10_000:>12.2f}bp "
+            + f"{(sharpe if sharpe is not None else float('nan')):>9.4f} {total_ret if total_ret is not None else float('nan'):>9.4f} {verdict[:12]:>12}"
+        )
+
+    assert isinstance(rows, list) and len(rows) == len(grid)
+    assert rows[0]["borrow_cost"] == 0.0 and rows[0]["funding_cost"] == 0.0, (
+        "first borrow/funding level must be frictionless"
+    )
+    for prev, curr in zip(rows, rows[1:]):
+        assert curr["borrow_cost"] >= prev["borrow_cost"], "borrow cost levels not ascending"
+        assert curr["funding_cost"] >= prev["funding_cost"], "funding cost levels not ascending"
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
+        assert r["verdict"] == ("SUPPORTED" if r["all_pass"] else "NOT SUPPORTED")
+        assert len(r["criteria"]) == 3
+        assert {c["name"] for c in r["criteria"]} == {
+            "oos_sharpe_gt_zero",
+            "oos_total_return_positive",
+            "deflated_sharpe_pvalue_lt_0.10",
+        }
+
+    for key, label in (("sharpe_ratio", "Sharpe ratio"), ("total_return", "total return")):
+        values = [r[key] for r in rows]
+        for prev, curr in zip(values, values[1:]):
+            if prev is not None and curr is not None:
+                assert curr <= prev + 1e-12, (
+                    f"{label} improves with borrow/funding cost: {prev} -> {curr}"
+                )
+
+    frictionless = rows[0]
+    costed = rows[-1]
+    print()
+    if frictionless["sharpe_ratio"] is not None and costed["sharpe_ratio"] is not None:
+        print(
+            f"  Directional claim: Sharpe {frictionless['sharpe_ratio']:.4f} -> {costed['sharpe_ratio']:.4f}, "
+            f"Return {frictionless['total_return']:.4f} -> {costed['total_return']:.4f} as annualized "
+            f"borrow/funding rise 0.00/0.00 -> {costed['borrow_cost']:.2f}/{costed['funding_cost']:.2f}."
+        )
+
+    print("\n  VERDICT BY BORROW/FUNDING LEVEL (with failing criteria):")
+    for i, r in enumerate(rows):
+        failed = [c["name"] for c in r["criteria"] if not c["passed"]]
+        failed_str = ", ".join(failed) if failed else "none"
+        print(f"    [{i}] borrow={r['borrow_cost']:.4f}/yr funding={r['funding_cost']:.4f}/yr -> {r['verdict']}: failing={failed_str}")
+    verdicts = [r["verdict"] for r in rows]
+    if len(set(verdicts)) > 1:
+        print(f"  VERDICT CHANGES across borrow/funding sweep: {verdicts[0]} -> ... -> {verdicts[-1]} (sensitivity demonstrated)")
+    else:
+        print(f"  VERDICT STABLE across borrow/funding sweep: {verdicts[0]} (pre-registered criteria applied at each level)")
+    print("  Borrow / funding cost sweep completed with directional sensitivity observed.")
     print("=" * 80)
 
     return rows
