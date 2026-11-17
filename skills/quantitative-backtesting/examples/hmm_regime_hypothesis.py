@@ -63,6 +63,19 @@ COMMISSION = 0.0002  # 2 bps
 SLIPPAGE = 0.0001    # 1 bps
 MIN_REGIME_OBS = 21
 
+# Commission / slippage levels exercised by the cost-sensitivity sweep, in
+# ascending order, spanning realistic retail-to-institutional round-trip
+# costs (1 bps = 0.0001). The advertised setting is the middle rung. The
+# sweep asserts the honest directional claim -- higher per-trade costs reduce
+# net out-of-sample performance -- rather than merely comparing two points.
+COST_SWEEP_LEVELS = [
+    (0.0, 0.0),
+    (0.0001, 0.0),
+    (COMMISSION, SLIPPAGE),
+    (0.0005, 0.00025),
+    (0.0010, 0.0005),
+]
+
 HYPOTHESIS = (
     "On committed AAPL real-market data (2020-01-02..2025-12-30), an SMA 20/50 "
     "crossover strategy has positive walk-forward out-of-sample Sharpe and total "
@@ -195,7 +208,9 @@ def _build_hmm_regime_report(oos_returns: pd.Series, close: pd.Series) -> dict:
     }
 
 
-def run_hmm_regime_hypothesis(data_path: Path = DATA_PATH) -> dict:
+def run_hmm_regime_hypothesis(data_path: Path = DATA_PATH,
+                              commission: float = COMMISSION,
+                              slippage: float = SLIPPAGE) -> dict:
     if not data_path.exists():
         raise FileNotFoundError(f"Missing committed real-market fixture: {data_path}")
 
