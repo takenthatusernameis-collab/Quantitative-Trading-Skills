@@ -57,6 +57,18 @@
     "plausible_max_annualized_alpha": 0.1,
     "message": "No significance test was run on this record, so there is no test resolution to report."
   },
+  "sharpe_ci": {
+    "lower": -1.5768874658585228,
+    "upper": 0.632387988345766,
+    "confidence": 0.95,
+    "point_estimate": -0.4038915961932067,
+    "block_size": 15,
+    "n_observations": 503,
+    "n_bootstrap": 2000,
+    "method": "stationary_bootstrap",
+    "status": "resolvable",
+    "reason": null
+  },
   "initial_capital": 100000,
   "capacity": null,
   "capacity_trend": null,

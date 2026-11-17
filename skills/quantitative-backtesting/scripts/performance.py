@@ -721,6 +721,17 @@ def calculate_metrics(
         from walk_forward import _build_test_resolution  # noqa: E402
     metrics["test_resolution"] = _build_test_resolution(metrics, returns)
 
+    # --- Sharpe Confidence Interval (Stationary Bootstrap) ---
+    # Report a percentile confidence interval for the annualized Sharpe ratio
+    # using the stationary bootstrap with Politis-White (2004) automatic block
+    # length. This is a measurement, not a correction: it reports uncertainty
+    # around the point Sharpe without changing any other reported number.
+    try:
+        from monte_carlo import sharpe_confidence_interval  # noqa: E402
+    except ImportError:
+        from monte_carlo import sharpe_confidence_interval  # noqa: E402
+    metrics["sharpe_ci"] = sharpe_confidence_interval(returns)
+
     # Store config metadata
     if config:
         metrics["initial_capital"] = config.get("initial_capital", None)

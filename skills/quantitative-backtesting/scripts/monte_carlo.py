@@ -116,6 +116,160 @@ def estimate_optimal_block_size(
     return max(2, min(b_opt, n // 2))
 
 
+def sharpe_confidence_interval(
+    returns: pd.Series,
+    confidence: float = 0.95,
+    n_bootstrap: int = 2000,
+    block_size: Union[int, str, None] = "auto",
+    risk_free: float = 0.02,
+    seed: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Compute a stationary-bootstrap percentile confidence interval for the annualized Sharpe ratio.
+
+    Uses the stationary bootstrap (Politis & Romano, 1994) with automatic block length
+    selection following Politis & White (2004) to preserve the autocorrelation structure
+    of the return series.
+
+    This is a measurement, not a correction: it reports the uncertainty around the
+    point Sharpe estimate without changing any other reported number (the point Sharpe,
+    Deflated Sharpe, Probabilistic Sharpe, or test resolution are unchanged).
+
+    Args:
+        returns: Per-period return series (e.g., daily, weekly, monthly).
+        confidence: Confidence level for the interval (default 0.95 -> 95% CI).
+        n_bootstrap: Number of bootstrap resamples (default 2000).
+        block_size: If int, fixed block size. If "auto" (default), estimate using
+                    Politis & White (2004) via `estimate_optimal_block_size`.
+                    If None, use simple i.i.d. bootstrap (no autocorrelation preservation).
+        risk_free: Annualized risk-free rate for excess return calculation (default 0.02).
+        seed: Random seed for reproducibility.
+
+    Returns:
+        Dictionary with:
+            - 'lower': Lower bound of the CI (annualized Sharpe), or None if degenerate.
+            - 'upper': Upper bound of the CI (annualized Sharpe), or None if degenerate.
+            - 'confidence': Confidence level (e.g., 0.95).
+            - 'point_estimate': The annualized Sharpe ratio computed on the original series.
+            - 'block_size': The block size used (int, or None for i.i.d.).
+            - 'n_observations': Number of return observations used.
+            - 'n_bootstrap': Number of bootstrap resamples.
+            - 'method': "stationary_bootstrap" or "iid_bootstrap".
+            - 'status': "resolvable" if CI computed, "degenerate" if zero-variance or n<2.
+            - 'reason': Reason for degenerate status (None when resolvable).
+
+    Degenerate contract (mirrors DSR/PSR handling):
+        - n < 2: returns status="degenerate", lower/upper=None, reason="insufficient_observations"
+        - Zero variance (constant returns): returns status="degenerate", lower/upper=None,
+          reason="zero_variance", point_estimate=0.0
+        - Never returns NaN or raises; always returns a well-formed dict.
+    """
+    returns = returns.dropna()
+    n_obs = len(returns)
+
+    # Degenerate case: insufficient observations
+    if n_obs < 2:
+        return {
+            "lower": None,
+            "upper": None,
+            "confidence": float(confidence),
+            "point_estimate": 0.0,
+            "block_size": None,
+            "n_observations": int(n_obs),
+            "n_bootstrap": int(n_bootstrap),
+            "method": "stationary_bootstrap" if block_size is not None else "iid_bootstrap",
+            "status": "degenerate",
+            "reason": "insufficient_observations",
+        }
+
+    # Compute point estimate (annualized Sharpe with risk-free adjustment)
+    ann_factor = _annualization_factor(returns.index)
+    rf_period = risk_free / ann_factor
+    excess = returns - rf_period
+    vol = excess.std()
+
+    # Degenerate case: zero variance (or near-zero due to floating point)
+    # Use a small threshold to catch constant returns that have tiny numerical variance
+    if vol <= 0 or not np.isfinite(vol) or vol < np.finfo(float).eps:
+        return {
+            "lower": None,
+            "upper": None,
+            "confidence": float(confidence),
+            "point_estimate": 0.0,
+            "block_size": None,
+            "n_observations": int(n_obs),
+            "n_bootstrap": int(n_bootstrap),
+            "method": "stationary_bootstrap" if block_size is not None else "iid_bootstrap",
+            "status": "degenerate",
+            "reason": "zero_variance",
+        }
+
+    point_estimate = float(excess.mean() / vol * np.sqrt(ann_factor))
+
+    # Determine block size
+    block_size_used = None
+    if isinstance(block_size, str) and block_size.lower() == "auto":
+        block_size_used = estimate_optimal_block_size(returns)
+    elif isinstance(block_size, int) and block_size > 1:
+        block_size_used = block_size
+    else:
+        block_size_used = None
+
+    method = "stationary_bootstrap" if block_size_used is not None else "iid_bootstrap"
+
+    # Seeded RNG for reproducibility
+    rng = np.random.default_rng(seed) if seed is not None else None
+
+    bootstrap_sharpes = []
+    returns_array = excess.values
+
+    for _ in range(n_bootstrap):
+        if block_size_used is not None and block_size_used > 1 and block_size_used < n_obs:
+            # Stationary block bootstrap (Politis & Romano, 1994)
+            p_new_block = 1.0 / block_size_used
+            sim_excess = np.empty(n_obs)
+            pos = int(rng.integers(0, n_obs)) if rng is not None else int(np.random.randint(0, n_obs))
+
+            for i in range(n_obs):
+                sim_excess[i] = returns_array[pos]
+                draw = rng.random() if rng is not None else np.random.random()
+                if draw < p_new_block:
+                    pos = int(rng.integers(0, n_obs)) if rng is not None else int(np.random.randint(0, n_obs))
+                else:
+                    pos = (pos + 1) % n_obs
+        else:
+            # Simple i.i.d. bootstrap
+            if rng is not None:
+                sim_excess = returns_array[rng.integers(0, n_obs, size=n_obs)]
+            else:
+                sim_excess = np.random.choice(returns_array, size=n_obs, replace=True)
+
+        sim_vol = sim_excess.std()
+        if sim_vol > 0:
+            sim_sharpe = float(sim_excess.mean() / sim_vol * np.sqrt(ann_factor))
+        else:
+            sim_sharpe = 0.0
+        bootstrap_sharpes.append(sim_sharpe)
+
+    bootstrap_sharpes = np.array(bootstrap_sharpes)
+    alpha = (1 - confidence) / 2
+    lower = float(np.percentile(bootstrap_sharpes, alpha * 100))
+    upper = float(np.percentile(bootstrap_sharpes, (1 - alpha) * 100))
+
+    return {
+        "lower": lower,
+        "upper": upper,
+        "confidence": float(confidence),
+        "point_estimate": point_estimate,
+        "block_size": int(block_size_used) if block_size_used is not None else None,
+        "n_observations": int(n_obs),
+        "n_bootstrap": int(n_bootstrap),
+        "method": method,
+        "status": "resolvable",
+        "reason": None,
+    }
+
+
 def monte_carlo_simulation(
     base_returns: pd.Series,
     n_simulations: int = 2000,

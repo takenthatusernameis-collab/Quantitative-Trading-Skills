@@ -1200,6 +1200,14 @@ def walk_forward_analysis(
     # verdict and no reported number.
     summary["test_resolution"] = _build_test_resolution(summary, oos_returns)
 
+    # Sharpe confidence interval (stationary bootstrap, Politis-White block length)
+    # Additive reporting: brackets the point oos_sharpe without changing it.
+    try:
+        from monte_carlo import sharpe_confidence_interval  # noqa: E402
+    except ImportError:
+        from monte_carlo import sharpe_confidence_interval  # noqa: E402
+    summary["sharpe_ci"] = sharpe_confidence_interval(oos_returns)
+
     summary["bias_controls_engaged"] = bool(pit_results is not None)
 
     # Family-level multiple-testing diagnostics (additive, opt-in). When a
@@ -4533,6 +4541,14 @@ def cpcv_analysis(
     # reported number.
     summary["test_resolution"] = _build_test_resolution(summary, oos_returns)
 
+    # Sharpe confidence interval (stationary bootstrap, Politis-White block length)
+    # Additive reporting: brackets the point oos_sharpe without changing it.
+    try:
+        from monte_carlo import sharpe_confidence_interval  # noqa: E402
+    except ImportError:
+        from monte_carlo import sharpe_confidence_interval  # noqa: E402
+    summary["sharpe_ci"] = sharpe_confidence_interval(oos_returns)
+
     # Add per-fold benchmark metrics to summary
     if fold_benchmark_stats:
         summary['benchmark_metrics_per_fold'] = fold_benchmark_stats
@@ -7091,6 +7107,14 @@ def out_of_sample_validation(
     # unfalsifiable one. A measurement, not a correction: it changes no
     # verdict and no reported number.
     summary["test_resolution"] = _build_test_resolution(summary, test_returns)
+
+    # Sharpe confidence interval (stationary bootstrap, Politis-White block length)
+    # Additive reporting: brackets the point test_sharpe without changing it.
+    try:
+        from monte_carlo import sharpe_confidence_interval  # noqa: E402
+    except ImportError:
+        from monte_carlo import sharpe_confidence_interval  # noqa: E402
+    summary["sharpe_ci"] = sharpe_confidence_interval(test_returns)
 
     # Add benchmark information to summary (only for single benchmark for backward compatibility)
     if test_benchmark and not isinstance(test_benchmark, list):
