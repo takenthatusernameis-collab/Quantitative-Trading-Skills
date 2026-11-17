@@ -105,6 +105,19 @@ BORROW_FUNDING_COST_SWEEP_LEVELS = [
 # out-of-sample performance as it rises.
 BORROW_COST_SWEEP_SHORT_CAPABLE_LEVELS = [0.0, 0.01, 0.03, 0.05]
 
+# Regime-conditional commission/slippage multiplier levels exercised by the
+# stressed-regime cost sensitivity sweep on the short-capable TSMOM triple
+# panel. The multiplier scales per-trade commission + slippage in every
+# detected regime; 1.0 is the baseline (no change). As the stressed-regime cost
+# load rises, net out-of-sample performance must not improve -- it is a
+# sensitivity analysis (does the verdict survive stressed-regime costs), not a
+# profitability claim.
+REGIME_COST_SWEEP_SHORT_CAPABLE_LEVELS = [1.0, 2.0, 5.0, 10.0]
+
+# Realized annualized borrow cost (3%/yr) applied to short exposure on the
+# short-capable path, so borrow is a real cost rather than inert.
+REGIME_COST_SWEEP_SHORT_CAPABLE_BORROW_COST = 0.03
+
 # Market-impact coefficients exercised by the capacity sensitivity sweep on the
 # committed three-asset TSMOM panel, in ascending order. Capacity scales
 # inversely with impact_coefficient (capacity = max_impact * ADV_notional /
@@ -508,7 +521,8 @@ def run_borrow_funding_cost_sweep(grid=BORROW_FUNDING_COST_SWEEP_LEVELS):
     return rows
 
 
-def _run_walk_forward_short_capable(borrow_cost=0.0, lookback=252):
+def _run_walk_forward_short_capable(borrow_cost=0.0, lookback=252,
+                                    regime_cost_multipliers=None):
     """Run walk-forward on the triple panel with allow_short=True (short-capable)."""
     sys.path.insert(0, str(SCRIPTS_DIR))
     from walk_forward import walk_forward_analysis
@@ -529,6 +543,7 @@ def _run_walk_forward_short_capable(borrow_cost=0.0, lookback=252):
             commission=COMMISSION,
             slippage=SLIPPAGE,
             borrow_cost=borrow_cost,
+            regime_cost_multipliers=regime_cost_multipliers,
             panel_pricing="book",
             apply_deflation=True,
             validate_pit=True,
@@ -615,6 +630,105 @@ def run_borrow_cost_sweep_short_capable(grid=BORROW_COST_SWEEP_SHORT_CAPABLE_LEV
             )
 
     print("\n  Borrow cost sweep completed: borrow is a real cost that never improves net performance.")
+    print("=" * 80)
+
+    return rows
+
+
+def run_regime_cost_sweep_short_capable(grid=REGIME_COST_SWEEP_SHORT_CAPABLE_LEVELS,
+                                        borrow_cost=REGIME_COST_SWEEP_SHORT_CAPABLE_BORROW_COST):
+    """Stressed-regime cost sensitivity sweep on the short-capable TSMOM
+    triple panel (AAPL / MSFT / GOOGL).
+
+    Sweeps a regime-conditional commission/slippage multiplier applied to
+    every detected regime, with borrow cost real (short-capable path,
+    allow_short=True, borrow not inert). Net out-of-sample performance must
+    not improve as the stressed-regime cost load rises. This is a sensitivity
+    analysis on the committed sample, not a profitability claim; it codifies
+    that stressed/illiquid regimes cost more to trade in, never less.
+
+    Regimes are detected on the panel's first asset's close (the asset
+    walk_forward_analysis uses for panel regime detection), so loading every
+    label it produces puts the full stressed-regime cost load on every trade.
+    """
+    print("\n" + "=" * 80)
+    print("STRESSED-REGIME COST SENSITIVITY SWEEP: short-capable TSMOM, borrow real")
+    print("=" * 80)
+    print(f"  {'level':<8} {'regime mult':>12} {'borrow /yr':>11} {'Sharpe':>9} {'Return':>9} {'verdict':>12}")
+    print("  " + "-" * 70)
+
+    panel = _build_triple_panel()
+    sys.path.insert(0, str(SCRIPTS_DIR))
+    from regime_detection import detect_combined_regime
+    labels = detect_combined_regime(next(iter(panel.values()))["close"]).unique()
+    label_strings = [str(label) for label in labels]
+
+    rows = []
+    for mult in grid:
+        mapping = {lab: float(mult) for lab in label_strings}
+        result, _ = _run_walk_forward_short_capable(
+            borrow_cost=borrow_cost,
+            regime_cost_multipliers=mapping,
+        )
+        summary = result.get("summary", {})
+        dsr = summary.get("deflated_sharpe") or {}
+        dsr_p = dsr.get("p_value")
+        sharpe = summary.get("oos_sharpe")
+        total_ret = summary.get("total_oos_return")
+
+        ok1 = sharpe is not None and float(sharpe) > 0
+        ok2 = total_ret is not None and float(total_ret) > 0
+        ok3 = dsr_p is not None and float(dsr_p) < DSR_PVALUE_THRESHOLD
+        passes = {
+            "oos_sharpe_gt_zero": bool(ok1),
+            "oos_total_return_positive": bool(ok2),
+            "deflated_sharpe_pvalue_lt_0.10": bool(ok3),
+        }
+        verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+        rows.append({
+            "regime_multiplier": mult,
+            "borrow_cost": borrow_cost,
+            "sharpe_ratio": sharpe,
+            "total_return": total_ret,
+            "deflated_sharpe_pvalue": dsr_p,
+            "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+            "verdict": verdict,
+            "all_pass": all(passes.values()),
+        })
+        print(
+            f"  {len(rows):<8} {mult:>12.1f} {borrow_cost*10_000:>11.2f}bp "
+            + f"{(sharpe if sharpe is not None else float('nan')):>9.4f} {total_ret if total_ret is not None else float('nan'):>9.4f} {verdict[:12]:>12}"
+        )
+
+    assert isinstance(rows, list) and len(rows) == len(grid)
+    assert rows[0]["regime_multiplier"] == 1.0, "first regime multiplier level must be the baseline (1.0)"
+    for prev, curr in zip(rows, rows[1:]):
+        assert curr["regime_multiplier"] > prev["regime_multiplier"], "regime multiplier levels not strictly ascending"
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
+        assert r["verdict"] == ("SUPPORTED" if r["all_pass"] else "NOT SUPPORTED")
+        assert len(r["criteria"]) == 3
+        assert {c["name"] for c in r["criteria"]} == {
+            "oos_sharpe_gt_zero",
+            "oos_total_return_positive",
+            "deflated_sharpe_pvalue_lt_0.10",
+        }
+    # Directional claim: net performance must not improve as the stressed-regime
+    # cost load rises (borrow is real, not inert, on the short-capable path).
+    for prev, curr in zip(rows, rows[1:]):
+        if prev["sharpe_ratio"] is not None and curr["sharpe_ratio"] is not None:
+            assert curr["sharpe_ratio"] <= prev["sharpe_ratio"] + 1e-12, (
+                "Sharpe improves with stressed-regime cost load on short-capable variant: "
+                f"{prev['sharpe_ratio']} -> {curr['sharpe_ratio']}"
+            )
+        if prev["total_return"] is not None and curr["total_return"] is not None:
+            assert curr["total_return"] <= prev["total_return"] + 1e-12, (
+                "total return improves with stressed-regime cost load on short-capable variant: "
+                f"{prev['total_return']} -> {curr['total_return']}"
+            )
+
+    print("\n  Stressed-regime cost sweep completed: higher stressed-regime cost load never improves net performance.")
     print("=" * 80)
 
     return rows
