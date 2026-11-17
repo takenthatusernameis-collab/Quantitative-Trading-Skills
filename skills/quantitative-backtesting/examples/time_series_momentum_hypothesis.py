@@ -98,6 +98,13 @@ BORROW_FUNDING_COST_SWEEP_LEVELS = [
     (0.05, 0.05),         # 5%/yr borrow + 5%/yr funding
 ]
 
+# Borrow cost levels exercised by the short-capable borrow-realism sweep on the
+# committed three-asset TSMOM panel, annualized as decimals, ascending. With
+# allow_short=True the strategy can carry short exposure, so borrow cost is no
+# longer inert: it applies to short exposure and must never improve net
+# out-of-sample performance as it rises.
+BORROW_COST_SWEEP_SHORT_CAPABLE_LEVELS = [0.0, 0.01, 0.03, 0.05]
+
 # Market-impact coefficients exercised by the capacity sensitivity sweep on the
 # committed three-asset TSMOM panel, in ascending order. Capacity scales
 # inversely with impact_coefficient (capacity = max_impact * ADV_notional /
@@ -496,6 +503,118 @@ def run_borrow_funding_cost_sweep(grid=BORROW_FUNDING_COST_SWEEP_LEVELS):
     else:
         print(f"  VERDICT STABLE across borrow/funding sweep: {verdicts[0]} (pre-registered criteria applied at each level)")
     print("  Borrow / funding cost sweep completed with directional sensitivity observed.")
+    print("=" * 80)
+
+    return rows
+
+
+def _run_walk_forward_short_capable(borrow_cost=0.0, lookback=252):
+    """Run walk-forward on the triple panel with allow_short=True (short-capable)."""
+    sys.path.insert(0, str(SCRIPTS_DIR))
+    from walk_forward import walk_forward_analysis
+    from strategy_builder import build_strategy
+
+    def factory(params):
+        return build_strategy("time_series_momentum", json.dumps(params))
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        result = walk_forward_analysis(
+            data=_build_triple_panel(),
+            strategy_factory=factory,
+            param_grid={"lookback": [lookback], "allow_short": [True]},
+            train_months=TRAIN_MONTHS,
+            test_months=TEST_MONTHS,
+            step_months=STEP_MONTHS,
+            commission=COMMISSION,
+            slippage=SLIPPAGE,
+            borrow_cost=borrow_cost,
+            panel_pricing="book",
+            apply_deflation=True,
+            validate_pit=True,
+        )
+    return result, buf.getvalue()
+
+
+def run_borrow_cost_sweep_short_capable(grid=BORROW_COST_SWEEP_SHORT_CAPABLE_LEVELS):
+    """Borrow cost realism sweep on the short-capable TSMOM triple panel.
+
+    Runs time-series momentum with ``allow_short=True`` so the strategy can
+    carry short exposure, and sweeps annualized borrow_cost across ascending
+    levels. Borrow cost applies to short exposure and must never improve net
+    out-of-sample performance as it rises. This is a sensitivity analysis on
+    the committed sample, not a profitability claim; it codifies that borrow
+    is a real cost, not a free source of return. Because the long/flat default
+    path never shorts, borrow is inert there; this sweep exercises the path
+    where borrow actually bites.
+    """
+    print("\n" + "=" * 80)
+    print("BORROW COST REALISM SWEEP: short-capable TSMOM, ascending borrow cost")
+    print("=" * 80)
+    print(f"  {'level':<8} {'borrow /yr':>12} {'Sharpe':>9} {'Return':>9} {'verdict':>12}")
+    print("  " + "-" * 60)
+
+    rows = []
+    for borrow_cost in grid:
+        result, _ = _run_walk_forward_short_capable(borrow_cost=borrow_cost)
+        summary = result.get("summary", {})
+        dsr = summary.get("deflated_sharpe") or {}
+        dsr_p = dsr.get("p_value")
+        sharpe = summary.get("oos_sharpe")
+        total_ret = summary.get("total_oos_return")
+
+        ok1 = sharpe is not None and float(sharpe) > 0
+        ok2 = total_ret is not None and float(total_ret) > 0
+        ok3 = dsr_p is not None and float(dsr_p) < DSR_PVALUE_THRESHOLD
+        passes = {
+            "oos_sharpe_gt_zero": bool(ok1),
+            "oos_total_return_positive": bool(ok2),
+            "deflated_sharpe_pvalue_lt_0.10": bool(ok3),
+        }
+        verdict = "SUPPORTED" if all(passes.values()) else "NOT SUPPORTED"
+        rows.append({
+            "borrow_cost": borrow_cost,
+            "borrow_cost_bps_per_year": borrow_cost * 10_000,
+            "sharpe_ratio": sharpe,
+            "total_return": total_ret,
+            "deflated_sharpe_pvalue": dsr_p,
+            "criteria": [{"name": name, "passed": ok} for name, ok in passes.items()],
+            "verdict": verdict,
+            "all_pass": all(passes.values()),
+        })
+        print(
+            f"  {len(rows):<8} {borrow_cost*10_000:>12.2f}bp "
+            + f"{(sharpe if sharpe is not None else float('nan')):>9.4f} {total_ret if total_ret is not None else float('nan'):>9.4f} {verdict[:12]:>12}"
+        )
+
+    assert isinstance(rows, list) and len(rows) == len(grid)
+    assert rows[0]["borrow_cost"] == 0.0, "first borrow cost level must be frictionless"
+    for prev, curr in zip(rows, rows[1:]):
+        assert curr["borrow_cost"] > prev["borrow_cost"], "borrow cost levels not strictly ascending"
+    for r in rows:
+        assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
+        assert r["verdict"] == ("SUPPORTED" if r["all_pass"] else "NOT SUPPORTED")
+        assert len(r["criteria"]) == 3
+        assert {c["name"] for c in r["criteria"]} == {
+            "oos_sharpe_gt_zero",
+            "oos_total_return_positive",
+            "deflated_sharpe_pvalue_lt_0.10",
+        }
+    # Directional claim: net performance must not improve as borrow cost rises.
+    for prev, curr in zip(rows, rows[1:]):
+        if prev["sharpe_ratio"] is not None and curr["sharpe_ratio"] is not None:
+            assert curr["sharpe_ratio"] <= prev["sharpe_ratio"] + 1e-12, (
+                "Sharpe improves with borrow cost on short-capable variant: "
+                f"{prev['sharpe_ratio']} -> {curr['sharpe_ratio']}"
+            )
+        if prev["total_return"] is not None and curr["total_return"] is not None:
+            assert curr["total_return"] <= prev["total_return"] + 1e-12, (
+                "total return improves with borrow cost on short-capable variant: "
+                f"{prev['total_return']} -> {curr['total_return']}"
+            )
+
+    print("\n  Borrow cost sweep completed: borrow is a real cost that never improves net performance.")
     print("=" * 80)
 
     return rows
