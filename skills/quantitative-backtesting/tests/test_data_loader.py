@@ -1112,11 +1112,11 @@ def test_adjustment_integrity_guard_details_populated():
     assert len(details["cum_split_after"]) == 10
     # Before split (indices 0-4), cum_split_after should be 2.0
     for i in range(5):
-        key = df.index[i]
+        key = str(df.index[i])
         assert abs(details["cum_split_after"][key] - 2.0) < 0.1
     # After split (indices 5-9), cum_split_after should be 1.0
     for i in range(5, 10):
-        key = df.index[i]
+        key = str(df.index[i])
         assert abs(details["cum_split_after"][key] - 1.0) < 0.1
 
 

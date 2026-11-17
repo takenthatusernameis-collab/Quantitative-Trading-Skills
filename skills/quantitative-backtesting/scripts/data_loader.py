@@ -242,8 +242,8 @@ def adjustment_integrity_guard(df: pd.DataFrame) -> Dict[str, Any]:
     n_mismatch = int((rel_dev > 1e-6).sum())
 
     details = {
-        "cum_split_after": cum.to_dict(),
-        "expected_adj_close": expected.to_dict(),
+        "cum_split_after": {str(k): v for k, v in cum.to_dict().items()},
+        "expected_adj_close": {str(k): v for k, v in expected.to_dict().items()},
         "max_relative_deviation": max_rel_dev,
         "n_mismatch": n_mismatch,
     }
