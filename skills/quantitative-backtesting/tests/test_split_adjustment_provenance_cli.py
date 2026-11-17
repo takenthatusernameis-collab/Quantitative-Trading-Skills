@@ -28,13 +28,16 @@ def _make_panel(path: Path, corrupt_adj_close: bool = False) -> None:
             c = float(close[i])
             # Fixture consistent with --adjust-splits: load_multi_symbol applies
             # _adjust_for_splits (dividing pre-split OHLC by split ratio) but
-            # leaves adj_close unchanged, then adjustment_integrity_guard checks
-            # adj_close against the adjusted close and recorded split factors.
-            # For AAA's 2:1 split at i==30, cum_split_after is 2.0 pre-split and
-            # 1.0 on/after, so expected adj_close is (adjusted close)/2 pre-split
-            # => c/4 from raw c, and c on/after.
+            # leaves adj_close unchanged, then adjustment_integrity_guard runs
+            # on the ORIGINAL data BEFORE adjustment and checks adj_close
+            # against the raw close and recorded split factors. Under the
+            # guard's convention (a split with ratio r at date k means close on
+            # and after k is already at the post-split level), expected
+            # adj_close[t] == close[t] / cum_split_after[t], so for AAA's 2:1
+            # split at i==30 the pre-split adj_close is raw c/2 and on/after it
+            # is c. (c/4 would be off by a factor of 2 and fail the guard.)
             if sym == "AAA" and i < 30:
-                adj_close = c / 4.0
+                adj_close = c / 2.0
             else:
                 adj_close = c
             if corrupt_adj_close and sym == "AAA":
