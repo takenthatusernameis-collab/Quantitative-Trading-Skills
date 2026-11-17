@@ -6246,6 +6246,7 @@ def out_of_sample_validation(
     impact_model: str = DEFAULT_IMPACT_MODEL,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
     regime_cost_multipliers: Optional[Dict[str, float]] = None,
+    survivorship: Optional[Dict[str, Any]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -6313,6 +6314,13 @@ def out_of_sample_validation(
             record the result in `results["point_in_time_validation"]` and
             `summary["bias_controls_engaged"]`. Default True on the programmatic
             API; default True (CLI parity, non-strict: warns, never aborts).
+        survivorship: Optional pre-computed survivorship-bias detection report
+            (as returned by `detect_survivorship_bias`). When provided, it is
+            included in the results and summary. When None and the input data is
+            a multi-asset panel, survivorship bias detection is run automatically
+            and the result is included. This enables bias controls engagement
+            tracking for panel data without requiring the caller to run detection
+            separately.
 
     Returns:
         Dictionary with:
@@ -6351,6 +6359,29 @@ def out_of_sample_validation(
         if not isinstance(data.index, pd.DatetimeIndex):
             raise ValueError("Data must be indexed by DatetimeIndex")
         data = data.sort_index()
+
+    # Survivorship bias detection for multi-asset panels. Runs when
+    # survivorship is not pre-computed and the data is a panel (MultiIndex
+    # columns). This mirrors the walk-forward / CPCV paths so the
+    # out-of-sample framework reports the same bias-controls engagement.
+    if survivorship is None and isinstance(data.columns, pd.MultiIndex):
+        # Convert MultiIndex panel back to dict for detect_survivorship_bias
+        panel_dict = {}
+        for col in data.columns:
+            field, symbol = col
+            if symbol not in panel_dict:
+                panel_dict[symbol] = pd.DataFrame(index=data.index)
+            panel_dict[symbol][field] = data[col].values
+        survivorship = detect_survivorship_bias(panel_dict)
+        if survivorship.get("bias_score", 0.0) > 0.0:
+            print("Survivorship bias detection results:")
+            for k, v in survivorship.items():
+                if k == "bias_score":
+                    print(f"  bias_score: {v:.4f}")
+                elif v:
+                    print(f"  {k}: {v}")
+        else:
+            print("Survivorship bias detection passed (no bias detected).")
 
     # Point-in-time validation (look-ahead / stale-data / temporal-ordering
     # screening). Opt-in on the programmatic API; the CLI engages it via
@@ -6575,6 +6606,8 @@ def out_of_sample_validation(
             "validation_performance": None,
             "test_performance": None,
             "test_benchmark": None,
+            "point_in_time_validation": pit_results,
+            "survivorship_bias": survivorship,
             "summary": {
                 "error": diagnosis["message"],
                 "no_selection_diagnosis": diagnosis,
@@ -6582,6 +6615,8 @@ def out_of_sample_validation(
                 "inert_grid_message": inert_report["message"],
                 "walk_forward_window": wf_window,
                 "train_val_test_split": split_info,
+                "bias_controls_engaged": bool(pit_results is not None or survivorship is not None),
+                "survivorship_bias": survivorship,
             },
         }
 
@@ -7061,7 +7096,7 @@ def out_of_sample_validation(
     if test_benchmark and not isinstance(test_benchmark, list):
         summary.update(test_benchmark)
 
-    summary["bias_controls_engaged"] = bool(pit_results is not None)
+    summary["bias_controls_engaged"] = bool(pit_results is not None or survivorship is not None)
 
     # Surface market-impact capacity estimate in the summary when impact is
     # enabled and estimable; keep None (backward compatible) otherwise.
@@ -7142,6 +7177,7 @@ def out_of_sample_validation(
         "test_performance": test_performance,
         "test_benchmark": test_benchmark,
         "point_in_time_validation": pit_results,
+        "survivorship_bias": survivorship,
         "summary": summary,
     }
 
@@ -7628,6 +7664,7 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         regime_cost_multipliers=regime_cost_multipliers,
+        survivorship=survivorship,
     )
     test_perf = results.get("test_performance") or {}
     summary = results.get("summary") or {}
@@ -11275,6 +11312,7 @@ def run_out_of_sample_validation(args) -> int:
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
+        survivorship=survivorship,
     )
 
     if pit_results is not None:
@@ -11525,7 +11563,7 @@ def run_out_of_sample_validation(args) -> int:
             "deflate": bool(getattr(args, "deflate", False)),
             "param_grid": param_grid,
             "point_in_time_validation": pit_results,
-            "bias_controls_engaged": pit_results is not None,
+            "bias_controls_engaged": bool(pit_results is not None or survivorship is not None),
             "benchmark": getattr(args, "benchmark", None),
             "total_return_benchmark": total_return_benchmark,
             "benchmark_commission": bench_commission,
