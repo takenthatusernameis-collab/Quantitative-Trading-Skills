@@ -16,7 +16,7 @@
 | `test_falsifiable_hypothesis_example_runs_end_to_end` (direct) | Timed out at 120s with no output (subprocess of `falsifiable_hypothesis_example.py`) |
 | `test_the_example_prints_the_resolution_and_the_reading_note` (direct) | Timed out at 120s with no output |
 | Direct run of `falsifiable_hypothesis_example.py` | Ran 2+ minutes at 75% CPU, **zero stdout**, killed; confirms environmental slowness, not a code regression |
-| Full gate minus the 2 slow tests | Reached ~14% in ~8 min before termination (background, `-n 4`) |
+| Full gate minus the 2 slow tests | Exceeded 590s without finishing in foreground (`-n 4`); confirms sustained environmental slowness across re-runs |
 
 ## The 2 remaining failures (environmental, NOT regressions)
 Both are `subprocess.TimeoutExpired` on `examples/falsifiable_hypothesis_example.py`:

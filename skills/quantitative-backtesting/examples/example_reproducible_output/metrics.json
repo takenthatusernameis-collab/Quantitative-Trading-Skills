@@ -58,8 +58,8 @@
     "message": "No significance test was run on this record, so there is no test resolution to report."
   },
   "sharpe_ci": {
-    "lower": -1.5768874658585228,
-    "upper": 0.632387988345766,
+    "lower": -1.5341464105077696,
+    "upper": 0.6681821626231287,
     "confidence": 0.95,
     "point_estimate": -0.4038915961932067,
     "block_size": 15,
