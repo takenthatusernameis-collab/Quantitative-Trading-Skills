@@ -1421,6 +1421,29 @@ def test_real_market_cost_sensitivity_sweep_msft():
         assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
         assert len(r["criteria"]) == 5
 
+    # Single-benchmark override: criterion 5 (Deflated Alpha Ratio) is
+    # unavailable (N=1). Assert the sweep reports it as unavailable, not failed.
+    assert all(r["n_benchmarks"] == 1 for r in rows), (
+        "single-benchmark sweep must have n_benchmarks == 1, got "
+        f"{[r['n_benchmarks'] for r in rows]}"
+    )
+    assert all(r["deflated_alpha_ratio"] is None for r in rows), (
+        "single-benchmark sweep must have DAR == None, got "
+        f"{[r['deflated_alpha_ratio'] for r in rows]}"
+    )
+    assert all(not r["deflated_alpha_ratio_evaluable"] for r in rows), (
+        "single-benchmark sweep must have DAR evaluable == False, got "
+        f"{[r['deflated_alpha_ratio_evaluable'] for r in rows]}"
+    )
+    for r in rows:
+        criterion_5 = next(c for c in r["criteria"] if c["name"] == "deflated_alpha_ratio_gt_0.90")
+        assert criterion_5["evaluable"] is False, (
+            "criterion 5 must be unavailable under single-benchmark override"
+        )
+        assert criterion_5["passed"] is False, (
+            "unavailable criterion must still be counted as not satisfied"
+        )
+
     # Extend machinery separation audit to MSFT vs GOOGL pair.
     from falsifiable_hypothesis_example import run_hypothesis_test
 
@@ -1508,6 +1531,29 @@ def test_real_market_cost_sensitivity_sweep_aapl_msft():
     for r in rows:
         assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
         assert len(r["criteria"]) == 5
+
+    # Single-benchmark override: criterion 5 (Deflated Alpha Ratio) is
+    # unavailable (N=1). Assert the sweep reports it as unavailable, not failed.
+    assert all(r["n_benchmarks"] == 1 for r in rows), (
+        "single-benchmark sweep must have n_benchmarks == 1, got "
+        f"{[r['n_benchmarks'] for r in rows]}"
+    )
+    assert all(r["deflated_alpha_ratio"] is None for r in rows), (
+        "single-benchmark sweep must have DAR == None, got "
+        f"{[r['deflated_alpha_ratio'] for r in rows]}"
+    )
+    assert all(not r["deflated_alpha_ratio_evaluable"] for r in rows), (
+        "single-benchmark sweep must have DAR evaluable == False, got "
+        f"{[r['deflated_alpha_ratio_evaluable'] for r in rows]}"
+    )
+    for r in rows:
+        criterion_5 = next(c for c in r["criteria"] if c["name"] == "deflated_alpha_ratio_gt_0.90")
+        assert criterion_5["evaluable"] is False, (
+            "criterion 5 must be unavailable under single-benchmark override"
+        )
+        assert criterion_5["passed"] is False, (
+            "unavailable criterion must still be counted as not satisfied"
+        )
 
     # Extend machinery separation audit to AAPL vs MSFT pair and verify split
     # separation audit holds (held-out test set never used in selection).
@@ -1605,6 +1651,29 @@ def test_real_market_cost_sensitivity_sweep_googl_aapl():
     for r in rows:
         assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
         assert len(r["criteria"]) == 5
+
+    # Single-benchmark override: criterion 5 (Deflated Alpha Ratio) is
+    # unavailable (N=1). Assert the sweep reports it as unavailable, not failed.
+    assert all(r["n_benchmarks"] == 1 for r in rows), (
+        "single-benchmark sweep must have n_benchmarks == 1, got "
+        f"{[r['n_benchmarks'] for r in rows]}"
+    )
+    assert all(r["deflated_alpha_ratio"] is None for r in rows), (
+        "single-benchmark sweep must have DAR == None, got "
+        f"{[r['deflated_alpha_ratio'] for r in rows]}"
+    )
+    assert all(not r["deflated_alpha_ratio_evaluable"] for r in rows), (
+        "single-benchmark sweep must have DAR evaluable == False, got "
+        f"{[r['deflated_alpha_ratio_evaluable'] for r in rows]}"
+    )
+    for r in rows:
+        criterion_5 = next(c for c in r["criteria"] if c["name"] == "deflated_alpha_ratio_gt_0.90")
+        assert criterion_5["evaluable"] is False, (
+            "criterion 5 must be unavailable under single-benchmark override"
+        )
+        assert criterion_5["passed"] is False, (
+            "unavailable criterion must still be counted as not satisfied"
+        )
 
     # Machinery separation audit on GOOGL vs AAPL pair.
     from falsifiable_hypothesis_example import run_hypothesis_test
