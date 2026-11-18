@@ -217,8 +217,13 @@ def sharpe_confidence_interval(
 
     method = "stationary_bootstrap" if block_size_used is not None else "iid_bootstrap"
 
-    # Seeded RNG for reproducibility
-    rng = np.random.default_rng(seed) if seed is not None else None
+    # Seeded RNG for reproducibility.
+    # Default to a fixed seed (42) when the caller does not provide one, so the
+    # reported CI is deterministic across runs of the same return series. This
+    # matters because the CI is serialized into committed artifacts (e.g. the
+    # reproducible worked example) where byte-identical output is required; a
+    # fresh unseeded bootstrap would make those artifacts non-reproducible.
+    rng = np.random.default_rng(seed if seed is not None else 42)
 
     bootstrap_sharpes = []
     returns_array = excess.values
