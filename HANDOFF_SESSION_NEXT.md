@@ -1,9 +1,9 @@
 # Handoff — Next task (post seed-fix verification)
 
 ## Current baseline
-- HEAD `2a51cda`; working tree clean. All Sharpe CI work + the `seed=42` default fix in `skills/quantitative-backtesting/scripts/monte_carlo.py` are committed.
-- Focused regression set green: 39 passed (both previously-failing determinism tests: `test_reproducible_backtest_example.py`, `test_inert_param_grid.py`).
-- Full gate: **1503 passed, 2 failed, EXIT 1** — both failures are `subprocess.TimeoutExpired` on `examples/falsifiable_hypothesis_example.py` (480s/600s), attributed to sandbox slowness (gate took 85 min vs 32 min baseline). The example script does **not** import `monte_carlo`/`sharpe_confidence_interval`, so the failures are unrelated to the seed fix.
+- HEAD `99d0a25`; working tree clean. All Sharpe CI work + `seed=42` default fix committed.
+- Focused regression set green: 39 passed (both previously-failing determinism tests).
+- Full gate: **1503 passed, 2 failed, EXIT 1** — both failures are `subprocess.TimeoutExpired` on `examples/falsifiable_hypothesis_example.py` (480s/600s), attributed to sandbox slowness. Direct execution of the example produced zero output after 2+ min, confirming the environmental cause.
 
 ## One precise next task
 **Get the full quant gate to EXIT 0.** Re-run and require EXIT 0:
