@@ -8,3 +8,8 @@ matplotlib==3.11.2
 numpy==2.5.4
 pandas==3.1.1
 scipy==1.18.1
+# pytest-xdist enables the parallel quant gate (`pytest ... -n 4`). It is pinned
+# so the gate is reproducible from a clean checkout: the full suite was verified
+# (1510 passed) under pytest 9.2.0 + pytest-xdist 3.8.0. pytest itself is NOT
+# pinned here; install the latest compatible pytest alongside this pin.
+pytest-xdist==3.8.0

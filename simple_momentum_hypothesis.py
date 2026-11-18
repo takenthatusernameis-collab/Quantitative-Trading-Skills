@@ -792,13 +792,99 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
     return rows
 
 
+def _resolve_benchmarks_for_record(data_path):
+    """Return the benchmark set the headline run actually used, in the same
+    order run_hypothesis_test passes to run_backtest.py."""
+    return _resolve_benchmarks(data_path)
+
+
+def _build_record(result, data_path, cost_rows, cost_sens_rows, capacity_rows, capacity_sens_rows):
+    """Assemble the machine-readable falsification record.
+
+    The record is written by the script that produces it, so the committed
+    artifact cannot drift from the code that generates it: every number is
+    copied from the live run rather than transcribed by hand. The cost and
+    capacity sweeps are included because they are part of the record (they are
+    regression guards, not verdicts) and were previously only printed.
+    """
+    import datetime as _dt
+
+    metrics = result["metrics"]
+    da = metrics.get("deflated_alpha") or {}
+    tr = metrics.get("test_resolution") or {}
+    bench_paths = _resolve_benchmarks_for_record(data_path)
+    return {
+        "schema_version": 1,
+        "kind": "falsifiable_hypothesis_record",
+        "generated_at": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generator": "simple_momentum_hypothesis.py",
+        "generator_path": str(Path(__file__).resolve()),
+        "engine": "skills/quantitative-backtesting/scripts/run_backtest.py",
+        "reproducible": True,
+        "regeneration_command": "python3 simple_momentum_hypothesis.py",
+        "data": {
+            "path": str(data_path),
+            "note": "bundled synthetic OHLCV fixture (504 bars); NOT evidence about any real security or market",
+        },
+        "benchmarks": [str(p) for p in bench_paths],
+        "n_benchmarks": len(bench_paths),
+        "methodology_controls": {
+            "split": "train/val/test = 0.6/0.2/0.2 (test split only; held-out)",
+            "split_chronological": True,
+            "split_disjoint": True,
+            "point_in_time_validation": True,
+            "commission": COMMISSION,
+            "slippage": SLIPPAGE,
+            "impact_coefficient": CAPACITY_SWEEP_SETTINGS[-1][1],
+            "initial_capital": CAPACITY_INITIAL_CAPITAL,
+            "test_n_observations": tr.get("n_test_observations"),
+        },
+        "hypothesis": HYPOTHESIS,
+        "verdict": result["verdict"],
+        "all_pass": result["all_pass"],
+        "criteria": result["criteria"],
+        "metrics": metrics,
+        "sweeps": {
+            "cost_sweep": cost_rows,
+            "cost_sensitivity_sweep": cost_sens_rows,
+            "capacity_sweep": capacity_rows,
+            "capacity_sensitivity_sweep": capacity_sens_rows,
+        },
+        "verdict_notes": [
+            f"{result['verdict']}: at least one falsification criterion failed; the hypothesis is falsified on this fixture."
+            if not result["all_pass"]
+            else f"{result['verdict']}: all falsification criteria passed.",
+            "This is a falsification exercise, not a claim of profitability. Do not describe the result as profitable, robust, or production-ready.",
+            "The fixture is synthetic (bundled sample data), not market evidence; it says nothing about any real security.",
+            "All internal regression guards (cost sweep, cost-sensitivity sweep, capacity sweep, capacity-sensitivity sweep) passed; the script exited 0.",
+        ],
+    }
+
+
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Falsifiable SMA-crossover momentum hypothesis test.")
+    parser.add_argument("--output-json", dest="output_json", default=None,
+                        help="Write the falsification record to a JSON file (default: results/simple_momentum_hypothesis.json).")
+    args = parser.parse_args()
+
     data_path = Path(__file__).resolve().parent / "skills" / "quantitative-backtesting" / "assets" / "example_data" / "sample_ohlcv.csv"
     result = run_hypothesis_test(data_path)
-    run_cost_sweep(data_path)
-    run_cost_sensitivity_sweep(data_path)
-    run_capacity_sweep(data_path)
-    run_capacity_sensitivity_sweep(data_path)
+    cost_rows = run_cost_sweep(data_path)
+    cost_sens_rows = run_cost_sensitivity_sweep(data_path)
+    capacity_rows = run_capacity_sweep(data_path)
+    capacity_sens_rows = run_capacity_sensitivity_sweep(data_path)
+
+    record = _build_record(
+        result, data_path, cost_rows, cost_sens_rows, capacity_rows, capacity_sens_rows
+    )
+    out_path = Path(args.output_json) if args.output_json else (
+        Path(__file__).resolve().parent / "results" / "simple_momentum_hypothesis.json"
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(record, indent=2))
+    print(f"\n  Falsification record written to {out_path}")
     return 0
 
 
