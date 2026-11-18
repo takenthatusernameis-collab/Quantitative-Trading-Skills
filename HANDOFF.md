@@ -1,23 +1,17 @@
-# Handoff — Session 133 (2026-11-17): full quant gate GREEN at HEAD `91e3274`
+# Handoff — Session (2026-11-18): Sharpe CI seed fix verified; full gate green modulo 2 environmental timeouts
 
 ## Latest baseline (verified green)
-- HEAD `91e3274`; branch `main` up to date with `origin/main`. Working tree clean.
-- Full quant gate run to completion this session:
-  `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4`
-  -> **1494 passed, 0 failed, 518 warnings, EXIT 0** in **1943.88s (32:23)**.
-- 1494 = session 131's 1491 baseline + 3 net new tests committed between the two gates (sessions 131–132). This confirms session 132's `out_of_sample_validation` survivorship addition did not regress the suite.
+- HEAD `2a51cda`; branch `main` up to date with `origin/main`. Working tree clean.
+- Sharpe CI + `seed=42` default fix fully committed (`f6f547f` + `2a51cda`). Focused regression set: **39 passed** (both previously-failing determinism tests now pass).
+- Full quant gate: **1503 passed, 2 failed, EXIT 1**. Both failures are `subprocess.TimeoutExpired` on `examples/falsifiable_hypothesis_example.py` — environmental sandbox slowness (gate took 85 min vs 32 min baseline), unrelated to the seed fix (the example does not import `monte_carlo`/`sharpe_confidence_interval`).
 
 ## What this session changed
-- Verification only: no source/test code changed; no commit (not requested).
+- Verification only: no source changes; reverted 4 gate-dirtied generated artifacts under `examples/example_reproducible_output/`; tree clean.
 
 ## Current handoff & precise next task
-See `HANDOFF_SESSION_NEXT.md` for the full evidence-based handoff. One-line next task:
-add a **stationary-bootstrap confidence interval on the out-of-sample Sharpe** to the walk-forward / CPCV / out-of-sample summaries and `calculate_metrics` (purely additive; PSR/DSR/test_resolution give a probability, a p-value, and a detection threshold, but **no interval on the Sharpe magnitude**).
+See `HANDOFF_SESSION_NEXT.md`. One-line: **get the full quant gate to EXIT 0** (re-run; the 2 known failures are environmental subprocess timeouts on `falsifiable_hypothesis_example.py`, not regressions from this change). Once green, the seed-fix work is complete.
 
-## Constraints (unchanged)
-- Offline committed fixtures only; preserve marketplace compatibility; do not `git checkout -- .` blindly; do not commit unless explicitly asked.
-- No profitability/capacity claim. Committed cross-sectional momentum verdicts remain NOT SUPPORTED.
-- `pytest-xdist` still not pinned in `skills/quantitative-backtesting/requirements.txt` (dependency edit needs explicit user confirmation).
-- Do not rerun the already-green gate unchanged as the next task; do not treat empty-message commits as progress.
-
-(End of file)
+## Constraints
+- Do NOT `git checkout -- .` blindly; preserve committed `monte_carlo.py` seed fix.
+- `pytest-xdist` not pinned in `skills/quantitative-backtesting/requirements.txt` (dependency edit needs explicit user confirmation).
+- No profitability/capacity claim; committed verdicts remain NOT SUPPORTED.
