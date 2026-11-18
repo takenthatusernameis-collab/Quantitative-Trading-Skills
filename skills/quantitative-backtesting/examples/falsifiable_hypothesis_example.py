@@ -217,7 +217,7 @@ PARAM_GRID = {"fast_period": [10, 20], "slow_period": [30, 40]}
 
 def _run_on_real_market(symbol="AAPL", start="2020-01-01", end="2025-12-31",
                         commission=COMMISSION, slippage=SLIPPAGE, benchmark_path=None,
-                        fixtures_dir=None, base_url=None):
+                        fixtures_dir=None, base_url=None, resolution_curves=False):
     """Run falsifiable hypothesis test on real market data (with optional fetch).
 
     Fetch failures propagate as RuntimeError including the underlying cause
@@ -231,7 +231,8 @@ def _run_on_real_market(symbol="AAPL", start="2020-01-01", end="2025-12-31",
         detail = f": {err}" if err else ""
         raise RuntimeError(f"Could not obtain real market data for {symbol} ({start}..{end}){detail}")
     return run_hypothesis_test(str(path), symbol=symbol, commission=commission,
-                               slippage=slippage, benchmark_path=benchmark_path)
+                               slippage=slippage, benchmark_path=benchmark_path,
+                               resolution_curves=resolution_curves)
 
 # Plausibility bounds used to flag a criterion as beyond the sample's
 # resolution. These are ASSUMPTIONS, declared up front and printed with the
@@ -466,7 +467,8 @@ def _test_resolution(summary, test_returns, benchmark_frame, primary_bench, data
     return resolution
 
 
-def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage=SLIPPAGE, benchmark_path=None):
+def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage=SLIPPAGE, benchmark_path=None,
+                        resolution_curves=False):
     """Run the pre-registered falsifiable hypothesis test.
 
     Returns a dict with the observed metrics, per-criterion pass/fail, the
@@ -487,6 +489,12 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
     to pair a strategy symbol (e.g. MSFT.csv) with a different benchmark
     (e.g. GOOGL.csv) in the same directory, which BENCHMARK_FILES cannot
     express because it resolves to fixed sibling filenames.
+
+    ``resolution_curves`` enables sections 7 and 8 (measurement-only
+    resolution curves) after the verdict. They re-run the full validation
+    machinery on synthetic fixtures at many sample sizes and take several
+    minutes, so they are off by default: the verdict and the reported
+    metrics do not depend on them.
     """
     base_dir = Path(data_path).resolve().parent
     print("=" * 80)
@@ -795,6 +803,47 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
         print("  criteria; it is reported here unchanged.")
         print("=" * 80)
 
+    if resolution_curves:
+        print_resolution_measurements()
+
+    return {
+        "hypothesis": HYPOTHESIS,
+        "verdict": verdict,
+        "observed": observed,
+        "criteria": criterion_results,
+        "all_pass": all_pass,
+        "resolution": resolution,
+        "criteria_beyond_resolution": beyond,
+        "separation_check": sep,
+        "bias_controls_engaged": bool(summary.get("bias_controls_engaged")),
+        "pit_passed": bool(pit.get("passed")) if pit else None,
+        "methodology": {
+            "commission": float(commission),
+            "slippage": float(slippage),
+            "validation_method": summary.get("validation_method"),
+            "selection_criterion": summary.get("selection_criterion"),
+            "walk_forward_window": summary.get("walk_forward_window"),
+            "multiple_benchmarks": bool(summary.get("multiple_benchmarks")),
+            "n_benchmarks_loaded": len(benchmarks),
+            "param_grid": {k: list(v) for k, v in PARAM_GRID.items()},
+            "train_frac": 0.6,
+            "val_frac": 0.2,
+            "test_frac": 0.2,
+        },
+    }
+
+
+def print_resolution_measurements():
+    """Print sections 7 and 8: the held-out-window resolution curve and the
+    minimum-detectable-alpha-vs-sample-size curve.
+
+    These are measurement-only diagnostics (they never change the verdict).
+    They re-run the full validation machinery on a synthetic control fixture
+    at many sample sizes, which costs several minutes, so they are opt-in via
+    ``--resolution-curves`` and are not part of the default verdict run. The
+    same measurements are available standalone from
+    ``scripts/measure_resolution_vs_sample_size.py``.
+    """
     # Held-out window resolution curve (measurement, not a correction).
     # Varies test_frac with train_frac = 0.8 - test_frac, val_frac = 0.2,
     # at a fixed sample size on the synthetic control fixture. The trade-off:
@@ -880,35 +929,6 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
               "the validation path and the test machinery, not evidence about a market.")
     except Exception as e:
         print(f"\n  (held-out window resolution curve unavailable: {e})")
-
-    return {
-        "hypothesis": HYPOTHESIS,
-        "verdict": verdict,
-        "observed": observed,
-        "criteria": criterion_results,
-        "all_pass": all_pass,
-        "resolution": resolution,
-        "criteria_beyond_resolution": beyond,
-        "separation_check": sep,
-        "bias_controls_engaged": bool(summary.get("bias_controls_engaged")),
-        "pit_passed": bool(pit.get("passed")) if pit else None,
-        "methodology": {
-            "commission": float(commission),
-            "slippage": float(slippage),
-            "validation_method": summary.get("validation_method"),
-            "selection_criterion": summary.get("selection_criterion"),
-            "walk_forward_window": summary.get("walk_forward_window"),
-            "multiple_benchmarks": bool(summary.get("multiple_benchmarks")),
-            "n_benchmarks_loaded": len(benchmarks),
-            "param_grid": {k: list(v) for k, v in PARAM_GRID.items()},
-            "train_frac": 0.6,
-            "val_frac": 0.2,
-            "test_frac": 0.2,
-        },
-    }
-
-
-
 def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
     """Sweep commission / slippage across levels and assert the honest
     directional claim: as per-trade costs rise, net out-of-sample performance
@@ -1047,6 +1067,8 @@ def main():
     parser.add_argument("--benchmark", dest="benchmark", default=None, help="Optional benchmark CSV path.")
     parser.add_argument("--output-json", dest="output_json", default=None, help="Write results to JSON file.")
     parser.add_argument("--no-cost-sweep", dest="no_cost_sweep", action="store_true", help="Skip cost sensitivity sweep.")
+    parser.add_argument("--resolution-curves", dest="resolution_curves", action="store_true",
+                        help="Also print the measurement-only resolution curves (sections 7-8; several minutes).")
     parser.add_argument("--fixtures-dir", dest="fixtures_dir", default=None, help="Override the real-market fixtures directory (tests).")
     parser.add_argument("--fetch-base-url", dest="fetch_base_url", default=None, help="Override the Yahoo fetch base URL (tests).")
     args = parser.parse_args()
@@ -1060,6 +1082,7 @@ def main():
                 benchmark_path=args.benchmark,
                 fixtures_dir=args.fixtures_dir,
                 base_url=args.fetch_base_url,
+                resolution_curves=args.resolution_curves,
             )
             if args.output_json:
                 try:
@@ -1104,7 +1127,7 @@ def main():
             print("  Falling back to sample data (offline/network-safe).")
 
     data_path = Path(__file__).resolve().parent.parent / "assets" / "example_data" / "sample_ohlcv.csv"
-    result = run_hypothesis_test(data_path)
+    result = run_hypothesis_test(data_path, resolution_curves=args.resolution_curves)
     if args.output_json:
         try:
             out_path = Path(args.output_json)

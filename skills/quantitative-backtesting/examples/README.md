@@ -174,6 +174,13 @@ Run with:
 python3 skills/quantitative-backtesting/examples/falsifiable_hypothesis_example.py
 ```
 
+Add `--resolution-curves` to also print the measurement-only held-out-window
+and minimum-detectable-alpha-vs-sample-size curves (sections 7-8). They re-run
+the validation machinery on synthetic fixtures at many sample sizes and take
+several minutes, so they are off by default; they never change the verdict,
+and `scripts/measure_resolution_vs_sample_size.py` produces the same
+measurements standalone.
+
 ### `reproducible_backtest_example.py`
 
 Regenerates a metrics artifact from a committed tiny CSV fixture (`sample_ohlcv.csv`)

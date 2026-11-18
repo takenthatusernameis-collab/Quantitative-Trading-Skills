@@ -1803,6 +1803,38 @@ def test_fetch_failure_surfaces_underlying_cause_offline():
         httpd.server_close()
 
 
+def test_the_verdict_run_does_not_execute_the_expensive_resolution_curves():
+    """The verdict is computed without the multi-minute resolution curves.
+
+    Sections 7-8 re-run the validation machinery on synthetic fixtures at many
+    sample sizes (several minutes). They are measurement-only, so the default
+    verdict run must not execute them: the subprocess coverage for this example
+    has to finish inside its timeout, and every caller of ``run_hypothesis_test``
+    (the cost sweep, the real-market tests) would otherwise pay that cost again.
+    The curves stay reachable through ``print_resolution_measurements`` and the
+    ``--resolution-curves`` flag.
+    """
+    import inspect
+
+    import falsifiable_hypothesis_example as example_module
+
+    assert inspect.signature(run_hypothesis_test).parameters["resolution_curves"].default is False
+
+    def _fail():
+        raise AssertionError("run_hypothesis_test executed the resolution curves by default")
+
+    original = example_module.print_resolution_measurements
+    example_module.print_resolution_measurements = _fail
+    try:
+        data_path, _ = _sample_paths()
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            result = run_hypothesis_test(data_path)
+    finally:
+        example_module.print_resolution_measurements = original
+    assert result["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+
+
 def main() -> int:
     tests = TEST_REGISTRY
     failures = 0
@@ -1851,6 +1883,7 @@ TEST_REGISTRY = [
     ("test_real_market_machinery_separation_audit_longer_windows", test_real_market_machinery_separation_audit_longer_windows),
     ("test_real_market_fetch_save_and_run_path_is_offline_safe", test_real_market_fetch_save_and_run_path_is_offline_safe),
     ("test_fetch_failure_surfaces_underlying_cause_offline", test_fetch_failure_surfaces_underlying_cause_offline),
+    ("test_the_verdict_run_does_not_execute_the_expensive_resolution_curves", test_the_verdict_run_does_not_execute_the_expensive_resolution_curves),
 ]
 
 
