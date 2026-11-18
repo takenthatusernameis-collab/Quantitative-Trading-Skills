@@ -1970,6 +1970,99 @@ def test_the_verdict_run_does_not_execute_the_expensive_resolution_curves():
     assert result["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
 
 
+def test_the_cli_json_artifact_carries_the_cost_sweep():
+    """The durable JSON artifact must include the cost sensitivity sweep.
+
+    ``main()`` whitelisted a ``cost_sweep`` key that no result ever set, so the
+    artifact silently omitted the sensitivity analysis. This runs the CLI with
+    ``--output-json`` into a tmp dir and asserts the artifact carries one row
+    per cost level, that the default sweep evaluated the headline benchmark set
+    (N >= 2), and that the Deflated Alpha Ratio is finite in every row.
+    """
+    import json
+    import subprocess
+    import sys
+
+    example_path = SKILLS_DIR / "examples" / "falsifiable_hypothesis_example.py"
+    with tempfile.TemporaryDirectory() as td:
+        out_path = Path(td) / "artifact.json"
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(example_path),
+                "--output-json",
+                str(out_path),
+                "--no-cost-sweep",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        assert proc.returncode == 0, (
+            f"example exited {proc.returncode}\n"
+            f"stdout:\n{proc.stdout[-2000:]}\n"
+            f"stderr:\n{proc.stderr[-2000:]}"
+        )
+        assert out_path.exists(), "artifact not written"
+        artifact = json.loads(out_path.read_text())
+        # With --no-cost-sweep the sweep is skipped, so the artifact must NOT
+        # carry a cost_sweep key at all (it is absent, not empty).
+        assert "cost_sweep" not in artifact, (
+            "--no-cost-sweep must not write a cost_sweep block; got "
+            f"{artifact.get('cost_sweep')!r}"
+        )
+
+        # Now run with the sweep enabled and capture the rows in the artifact.
+        out_path2 = Path(td) / "artifact_with_sweep.json"
+        proc2 = subprocess.run(
+            [
+                sys.executable,
+                str(example_path),
+                "--output-json",
+                str(out_path2),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        assert proc2.returncode == 0, (
+            f"example exited {proc2.returncode}\n"
+            f"stdout:\n{proc2.stdout[-2000:]}\n"
+            f"stderr:\n{proc2.stderr[-2000:]}"
+        )
+        artifact2 = json.loads(out_path2.read_text())
+        rows = artifact2.get("cost_sweep")
+        assert rows is not None and isinstance(rows, list), (
+            "artifact must carry a cost_sweep list; got " f"{rows!r}"
+        )
+        assert len(rows) == len(COST_SWEEP_LEVELS), (
+            f"expected {len(COST_SWEEP_LEVELS)} cost sweep rows, got {len(rows)}"
+        )
+        # One row per cost level, in ascending cost order.
+        assert [r["commission_bps"] for r in rows] == [
+            c * 10_000 for c, _ in COST_SWEEP_LEVELS
+        ], "cost sweep rows are not recorded in ascending order"
+        # The default sweep evaluates the headline benchmark set, so criterion 5
+        # (Deflated Alpha Ratio) is genuinely measured at every level.
+        for r in rows:
+            assert r.get("n_benchmarks") is not None and r["n_benchmarks"] >= 2, (
+                "default sweep rows must test >= 2 benchmarks, got "
+                f"{[r.get('n_benchmarks') for r in rows]}"
+            )
+            assert r.get("deflated_alpha_ratio_evaluable") is True, (
+                "default sweep rows must report DAR evaluable, got "
+                f"{[r.get('deflated_alpha_ratio_evaluable') for r in rows]}"
+            )
+            assert r.get("deflated_alpha_ratio") is not None and np.isfinite(
+                r["deflated_alpha_ratio"]
+            ), (
+                "default sweep rows must carry a finite Deflated Alpha Ratio, got "
+                f"{[r.get('deflated_alpha_ratio') for r in rows]}"
+            )
+        # The headline verdict is present alongside the sweep.
+        assert "verdict" in artifact2
+
+
 def main() -> int:
     tests = TEST_REGISTRY
     failures = 0
@@ -2022,6 +2115,7 @@ TEST_REGISTRY = [
     ("test_real_market_fetch_save_and_run_path_is_offline_safe", test_real_market_fetch_save_and_run_path_is_offline_safe),
     ("test_fetch_failure_surfaces_underlying_cause_offline", test_fetch_failure_surfaces_underlying_cause_offline),
     ("test_the_verdict_run_does_not_execute_the_expensive_resolution_curves", test_the_verdict_run_does_not_execute_the_expensive_resolution_curves),
+    ("test_the_cli_json_artifact_carries_the_cost_sweep", test_the_cli_json_artifact_carries_the_cost_sweep),
 ]
 
 

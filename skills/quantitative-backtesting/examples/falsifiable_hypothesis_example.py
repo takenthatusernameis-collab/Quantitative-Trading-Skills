@@ -1198,6 +1198,11 @@ def main():
                     print(f"\n  Results written to {out_path} (no profitability claims).")
                 except Exception as e:
                     print(f"\n  (failed to write JSON: {e})")
+            # Run the cost sensitivity sweep BEFORE writing the JSON artifact
+            # so the sensitivity rows are captured in the durable output. The
+            # sweep is a sensitivity analysis, not a verdict; it belongs in the
+            # artifact alongside the headline result.
+            cost_sweep_rows = None
             if not args.no_cost_sweep:
                 try:
                     # Re-resolve the cached/fetched path through the same helper
@@ -1211,11 +1216,22 @@ def main():
                         base_url=args.fetch_base_url,
                     )
                     if p is not None:
-                        run_cost_sensitivity_sweep(str(p), benchmark_path=args.benchmark)
+                        cost_sweep_rows = run_cost_sensitivity_sweep(
+                            str(p), benchmark_path=args.benchmark
+                        )
                     else:
                         print("\n  (cost sensitivity sweep unavailable: no real market data path)")
                 except Exception as e:
                     print("\n  (cost sensitivity sweep unavailable: %s)" % e)
+            if args.output_json and cost_sweep_rows is not None:
+                try:
+                    out_path = Path(args.output_json)
+                    existing = json.loads(out_path.read_text())
+                    existing["cost_sweep"] = cost_sweep_rows
+                    out_path.write_text(json.dumps(existing, indent=2))
+                    print(f"\n  Cost sensitivity sweep written to {out_path}.")
+                except Exception as e:
+                    print(f"\n  (failed to append cost sweep to JSON: {e})")
             return 0
         except Exception as e:
             print(f"  (real-market fetch/run failed: {e})")
@@ -1247,9 +1263,23 @@ def main():
             print(f"\n  (failed to write JSON: {e})")
     try:
         if not args.no_cost_sweep:
-            run_cost_sensitivity_sweep(data_path, benchmark_path=args.benchmark)
+            cost_sweep_rows = run_cost_sensitivity_sweep(
+                data_path, benchmark_path=args.benchmark
+            )
+        else:
+            cost_sweep_rows = None
     except Exception as e:
         print("\n  (cost sensitivity sweep unavailable: %s)" % e)
+        cost_sweep_rows = None
+    if args.output_json and cost_sweep_rows is not None:
+        try:
+            out_path = Path(args.output_json)
+            existing = json.loads(out_path.read_text())
+            existing["cost_sweep"] = cost_sweep_rows
+            out_path.write_text(json.dumps(existing, indent=2))
+            print(f"\n  Cost sensitivity sweep written to {out_path}.")
+        except Exception as e:
+            print(f"\n  (failed to append cost sweep to JSON: {e})")
     # Exit 0 when the test runs successfully; the verdict (SUPPORTED / NOT
     # SUPPORTED) is carried by the printed output, not the exit code. A
     # falsified hypothesis is a valid scientific outcome, not a script failure.
