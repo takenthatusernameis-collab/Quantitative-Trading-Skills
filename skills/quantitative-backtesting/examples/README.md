@@ -133,6 +133,7 @@ is the conjunction of those criteria — never a claim of profitability.
 3. **Point-in-time validation, walk-forward selection on the training slice only**, and a multiple-testing correction on both sides (parameter grid → Deflated Sharpe; benchmark set → Deflated Alpha).
 4. **The raw and the corrected alpha p-values are kept distinct.** The benchmark correction rewrites `alpha_pvalue` with the deflated value and keeps the raw one in `alpha_pvalue_original`; criterion 3 reads the raw value and criterion 5 the corrected one, so the benchmark-side data-mining control binds independently instead of being implied by criterion 3.
 5. **Test resolution** — the smallest annualized Sharpe / alpha each significance criterion requires at the sample size actually available (the minimum detectable effect), with the criteria the sample cannot resolve named in the output. The verdict is *not* changed by this analysis: a decision rule is not revisited after the result is seen.
+6. **Cost sensitivity sweep on the same benchmark set as the verdict.** Each cost level re-runs the full test against `BENCHMARK_FILES` (N = 2), so criterion 5's Deflated Alpha Ratio is measured in every row instead of being silently disabled by a one-benchmark override. An explicit `--benchmark` narrows the sweep to one benchmark; criterion 5 is then reported as *unavailable* (not failed) and counted as not satisfied.
 
 On the shipped sample data the verdict is `NOT SUPPORTED`, and the resolution
 section shows that the three statistical criteria need effects the 100 test

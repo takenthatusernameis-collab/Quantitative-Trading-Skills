@@ -54,6 +54,7 @@ import sys
 import tempfile
 import traceback
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -694,6 +695,140 @@ def test_falsifiable_hypothesis_cost_sensitivity_sweep():
     assert advertised is rows[2], (
         "the advertised cost level is not the middle rung of the sweep"
     )
+
+    # The sweep must evaluate the SAME benchmark set as the headline verdict,
+    # so criterion 5 (Deflated Alpha Ratio) is genuinely measured at every
+    # cost level rather than silently disabled by a one-benchmark override.
+    assert all(r["n_benchmarks"] is not None and r["n_benchmarks"] >= 2 for r in rows), (
+        "cost sweep rows must test >= 2 benchmarks, got "
+        f"{[r['n_benchmarks'] for r in rows]}"
+    )
+    assert all(r["deflated_alpha_ratio_evaluable"] for r in rows), (
+        "cost sweep rows must report a finite Deflated Alpha Ratio; got "
+        f"{[r['deflated_alpha_ratio'] for r in rows]}"
+    )
+    assert all(v is not None and np.isfinite(v) for v in dar_values)
+
+
+def _stub_run_hypothesis_test_factory(observed_extra):
+    """Build a cheap stand-in for run_hypothesis_test that records kwargs.
+
+    The sweep's expensive part is the validation machinery; these tests only
+    need the argument plumbing and the row bookkeeping, so the stub keeps the
+    regression fast and deterministic.
+    """
+    calls = []
+
+    def _stub(data_path, commission=None, slippage=None, benchmark_path=None, **kwargs):
+        calls.append({
+            "data_path": data_path,
+            "commission": commission,
+            "slippage": slippage,
+            "benchmark_path": benchmark_path,
+        })
+        n_bench = 1 if benchmark_path is not None else 2
+        dar = 0.5 if n_bench >= 2 else None
+        return {
+            "verdict": "NOT SUPPORTED",
+            "all_pass": False,
+            "observed": {
+                "oos_sharpe": 0.1,
+                "oos_total_return": 0.05,
+                "deflated_alpha_ratio": dar,
+                "n_benchmarks": n_bench,
+                **observed_extra,
+            },
+            "criteria": [
+                {
+                    "name": "deflated_alpha_ratio_gt_0.90",
+                    "description": "deflated_alpha_ratio > 0.90 (corrected p-value < 0.10)",
+                    "passed": False,
+                    "evaluable": n_bench >= 2,
+                },
+            ],
+        }
+
+    return _stub, calls
+
+
+def test_cost_sweep_judges_criterion_5_on_the_headline_benchmark_set():
+    """Default sweep forwards benchmark_path=None so run_hypothesis_test
+    resolves BENCHMARK_FILES (N=2). Hard-coding a single benchmark path would
+    null the DAR and make every row report criterion 5 as failed without ever
+    measuring it."""
+    import falsifiable_hypothesis_example as fx
+
+    stub, calls = _stub_run_hypothesis_test_factory({})
+    data_path, _ = _sample_paths()
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        with mock.patch.object(fx, "run_hypothesis_test", stub):
+            rows = fx.run_cost_sensitivity_sweep(str(data_path))
+
+    assert len(rows) == len(COST_SWEEP_LEVELS)
+    assert all(c["benchmark_path"] is None for c in calls), (
+        "the default sweep must defer benchmark resolution to run_hypothesis_test"
+    )
+    assert all(r["n_benchmarks"] >= 2 for r in rows)
+    console = buffer.getvalue()
+    assert "unavailable" not in console.lower(), (
+        "the default sweep must not report criterion 5 as unavailable"
+    )
+
+
+def test_cost_sweep_single_benchmark_override_reports_unavailable_not_failed():
+    """An explicit single benchmark makes the DAR inapplicable (N=1). The
+    sweep must say so, list criterion 5 as unavailable, and not count it among
+    the failing criteria handed to the reader."""
+    import falsifiable_hypothesis_example as fx
+
+    stub, calls = _stub_run_hypothesis_test_factory({})
+    data_path, bench = _sample_paths()
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        with mock.patch.object(fx, "run_hypothesis_test", stub):
+            rows = fx.run_cost_sensitivity_sweep(str(data_path), benchmark_path=str(bench))
+
+    assert all(str(c["benchmark_path"]) == str(bench) for c in calls), (
+        "an explicit benchmark override must be forwarded to every level"
+    )
+    assert all(r["n_benchmarks"] == 1 for r in rows)
+    assert all(r["deflated_alpha_ratio"] is None for r in rows)
+    assert all(not r["deflated_alpha_ratio_evaluable"] for r in rows)
+    console = buffer.getvalue()
+    assert "UNAVAILABLE" in console, (
+        "the sweep must label criterion 5 unavailable under a single-benchmark "
+        f"override; console:\n{console[-2000:]}"
+    )
+    assert "failing=deflated_alpha_ratio" not in console
+
+
+def test_single_benchmark_override_marks_criterion_5_unavailable_end_to_end():
+    """run_hypothesis_test with an explicit benchmark loads N=1, so the DAR is
+    not defined. Criterion 5 must be reported as unavailable (still counted as
+    not satisfied, so an uncorrected alpha can never be SUPPORTED) rather than
+    as a measured failure."""
+    data_path, bench = _sample_paths()
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        result = run_hypothesis_test(
+            data_path, commission=COMMISSION, slippage=SLIPPAGE,
+            benchmark_path=str(bench),
+        )
+
+    assert result["observed"]["n_benchmarks"] == 1
+    assert result["observed"]["deflated_alpha_ratio"] is None
+    criterion_5 = _criterion(result, "deflated_alpha_ratio_gt_0.90")
+    assert criterion_5["passed"] is False
+    assert criterion_5["evaluable"] is False
+    assert result["criteria_unavailable"] == ["deflated_alpha_ratio_gt_0.90"]
+    # Conservative verdict semantics: unavailable counts as not satisfied.
+    assert result["all_pass"] is False
+    assert result["verdict"] == "NOT SUPPORTED"
+    console = buffer.getvalue()
+    assert "[N/A] deflated_alpha_ratio_gt_0.90" in console
+    assert "UNAVAILABLE CRITERIA" in console
+    assert "[FAIL] deflated_alpha_ratio_gt_0.90" not in console
 
 
 def test_the_selection_criterion_is_oos_aware():
@@ -1868,6 +2003,9 @@ TEST_REGISTRY = [
     ("test_the_example_records_its_methodology_block", test_the_example_records_its_methodology_block),
     ("test_the_advertised_costs_are_actually_applied", test_the_advertised_costs_are_actually_applied),
     ("test_falsifiable_hypothesis_cost_sensitivity_sweep", test_falsifiable_hypothesis_cost_sensitivity_sweep),
+    ("test_cost_sweep_judges_criterion_5_on_the_headline_benchmark_set", test_cost_sweep_judges_criterion_5_on_the_headline_benchmark_set),
+    ("test_cost_sweep_single_benchmark_override_reports_unavailable_not_failed", test_cost_sweep_single_benchmark_override_reports_unavailable_not_failed),
+    ("test_single_benchmark_override_marks_criterion_5_unavailable_end_to_end", test_single_benchmark_override_marks_criterion_5_unavailable_end_to_end),
     ("test_the_selection_criterion_is_oos_aware", test_the_selection_criterion_is_oos_aware),
     ("test_falsifiable_machinery_on_independent_out_of_sample_fixture", test_falsifiable_machinery_on_independent_out_of_sample_fixture),
     ("test_falsifiable_machinery_on_independent_real_market_data", test_falsifiable_machinery_on_independent_real_market_data),

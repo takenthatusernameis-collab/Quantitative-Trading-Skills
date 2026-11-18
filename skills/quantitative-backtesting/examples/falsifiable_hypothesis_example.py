@@ -355,6 +355,11 @@ def _test_resolution(summary, test_returns, benchmark_frame, primary_bench, data
 
     if isinstance(deflated_alpha, dict):
         resolution["n_benchmarks"] = deflated_alpha.get("n_benchmarks")
+        if resolution["n_benchmarks"] is None and benchmarks is not None:
+            # Single-benchmark runs: the Deflated Alpha block has no
+            # n_benchmarks field, but the count is still known and should not
+            # be printed as None.
+            resolution["n_benchmarks"] = len(benchmarks)
         mde = minimum_detectable_alpha(
             deflated_alpha, test_returns, CRITERION_P_VALUE_THRESHOLD
         )
@@ -582,6 +587,7 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
             "verdict": "NOT SUPPORTED",
             "reason": "no_valid_parameters",
             "criteria": [],
+            "criteria_unavailable": [],
             "observed": {},
             "resolution": {},
             "criteria_beyond_resolution": [],
@@ -732,9 +738,13 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
     print(f"  Criterion 3 needs an annualized alpha of at least "
           f"{_fmt_pct(resolution['min_detectable_benchmark_alpha'])} "
           f"(observed {_fmt_pct(bench_alpha)})")
-    print(f"  Criterion 5 needs an annualized alpha of at least "
-          f"{_fmt_pct(resolution['min_detectable_alpha'])} "
-          f"(observed {_fmt_pct(bench_alpha)})")
+    if resolution["min_detectable_alpha"] is None and resolution["n_benchmarks"] == 1:
+        print("  Criterion 5 is not applicable here: a single benchmark (N=1)")
+        print("  cannot support the benchmark-selection correction it tests.")
+    else:
+        print(f"  Criterion 5 needs an annualized alpha of at least "
+              f"{_fmt_pct(resolution['min_detectable_alpha'])} "
+              f"(observed {_fmt_pct(bench_alpha)})")
     print(f"  Plausibility bounds (stated assumptions, not results):")
     print(f"    max plausible annualized Sharpe: {_fmt_num(PLAUSIBLE_MAX_ANNUALIZED_SHARPE)}")
     try:
@@ -780,8 +790,29 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
     }
     for name, desc, _ in CRITERIA:
         ok = passes[name]
-        criterion_results.append({"name": name, "description": desc, "passed": bool(ok)})
-        print(f"\n  [{'PASS' if ok else 'FAIL'}] {name}: {desc}")
+        # A criterion that reads a statistic this configuration cannot produce
+        # is unavailable, not failed. The Deflated Alpha Ratio is defined only
+        # across multiple benchmarks: with N == 1 there is no benchmark-
+        # selection correction to apply, so criterion 5 cannot be evaluated.
+        # It is still counted as not satisfied (conservative), so an
+        # uncorrected single-benchmark alpha can never yield SUPPORTED.
+        evaluable = not (name == "deflated_alpha_ratio_gt_0.90" and dar is None)
+        criterion_results.append({
+            "name": name,
+            "description": desc,
+            "passed": bool(ok),
+            "evaluable": bool(evaluable),
+        })
+        if evaluable:
+            print(f"\n  [{'PASS' if ok else 'FAIL'}] {name}: {desc}")
+        else:
+            print(f"\n  [N/A] {name}: {desc}")
+            print("        unavailable: this run tested a single benchmark (N=1), so")
+            print("        there is no benchmark-selection correction to apply. It is")
+            print("        counted as not satisfied, never as evidence of alpha.")
+
+    unavailable_criteria = [c["name"] for c in criterion_results if not c["evaluable"]]
+
 
     all_pass = all(passes.values())
     verdict = "SUPPORTED" if all_pass else "NOT SUPPORTED"
@@ -791,6 +822,15 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
     print("  SUPPORTED  = all falsification criteria passed")
     print("  NOT SUPPORTED = at least one criterion failed (hypothesis falsified)")
     print("=" * 80)
+
+    if unavailable_criteria:
+        print()
+        print("UNAVAILABLE CRITERIA (not evaluable in this configuration):")
+        for name in unavailable_criteria:
+            print(f"  - {name}")
+        print("  These are counted as not satisfied, so the verdict is a lower")
+        print("  bound on what the evaluated criteria support.")
+        print("=" * 80)
 
     if beyond:
         print()
@@ -811,6 +851,7 @@ def run_hypothesis_test(data_path, symbol="SPY", commission=COMMISSION, slippage
         "verdict": verdict,
         "observed": observed,
         "criteria": criterion_results,
+        "criteria_unavailable": unavailable_criteria,
         "all_pass": all_pass,
         "resolution": resolution,
         "criteria_beyond_resolution": beyond,
@@ -937,11 +978,30 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
     Reports how the verdict changes as transaction costs rise, with explicit
     falsification criteria. This is a sensitivity analysis on the shipped
     sample, not evidence about any market. The claim is purely directional.
+
+    The sweep evaluates the SAME benchmark set as the headline verdict
+    (`BENCHMARK_FILES`, N=2), so criterion 5 (Deflated Alpha Ratio) is
+    genuinely evaluated in every row rather than silently disabled by a
+    single-benchmark override. Passing ``benchmark_path`` explicitly narrows
+    the run to one benchmark; in that case DAR is not applicable (the
+    framework's ``n_benchmarks == 1`` contract) and criterion 5 is reported
+    as unavailable instead of failed.
     """
     data_path = Path(data_path)
-    if benchmark_path is None:
-        benchmark_path = data_path.parent / "sample_benchmark.csv"
-    benchmark_path = Path(benchmark_path)
+    if benchmark_path is not None:
+        benchmark_path = Path(benchmark_path)
+    else:
+        # Resolve the same default set run_hypothesis_test uses (relative to
+        # the strategy data's directory). Fail loudly rather than silently
+        # degrading to a single benchmark, which would null out the DAR.
+        default_benchmarks = [data_path.resolve().parent / p for p in BENCHMARK_FILES]
+        missing = [str(p) for p in default_benchmarks if not p.exists()]
+        if missing:
+            raise FileNotFoundError(
+                "cost sensitivity sweep cannot evaluate the headline benchmark "
+                f"set; missing {missing}. Pass benchmark_path explicitly to run "
+                "a single-benchmark sensitivity analysis."
+            )
 
     print("\n" + "=" * 80)
     print("COST SENSITIVITY SWEEP: ascending costs (falsifiable criteria)")
@@ -971,6 +1031,8 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
                     "sharpe_ratio": obs.get("oos_sharpe"),
                     "total_return": obs.get("oos_total_return"),
                     "deflated_alpha_ratio": da,
+                    "n_benchmarks": obs.get("n_benchmarks"),
+                    "deflated_alpha_ratio_evaluable": da is not None,
                     "verdict": result.get("verdict"),
                     "criteria": result.get("criteria", []),
                     "all_pass": result.get("all_pass"),
@@ -983,6 +1045,8 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
                     "sharpe_ratio": None,
                     "total_return": None,
                     "deflated_alpha_ratio": None,
+                    "n_benchmarks": None,
+                    "deflated_alpha_ratio_evaluable": False,
                     "verdict": f"ERR:{e}",
                     "criteria": [],
                     "all_pass": False,
@@ -1003,6 +1067,21 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
     assert rows[0]["commission_bps"] == 0.0 and rows[0]["slippage_bps"] == 0.0, (
         "first cost sweep level must be frictionless"
     )
+
+    # The default sweep must evaluate the headline benchmark set, otherwise
+    # criterion 5 is silently unavailable (n_benchmarks == 1 -> DAR None) and
+    # every row reports a "failure" that was never actually measured.
+    dar_unavailable = [r for r in rows if not r.get("deflated_alpha_ratio_evaluable")]
+    if benchmark_path is None:
+        assert not dar_unavailable, (
+            "cost sweep default must evaluate the multi-benchmark set so "
+            "criterion 5 is measured; got rows with no DAR: "
+            f"{[(r['n_benchmarks'], r['deflated_alpha_ratio']) for r in rows]}"
+        )
+        assert all(r["n_benchmarks"] is not None and r["n_benchmarks"] >= 2 for r in rows), (
+            "cost sweep default must test at least two benchmarks, got "
+            f"{[r['n_benchmarks'] for r in rows]}"
+        )
 
     # Check monotonic degradation where values are finite
     series = {
@@ -1037,12 +1116,28 @@ def run_cost_sensitivity_sweep(data_path, benchmark_path=None):
     print("\n  VERDICT BY COST LEVEL (with failing criteria):")
     for i, r in enumerate(rows):
         crits = r.get("criteria") or []
-        failed = [c["name"] for c in crits if isinstance(c, dict) and not c.get("passed")]
+        failed = [
+            c["name"] for c in crits
+            if isinstance(c, dict) and not c.get("passed") and c.get("evaluable", True)
+        ]
+        unavailable = [
+            c["name"] for c in crits
+            if isinstance(c, dict) and c.get("evaluable") is False
+        ]
         if failed:
             failed_str = ", ".join(failed)
         else:
             failed_str = "none"
-        print(f"    [{i}] {r['commission_bps']:.0f}bp+{r['slippage_bps']:.2f}bp -> {r['verdict']}: failing={failed_str}")
+        line = f"    [{i}] {r['commission_bps']:.0f}bp+{r['slippage_bps']:.2f}bp -> {r['verdict']}: failing={failed_str}"
+        if unavailable:
+            line += f" unavailable={', '.join(unavailable)}"
+        print(line)
+    if dar_unavailable:
+        print()
+        print("  NOTE: a single-benchmark override was used (N=1), so the Deflated")
+        print("  Alpha Ratio is not applicable and criterion 5 is UNAVAILABLE, not")
+        print("  failed. It is counted as not satisfied, so those rows' verdicts are")
+        print("  a lower bound on what the evaluated criteria support.")
     verdicts = [r.get("verdict") for r in rows if r.get("verdict") and not str(r.get("verdict")).startswith("ERR")]
     if verdicts and len(set(verdicts)) > 1:
         print(f"  VERDICT CHANGES across cost sweep: {verdicts[0]} -> ... -> {verdicts[-1]} (sensitivity demonstrated)")
@@ -1091,7 +1186,7 @@ def main():
                     # Avoid serializing non-JSON friendly objects
                     serializable = {}
                     for k, v in result.items():
-                        if k in ("criteria", "resolution", "observed", "separation_check", "trade_statistics", "cost_sweep"):
+                        if k in ("criteria", "criteria_unavailable", "resolution", "observed", "separation_check", "trade_statistics", "cost_sweep"):
                             serializable[k] = v
                         elif k in ("verdict", "all_pass", "pit_passed", "bias_controls_engaged", "hypothesis", "strategy"):
                             serializable[k] = v
@@ -1127,14 +1222,20 @@ def main():
             print("  Falling back to sample data (offline/network-safe).")
 
     data_path = Path(__file__).resolve().parent.parent / "assets" / "example_data" / "sample_ohlcv.csv"
-    result = run_hypothesis_test(data_path, resolution_curves=args.resolution_curves)
+    # --benchmark applies to the sample path too: before this, the flag was
+    # silently ignored here while the sweep and headline run still used the
+    # default BENCHMARK_FILES set.
+    result = run_hypothesis_test(
+        data_path, benchmark_path=args.benchmark,
+        resolution_curves=args.resolution_curves,
+    )
     if args.output_json:
         try:
             out_path = Path(args.output_json)
             out_path.parent.mkdir(parents=True, exist_ok=True)
             serializable = {}
             for k, v in result.items():
-                if k in ("criteria", "resolution", "observed", "separation_check", "trade_statistics", "cost_sweep"):
+                if k in ("criteria", "criteria_unavailable", "resolution", "observed", "separation_check", "trade_statistics", "cost_sweep"):
                     serializable[k] = v
                 elif k in ("verdict", "all_pass", "pit_passed", "bias_controls_engaged", "hypothesis", "strategy"):
                     serializable[k] = v
@@ -1146,7 +1247,7 @@ def main():
             print(f"\n  (failed to write JSON: {e})")
     try:
         if not args.no_cost_sweep:
-            run_cost_sensitivity_sweep(data_path)
+            run_cost_sensitivity_sweep(data_path, benchmark_path=args.benchmark)
     except Exception as e:
         print("\n  (cost sensitivity sweep unavailable: %s)" % e)
     # Exit 0 when the test runs successfully; the verdict (SUPPORTED / NOT
