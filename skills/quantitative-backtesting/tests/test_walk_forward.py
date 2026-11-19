@@ -49,6 +49,7 @@ from walk_forward import (  # noqa: E402
     _add_benchmark_to_summary,
     _benchmark_list_alpha_correction,
     _print_family_stepdown,
+    _print_family_pbo,
     deflated_alpha_ratio,
     minimum_detectable_alpha,
     minimum_detectable_sharpe,
@@ -883,6 +884,74 @@ def _family_fixture_path():
     return str(SKILLS_DIR / "tests" / "fixtures" / "family_returns.csv")
 
 
+def test_walk_forward_analysis_family_pbo_opt_in():
+    """``family_pbo`` records a bounded CSCV reading on the aligned matrix."""
+    data = _make_ohlcv_data(periods=500, seed=42)
+    _, result = _family_walk_forward_result(
+        family_returns=_family_return_frame(data.index),
+        family_pbo=True,
+        family_pbo_splits=8,
+    )
+    summary = result["summary"]
+    pbo = summary.get("family_pbo")
+    assert isinstance(pbo, dict), "family_pbo must be recorded when requested"
+    assert "family_pbo_error" not in summary
+    assert pbo["n_splits"] == 8
+    assert pbo["n_partitions"] == math.comb(8, 4)
+    assert 0.0 <= pbo["pbo"] <= 1.0
+    assert pbo["n_trials"] == 3
+    oos_len = len(result["oos_returns"])
+    assert pbo["n_observations"] == (oos_len // 8) * 8, (
+        "CSCV uses floor(T/S)*S equal-length blocks"
+    )
+    assert "logits" not in pbo, "the summary must not carry the per-partition vector"
+    assert pbo["n_logits"] == pbo["n_partitions_evaluated"]
+    assert isinstance(pbo["is_overfit"], bool)
+    assert pbo["strategy_names"] == [
+        "strong_momentum", "flat_signal", "negative_signal"
+    ]
+
+
+def test_walk_forward_analysis_family_pbo_defaults_off():
+    """Supplying ``family_returns`` alone must not add a PBO reading."""
+    data = _make_ohlcv_data(periods=500, seed=42)
+    _, result = _family_walk_forward_result(
+        family_returns=_family_return_frame(data.index),
+    )
+    assert "family_pbo" not in result["summary"]
+
+
+def test_walk_forward_analysis_family_pbo_too_short_records_error():
+    """An unusable PBO matrix is reported, never raised."""
+    data = _make_ohlcv_data(periods=500, seed=42)
+    _, result = _family_walk_forward_result(
+        family_returns=pd.DataFrame(
+            {"only_one_row": [0.001]}, index=[data.index[0]]
+        ),
+        family_pbo=True,
+    )
+    summary = result["summary"]
+    assert summary["family_pbo"] is None
+    assert "family_pbo_error" in summary
+
+
+def test_print_family_pbo_surfaces_reading_and_caveat():
+    buf = StringIO()
+    with redirect_stdout(buf):
+        _print_family_pbo({
+            "n_trials": 10,
+            "n_observations": 1504,
+            "n_splits": 8,
+            "n_partitions": 70,
+            "pbo": 0.25,
+            "mean_oos_rank": 0.6,
+            "is_overfit": False,
+        })
+    out = buf.getvalue()
+    assert "PBO: 0.2500" in out
+    assert "not a profitability claim" in out
+
+
 def test_cli_walk_forward_family_diagnostics_end_to_end():
     """CLI end-to-end: --family-returns/--family-stepdown reach the summary.
 
@@ -903,6 +972,8 @@ def test_cli_walk_forward_family_diagnostics_end_to_end():
             "--output", out_dir,
             "--family-returns", _family_fixture_path(),
             "--family-stepdown",
+            "--family-pbo",
+            "--family-pbo-splits", "8",
             "--family-seed", "12345",
             "--family-bootstrap", "200",
         ]
@@ -917,6 +988,22 @@ def test_cli_walk_forward_family_diagnostics_end_to_end():
             "the CLI must print the family stepdown block when --family-stepdown "
             "is passed"
         )
+        assert "Family CSCV probability of backtest overfitting:" in output, (
+            "the CLI must print the family PBO block when --family-pbo is passed"
+        )
+
+        summary_path = os.path.join(out_dir, "walk_forward_summary.json")
+        assert os.path.exists(summary_path), "walk_forward_summary.json not written"
+        with open(summary_path) as f:
+            summary = json.load(f)["summary"]
+
+        pbo = summary.get("family_pbo")
+        assert isinstance(pbo, dict), "family_pbo must be persisted with --family-pbo"
+        assert "family_pbo_error" not in summary
+        assert pbo["n_splits"] == 8
+        assert pbo["n_partitions"] == math.comb(8, 4)
+        assert 0.0 <= pbo["pbo"] <= 1.0
+        assert "logits" not in pbo
 
         summary_path = os.path.join(out_dir, "walk_forward_summary.json")
         assert os.path.exists(summary_path), "walk_forward_summary.json not written"

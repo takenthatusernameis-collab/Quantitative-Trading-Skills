@@ -528,6 +528,53 @@ def _family_multiple_testing_summary(
     return result
 
 
+def _family_pbo_summary(
+    family_returns,
+    oos_returns: pd.Series,
+    n_splits: int = 8,
+    metric: str = "sharpe",
+) -> Dict[str, Any]:
+    """Run the CSCV probability of backtest overfitting on a family matrix.
+
+    The family Reality Check asks whether the *best* strategy in a family
+    beats the benchmark after a bootstrap correction; the CSCV PBO asks the
+    complementary question: how often does the configuration that wins
+    in-sample rank at or below the out-of-sample median? Running both on the
+    same aligned matrix makes the selection-generalization reading available
+    from the walk-forward summary instead of standing alone.
+
+    This is a *measurement* input: it changes no walk-forward return, cost,
+    impact or capacity number. The matrix is aligned to the walk-forward OOS
+    record (see :func:`_align_family_returns`) so the reading covers exactly
+    the out-of-sample dates. Any unusable input is reported under ``error``
+    rather than raised, so an opt-in diagnostic can never break the run.
+
+    The per-partition logits (``C(S, S/2)`` values) are summarised as a count
+    rather than carried in the summary: the diagnostic keys are enough to
+    report the reading, and the full vector would bloat every artifact.
+
+    Returns the :func:`pbo_cscv` result without ``logits`` (plus
+    ``n_logits`` and ``strategy_names``), or ``{"pbo": None, "error": ...}``.
+    """
+    try:
+        frame = _align_family_returns(family_returns, oos_returns)
+        frame = frame.apply(pd.to_numeric, errors="coerce")
+        result = dict(pbo_cscv(frame, n_splits=n_splits, metric=metric))
+    except Exception as exc:  # opt-in measurement input; never break the run
+        return {"pbo": None, "error": f"{type(exc).__name__}: {exc}"}
+    logits = result.pop("logits", [])
+    result["n_logits"] = len(logits)
+    result["strategy_names"] = [str(c) for c in frame.columns]
+    # An undefined reading is reported as None, never as a non-finite float:
+    # NaN in a persisted JSON artifact is not valid JSON for strict readers.
+    if result.get("pbo") is not None and not np.isfinite(result["pbo"]):
+        result["pbo"] = None
+        result["is_overfit"] = False
+        result["mean_logit"] = None
+        result["mean_oos_rank"] = None
+    return result
+
+
 def _load_family_returns_csv(path):
     """Load an optional per-period family return matrix from CSV.
 
@@ -582,6 +629,8 @@ def walk_forward_analysis(
     family_stepdown: bool = False,
     family_seed: Optional[int] = None,
     family_n_bootstrap: int = 1000,
+    family_pbo: bool = False,
+    family_pbo_splits: int = 8,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -693,6 +742,14 @@ def walk_forward_analysis(
             RNG. Reproducible when set.
         family_n_bootstrap: Number of stationary-block bootstrap resamples for
             the family tests. Default 1000.
+        family_pbo: When ``True`` (and ``family_returns`` is supplied), also
+            compute the CSCV Probability of Backtest Overfitting on the same
+            aligned family matrix and record it under ``summary["family_pbo"]``.
+            Default ``False``: no PBO is run and the summary is byte-for-byte
+            unchanged. The reading is a diagnostic of the selection procedure,
+            not a profitability claim.
+        family_pbo_splits: Even number of contiguous CSCV blocks ``S`` (>= 4)
+            used by ``family_pbo``. Default 8.
 
     Returns:
         Dictionary with walk-forward results including:
@@ -1230,6 +1287,22 @@ def walk_forward_analysis(
             summary["family_reality_check_error"] = _family["error"]
         if family_stepdown:
             summary["family_stepdown"] = _family.get("stepdown")
+
+    # CSCV probability of backtest overfitting on the same family matrix
+    # (additive, opt-in). The Reality Check above asks whether the family's
+    # best member beats the benchmark; PBO asks how often the in-sample
+    # winner fails to hold up out-of-sample. Default ``False``: no PBO is run
+    # and the summary is unchanged. This is a measurement: it changes no
+    # return, cost, impact or capacity number.
+    if family_returns is not None and family_pbo:
+        _pbo = _family_pbo_summary(
+            family_returns,
+            oos_returns,
+            n_splits=family_pbo_splits,
+        )
+        summary["family_pbo"] = _pbo if _pbo.get("error") is None else None
+        if _pbo.get("error") is not None:
+            summary["family_pbo_error"] = _pbo["error"]
 
     # Surface market-impact capacity estimate in the summary when impact is
     # enabled and estimable; keep None (backward compatible) otherwise.
@@ -5699,6 +5772,37 @@ def _print_family_stepdown(
         )
 
 
+def _print_family_pbo(
+    pbo: Optional[Dict[str, Any]],
+    indent: str = "  ",
+) -> None:
+    """Print the CSCV probability of backtest overfitting for a family.
+
+    The reading is a diagnostic of the selection procedure: a low PBO means
+    the in-sample winner tends to hold up out-of-sample, a high PBO means it
+    tends not to. It says nothing about the sign or size of any edge, so the
+    block states that explicitly.
+    """
+    if not isinstance(pbo, dict):
+        return
+    print(f"{indent}Family CSCV probability of backtest overfitting:")
+    print(
+        f"{indent}  Configurations: {pbo.get('n_trials')} | "
+        f"Observations: {pbo.get('n_observations')} | "
+        f"S: {pbo.get('n_splits')} | "
+        f"Partitions: {pbo.get('n_partitions')}"
+    )
+    print(
+        f"{indent}  PBO: {_format_optional_float(pbo.get('pbo'))} | "
+        f"mean_oos_rank: {_format_optional_float(pbo.get('mean_oos_rank'))} | "
+        f"is_overfit: {pbo.get('is_overfit')}"
+    )
+    print(
+        f"{indent}  Diagnostic of the selection procedure, not a "
+        f"profitability claim."
+    )
+
+
 def _selection_window_remedy(
     validation_method: str,
     context: Optional[Dict[str, Any]],
@@ -9562,6 +9666,8 @@ def run_walk_forward(args) -> int:
         family_stepdown=getattr(args, "family_stepdown", False),
         family_seed=getattr(args, "family_seed", None),
         family_n_bootstrap=getattr(args, "family_bootstrap", 1000),
+        family_pbo=getattr(args, "family_pbo", False),
+        family_pbo_splits=getattr(args, "family_pbo_splits", 8),
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
@@ -9684,6 +9790,8 @@ def run_walk_forward(args) -> int:
 
     # Print family stepdown results when available
     _print_family_stepdown(results["summary"].get("family_stepdown"))
+    # Print the family CSCV probability of backtest overfitting when available
+    _print_family_pbo(results["summary"].get("family_pbo"))
 
     # Save results
     output_dir = Path(args.output)
@@ -11926,6 +12034,8 @@ def main():
     wf_parser.add_argument("--family-returns", type=str, default=None, help="Path to a CSV of per-period family returns for the multiple-testing diagnostics (first column = date index, remaining columns = strategies). Opt-in: unset adds no family keys to the summary.")
     wf_parser.add_argument("--family-stepdown", action="store_true", help="Also run the Romano-Wolf stepdown on the family returns (requires --family-returns); identifies which strategies drive a Reality Check rejection.")
     wf_parser.add_argument("--family-seed", type=int, default=None, help="RNG seed for the family bootstrap (Reality Check / stepdown). Unset uses a fresh seed.")
+    wf_parser.add_argument("--family-pbo", action="store_true", help="Also compute the CSCV probability of backtest overfitting on the family returns (requires --family-returns). Opt-in: unset adds no family_pbo key to the summary.")
+    wf_parser.add_argument("--family-pbo-splits", type=int, default=8, help="Even number of contiguous CSCV blocks S (>= 4) for --family-pbo. Default 8.")
     wf_parser.add_argument("--family-bootstrap", type=int, default=1000, help="Stationary-block bootstrap resamples for the family diagnostics (default 1000).")
     wf_parser.set_defaults(func=run_walk_forward)
 

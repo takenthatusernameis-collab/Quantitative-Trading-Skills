@@ -17,7 +17,8 @@ Methodology:
 - Uses the committed AAPL.csv price panel (offline, no live data).
 - Pre-registered parameter grid (fixed before looking at results).
 - Generates one return series per grid configuration over the full price panel,
-  net of 3 bps round-trip costs (2 bps commission + 1 bps slippage), respecting
+  net of per-side costs of 3 bps (2 bps commission + 1 bps slippage), i.e. a
+  6 bps flat-to-flat round trip, respecting
   the point-in-time convention (trade at next period's open, 1-bar latency).
 - Assembles a (T, N) return matrix and computes PBO with n_splits=8 and n_splits=16.
 - Reports PBO, mean_oos_rank, mean_logit, and n_partitions for both settings.
