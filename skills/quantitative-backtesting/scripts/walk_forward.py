@@ -6878,6 +6878,7 @@ def out_of_sample_validation(
             benchmark_expense_ratio=benchmark_expense_ratio,
             panel_pricing=panel_pricing,
             pit_strict=pit_strict,
+            max_participation_rate=max_participation_rate,
         )
     elif validation_method == "cpcv":
         validation_results = cpcv_analysis(
@@ -6903,6 +6904,7 @@ def out_of_sample_validation(
             apply_deflation=apply_deflation,
             panel_pricing=panel_pricing,
             pit_strict=pit_strict,
+            max_participation_rate=max_participation_rate,
         )
     else:
         raise ValueError(f"Unknown validation_method: {validation_method}. Use 'walk_forward' or 'cpcv'.")
@@ -7120,7 +7122,8 @@ def out_of_sample_validation(
     test_total_return = float((1 + test_returns).prod() - 1) if len(test_returns) > 0 else 0.0
 
     test_capacity = estimate_capacity(
-        test_data, impact_coefficient, adv_window=adv_window
+        test_data, impact_coefficient, adv_window=adv_window,
+        max_participation_rate=max_participation_rate
     )
     test_capacity_point = test_capacity.get("estimated_capacity")
     test_capacity_trend = test_capacity.get("capacity_trend")
@@ -7476,7 +7479,8 @@ def out_of_sample_validation(
 
     # Surface market-impact capacity estimate in the summary when impact is
     # enabled and estimable; keep None (backward compatible) otherwise.
-    _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window)
+    _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window,
+                                  max_participation_rate=max_participation_rate)
     summary["capacity"] = _capacity.get("estimated_capacity")
     # Capacity trend over the whole sample (the per-period / per-fold
     # records carry the same key for their own window).
@@ -7955,7 +7959,8 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                            impact_coefficient, borrow_cost=None, funding_cost=None,
                            commission=None, slippage=None, latency=None, fill_rate=None,
                            pit_results=None, survivorship=None, pit_strict=None,
-                           regime_cost_multipliers: Optional[Dict[str, float]] = None):
+                           regime_cost_multipliers: Optional[Dict[str, float]] = None,
+                           max_participation_rate: Optional[float] = None):
     """Run out-of-sample validation for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -8004,6 +8009,8 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         fill_rate = 1.0
     if fill_rate <= 0 or fill_rate > 1:
         raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
+    if max_participation_rate is None:
+        max_participation_rate = getattr(args, "max_participation_rate", None)
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -8041,9 +8048,10 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
-        regime_cost_multipliers=regime_cost_multipliers,
-        survivorship=survivorship,
-    )
+regime_cost_multipliers=regime_cost_multipliers,
+                survivorship=survivorship,
+                max_participation_rate=max_participation_rate,
+            )
     test_perf = results.get("test_performance") or {}
     summary = results.get("summary") or {}
     dsr = summary.get("deflated_sharpe")
@@ -10511,7 +10519,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
                                      commission=None, slippage=None, latency=None, fill_rate=None,
                                      regime_impact_coefficients=None,
                                      regime_cost_multipliers=None,
-                                     pit_results=None, survivorship=None):
+                                     pit_results=None, survivorship=None,
+                                     max_participation_rate: Optional[float] = None):
     """Run the Monte Carlo pipeline for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -10563,6 +10572,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         fill_rate = 1.0
     if fill_rate <= 0 or fill_rate > 1:
         raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
+    if max_participation_rate is None:
+        max_participation_rate = getattr(args, "max_participation_rate", None)
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -10691,7 +10702,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     # necessarily trade under book pricing). Computed unconditionally so the
     # sweep rows stay comparable to the net-exposure path.
     try:
-        _capacity = estimate_capacity(data, impact_coefficient, adv_window=args.adv_window)
+        _capacity = estimate_capacity(data, impact_coefficient, adv_window=args.adv_window,
+                                      max_participation_rate=max_participation_rate)
         _capacity_point = _capacity.get("estimated_capacity")
         _capacity_trend = _capacity.get("capacity_trend")
     except Exception:
@@ -10789,6 +10801,11 @@ def run_monte_carlo(args) -> int:
                 benchmark_provenance.append(prov)
 
     latency, fill_rate = _resolve_latency_fill_rate(args)
+    max_participation_rate = getattr(args, "max_participation_rate", None)
+    if max_participation_rate is not None:
+        if not np.isfinite(max_participation_rate) or max_participation_rate <= 0:
+            print(f"--max-participation-rate must be positive and finite, got {max_participation_rate}")
+            return 1
 
     # Parse regime_impact_coefficients for regime-aware market impact modeling.
     # This mirrors the parsing in run_walk_forward so both entry points
@@ -10812,6 +10829,7 @@ def run_monte_carlo(args) -> int:
                 regime_impact_coefficients=regime_impact_coefficients,
                 regime_cost_multipliers=regime_cost_multipliers,
                 survivorship=survivorship,
+                max_participation_rate=max_participation_rate,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "monte_carlo_impact_sweep.json"
@@ -10853,6 +10871,7 @@ def run_monte_carlo(args) -> int:
                 regime_impact_coefficients=regime_impact_coefficients,
                 regime_cost_multipliers=regime_cost_multipliers,
                 survivorship=survivorship,
+                max_participation_rate=max_participation_rate,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "monte_carlo_borrow_sweep.json"
@@ -10891,6 +10910,7 @@ def run_monte_carlo(args) -> int:
                 regime_impact_coefficients=regime_impact_coefficients,
                 regime_cost_multipliers=regime_cost_multipliers,
                 survivorship=survivorship,
+                max_participation_rate=max_participation_rate,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "monte_carlo_funding_sweep.json"
@@ -10929,6 +10949,7 @@ def run_monte_carlo(args) -> int:
             regime_impact_coefficients=regime_impact_coefficients,
             regime_cost_multipliers=regime_cost_multipliers,
             survivorship=survivorship,
+            max_participation_rate=max_participation_rate,
         ),
         latency_values=latencies,
         fill_rate_values=fill_rates,
@@ -11005,6 +11026,7 @@ def run_monte_carlo(args) -> int:
                 regime_impact_coefficients=regime_impact_coefficients,
                 regime_cost_multipliers=regime_cost_multipliers,
                 survivorship=survivorship,
+                max_participation_rate=max_participation_rate,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "monte_carlo_slippage_sweep.json"
@@ -11246,7 +11268,8 @@ def run_monte_carlo(args) -> int:
     # cost, impact, or simulation number.
     try:
         _capacity = estimate_capacity(
-            data, args.impact_coefficient, adv_window=args.adv_window
+            data, args.impact_coefficient, adv_window=args.adv_window,
+            max_participation_rate=max_participation_rate
         )
         mc_results["summary"]["capacity"] = _capacity.get("estimated_capacity")
         mc_results["summary"]["capacity_trend"] = _capacity.get("capacity_trend")
@@ -11443,6 +11466,11 @@ def run_out_of_sample_validation(args) -> int:
 
     latency, fill_rate = _resolve_latency_fill_rate(args)
     min_position_fraction = _resolve_min_position_fraction(args)
+    max_participation_rate = getattr(args, "max_participation_rate", None)
+    if max_participation_rate is not None:
+        if not np.isfinite(max_participation_rate) or max_participation_rate <= 0:
+            print(f"--max-participation-rate must be positive and finite, got {max_participation_rate}")
+            return 1
 
     impact_coefficients = [float(c) for c in (args.impact_coefficients or [args.impact_coefficient])]
     borrow_costs = [float(c) for c in (args.borrow_costs or [args.borrow_cost])]
@@ -11460,6 +11488,7 @@ def run_out_of_sample_validation(args) -> int:
                 args, data, benchmark, total_return_benchmark,
                 bench_commission, bench_slippage, bench_expense_ratio, coeff,
                 survivorship=survivorship,
+                max_participation_rate=max_participation_rate,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "out_of_sample_impact_sweep.json"
@@ -11494,6 +11523,7 @@ def run_out_of_sample_validation(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=cost, funding_cost=args.funding_cost,
                 survivorship=survivorship,
+                max_participation_rate=max_participation_rate,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "out_of_sample_borrow_sweep.json"
@@ -11528,6 +11558,7 @@ def run_out_of_sample_validation(args) -> int:
                 bench_commission, bench_slippage, bench_expense_ratio,
                 args.impact_coefficient, borrow_cost=args.borrow_cost, funding_cost=cost,
                 survivorship=survivorship,
+                max_participation_rate=max_participation_rate,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "out_of_sample_funding_sweep.json"
@@ -11565,6 +11596,7 @@ def run_out_of_sample_validation(args) -> int:
             args.impact_coefficient, borrow_cost=args.borrow_cost,
             funding_cost=args.funding_cost, **{key: v},
             survivorship=survivorship,
+            max_participation_rate=max_participation_rate,
         ),
         latency_values=latencies,
         fill_rate_values=fill_rates,
@@ -11599,6 +11631,7 @@ def run_out_of_sample_validation(args) -> int:
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, commission=cost,
                 survivorship=survivorship,
+                max_participation_rate=max_participation_rate,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "out_of_sample_commission_sweep.json"
@@ -11638,6 +11671,7 @@ def run_out_of_sample_validation(args) -> int:
                 args.impact_coefficient, borrow_cost=args.borrow_cost,
                 funding_cost=args.funding_cost, slippage=cost,
                 survivorship=survivorship,
+                max_participation_rate=max_participation_rate,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "out_of_sample_slippage_sweep.json"
@@ -11707,6 +11741,7 @@ def run_out_of_sample_validation(args) -> int:
         validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
         survivorship=survivorship,
+        max_participation_rate=max_participation_rate,
     )
 
     if pit_results is not None:
@@ -12111,7 +12146,7 @@ def main():
     common_parser.add_argument("--latencies", type=int, nargs="+", default=None, help="List of execution latencies (in periods) to sweep (overrides --latency). Delays position execution by each latency after signal generation.")
     common_parser.add_argument("--min-position-fraction", type=float, default=None, help="Reject a run whose verdict rests on windows the strategy held a position for less than this fraction of each window's executable bars (after warmup). Opt-in: unset means the run is never rejected on this basis.")
     common_parser.add_argument("--max-impact", type=float, default=None, help="Maximum acceptable market impact per trade (as decimal, e.g., 0.0005 = 5 bps). When set, positions are scaled so the estimated market impact of each trade stays below this threshold. Opt-in: unset means no capacity-aware scaling.")
-    common_parser.add_argument("--max-participation-rate", type=float, default=None, help="Maximum participation rate per trade as a fraction of ADV (e.g., 0.10 = 10%). When set and --impact-coefficient > 0, the reported strategy capacity is the minimum of the impact-based capacity and max_participation_rate * ADV_notional. Opt-in; unset reports the impact-based capacity only.")
+    common_parser.add_argument("--max-participation-rate", type=float, default=None, help="Maximum participation rate per trade as a fraction of ADV (e.g., 0.10 = 10%%). When set and --impact-coefficient > 0, the reported strategy capacity is the minimum of the impact-based capacity and max_participation_rate * ADV_notional. Opt-in; unset reports the impact-based capacity only.")
     common_parser.add_argument(
         "--panel-pricing",
         type=str,
