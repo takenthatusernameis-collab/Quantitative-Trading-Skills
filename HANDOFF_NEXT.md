@@ -1,53 +1,51 @@
-# Handoff: next task (session ending 2026-11-19): Full quant gate GREEN (1522 passed)
+# Handoff: next task (session ending 2026-11-19): wire participation-rate cap through walk-forward
 
-## Latest baseline (verified this session)
-- **Full quant gate: 1522 passed** in 23:52 with `-n 4` (`/tmp/venv/bin/python -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4`).
-- **`test_main_registers_every_module_level_test`**: PASS (4 previously unregistered PBO tests now in TEST_REGISTRY).
-- **`test_adjustment_integrity_cli_regression.py`**: 2 passed (positive + negative control for split-adjustment provenance).
-- Default example CLI: **EXIT 0**, verdict `NOT SUPPORTED`.
-- Working tree (uncommitted): `skills/quantitative-backtesting/tests/test_walk_forward.py` (TEST_REGISTRY fix only). No generated artifacts dirtied.
+## Latest verified baseline
+- **Full quant gate: 1535 passed, EXIT 0** in 1459.84s with `-n 4`
+  (`/tmp/venv/bin/python -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4`).
+- 1535 = previous 1522 + 9 walk-forward capacity-cap tests + 4 run_backtest cap tests.
+- `run_backtest.py --max-participation-rate` verified end-to-end by CLI smoke:
+  capacity equals `rate * ADV_notional` exactly on the AAPL fixture.
+- Working tree (uncommitted): `scripts/walk_forward.py` (estimate_capacity cap),
+  `scripts/run_backtest.py` (flag + validation + config), both test files,
+  `SKILL.md`, `references/cost_models.md`, this handoff set.
 
-## What changed
-Fixed the registry audit failure by registering 4 existing but unregistered test functions:
-- `test_walk_forward_analysis_family_pbo_opt_in`
-- `test_walk_forward_analysis_family_pbo_defaults_off`
-- `test_walk_forward_analysis_family_pbo_too_short_records_error`
-- `test_print_family_pbo_surfaces_reading_and_caveat`
-
-These were defined in the module but omitted from `TEST_REGISTRY`, causing `test_main_registers_every_module_level_test` to fail. The fix is a 4-line addition at line 6859.
-
-## Verification evidence
-| Check | Result |
-|---|---|
-| `pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` | **1522 passed, 0 failed, EXIT 0** (23:52) |
-| `test_walk_forward.py` (211 tests) | **211 passed** |
-| `test_falsifiable_hypothesis_example.py` (37 tests) | **37 passed** |
-| `test_adjustment_integrity_cli_regression.py` | **2 passed** |
-| Focused regression set (3 test files) | **39 passed** |
+## What is complete
+- `estimate_capacity(..., max_participation_rate=r)` caps the point estimate,
+  the panel basket estimate (least-liquid constituent x n_assets), and every
+  period of `capacity_trend`; rejects non-positive/non-finite values.
+- `run_backtest.py` exposes `--max-participation-rate`, validates before the
+  capacity `try/except`, and records `results["config"]["max_participation_rate"]`.
+- Docs describe the `min(impact_capacity, r * ADV_notional)` semantics and the
+  full-rebalance limitation.
+- Default `None` leaves the impact-only numbers unchanged (tested).
 
 ## What remains unresolved
-- Changes are **uncommitted** (do not commit unless the user asks).
-- No profitability/capacity claim. Verdicts on committed fixtures remain `NOT SUPPORTED`.
+- `walk_forward.py` CLI paths (`walk-forward`, `optimize`, `cpcv`, `monte-carlo`,
+  `out-of-sample`) still compute capacity without the cap. Their per-period and
+  summary capacity numbers therefore use a different liquidity convention than
+  `run_backtest`.
+- No profitability/capacity claim. Committed-fixture verdicts remain `NOT SUPPORTED`.
+- Uncommitted (do not commit unless the user asks).
 
-## Do not repeat
-- Do NOT re-run the full gate hoping for different results; it is deterministic and green.
-- Do NOT treat unavailable criteria as passing; conservative semantics (unavailable = not satisfied) are intentional and tested.
-- Do NOT tune parameters/costs/verdicts to force SUPPORT.
-
-## One precise next task (evidence-based)
-**Select a new bounded quantitative research task.** The prior backlog item (data-integrity regression for split-adjustment provenance) is complete in `test_adjustment_integrity_cli_regression.py`. Candidate next tasks:
-1. **Regime-aware stress testing**: Extend `test_regime_cost_multiplier.py` with synthetic regime-switching scenarios and verify OOS degradation is captured.
-2. **Capacity estimation refinement**: Improve `estimate_capacity()` in `scripts/walk_forward.py` with participation-rate limits and validate against the `test_estimate_capacity_*` tests.
-3. **Out-of-sample validation enhancements**: Add a walk-forward "anchored vs expanding window" comparison test to `test_out_of_sample_window.py`.
-4. **Multiple-testing diagnostics**: Add a synthetic overfit-family test to `test_pbo_overfitting_example.py` that exercises PBO + Reality Check + Romano-Wolf together.
-
-Pick one, implement a focused test + minimal wiring if needed, run the focused test then the full gate (require EXIT 0; baseline 1522 passed). Revert only gate-dirtied generated artifacts and leave a new handoff with exact evidence and limitations.
+## One precise next task
+1. Add `--max-participation-rate` to `common_parser` in `scripts/walk_forward.py`
+   (~line 12050), default `None`, validated once per subcommand.
+2. Thread the value into `walk_forward_analysis`, `cpcv_analysis`,
+   `out_of_sample_validation`, and the two Monte Carlo summary paths, and pass
+   it to every `estimate_capacity` call:
+   lines **1102** (per period), **1309** (WF summary), **4624** (per fold),
+   **4832** (CPCV summary), **6973** / **7073** (OOS val/test), **7430** (OOS
+   summary), **10631** and **11185** (Monte Carlo).
+3. Record the value in each summary (same key name as run_backtest) and add a
+   focused test that a cap tighter than the impact capacity binds in both
+   `periods[i]["capacity"]` and `summary["capacity"]` (and in the trend).
+4. Run focused capacity tests, then the full gate with `-n 4`; require EXIT 0
+   (baseline **1535**). Revert only inspected generated artifacts.
 
 ## Constraints
-- Do not rerun the already-green registry fix or adjustment-integrity regression unchanged.
-- Do not claim profitability or capacity on committed fixtures.
-- Use `-n 4` with adequate budget (~25 min).
-- Revert only inspected generated-artifact paths; do not `git checkout -- .` blindly.
+- Default `None` must be bitwise identical to today's published numbers.
+- Do not weaken the capacity `try/except` or CLI validation.
+- Use `-n 4` with ~25 min budget.
+- Do not `git checkout -- .` blindly; revert only inspected artifact paths.
 - Do not commit unless explicitly asked.
-
-(End of file)

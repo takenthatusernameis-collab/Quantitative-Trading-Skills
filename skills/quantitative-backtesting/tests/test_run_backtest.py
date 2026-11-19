@@ -110,7 +110,8 @@ class _Args:
                  fill_rate=1.0, latency=0, panel_pricing="net-exposure",
                  impact_aggregation="panel",
                  train_frac=None, val_frac=None, test_frac=None, run_split=None,
-                 max_impact=None, regime_impact_coefficients=None):
+                 max_impact=None, regime_impact_coefficients=None,
+                 max_participation_rate=None):
         self.commission = commission
         self.slippage = slippage
         self.initial_capital = initial_capital
@@ -136,6 +137,7 @@ class _Args:
         self.run_split = run_split
         self.max_impact = max_impact
         self.regime_impact_coefficients = regime_impact_coefficients
+        self.max_participation_rate = max_participation_rate
 
 
 def test_signals_active_detects_flat_and_active_series():
@@ -868,6 +870,21 @@ def test_parse_args_accepts_max_impact():
         args = parse_args()
     assert args.max_impact is None
     assert args.max_impacts is None
+
+
+def test_parse_args_accepts_max_participation_rate():
+    """parse_args accepts --max-participation-rate and defaults to None."""
+    from unittest.mock import patch
+
+    with patch.object(
+        sys, "argv", ["prog", "--data", "d.csv", "--max-participation-rate", "0.10"]
+    ):
+        args = parse_args()
+    assert args.max_participation_rate == 0.10
+
+    with patch.object(sys, "argv", ["prog", "--data", "d.csv"]):
+        args = parse_args()
+    assert args.max_participation_rate is None
 
 
 def test_run_backtest_fill_rate_default_is_one():
@@ -2639,6 +2656,68 @@ def test_run_backtest_surfaces_capacity_trend_in_results():
     assert disabled["capacity"] is None
     assert disabled["capacity_trend"] is None
 
+
+def test_run_backtest_max_participation_rate_binds_capacity():
+    """--max-participation-rate caps the reported capacity when it is tighter
+    than the impact-based capacity, and the cap flows into the trend."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+
+    # Impact-based capacity = 0.0005 * ADV / 0.5 = 0.001 * ADV.
+    # A 0.0005 participation rate is tighter and should bind.
+    results = run_backtest(
+        data, strategy, _Args(impact_coefficient=0.5, max_participation_rate=0.0005)
+    )
+    assert results["config"]["max_participation_rate"] == 0.0005
+
+    last_adv = (
+        data["volume"].rolling(window=20, min_periods=1).mean().iloc[-1]
+        * data["close"].iloc[-1]
+    )
+    expected = 0.0005 * last_adv
+    assert abs(results["capacity"] - expected) < 1e-6
+    impact_capacity = 0.0005 * last_adv / 0.5
+    assert impact_capacity > expected
+
+    trend = results["capacity_trend"]
+    assert trend is not None
+    assert abs(trend["last_capacity"] - expected) < 1e-6
+
+
+def test_run_backtest_max_participation_rate_does_not_bind_capacity():
+    """A loose participation-rate cap leaves the impact-based capacity."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+
+    capped = run_backtest(
+        data, strategy, _Args(impact_coefficient=0.5, max_participation_rate=0.50)
+    )
+    uncapped = run_backtest(data, strategy, _Args(impact_coefficient=0.5))
+    assert capped["config"]["max_participation_rate"] == 0.50
+    assert uncapped["config"]["max_participation_rate"] is None
+    assert abs(capped["capacity"] - uncapped["capacity"]) < 1e-9
+
+
+def test_run_backtest_max_participation_rate_rejects_invalid():
+    """A non-positive or non-finite participation rate fails loudly instead of
+    silently reporting a None capacity."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+
+    for bad in (0.0, -0.01, float("nan"), float("inf")):
+        try:
+            run_backtest(
+                data,
+                strategy,
+                _Args(impact_coefficient=0.5, max_participation_rate=bad),
+            )
+        except ValueError as exc:
+            assert "max-participation-rate" in str(exc)
+        else:
+            raise AssertionError(
+                f"expected ValueError for max_participation_rate={bad}"
+            )
+
     no_volume = _make_data().drop(columns=["volume"])
     missing = run_backtest(no_volume, strategy, _Args(impact_coefficient=0.5))
     assert missing["capacity"] is None
@@ -4224,6 +4303,7 @@ TEST_REGISTRY = [
     ("test_run_backtest_market_impact_scales_with_equity_not_price", test_run_backtest_market_impact_scales_with_equity_not_price),
     ("test_parse_args_accepts_fill_rate", test_parse_args_accepts_fill_rate),
     ("test_parse_args_accepts_max_impact", test_parse_args_accepts_max_impact),
+    ("test_parse_args_accepts_max_participation_rate", test_parse_args_accepts_max_participation_rate),
     ("test_run_backtest_fill_rate_default_is_one", test_run_backtest_fill_rate_default_is_one),
     ("test_run_backtest_fill_rate_one_identical_to_default", test_run_backtest_fill_rate_one_identical_to_default),
     ("test_run_backtest_fill_rate_scales_borrow_cost_with_position", test_run_backtest_fill_rate_scales_borrow_cost_with_position),
@@ -4276,6 +4356,9 @@ TEST_REGISTRY = [
     ("test_cli_data_provenance_reproducible_across_runs", test_cli_data_provenance_reproducible_across_runs),
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
     ("test_run_backtest_surfaces_capacity_in_results", test_run_backtest_surfaces_capacity_in_results),
+    ("test_run_backtest_max_participation_rate_binds_capacity", test_run_backtest_max_participation_rate_binds_capacity),
+    ("test_run_backtest_max_participation_rate_does_not_bind_capacity", test_run_backtest_max_participation_rate_does_not_bind_capacity),
+    ("test_run_backtest_max_participation_rate_rejects_invalid", test_run_backtest_max_participation_rate_rejects_invalid),
     ("test_run_backtest_capacity_omits_when_volume_unavailable", test_run_backtest_capacity_omits_when_volume_unavailable),
     ("test_run_backtest_surfaces_capacity_trend_in_results", test_run_backtest_surfaces_capacity_trend_in_results),
     ("test_run_backtest_surfaces_book_diagnostic_for_a_panel", test_run_backtest_surfaces_book_diagnostic_for_a_panel),

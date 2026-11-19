@@ -6967,6 +6967,199 @@ def test_estimate_capacity_missing_volume_not_estimable():
     assert cap["estimated_capacity"] is None
 
 
+def test_estimate_capacity_participation_rate_limit_binds_single_asset():
+    """When max_participation_rate is set low enough, it binds and the
+    estimated capacity equals participation_rate * ADV_notional (impact-based
+    capacity is higher and thus not the constraint).
+
+    Impact-based participation rate = max_impact / impact_coefficient = 0.001.
+    So a max_participation_rate of 0.0005 (0.05%) is tighter and should bind.
+    """
+    data = _make_ohlcv_data(periods=300, seed=42)
+    # Low participation rate (0.05%) should bind before impact-based capacity (0.1%)
+    cap = estimate_capacity(data, impact_coefficient=0.5, max_participation_rate=0.0005)
+    assert cap["estimable"] is True
+    assert cap["max_participation_rate"] == 0.0005
+    # Participation capacity = 0.0005 * ADV_notional
+    last_adv_notional = cap["adv_notional"]
+    expected = 0.0005 * last_adv_notional
+    assert abs(cap["estimated_capacity"] - expected) < 1e-6
+    # Impact-based capacity would be higher (0.0005 * ADV / 0.5 = 0.001 * ADV)
+    impact_capacity = 0.0005 * last_adv_notional / 0.5
+    assert impact_capacity > expected
+    assert cap["estimated_capacity"] < impact_capacity
+
+
+def test_estimate_capacity_participation_rate_limit_does_not_bind_single_asset():
+    """When max_participation_rate is high, impact-based capacity binds and
+    participation-rate limit is not the constraint."""
+    data = _make_ohlcv_data(periods=300, seed=42)
+    # High participation rate (50%) should not bind
+    cap = estimate_capacity(data, impact_coefficient=0.5, max_participation_rate=0.50)
+    assert cap["estimable"] is True
+    assert cap["max_participation_rate"] == 0.50
+    # Impact-based capacity = 0.0005 * ADV_notional / 0.5 = 0.001 * ADV
+    last_adv_notional = cap["adv_notional"]
+    expected_impact = 0.0005 * last_adv_notional / 0.5
+    participation_capacity = 0.50 * last_adv_notional
+    assert expected_impact < participation_capacity
+    assert abs(cap["estimated_capacity"] - expected_impact) < 1e-6
+
+
+def test_estimate_capacity_participation_rate_limit_binds_panel():
+    """On a panel, the participation-rate limit binds on the least liquid asset
+    and is scaled by n_assets (equal-weight basket).
+
+    Impact-based participation rate = max_impact / impact_coefficient = 0.001.
+    So a max_participation_rate of 0.0005 (0.05%) is tighter and should bind.
+    """
+    dates = pd.date_range("2020-01-01", periods=30, freq="B")
+    symbols = ["LIQ", "ILLIQ"]
+    cols = pd.MultiIndex.from_product([["close", "volume"], symbols])
+    data = pd.DataFrame(index=dates, columns=cols, dtype=float)
+    data[("close", "LIQ")] = 100.0
+    data[("close", "ILLIQ")] = 100.0
+    data[("volume", "LIQ")] = 1_000_000.0
+    data[("volume", "ILLIQ")] = 100_000.0  # 10x less liquid
+
+    cap = estimate_capacity(data, impact_coefficient=0.5, max_participation_rate=0.0005)
+    assert cap["estimable"] is True
+    assert cap["n_assets"] == 2
+    assert cap["binding_asset"] == "ILLIQ"
+    assert cap["max_participation_rate"] == 0.0005
+    # Participation capacity = n_assets * max_participation_rate * binding_ADV_notional
+    # binding_ADV_notional = 100_000 * 100 = 10_000_000
+    expected = 2 * 0.0005 * 10_000_000.0
+    assert abs(cap["estimated_capacity"] - expected) < 1e-6
+    # Impact-based capacity would be higher
+    impact_capacity = 2 * 0.0005 * 10_000_000.0 / 0.5
+    assert impact_capacity > expected
+    assert cap["estimated_capacity"] < impact_capacity
+
+
+def test_estimate_capacity_participation_rate_limit_does_not_bind_panel():
+    """On a panel, high participation rate means impact-based capacity binds."""
+    dates = pd.date_range("2020-01-01", periods=30, freq="B")
+    symbols = ["LIQ", "ILLIQ"]
+    cols = pd.MultiIndex.from_product([["close", "volume"], symbols])
+    data = pd.DataFrame(index=dates, columns=cols, dtype=float)
+    data[("close", "LIQ")] = 100.0
+    data[("close", "ILLIQ")] = 100.0
+    data[("volume", "LIQ")] = 1_000_000.0
+    data[("volume", "ILLIQ")] = 100_000.0
+
+    cap = estimate_capacity(data, impact_coefficient=0.5, max_participation_rate=0.50)
+    assert cap["estimable"] is True
+    assert cap["n_assets"] == 2
+    assert cap["binding_asset"] == "ILLIQ"
+    assert cap["max_participation_rate"] == 0.50
+    # Impact-based capacity = n_assets * max_impact * binding_ADV / coefficient
+    expected_impact = 2 * 0.0005 * 10_000_000.0 / 0.5
+    participation_capacity = 2 * 0.50 * 10_000_000.0
+    assert expected_impact < participation_capacity
+    assert abs(cap["estimated_capacity"] - expected_impact) < 1e-6
+
+
+def test_estimate_capacity_participation_rate_trend_single_asset():
+    """The capacity trend respects the participation-rate limit on every period."""
+    # Create data with flat ADV so trend is easy to verify
+    dates = pd.date_range("2020-01-01", periods=60, freq="B")
+    data = pd.DataFrame({
+        "close": 100.0,
+        "volume": 1_000_000.0,
+    }, index=dates)
+
+    # Use participation rate tighter than impact-based (0.001)
+    cap = estimate_capacity(data, impact_coefficient=0.5, max_participation_rate=0.0005)
+    trend = cap["capacity_trend"]
+    assert trend is not None
+    # On flat ADV, all periods should have the same capacity = participation limit
+    expected = 0.0005 * (1_000_000.0 * 100.0)
+    assert abs(trend["min_capacity"] - expected) < 1e-6
+    assert abs(trend["median_capacity"] - expected) < 1e-6
+    assert abs(trend["max_capacity"] - expected) < 1e-6
+    assert abs(trend["last_capacity"] - expected) < 1e-6
+    assert trend["min_to_median_ratio"] == 1.0
+    assert trend["last_to_median_ratio"] == 1.0
+
+
+def test_estimate_capacity_participation_rate_trend_declining_adv():
+    """On declining ADV, the participation-rate limit still binds per period
+    and the trend follows the participation capacity."""
+    dates = pd.date_range("2020-01-01", periods=60, freq="B")
+    data = pd.DataFrame({
+        "open": 100.0,
+        "high": 100.5,
+        "low": 99.5,
+        "close": 100.0,
+        "volume": np.linspace(4_000_000.0, 1_000_000.0, 60),
+    }, index=dates)
+
+    # Use participation rate tighter than impact-based (0.001)
+    cap = estimate_capacity(data, impact_coefficient=0.5, max_participation_rate=0.0005)
+    trend = cap["capacity_trend"]
+    assert trend is not None
+    # Last capacity should equal participation_rate * last_ADV_notional
+    last_adv = data["volume"].rolling(window=20, min_periods=1).mean().iloc[-1] * 100.0
+    expected_last = 0.0005 * last_adv
+    assert abs(trend["last_capacity"] - expected_last) < 1e-6
+    # First capacity should be higher (higher ADV)
+    first_adv = data["volume"].rolling(window=20, min_periods=1).mean().iloc[0] * 100.0
+    expected_first = 0.0005 * first_adv
+    assert abs(trend["max_capacity"] - expected_first) < 1e-6
+    # Since liquidity only declines, min < median < max
+    assert trend["min_capacity"] < trend["median_capacity"]
+    assert trend["median_capacity"] < trend["max_capacity"]
+
+
+def test_estimate_capacity_participation_rate_trend_panel():
+    """On a panel, the trend binds on the least liquid asset per period."""
+    dates = pd.date_range("2021-01-01", periods=60, freq="B")
+    symbols = ["LIQ", "ILLIQ"]
+    cols = pd.MultiIndex.from_product([["close", "volume"], symbols])
+    panel = pd.DataFrame(index=dates, columns=cols, dtype=float)
+    for sym in symbols:
+        panel[("close", sym)] = 100.0
+    panel[("volume", "LIQ")] = 1_000_000.0
+    panel[("volume", "ILLIQ")] = np.linspace(400_000.0, 100_000.0, 60)
+
+    # Use participation rate tighter than impact-based (0.001)
+    cap = estimate_capacity(panel, impact_coefficient=0.5, max_participation_rate=0.0005)
+    assert cap["binding_asset"] == "ILLIQ"
+    trend = cap["capacity_trend"]
+    assert trend is not None
+    # Last capacity = n_assets * participation_rate * last_ILLIQ_ADV_notional
+    last_illiq_adv = panel[("volume", "ILLIQ")].rolling(window=20, min_periods=1).mean().iloc[-1] * 100.0
+    expected_last = 2 * 0.0005 * last_illiq_adv
+    assert abs(trend["last_capacity"] - expected_last) < 1e-6
+    # Max capacity at first period
+    first_illiq_adv = panel[("volume", "ILLIQ")].rolling(window=20, min_periods=1).mean().iloc[0] * 100.0
+    expected_first = 2 * 0.0005 * first_illiq_adv
+    assert abs(trend["max_capacity"] - expected_first) < 1e-6
+
+
+def test_estimate_capacity_participation_rate_rejects_invalid():
+    """Invalid max_participation_rate values must raise ValueError."""
+    data = _make_ohlcv_data(periods=300, seed=42)
+    for bad in (0.0, -0.01, float("nan"), float("inf")):
+        try:
+            estimate_capacity(data, impact_coefficient=0.5, max_participation_rate=bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"expected ValueError for max_participation_rate={bad}")
+
+
+def test_estimate_capacity_participation_rate_none_when_impact_disabled():
+    """When impact is disabled, participation-rate limit is not applied
+    (capacity is unconstrained regardless)."""
+    data = _make_ohlcv_data(periods=300, seed=42)
+    cap = estimate_capacity(data, impact_coefficient=0.0, max_participation_rate=0.01)
+    assert cap["unconstrained"] is True
+    assert cap["estimated_capacity"] is None
+    assert cap["capacity_trend"] is None
+
+
 TEST_REGISTRY.extend([
     ("test_examples_coverage_deflated_alpha_imports", test_examples_coverage_deflated_alpha_imports),
     ("test_examples_coverage_deflated_alpha_runs", test_examples_coverage_deflated_alpha_runs),
@@ -6980,6 +7173,15 @@ TEST_REGISTRY.extend([
     ("test_estimate_capacity_scales_inversely_with_impact_coefficient", test_estimate_capacity_scales_inversely_with_impact_coefficient),
     ("test_estimate_capacity_scales_directly_with_max_impact", test_estimate_capacity_scales_directly_with_max_impact),
     ("test_estimate_capacity_missing_volume_not_estimable", test_estimate_capacity_missing_volume_not_estimable),
+    ("test_estimate_capacity_participation_rate_limit_binds_single_asset", test_estimate_capacity_participation_rate_limit_binds_single_asset),
+    ("test_estimate_capacity_participation_rate_limit_does_not_bind_single_asset", test_estimate_capacity_participation_rate_limit_does_not_bind_single_asset),
+    ("test_estimate_capacity_participation_rate_limit_binds_panel", test_estimate_capacity_participation_rate_limit_binds_panel),
+    ("test_estimate_capacity_participation_rate_limit_does_not_bind_panel", test_estimate_capacity_participation_rate_limit_does_not_bind_panel),
+    ("test_estimate_capacity_participation_rate_trend_single_asset", test_estimate_capacity_participation_rate_trend_single_asset),
+    ("test_estimate_capacity_participation_rate_trend_declining_adv", test_estimate_capacity_participation_rate_trend_declining_adv),
+    ("test_estimate_capacity_participation_rate_trend_panel", test_estimate_capacity_participation_rate_trend_panel),
+    ("test_estimate_capacity_participation_rate_rejects_invalid", test_estimate_capacity_participation_rate_rejects_invalid),
+    ("test_estimate_capacity_participation_rate_none_when_impact_disabled", test_estimate_capacity_participation_rate_none_when_impact_disabled),
     ("test_verify_split_separation_non_chronological_disjoint_raises", test_verify_split_separation_non_chronological_disjoint_raises),
     ("test_walk_forward_analysis_validate_pit_passes_on_clean_data", test_walk_forward_analysis_validate_pit_passes_on_clean_data),
 ])

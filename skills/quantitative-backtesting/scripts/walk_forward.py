@@ -3596,9 +3596,11 @@ def estimate_capacity(
     max_impact: float = 0.0005,
     adv_window: int = 20,
     impact_model: str = DEFAULT_IMPACT_MODEL,
+    max_participation_rate: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
-    Estimate strategy capacity from the market-impact cost model.
+    Estimate strategy capacity from the market-impact cost model with an
+    optional participation-rate limit.
 
     Market impact of trading notional ``N`` is:
         Linear (default):  impact = (N / ADV_notional) * impact_coefficient
@@ -3627,6 +3629,15 @@ def estimate_capacity(
     ``price`` / ``adv_shares`` / ``adv_notional`` describe that binding
     (least liquid) member, and ``binding_asset`` / ``n_assets`` identify it.
 
+    Participation-rate limit (optional): if ``max_participation_rate`` is set
+    (e.g., 0.10 for 10%), the per-trade notional is also constrained by:
+        capacity_notional = max_participation_rate * ADV_notional
+    This is a hard constraint independent of the impact model. The final
+    estimated capacity is the minimum of the impact-based capacity and the
+    participation-rate-based capacity. For panels, the limit applies per
+    constituent and the binding (least liquid) asset determines the portfolio
+    limit (scaled by ``n_assets`` as with the impact-based calculation).
+
     The point-in-time estimate above reads the ADV of the *last* bar of the
     window, so a liquidity squeeze that happened earlier in the window is
     hidden. The ``capacity_trend`` key therefore reports the distribution of
@@ -3647,12 +3658,17 @@ def estimate_capacity(
         impact_model: ``"linear"`` (default) or ``"sqrt"``. The square-root model
             computes impact as ``coefficient * sqrt(participation_rate)`` instead
             of ``coefficient * participation_rate``.
+        max_participation_rate: Optional maximum participation rate per trade
+            as a fraction of ADV (e.g., 0.10 = 10%). When set, the estimated
+            capacity is the minimum of the impact-based capacity and
+            ``max_participation_rate * ADV_notional`` (scaled by ``n_assets``
+            for panels). Default ``None`` (no participation-rate limit).
 
     Returns:
         Dictionary with keys: impact_coefficient, max_impact, adv_window,
-        impact_model, price, adv_shares, adv_notional, periods_per_year,
-        max_notional_per_trade, estimated_capacity, unconstrained, estimable,
-        n_assets, binding_asset, capacity_trend.
+        impact_model, max_participation_rate, price, adv_shares, adv_notional,
+        periods_per_year, max_notional_per_trade, estimated_capacity,
+        unconstrained, estimable, n_assets, binding_asset, capacity_trend.
         ``unconstrained`` is True when impact is disabled. ``estimable`` is
         False when ADV cannot be computed (missing columns or empty data).
         ``capacity_trend`` describes the per-period capacity distribution
@@ -3664,6 +3680,7 @@ def estimate_capacity(
         "max_impact": float(max_impact),
         "adv_window": int(adv_window),
         "impact_model": impact_model,
+        "max_participation_rate": float(max_participation_rate) if max_participation_rate is not None else None,
         "price": None,
         "adv_shares": None,
         "adv_notional": None,
@@ -3683,6 +3700,10 @@ def estimate_capacity(
 
     if impact_model not in IMPACT_MODEL_TYPES:
         raise ValueError(f"impact_model must be one of {IMPACT_MODEL_TYPES}, got {impact_model}")
+
+    if max_participation_rate is not None:
+        if not np.isfinite(max_participation_rate) or max_participation_rate <= 0:
+            raise ValueError(f"max_participation_rate must be positive and finite, got {max_participation_rate}")
 
     is_panel = isinstance(data.columns, pd.MultiIndex)
     if is_panel:
@@ -3736,6 +3757,11 @@ def estimate_capacity(
             per_asset_capacity = max_impact * binding_adv_notional / float(impact_coefficient)
         portfolio_capacity = n_assets * per_asset_capacity
 
+        # Apply participation-rate limit if set.
+        if max_participation_rate is not None:
+            participation_capacity = n_assets * max_participation_rate * binding_adv_notional
+            portfolio_capacity = min(portfolio_capacity, participation_capacity)
+
         # Capacity trend: the per-period portfolio capacity series, so a
         # liquidity squeeze *inside* the window is visible instead of being
         # hidden behind the last bar's reading. Each period's portfolio
@@ -3748,6 +3774,13 @@ def estimate_capacity(
             _capacity_series = n_assets * (max_impact / float(impact_coefficient)) ** 2 * _row_min_adv
         else:
             _capacity_series = n_assets * max_impact * _row_min_adv / float(impact_coefficient)
+
+        # Apply participation-rate limit to the capacity trend series.
+        if max_participation_rate is not None:
+            _participation_series = n_assets * max_participation_rate * _row_min_adv
+            _capacity_series = _capacity_series.where(
+                _capacity_series <= _participation_series, _participation_series
+            )
 
         result.update(
             price=binding_price,
@@ -3776,6 +3809,11 @@ def estimate_capacity(
     else:
         max_notional_per_trade = max_impact * last_adv_notional / float(impact_coefficient)
 
+    # Apply participation-rate limit if set.
+    if max_participation_rate is not None:
+        participation_capacity = max_participation_rate * last_adv_notional
+        max_notional_per_trade = min(max_notional_per_trade, participation_capacity)
+
     # Capacity trend: the per-period capacity series across the window.
     _valid_adv = adv_notional.where(
         np.isfinite(adv_notional) & (adv_notional > 0)
@@ -3784,6 +3822,13 @@ def estimate_capacity(
         _capacity_series = (max_impact / float(impact_coefficient)) ** 2 * _valid_adv
     else:
         _capacity_series = max_impact * _valid_adv / float(impact_coefficient)
+
+    # Apply participation-rate limit to the capacity trend series.
+    if max_participation_rate is not None:
+        _participation_series = max_participation_rate * _valid_adv
+        _capacity_series = _capacity_series.where(
+            _capacity_series <= _participation_series, _participation_series
+        )
 
     result.update(
         price=price,

@@ -634,6 +634,33 @@ disabled (`impact_coefficient <= 0`) or when ADV cannot be computed
 (missing `close`/`volume`, empty data, or non-positive ADV), so the key is
 backward compatible: consumers may omit it when absent.
 
+### Participation-rate cap (optional)
+
+A capacity reading that implies trading more than a chosen fraction of ADV
+per rebalance is not executable even when it is below the impact threshold.
+`estimate_capacity(..., max_participation_rate=r)` therefore caps the
+estimate at `r * ADV_notional`:
+
+```
+capacity_notional = min(
+    max_impact * ADV_notional / impact_coefficient,   # impact-based
+    max_participation_rate * ADV_notional,            # participation cap
+)
+```
+
+For a panel, the cap uses the same least-liquid binding constituent and is
+scaled by `n_assets`, exactly like the impact-based basket capacity. The cap
+is applied to every period of `capacity_trend` as well, so the trend and the
+point-in-time reading never contradict each other. Default `None` (no cap),
+which leaves every published capacity number unchanged. `run_backtest.py`
+exposes it as `--max-participation-rate` and records the value in
+`results["config"]["max_participation_rate"]`. Non-positive or non-finite
+values raise `ValueError`.
+
+The cap assumes a full rebalance per period (the same assumption as the
+impact-based capacity), so it bounds per-rebalance participation, not the
+participation of an intraday execution schedule.
+
 ### Capacity per regime (fold / period / window)
 
 The aggregate `summary["capacity"]` is computed on the whole sample, so it

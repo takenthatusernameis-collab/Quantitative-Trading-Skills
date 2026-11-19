@@ -83,6 +83,7 @@ def parse_args():
     parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
     parser.add_argument("--max-impact", type=float, default=None, help="Maximum acceptable market impact per trade (as decimal, e.g., 0.0005 = 5 bps). When set and --impact-coefficient > 0, target positions are scaled so the estimated market impact of each trade stays below this threshold (capacity-aware position cap). Opt-in; unset means no capacity-aware scaling.")
     parser.add_argument("--max-impacts", type=float, nargs="+", default=None, help="List of max-impact thresholds to sweep (overrides --max-impact).")
+    parser.add_argument("--max-participation-rate", type=float, default=None, help="Maximum participation rate per trade as a fraction of ADV (e.g. 0.10 = 10%%). When set and --impact-coefficient > 0, the reported strategy capacity is the minimum of the impact-based capacity and max_participation_rate * ADV_notional. Opt-in; unset reports the impact-based capacity only.")
     parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3%% per year)")
     parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="List of annual borrow costs to sweep (overrides --borrow-cost).")
     parser.add_argument("--funding-cost", type=float, default=0.0, help="Annual funding cost rate for leveraged positions (as decimal, e.g., 0.02 = 2%% per year)")
@@ -404,6 +405,17 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
         raise ValueError(
             f"--fill-rate must be in (0, 1], got {fill_rate}"
         )
+
+    # Optional participation-rate cap on the reported capacity. Validated
+    # here rather than inside the capacity try/except below so a
+    # misconfigured run fails loudly instead of silently reporting None.
+    max_participation_rate = getattr(args, "max_participation_rate", None)
+    if max_participation_rate is not None:
+        if not np.isfinite(max_participation_rate) or max_participation_rate <= 0:
+            raise ValueError(
+                f"--max-participation-rate must be positive and finite, "
+                f"got {max_participation_rate}"
+            )
 
     # Panel pricing mode. "net-exposure" (the default) prices the panel as
     # `net_exposure x mean(asset returns)` -- one scalar per period, the
@@ -855,6 +867,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             "borrow_cost": args.borrow_cost,
             "funding_cost": args.funding_cost,
             "max_impact": getattr(args, "max_impact", None),
+            "max_participation_rate": getattr(args, "max_participation_rate", None),
             "strategy": args.strategy,
             "symbol": args.symbol,
             "n_trials": getattr(args, "n_trials", None),
@@ -939,7 +952,8 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             results["capacity_trend"] = None
         else:
             _cap = estimate_capacity(
-                _cap_frame, args.impact_coefficient, adv_window=args.adv_window
+                _cap_frame, args.impact_coefficient, adv_window=args.adv_window,
+                max_participation_rate=max_participation_rate,
             )
             results["capacity"] = _cap.get("estimated_capacity")
             # Capacity trend: the per-period capacity distribution over the
