@@ -1750,6 +1750,29 @@ def parameter_optimization(
                     "total_return": float(total_return),
                     "n_periods": len(returns),
                 }
+                # Per-combo market-impact capacity estimate, so a ranking
+                # artifact is self-describing about the liquidity convention
+                # that produced it. Mirrors the per-period capacity the
+                # walk-forward path surfaces next to each period's selection:
+                # a measurement only, it changes no ranking number.
+                try:
+                    _combo_cap = estimate_capacity(
+                        data, impact_coefficient, adv_window=adv_window,
+                        max_participation_rate=max_participation_rate,
+                    )
+                    result["capacity"] = _combo_cap.get("estimated_capacity")
+                    result["capacity_trend"] = _combo_cap.get("capacity_trend")
+                    result["max_participation_rate"] = (
+                        float(max_participation_rate)
+                        if max_participation_rate is not None else None
+                    )
+                except Exception:
+                    result["capacity"] = None
+                    result["capacity_trend"] = None
+                    result["max_participation_rate"] = (
+                        float(max_participation_rate)
+                        if max_participation_rate is not None else None
+                    )
 
                 if regime_report is not None and sharpe > best_sharpe:
                     best_sharpe = sharpe
@@ -7832,7 +7855,8 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                                 commission=None, slippage=None, latency=None, fill_rate=None,
                                 pit_results=None, survivorship=None,
                                 regime_impact_coefficients: Optional[Dict[str, float]] = None,
-                                regime_cost_multipliers: Optional[Dict[str, float]] = None):
+                                regime_cost_multipliers: Optional[Dict[str, float]] = None,
+                                max_participation_rate: Optional[float] = None):
     """Run parameter optimization for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -7885,7 +7909,8 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
     if fill_rate <= 0 or fill_rate > 1:
         raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
     max_impact = getattr(args, "max_impact", None)
-    max_participation_rate = getattr(args, "max_participation_rate", None)
+    if max_participation_rate is None:
+        max_participation_rate = getattr(args, "max_participation_rate", None)
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -7956,6 +7981,13 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         # through so a panel optimization sweep is traceable to the universe
         # selection risk flagged at load time.
         "survivorship_bias": survivorship,
+        # The opt-in participation-rate cap that produced the reported
+        # capacity, so a capped number is never confused with an
+        # impact-only one. Mirrors the key run_backtest and the other
+        # analysis paths record in their summaries.
+        "max_participation_rate": (
+            float(max_participation_rate) if max_participation_rate is not None else None
+        ),
         # Parameter optimization's top_sharpe is an in-sample selection
         # statistic over the grid: the resolution that belongs to it is the
         # resolution of the selection itself (the trials searched), not of a
@@ -10120,6 +10152,7 @@ def run_parameter_optimization(args) -> int:
                 pit_results=pit_results,
                 regime_impact_coefficients=regime_impact_coefficients,
                 regime_cost_multipliers=regime_cost_multipliers,
+                max_participation_rate=max_participation_rate,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_impact_sweep.json"
@@ -10156,6 +10189,7 @@ def run_parameter_optimization(args) -> int:
                 survivorship=survivorship,
                 regime_impact_coefficients=regime_impact_coefficients,
                 regime_cost_multipliers=regime_cost_multipliers,
+                max_participation_rate=max_participation_rate,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_borrow_sweep.json"
@@ -10192,6 +10226,7 @@ def run_parameter_optimization(args) -> int:
                 survivorship=survivorship,
                 regime_impact_coefficients=regime_impact_coefficients,
                 regime_cost_multipliers=regime_cost_multipliers,
+                max_participation_rate=max_participation_rate,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_funding_sweep.json"
@@ -10231,6 +10266,7 @@ def run_parameter_optimization(args) -> int:
             pit_results=pit_results, survivorship=survivorship,
             regime_impact_coefficients=regime_impact_coefficients,
             regime_cost_multipliers=regime_cost_multipliers,
+            max_participation_rate=max_participation_rate,
         ),
         latency_values=latencies,
         fill_rate_values=fill_rates,
@@ -10268,6 +10304,7 @@ def run_parameter_optimization(args) -> int:
                 survivorship=survivorship,
                 regime_impact_coefficients=regime_impact_coefficients,
                 regime_cost_multipliers=regime_cost_multipliers,
+                max_participation_rate=max_participation_rate,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_commission_sweep.json"
@@ -10309,6 +10346,7 @@ def run_parameter_optimization(args) -> int:
                 survivorship=survivorship,
                 regime_impact_coefficients=regime_impact_coefficients,
                 regime_cost_multipliers=regime_cost_multipliers,
+                max_participation_rate=max_participation_rate,
             )
             sweep_rows.append(row)
         sweep_path = output_dir / "parameter_optimization_slippage_sweep.json"
