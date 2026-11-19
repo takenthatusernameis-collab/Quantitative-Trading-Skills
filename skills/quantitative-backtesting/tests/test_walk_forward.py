@@ -6670,6 +6670,226 @@ def test_annualization_scales_oos_risk_metrics_hourly_vs_daily():
     assert hourly_summary["oos_sharpe"] > daily_summary["oos_sharpe"]
 
 
+def test_walk_forward_analysis_participation_rate_caps_per_period_and_summary():
+    """A participation-rate cap tighter than the impact-based capacity binds
+    in every out-of-sample period and in the sample summary, and the rate is
+    recorded so a capped number is distinguishable from an impact-only one.
+
+    With impact_coefficient 0.5 and the default 5 bps impact target the
+    impact-based participation rate is 0.001 (max_impact / coefficient), so a
+    0.0001 cap is exactly one tenth of it and must bind everywhere.
+    """
+    data = _make_ohlcv_data(periods=500, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
+    common = dict(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        impact_coefficient=0.5,
+    )
+
+    uncapped = walk_forward_analysis(**common)
+    capped = walk_forward_analysis(**common, max_participation_rate=0.0001)
+
+    assert uncapped["summary"]["max_participation_rate"] is None
+    assert capped["summary"]["max_participation_rate"] == 0.0001
+
+    uncapped_cap = uncapped["summary"]["capacity"]
+    capped_cap = capped["summary"]["capacity"]
+    assert uncapped_cap is not None and uncapped_cap > 0
+    assert abs(capped_cap - 0.1 * uncapped_cap) <= 1e-9 * abs(uncapped_cap)
+
+    assert len(capped["periods"]) == len(uncapped["periods"])
+    assert len(capped["periods"]) > 0
+    for uncapped_period, capped_period in zip(
+        uncapped["periods"], capped["periods"]
+    ):
+        assert uncapped_period["capacity"] > 0
+        assert abs(
+            capped_period["capacity"] - 0.1 * uncapped_period["capacity"]
+        ) <= 1e-9 * uncapped_period["capacity"]
+        # The trend must be capped too: its last reading matches the period's
+        # point-in-time capacity instead of the impact-only number.
+        trend = capped_period["capacity_trend"]
+        assert trend is not None
+        assert trend["last_capacity"] == capped_period["capacity"]
+
+    summary_trend = capped["summary"]["capacity_trend"]
+    assert summary_trend["last_capacity"] == capped_cap
+
+    # A cap looser than the impact-based participation rate leaves every
+    # published number unchanged (opt-in semantics).
+    loose = walk_forward_analysis(**common, max_participation_rate=0.5)
+    assert loose["summary"]["capacity"] == uncapped_cap
+    for uncapped_period, loose_period in zip(
+        uncapped["periods"], loose["periods"]
+    ):
+        assert loose_period["capacity"] == uncapped_period["capacity"]
+
+
+def test_cpcv_analysis_participation_rate_caps_per_fold_and_summary():
+    """The CPCV path threads the participation-rate cap into every fold and
+    the sample summary, and records the rate."""
+    data = _make_ohlcv_data(periods=600, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
+    common = dict(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+        impact_coefficient=0.5,
+    )
+
+    uncapped = cpcv_analysis(**common)
+    capped = cpcv_analysis(**common, max_participation_rate=0.0001)
+
+    assert uncapped["summary"]["max_participation_rate"] is None
+    assert capped["summary"]["max_participation_rate"] == 0.0001
+
+    uncapped_cap = uncapped["summary"]["capacity"]
+    capped_cap = capped["summary"]["capacity"]
+    assert uncapped_cap is not None and uncapped_cap > 0
+    assert abs(capped_cap - 0.1 * uncapped_cap) <= 1e-9 * abs(uncapped_cap)
+
+    assert len(capped["folds"]) == len(uncapped["folds"])
+    assert len(capped["folds"]) > 0
+    for uncapped_fold, capped_fold in zip(uncapped["folds"], capped["folds"]):
+        assert uncapped_fold["capacity"] > 0
+        assert abs(
+            capped_fold["capacity"] - 0.1 * uncapped_fold["capacity"]
+        ) <= 1e-9 * uncapped_fold["capacity"]
+        assert capped_fold["capacity_trend"]["last_capacity"] == capped_fold["capacity"]
+
+
+def test_out_of_sample_validation_participation_rate_caps_splits_and_summary():
+    """The out-of-sample path caps the validation, held-out test and sample
+    capacities with the same rate and records it."""
+    data = _make_ohlcv_data(periods=600, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [5, 10], "slow_period": [15, 20]}
+    common = dict(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        validation_method="walk_forward",
+        impact_coefficient=0.5,
+        validate_pit=False,
+    )
+
+    uncapped = out_of_sample_validation(**common)
+    capped = out_of_sample_validation(**common, max_participation_rate=0.0001)
+
+    assert uncapped["summary"]["max_participation_rate"] is None
+    assert capped["summary"]["max_participation_rate"] == 0.0001
+
+    for key, path in (
+        ("validation_capacity", ("validation_performance", "capacity")),
+        ("test_capacity", ("test_performance", "capacity")),
+        ("capacity", None),
+    ):
+        uncapped_value = (
+            uncapped["summary"][key]
+            if path is None
+            else uncapped[path[0]][path[1]]
+        )
+        capped_value = (
+            capped["summary"][key]
+            if path is None
+            else capped[path[0]][path[1]]
+        )
+        assert uncapped_value is not None and uncapped_value > 0, key
+        assert abs(capped_value - 0.1 * uncapped_value) <= 1e-9 * uncapped_value, key
+        assert capped["summary"][key] == capped_value, key
+
+
+def test_cli_walk_forward_participation_rate_cap_written_to_summary():
+    """CLI walk-forward accepts --max-participation-rate and persists the cap
+    and the capped per-period capacities, so the artifact is self-describing."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+
+        def run(out_name, extra):
+            out_dir = os.path.join(tmpdir, out_name)
+            argv = [
+                "walk_forward", "walk-forward",
+                "--data", csv_path,
+                "--symbol", "SPY",
+                "--strategy", "sma_crossover",
+                "--param-grid", '{"fast_period": [3, 5], "slow_period": [10, 12]}',
+                "--output", out_dir,
+                "--impact-coefficient", "0.5",
+            ] + extra
+            with patch.object(sys, "argv", argv), \
+                    redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                rc = walk_forward_main()
+            assert rc == 0, f"CLI walk-forward should exit 0, got {rc}"
+            summary_path = os.path.join(out_dir, "walk_forward_summary.json")
+            assert os.path.exists(summary_path), "walk_forward_summary.json not written"
+            with open(summary_path) as f:
+                return json.load(f)
+
+        uncapped = run("uncapped", [])
+        capped = run("capped", ["--max-participation-rate", "0.0001"])
+
+        assert uncapped["summary"]["max_participation_rate"] is None
+        assert capped["summary"]["max_participation_rate"] == 0.0001
+        assert uncapped["summary"]["capacity"] is not None
+        assert abs(
+            capped["summary"]["capacity"] - 0.1 * uncapped["summary"]["capacity"]
+        ) <= 1e-9 * uncapped["summary"]["capacity"]
+
+        assert len(capped["capacity_per_period"]) == len(
+            uncapped["capacity_per_period"]
+        )
+        assert capped["capacity_per_period"]
+        for uncapped_row, capped_row in zip(
+            uncapped["capacity_per_period"], capped["capacity_per_period"]
+        ):
+            assert uncapped_row["capacity"] > 0
+            assert abs(
+                capped_row["capacity"] - 0.1 * uncapped_row["capacity"]
+            ) <= 1e-9 * uncapped_row["capacity"]
+            assert (
+                capped_row["capacity_trend"]["last_capacity"]
+                == capped_row["capacity"]
+            )
+
+
+def test_cli_rejects_invalid_participation_rate_in_every_subcommand():
+    """Every walk_forward.py subcommand rejects a non-positive participation
+    rate up front instead of silently reporting an uncapped capacity."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+        for subcommand in (
+            "walk-forward", "optimize", "monte-carlo", "cpcv", "out-of-sample",
+        ):
+            out = StringIO()
+            argv = [
+                "walk_forward", subcommand,
+                "--data", csv_path,
+                "--strategy", "sma_crossover",
+                "--param-grid", '{"fast_period": [3], "slow_period": [5]}',
+                "--output", os.path.join(tmpdir, subcommand),
+                "--max-participation-rate", "0",
+            ]
+            with patch.object(sys, "argv", argv), \
+                    redirect_stdout(out), redirect_stderr(StringIO()):
+                rc = walk_forward_main()
+            assert rc == 1, f"{subcommand} should reject rate 0, got rc={rc}"
+            assert "--max-participation-rate must be positive and finite" in out.getvalue()
+
+
 def test_main_registers_every_module_level_test():
     """main() must register every module-level ``test_*`` function.
 
@@ -7252,6 +7472,13 @@ TEST_REGISTRY.append(
 TEST_REGISTRY.append(
     ("test_walk_forward_analysis_surfaces_capacity_per_period", test_walk_forward_analysis_surfaces_capacity_per_period)
 )
+TEST_REGISTRY.extend([
+    ("test_walk_forward_analysis_participation_rate_caps_per_period_and_summary", test_walk_forward_analysis_participation_rate_caps_per_period_and_summary),
+    ("test_cpcv_analysis_participation_rate_caps_per_fold_and_summary", test_cpcv_analysis_participation_rate_caps_per_fold_and_summary),
+    ("test_out_of_sample_validation_participation_rate_caps_splits_and_summary", test_out_of_sample_validation_participation_rate_caps_splits_and_summary),
+    ("test_cli_walk_forward_participation_rate_cap_written_to_summary", test_cli_walk_forward_participation_rate_cap_written_to_summary),
+    ("test_cli_rejects_invalid_participation_rate_in_every_subcommand", test_cli_rejects_invalid_participation_rate_in_every_subcommand),
+])
 TEST_REGISTRY.extend([
     ("test_walk_forward_analysis_family_reality_check_and_stepdown", test_walk_forward_analysis_family_reality_check_and_stepdown),
     ("test_walk_forward_analysis_family_diagnostics_are_reproducible", test_walk_forward_analysis_family_diagnostics_are_reproducible),

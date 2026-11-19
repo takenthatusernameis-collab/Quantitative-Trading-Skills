@@ -7492,6 +7492,11 @@ def out_of_sample_validation(
     # Capacity trend over the whole sample (the per-period / per-fold
     # records carry the same key for their own window).
     summary["capacity_trend"] = _capacity.get("capacity_trend")
+    # The opt-in participation-rate cap that produced the reported capacity,
+    # so a capped number is never confused with an impact-only one.
+    summary["max_participation_rate"] = (
+        float(max_participation_rate) if max_participation_rate is not None else None
+    )
     # Book-based capacity: the capacity implied by the trade sizes the
     # selected strategy actually executes in the held-out test window, next
     # to the basket-based number above. The validation window's own book
@@ -8057,10 +8062,10 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
-regime_cost_multipliers=regime_cost_multipliers,
-                survivorship=survivorship,
-                max_participation_rate=max_participation_rate,
-            )
+        regime_cost_multipliers=regime_cost_multipliers,
+        survivorship=survivorship,
+        max_participation_rate=max_participation_rate,
+    )
     test_perf = results.get("test_performance") or {}
     summary = results.get("summary") or {}
     dsr = summary.get("deflated_sharpe")
@@ -11293,6 +11298,11 @@ def run_monte_carlo(args) -> int:
     except Exception:
         mc_results["summary"]["capacity"] = None
         mc_results["summary"]["capacity_trend"] = None
+    # The opt-in participation-rate cap that produced the reported capacity,
+    # so a capped number is never confused with an impact-only one.
+    mc_results["summary"]["max_participation_rate"] = (
+        float(max_participation_rate) if max_participation_rate is not None else None
+    )
     # Book-based capacity under book pricing: consistent with the P&L the
     # Monte Carlo path actually priced, mirroring walk_forward_analysis /
     # cpcv_analysis. Measurement only -- changes no return, cost, impact or
