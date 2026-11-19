@@ -625,6 +625,7 @@ def walk_forward_analysis(
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
     regime_cost_multipliers: Optional[Dict[str, float]] = None,
     max_impact: Optional[float] = None,
+    max_participation_rate: Optional[float] = None,
     family_returns: Optional[pd.DataFrame] = None,
     family_stepdown: bool = False,
     family_seed: Optional[int] = None,
@@ -722,6 +723,14 @@ def walk_forward_analysis(
             capacity-aware position cap: if a trade would exceed max_impact,
             the position is proportionally reduced. Opt-in; when None (default),
             no capacity-aware scaling is applied.
+        max_participation_rate: Optional maximum participation rate per trade
+            as a fraction of ADV (e.g., 0.10 = 10%). When provided and
+            impact_coefficient > 0, the reported strategy capacity is the
+            minimum of the impact-based capacity and
+            max_participation_rate * ADV_notional (scaled by n_assets for
+            panels). This is a reporting-only constraint; it does not scale
+            positions during the backtest. Opt-in; when None (default), the
+            impact-based capacity is reported without a participation-rate cap.
         family_returns: Optional per-period return matrix for a *family* of
             strategies, shape ``(T, K)`` with one column per strategy, aligned
             to the same dates as the walk-forward out-of-sample record. When
@@ -768,6 +777,9 @@ def walk_forward_analysis(
         latency = 0
     if latency < 0:
         latency = 0
+    if max_participation_rate is not None:
+        if not np.isfinite(max_participation_rate) or max_participation_rate <= 0:
+            raise ValueError(f"max_participation_rate must be positive and finite, got {max_participation_rate}")
     if impact_model not in IMPACT_MODEL_TYPES:
         raise ValueError(f"impact_model must be one of {IMPACT_MODEL_TYPES}, got {impact_model}")
     panel_pricing = resolve_panel_pricing(panel_pricing)
@@ -1100,7 +1112,8 @@ def walk_forward_analysis(
         # only periods whose grid search produced returns) and is None when
         # impact is disabled or ADV is not estimable.
         _period_capacity = estimate_capacity(
-            period["test_data"], impact_coefficient, adv_window=adv_window
+            period["test_data"], impact_coefficient, adv_window=adv_window,
+            max_participation_rate=max_participation_rate
         )
         period["capacity"] = _period_capacity.get("estimated_capacity")
         # Capacity trend for the period's test window: the distribution of the
@@ -1306,7 +1319,8 @@ def walk_forward_analysis(
 
     # Surface market-impact capacity estimate in the summary when impact is
     # enabled and estimable; keep None (backward compatible) otherwise.
-    _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window)
+    _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window,
+                                  max_participation_rate=max_participation_rate)
     summary["capacity"] = _capacity.get("estimated_capacity")
     # Capacity trend over the whole sample: the distribution of the
     # per-period capacity readings, so a liquidity squeeze anywhere in the
@@ -1480,6 +1494,9 @@ def walk_forward_analysis(
         )
     except Exception:
         summary["regime_robustness"] = None
+
+    # Record max_participation_rate in the summary config for traceability
+    summary["max_participation_rate"] = float(max_participation_rate) if max_participation_rate is not None else None
 
     return {
         "periods": periods,
@@ -4117,6 +4134,8 @@ def cpcv_analysis(
     impact_model: str = DEFAULT_IMPACT_MODEL,
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
     regime_cost_multipliers: Optional[Dict[str, float]] = None,
+    max_impact: Optional[float] = None,
+    max_participation_rate: Optional[float] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -4205,6 +4224,14 @@ def cpcv_analysis(
             published number is unchanged. Point-in-time: the regime labels
             are supplied by the caller from a causal detector; this function
             never looks at future bars.
+        max_participation_rate: Optional maximum participation rate per trade
+            as a fraction of ADV (e.g., 0.10 = 10%). When provided and
+            impact_coefficient > 0, the reported strategy capacity is the
+            minimum of the impact-based capacity and
+            max_participation_rate * ADV_notional (scaled by n_assets for
+            panels). This is a reporting-only constraint; it does not scale
+            positions during the backtest. Opt-in; when None (default), the
+            impact-based capacity is reported without a participation-rate cap.
 
     Returns:
         Dictionary with CPCV results including:
@@ -4224,6 +4251,9 @@ def cpcv_analysis(
         latency = 0
     if latency < 0:
         latency = 0
+    if max_participation_rate is not None:
+        if not np.isfinite(max_participation_rate) or max_participation_rate <= 0:
+            raise ValueError(f"max_participation_rate must be positive and finite, got {max_participation_rate}")
     panel_pricing = resolve_panel_pricing(panel_pricing)
 
     if isinstance(data, dict):
@@ -4622,7 +4652,8 @@ def cpcv_analysis(
         # every fold (not only folds whose grid search produced returns) and
         # is None when impact is disabled or ADV is not estimable.
         _fold_capacity = estimate_capacity(
-            fold["test_data"], impact_coefficient, adv_window=adv_window
+            fold["test_data"], impact_coefficient, adv_window=adv_window,
+            max_participation_rate=max_participation_rate
         )
         fold["capacity"] = _fold_capacity.get("estimated_capacity")
         # Capacity trend for the fold's test window (mirrors the per-period
@@ -4829,7 +4860,8 @@ def cpcv_analysis(
 
     # Surface market-impact capacity estimate in the summary when impact is
     # enabled and estimable; keep None (backward compatible) otherwise.
-    _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window)
+    _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window,
+                                  max_participation_rate=max_participation_rate)
     summary["capacity"] = _capacity.get("estimated_capacity")
     # Capacity trend over the whole sample (see the walk-forward summary for
     # the same key) plus the worst capacity seen in any out-of-sample fold.
@@ -5011,6 +5043,9 @@ def cpcv_analysis(
         )
     except Exception:
         summary["regime_robustness"] = None
+
+    # Record max_participation_rate in the summary config for traceability
+    summary["max_participation_rate"] = float(max_participation_rate) if max_participation_rate is not None else None
 
     return {
         "folds": folds,
@@ -6566,6 +6601,8 @@ def out_of_sample_validation(
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
     regime_cost_multipliers: Optional[Dict[str, float]] = None,
     survivorship: Optional[Dict[str, Any]] = None,
+    max_impact: Optional[float] = None,
+    max_participation_rate: Optional[float] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -6640,6 +6677,14 @@ def out_of_sample_validation(
             and the result is included. This enables bias controls engagement
             tracking for panel data without requiring the caller to run detection
             separately.
+        max_participation_rate: Optional maximum participation rate per trade
+            as a fraction of ADV (e.g., 0.10 = 10%). When provided and
+            impact_coefficient > 0, the reported strategy capacity is the
+            minimum of the impact-based capacity and
+            max_participation_rate * ADV_notional (scaled by n_assets for
+            panels). This is a reporting-only constraint; it does not scale
+            positions during the backtest. Opt-in; when None (default), the
+            impact-based capacity is reported without a participation-rate cap.
 
     Returns:
         Dictionary with:
@@ -6661,6 +6706,9 @@ def out_of_sample_validation(
         latency = 0
     if latency < 0:
         latency = 0
+    if max_participation_rate is not None:
+        if not np.isfinite(max_participation_rate) or max_participation_rate <= 0:
+            raise ValueError(f"max_participation_rate must be positive and finite, got {max_participation_rate}")
     panel_pricing = resolve_panel_pricing(panel_pricing)
 
     # Normalize data format
@@ -6971,7 +7019,8 @@ def out_of_sample_validation(
     # the per-period capacity that `walk_forward_analysis` records). None
     # when impact is disabled or ADV is not estimable.
     val_capacity = estimate_capacity(
-        val_data, impact_coefficient, adv_window=adv_window
+        val_data, impact_coefficient, adv_window=adv_window,
+        max_participation_rate=max_participation_rate
     )
     val_capacity_point = val_capacity.get("estimated_capacity")
     val_capacity_trend = val_capacity.get("capacity_trend")
@@ -7674,6 +7723,7 @@ survivorship=None, pit_strict=None,
     if pit_strict is None:
         pit_strict = bool(getattr(args, "point_in_time_strict", False))
     max_impact = getattr(args, "max_impact", None)
+    max_participation_rate = getattr(args, "max_participation_rate", None)
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -7706,6 +7756,7 @@ survivorship=None, pit_strict=None,
         regime_impact_coefficients=regime_impact_coefficients,
         regime_cost_multipliers=regime_cost_multipliers,
         max_impact=max_impact,
+        max_participation_rate=max_participation_rate,
     )
     summary = results["summary"]
     dsr = summary.get("deflated_sharpe")
@@ -8092,6 +8143,7 @@ survivorship=None,
         fill_rate = 1.0
     if fill_rate <= 0 or fill_rate > 1:
         raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
+    max_participation_rate = getattr(args, "max_participation_rate", None)
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -8122,6 +8174,7 @@ survivorship=None,
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         regime_impact_coefficients=regime_impact_coefficients,
         regime_cost_multipliers=regime_cost_multipliers,
+        max_participation_rate=max_participation_rate,
     )
     summary = results["summary"]
     dsr = summary.get("deflated_sharpe")
@@ -8209,6 +8262,11 @@ def run_cpcv(args) -> int:
 
     latency, fill_rate = _resolve_latency_fill_rate(args)
     min_position_fraction = _resolve_min_position_fraction(args)
+    max_participation_rate = getattr(args, "max_participation_rate", None)
+    if max_participation_rate is not None:
+        if not np.isfinite(max_participation_rate) or max_participation_rate <= 0:
+            print(f"--max-participation-rate must be positive and finite, got {max_participation_rate}")
+            return 1
 
     param_grid = _parse_param_grid(args.param_grid)
     regime_impact_coefficients = _parse_regime_impact_coefficients(getattr(args, "regime_impact_coefficients", None))
@@ -9441,6 +9499,11 @@ def run_walk_forward(args) -> int:
     latency, fill_rate = _resolve_latency_fill_rate(args)
     min_position_fraction = _resolve_min_position_fraction(args)
     max_impact = getattr(args, "max_impact", None)
+    max_participation_rate = getattr(args, "max_participation_rate", None)
+    if max_participation_rate is not None:
+        if not np.isfinite(max_participation_rate) or max_participation_rate <= 0:
+            print(f"--max-participation-rate must be positive and finite, got {max_participation_rate}")
+            return 1
 
     param_grid = _parse_param_grid(args.param_grid)
     regime_impact_coefficients = _parse_regime_impact_coefficients(getattr(args, "regime_impact_coefficients", None))
@@ -12048,6 +12111,7 @@ def main():
     common_parser.add_argument("--latencies", type=int, nargs="+", default=None, help="List of execution latencies (in periods) to sweep (overrides --latency). Delays position execution by each latency after signal generation.")
     common_parser.add_argument("--min-position-fraction", type=float, default=None, help="Reject a run whose verdict rests on windows the strategy held a position for less than this fraction of each window's executable bars (after warmup). Opt-in: unset means the run is never rejected on this basis.")
     common_parser.add_argument("--max-impact", type=float, default=None, help="Maximum acceptable market impact per trade (as decimal, e.g., 0.0005 = 5 bps). When set, positions are scaled so the estimated market impact of each trade stays below this threshold. Opt-in: unset means no capacity-aware scaling.")
+    common_parser.add_argument("--max-participation-rate", type=float, default=None, help="Maximum participation rate per trade as a fraction of ADV (e.g., 0.10 = 10%). When set and --impact-coefficient > 0, the reported strategy capacity is the minimum of the impact-based capacity and max_participation_rate * ADV_notional. Opt-in; unset reports the impact-based capacity only.")
     common_parser.add_argument(
         "--panel-pricing",
         type=str,
