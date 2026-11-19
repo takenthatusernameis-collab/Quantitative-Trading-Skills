@@ -6856,6 +6856,10 @@ TEST_REGISTRY = [
     ("annualization_factor_non_datetime_index", test_annualization_factor_non_datetime_index),
     ("annualization_scales_oos_risk_metrics_hourly_vs_daily", test_annualization_scales_oos_risk_metrics_hourly_vs_daily),
     ("test_main_registers_every_module_level_test", test_main_registers_every_module_level_test),
+    ("test_walk_forward_analysis_family_pbo_opt_in", test_walk_forward_analysis_family_pbo_opt_in),
+    ("test_walk_forward_analysis_family_pbo_defaults_off", test_walk_forward_analysis_family_pbo_defaults_off),
+    ("test_walk_forward_analysis_family_pbo_too_short_records_error", test_walk_forward_analysis_family_pbo_too_short_records_error),
+    ("test_print_family_pbo_surfaces_reading_and_caveat", test_print_family_pbo_surfaces_reading_and_caveat),
 ]
 
 # ---------------------------------------------------------------------------

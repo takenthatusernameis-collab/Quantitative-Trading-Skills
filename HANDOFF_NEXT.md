@@ -1,30 +1,53 @@
-# Handoff: next task (session ending 2026-11-17, session 130)
+# Handoff: next task (session ending 2026-11-19): Full quant gate GREEN (1522 passed)
 
-## State of baseline
-- HEAD at session start: `4f20b3e` (empty-message commit; not counted as progress). The assigned TSMOM borrow/funding implementation was already present in the tree.
-- **Full quant gate GREEN (run to completion):** `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` -> **1486 passed, 0 failed, EXIT 0** in 1916.46 s (31:56).
-- Focused TSMOM borrow/funding test: **1 passed in 1.03 s**. On committed AAPL/MSFT/GOOGL fixtures, OOS Sharpe falls from -0.1240526237 to -0.2025311022 and total return from -14.42890399% to -19.73025647% as borrow/funding rise from 0% to 5%/yr. All levels remain **NOT SUPPORTED**; this is not a profitability claim.
-- See `HANDOFF_SESSION_130.md` for the full measured table and verification details.
+## Latest baseline (verified this session)
+- **Full quant gate: 1522 passed** in 23:52 with `-n 4` (`/tmp/venv/bin/python -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4`).
+- **`test_main_registers_every_module_level_test`**: PASS (4 previously unregistered PBO tests now in TEST_REGISTRY).
+- **`test_adjustment_integrity_cli_regression.py`**: 2 passed (positive + negative control for split-adjustment provenance).
+- Default example CLI: **EXIT 0**, verdict `NOT SUPPORTED`.
+- Working tree (uncommitted): `skills/quantitative-backtesting/tests/test_walk_forward.py` (TEST_REGISTRY fix only). No generated artifacts dirtied.
 
-## One precise next task
-Add **one bounded end-to-end data-integrity regression for split-adjustment provenance and `adjustment_integrity_guard`**.
+## What changed
+Fixed the registry audit failure by registering 4 existing but unregistered test functions:
+- `test_walk_forward_analysis_family_pbo_opt_in`
+- `test_walk_forward_analysis_family_pbo_defaults_off`
+- `test_walk_forward_analysis_family_pbo_too_short_records_error`
+- `test_print_family_pbo_surfaces_reading_and_caveat`
 
-Inspect first:
-- `skills/quantitative-backtesting/scripts/data_loader.py:162` (`adjustment_integrity_guard`) and `:417` (split adjustment / provenance wiring).
-- `skills/quantitative-backtesting/tests/test_adjustment_integrity_guard.py` (existing unit coverage).
-- `skills/quantitative-backtesting/tests/test_multi_symbol_adjust_splits_cli.py` (existing CLI adjustment smoke test).
-- `skills/quantitative-backtesting/scripts/reporting.py` provenance serialization.
+These were defined in the module but omitted from `TEST_REGISTRY`, causing `test_main_registers_every_module_level_test` to fail. The fix is a 4-line addition at line 6859.
 
-Implement a focused offline test using a temporary two-symbol panel with a recorded split:
-1. **Positive control:** `run_backtest.py --multi-symbol --adjust-splits` writes `tear_sheet_summary.json` whose per-symbol `data_provenance` records `split_adjustment_applied` and `adjustment_integrity.passed == True` with no violations.
-2. **Negative control:** deterministically corrupt only `adj_close` in the temporary input and verify the failure is visibly recorded (`adjustment_integrity.passed == False` and a reproducible/look-ahead-related violation), not silently dropped. Keep the guard's existing advisory semantics unless evidence proves a separate defect.
-3. If the CLI already does this, convert the manual check into the regression test; if provenance serialization drops the field, make the smallest additive wiring fix. Do not change defaults, return calculations, verdicts, or unrelated marketplace content.
-4. Run the focused test, then `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` (require EXIT 0; current baseline 1486 passed). Revert only inspected gate-dirtied generated artifacts and leave a new handoff with exact evidence and limitations.
+## Verification evidence
+| Check | Result |
+|---|---|
+| `pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` | **1522 passed, 0 failed, EXIT 0** (23:52) |
+| `test_walk_forward.py` (211 tests) | **211 passed** |
+| `test_falsifiable_hypothesis_example.py` (37 tests) | **37 passed** |
+| `test_adjustment_integrity_cli_regression.py` | **2 passed** |
+| Focused regression set (3 test files) | **39 passed** |
 
-## Constraints and evidence
-- Do not rerun the already-green TSMOM borrow/funding assignment unchanged as the next task.
-- The inherited note that CPCV/Monte Carlo regime CLI coverage is partial is stale: `test_cpcv_cli_records_regime_analysis_in_artifact.py` and `test_monte_carlo_records_regime_robustness.py` exist; inspect before adding anything.
-- Do not tune parameters/costs/verdicts to force SUPPORT. TSMOM remains NOT SUPPORTED on every committed fixture; do not claim profitability or capacity.
-- Do not run the full serial gate under a short timeout. Use `-n 4` with an adequate budget (~32 min this session).
-- Do not `git checkout -- .` blindly after a gate; revert only inspected generated-artifact paths.
+## What remains unresolved
+- Changes are **uncommitted** (do not commit unless the user asks).
+- No profitability/capacity claim. Verdicts on committed fixtures remain `NOT SUPPORTED`.
+
+## Do not repeat
+- Do NOT re-run the full gate hoping for different results; it is deterministic and green.
+- Do NOT treat unavailable criteria as passing; conservative semantics (unavailable = not satisfied) are intentional and tested.
+- Do NOT tune parameters/costs/verdicts to force SUPPORT.
+
+## One precise next task (evidence-based)
+**Select a new bounded quantitative research task.** The prior backlog item (data-integrity regression for split-adjustment provenance) is complete in `test_adjustment_integrity_cli_regression.py`. Candidate next tasks:
+1. **Regime-aware stress testing**: Extend `test_regime_cost_multiplier.py` with synthetic regime-switching scenarios and verify OOS degradation is captured.
+2. **Capacity estimation refinement**: Improve `estimate_capacity()` in `scripts/walk_forward.py` with participation-rate limits and validate against the `test_estimate_capacity_*` tests.
+3. **Out-of-sample validation enhancements**: Add a walk-forward "anchored vs expanding window" comparison test to `test_out_of_sample_window.py`.
+4. **Multiple-testing diagnostics**: Add a synthetic overfit-family test to `test_pbo_overfitting_example.py` that exercises PBO + Reality Check + Romano-Wolf together.
+
+Pick one, implement a focused test + minimal wiring if needed, run the focused test then the full gate (require EXIT 0; baseline 1522 passed). Revert only gate-dirtied generated artifacts and leave a new handoff with exact evidence and limitations.
+
+## Constraints
+- Do not rerun the already-green registry fix or adjustment-integrity regression unchanged.
+- Do not claim profitability or capacity on committed fixtures.
+- Use `-n 4` with adequate budget (~25 min).
+- Revert only inspected generated-artifact paths; do not `git checkout -- .` blindly.
 - Do not commit unless explicitly asked.
+
+(End of file)
