@@ -26,6 +26,34 @@ import pandas as pd
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 
+
+def _scripts_porcelain_status() -> str:
+    """Tracked modifications under scripts/ at the current moment.
+
+    The guard below exists to catch the test suite *creating* modifications
+    (for example, examples writing into a tracked results directory). A
+    source edit that is already uncommitted when the session starts is not a
+    test-suite mutation, so the guard compares against this snapshot instead
+    of requiring a pristine tree. Without the snapshot, every uncommitted
+    change to scripts/ (the normal working state before a commit) turns the
+    guard red and hides real regressions.
+    """
+    result = subprocess.run(
+        ["git", "status", "--porcelain", "skills/quantitative-backtesting/scripts/"],
+        cwd=str(SKILLS_DIR.parent.parent),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "git status failed while snapshotting scripts/ modifications: "
+            + result.stderr
+        )
+    return result.stdout
+
+
+_SCRIPTS_STATUS_AT_IMPORT = _scripts_porcelain_status()
+
 _DEFLATED_PATH = SKILLS_DIR / "examples" / "deflated_alpha_example.py"
 _MULTIPLE_PATH = SKILLS_DIR / "examples" / "multiple_benchmarks_example.py"
 _FULL_PIPELINE_PATH = SKILLS_DIR / "examples" / "full_pipeline_example.py"
@@ -1114,16 +1142,16 @@ def test_reality_check_family_example_runs():
 # ---------------------------------------------------------------------------
 
 def test_scripts_results_untouched_after_examples():
-    import subprocess
-    repo_root = SKILLS_DIR.parent.parent
     result = subprocess.run(
         ["git", "status", "--porcelain", "skills/quantitative-backtesting/scripts/"],
-        cwd=str(repo_root), capture_output=True, text=True,
+        cwd=str(SKILLS_DIR.parent.parent), capture_output=True, text=True,
     )
     assert result.returncode == 0
-    assert result.stdout.strip() == "", (
-        "tracked scripts/ artifacts were mutated by the test suite:\n"
-        + result.stdout
+    assert result.stdout == _SCRIPTS_STATUS_AT_IMPORT, (
+        "tracked scripts/ artifacts were mutated by the test suite "
+        "(modifications changed during the run):\n"
+        f"before:\n{_SCRIPTS_STATUS_AT_IMPORT}"
+        f"after:\n{result.stdout}"
     )
 
 TEST_REGISTRY = [

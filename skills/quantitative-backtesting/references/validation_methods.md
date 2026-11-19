@@ -514,6 +514,50 @@ Notes and limits:
   `ci_level` controls only the marginal intervals; `alpha` controls both the
   stepdown decision and the simultaneous band coverage.
 
+## Probability of Backtest Overfitting (CSCV / PBO)
+
+`walk_forward.pbo_cscv` implements the Bailey, Borwein, López de Prado & Zhu
+(2017) probability of backtest overfitting via combinatorially symmetric
+cross-validation. It answers a question the Deflated Sharpe Ratio does not:
+*given a search over N configurations, how often does the in-sample winner
+rank at or below the out-of-sample median?*
+
+```python
+from walk_forward import pbo_cscv
+# returns: (T, N) DataFrame, one column per candidate configuration
+result = pbo_cscv(returns, n_splits=16, metric="sharpe")
+# result["pbo"]           -> share of partitions where the IS winner is <= OOS median
+# result["mean_oos_rank"] -> mean relative OOS rank of the IS winner (1=worst, N=best)
+```
+
+Algorithm:
+
+1. Split the T return rows into `S` contiguous equal-length blocks
+   (`S = n_splits`, even, ≥ 4). The remainder rows are discarded so every
+   block is the same length.
+2. For each of the `C(S, S/2)` ways of choosing half the blocks, rank all N
+   configurations on the in-sample half by `metric` (`"sharpe"` per-period
+   mean/std, or `"mean"`), and select the best.
+3. Compute the selected configuration's out-of-sample relative rank
+   `omega = rank / (N + 1)` (ties get the average rank) and
+   `lambda = log(omega / (1 - omega))`.
+4. `PBO = mean(lambda <= 0)`; `is_overfit` is `PBO > 0.5`.
+
+Interpretation and limits:
+
+- `PBO` near 0 means the selection procedure generalizes on this panel;
+  `PBO` near 0.5 is what independent noise produces (the IS winner is random);
+  `PBO` near 1 means the IS winner is systematically the OOS loser.
+- PBO is a **diagnostic of the search**, not evidence of profitability. It does
+  not report the sign or size of any out-of-sample edge, and a low PBO on a
+  short or regime-homogeneous panel does not transfer to other markets.
+- The estimate depends on `S` and block length; report both and check that the
+  reading is stable across a couple of `n_splits` values rather than quoting a
+  single number.
+- Constant-return columns have no defined Sharpe and are excluded from ranking
+  (a partition with no evaluable in-sample winner is omitted and reflected in
+  `n_partitions_evaluated`).
+
 ## Out-of-Sample Validation Framework
 
 `out_of_sample_validation` implements a three-phase validation framework

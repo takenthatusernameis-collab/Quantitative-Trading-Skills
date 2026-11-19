@@ -17,7 +17,7 @@ import pandas as pd
 from pathlib import Path
 from statistics import NormalDist
 from typing import Dict, Any, List, Callable, Optional, Union
-from itertools import product
+from itertools import combinations, product
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -2436,6 +2436,160 @@ def deflated_alpha_ratio(
         "n_observations": int(t_obs),
         "skewness": float(skew),
         "kurtosis": float(kurt),
+    }
+
+
+def _pbo_performance(block: np.ndarray, metric: str) -> np.ndarray:
+    """Per-column performance of a return block (rows = observations).
+
+    ``sharpe`` is the per-period mean/std ratio (frequency-invariant, so it
+    ranks strategies the same way an annualized Sharpe would). A column with
+    zero dispersion has no defined Sharpe and is reported as ``nan``.
+    """
+    with np.errstate(divide="ignore", invalid="ignore"):
+        mu = block.mean(axis=0)
+        if metric == "mean":
+            return mu
+        sd = block.std(axis=0, ddof=1)
+        return np.divide(
+            mu,
+            sd,
+            out=np.full_like(mu, np.nan, dtype=float),
+            where=sd > 0,
+        )
+
+
+def pbo_cscv(
+    returns,
+    n_splits: int = 16,
+    metric: str = "sharpe",
+) -> Dict[str, Any]:
+    """
+    Probability of Backtest Overfitting via Combinatorially Symmetric
+    Cross-Validation (Bailey, Borwein, Lopez de Prado & Zhu, 2017).
+
+    The Deflated Sharpe Ratio asks whether the *selected* strategy's Sharpe
+    survives a correction for the number of trials. It does not ask the
+    complementary question: how often does the configuration that looks best
+    in-sample actually rank below the median out-of-sample? That frequency is
+    the probability of backtest overfitting (PBO), and it is the quantity
+    CSCV estimates without any assumption about the true generating process.
+
+    Algorithm:
+        1. Split the T return rows into ``S`` contiguous, equal-length blocks
+           (``S = n_splits`` must be even).
+        2. For every way of choosing ``S / 2`` blocks as in-sample, use the
+           remaining blocks as out-of-sample. There are ``C(S, S/2)`` such
+           symmetric partitions.
+        3. In each partition, select the in-sample best strategy by
+           ``metric`` and compute its out-of-sample *relative rank*
+           ``omega in (0, 1)`` among the configurations with a finite
+           out-of-sample value (1 = worst, n_ranked = best), then the logit
+           ``lambda = log(omega / (1 - omega))``.
+        4. ``PBO = mean(lambda <= 0)``: the share of partitions in which the
+           in-sample winner lands at or below the out-of-sample median.
+
+    A low PBO is evidence that the selection procedure generalizes; a high
+    PBO is evidence that the winning configuration is a product of the
+    search. PBO is a diagnostic, not a profitability claim: it says nothing
+    about the sign or size of the out-of-sample edge.
+
+    Args:
+        returns: ``(T, N)`` return matrix (DataFrame or array-like) with one
+            column per candidate configuration. Rows containing NaN are
+            dropped before splitting.
+        n_splits: Even number of contiguous blocks ``S`` (default 16). Larger
+            values give more partitions and a finer estimate at the cost of
+            shorter blocks; must be even and at least 4.
+        metric: "sharpe" (default, per-period mean/std) or "mean" (per-period
+            average return) for ranking within a block.
+
+    Returns:
+        Dictionary with:
+            - 'pbo': probability of backtest overfitting in [0, 1]
+            - 'is_overfit': True when pbo > 0.5 (majority of partitions)
+            - 'n_splits': S used
+            - 'n_partitions': total symmetric partitions C(S, S/2)
+            - 'n_partitions_evaluated': partitions that produced a rank
+            - 'n_trials': N candidate configurations
+            - 'n_observations': T rows actually split
+            - 'mean_logit': mean of the partition logits (higher = better)
+            - 'logits': per-partition logits (partitions with no evaluable
+              in-sample winner or out-of-sample rank are omitted)
+            - 'mean_oos_rank': mean out-of-sample relative rank of the
+              in-sample winner (1 = worst, n_ranked = best); a level
+              diagnostic that complements the share-based PBO
+    """
+    if metric not in ("sharpe", "mean"):
+        raise ValueError(f"metric must be 'sharpe' or 'mean', got {metric!r}")
+    if int(n_splits) != n_splits or n_splits < 4 or n_splits % 2 != 0:
+        raise ValueError("n_splits must be an even integer >= 4")
+
+    frame = pd.DataFrame(returns)
+    frame = frame.dropna(axis=0, how="any")
+    t_rows, n_trials = frame.shape
+    if n_trials < 2:
+        raise ValueError("PBO needs at least 2 candidate configurations (columns)")
+
+    n_splits = int(n_splits)
+    if t_rows < n_splits:
+        raise ValueError(
+            f"PBO needs at least n_splits={n_splits} observations, got {t_rows}"
+        )
+
+    # Equal-length blocks: use only the first floor(T/S)*S rows so every
+    # block has the same number of observations (standard CSCV requirement).
+    block_len = t_rows // n_splits
+    used = block_len * n_splits
+    matrix = frame.to_numpy(dtype=float)[:used]
+    blocks = [matrix[i * block_len:(i + 1) * block_len] for i in range(n_splits)]
+
+    logits: List[float] = []
+    oos_ranks: List[float] = []
+    n_partitions = 0
+    for in_sample_blocks in combinations(range(n_splits), n_splits // 2):
+        n_partitions += 1
+        in_set = set(in_sample_blocks)
+        in_rows = np.concatenate([blocks[i] for i in in_sample_blocks], axis=0)
+        out_rows = np.concatenate(
+            [blocks[i] for i in range(n_splits) if i not in in_set], axis=0
+        )
+
+        is_perf = _pbo_performance(in_rows, metric)
+        if not np.any(np.isfinite(is_perf)):
+            continue
+        best = int(np.nanargmax(is_perf))
+
+        oos_perf = _pbo_performance(out_rows, metric)
+        finite = np.isfinite(oos_perf)
+        selected = oos_perf[best]
+        if not np.isfinite(selected):
+            continue
+
+        # Average ascending rank (1 = worst, n_ranked = best) so ties are
+        # handled without an arbitrary tie-break.
+        values = oos_perf[finite]
+        rank = float(np.sum(values < selected)) + (np.sum(values == selected) + 1.0) / 2.0
+        n_ranked = int(values.size)
+        omega = rank / (n_ranked + 1.0)
+        omega = float(min(max(omega, 1e-12), 1.0 - 1e-12))
+        logits.append(float(math.log(omega / (1.0 - omega))))
+        oos_ranks.append(omega)
+
+    evaluated = len(logits)
+    pbo = float(np.mean([lam <= 0.0 for lam in logits])) if evaluated else float("nan")
+
+    return {
+        "pbo": pbo,
+        "is_overfit": bool(evaluated and pbo > 0.5),
+        "n_splits": n_splits,
+        "n_partitions": int(n_partitions),
+        "n_partitions_evaluated": int(evaluated),
+        "n_trials": int(n_trials),
+        "n_observations": int(used),
+        "mean_logit": float(np.mean(logits)) if evaluated else None,
+        "logits": logits,
+        "mean_oos_rank": float(np.mean(oos_ranks)) if evaluated else None,
     }
 
 
