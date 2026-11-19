@@ -1534,6 +1534,7 @@ def parameter_optimization(
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
     regime_cost_multipliers: Optional[Dict[str, float]] = None,
     max_impact: Optional[float] = None,
+    max_participation_rate: Optional[float] = None,
     inert_grid_report: Optional[Dict[str, Any]] = None,
     regime_report: Optional[Dict[str, Any]] = None,
     **kwargs,
@@ -1617,6 +1618,12 @@ def parameter_optimization(
             capacity-aware position cap: if a trade would exceed max_impact,
             the position is proportionally reduced. Opt-in; when None (default),
             no capacity-aware scaling is applied.
+        max_participation_rate: Optional maximum participation rate per trade as
+            a fraction of ADV (e.g., 0.10 = 10%). When set and
+            impact_coefficient > 0, the reported strategy capacity is the minimum
+            of the impact-based capacity and max_participation_rate * ADV_notional
+            (scaled by n_assets for panels). Opt-in; when None (default), the
+            impact-based capacity only is reported.
         inert_grid_report: Optional dict that receives the inert-grid
             measurement (``inert_grid_params``, ``strategy_parameters`` and
             ``message``) for the grid that was priced. A grid key whose
@@ -7873,6 +7880,7 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
     if fill_rate <= 0 or fill_rate > 1:
         raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
     max_impact = getattr(args, "max_impact", None)
+    max_participation_rate = getattr(args, "max_participation_rate", None)
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -7905,6 +7913,7 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         regime_impact_coefficients=regime_impact_coefficients,
         regime_cost_multipliers=regime_cost_multipliers,
         max_impact=max_impact,
+        max_participation_rate=max_participation_rate,
     )
     top = results[0] if results else None
     dsr = top.get("deflated_sharpe") if isinstance(top, dict) else None
@@ -8548,6 +8557,7 @@ def run_cpcv(args) -> int:
         benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
+        max_participation_rate=max_participation_rate,
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
@@ -9778,6 +9788,7 @@ def run_walk_forward(args) -> int:
         regime_impact_coefficients=regime_impact_coefficients,
         regime_cost_multipliers=regime_cost_multipliers,
         max_impact=max_impact,
+        max_participation_rate=max_participation_rate,
         family_returns=family_returns,
         family_stepdown=getattr(args, "family_stepdown", False),
         family_seed=getattr(args, "family_seed", None),
@@ -10074,6 +10085,11 @@ def run_parameter_optimization(args) -> int:
                 benchmark_provenance.append(prov)
 
     latency, fill_rate = _resolve_latency_fill_rate(args)
+    max_participation_rate = getattr(args, "max_participation_rate", None)
+    if max_participation_rate is not None:
+        if not np.isfinite(max_participation_rate) or max_participation_rate <= 0:
+            print(f"--max-participation-rate must be positive and finite, got {max_participation_rate}")
+            return 1
 
     param_grid = _parse_param_grid(args.param_grid)
     regime_impact_coefficients = _parse_regime_impact_coefficients(getattr(args, "regime_impact_coefficients", None))
@@ -10346,6 +10362,7 @@ def run_parameter_optimization(args) -> int:
         regime_report=regime_report,
         regime_impact_coefficients=regime_impact_coefficients,
         regime_cost_multipliers=regime_cost_multipliers,
+        max_participation_rate=max_participation_rate,
     )
 
     if not results:
