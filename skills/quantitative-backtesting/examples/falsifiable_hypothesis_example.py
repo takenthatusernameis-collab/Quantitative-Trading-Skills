@@ -124,7 +124,7 @@ CRITERIA = [
 ]
 
 def _ensure_real_market_data(symbol="AAPL", start="2020-01-01", end="2025-12-31",
-                             fixtures_dir=None, base_url=None, return_error=False):
+                              fixtures_dir=None, base_url=None, return_error=False, cache_dir=None):
     """Ensure committed real market data exists for symbol.
 
     If the expected CSV is missing, attempt to fetch from Yahoo Finance via
@@ -139,6 +139,8 @@ def _ensure_real_market_data(symbol="AAPL", start="2020-01-01", end="2025-12-31"
     to redirect writes to a temp dir so the committed fixtures are never
     touched). ``base_url`` is passed through to fetch_ohlcv_yahoo so the fetch
     can be pointed at a local HTTP server for offline testing.
+    ``cache_dir`` enables file-based caching of raw fetched data in
+    fetch_ohlcv_yahoo (e.g., tests/fixtures/real_data/).
 
     The fetched frame is normalized to the exact schema ``load_data`` expects
     before it is written: the date column is located case-insensitively (accept
@@ -165,6 +167,8 @@ def _ensure_real_market_data(symbol="AAPL", start="2020-01-01", end="2025-12-31"
         fetch_kwargs = {}
         if base_url is not None:
             fetch_kwargs["base_url"] = base_url
+        if cache_dir is not None:
+            fetch_kwargs["cache_dir"] = cache_dir
         df = fetch_ohlcv_yahoo(symbol, start, end, **fetch_kwargs)
         if df is None or len(df) == 0:
             return _ret(None, f"fetch returned no rows for {symbol} ({start}..{end})")

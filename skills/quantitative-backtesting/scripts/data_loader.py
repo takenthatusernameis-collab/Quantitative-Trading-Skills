@@ -946,8 +946,9 @@ def resample_data(df: pd.DataFrame, freq: str) -> pd.DataFrame:
 
 
 def fetch_ohlcv_yahoo(symbol: str, start: str, end: str, max_retries: int = 3,
-                     backoff_base: float = 2.0, timeout: int = 20,
-                     base_url: str = "https://query1.finance.yahoo.com/v8/finance/chart") -> pd.DataFrame:
+                      backoff_base: float = 2.0, timeout: int = 20,
+                      base_url: str = "https://query1.finance.yahoo.com/v8/finance/chart",
+                      cache_dir: Optional[Union[str, Path]] = None) -> pd.DataFrame:
     """Bounded fetch of daily OHLCV from Yahoo Finance chart API.
 
     Honors HTTP 429 (reads Retry-After when present), retries with exponential
@@ -956,8 +957,29 @@ def fetch_ohlcv_yahoo(symbol: str, start: str, end: str, max_retries: int = 3,
 
     ``base_url`` is injectable for offline testing against a local HTTP server;
     it defaults to the public Yahoo chart endpoint and is otherwise unused.
+
+    ``cache_dir`` enables file-based caching. When provided, the function checks
+    for a cached CSV file named ``{symbol}_{start}_{end}.csv`` in the cache
+    directory before fetching. If found and valid, the cached data is returned.
+    Otherwise, data is fetched and saved to the cache directory.
     """
     import time, json, urllib.request, urllib.error
+
+    # Check cache first
+    if cache_dir is not None:
+        cache_path = Path(cache_dir)
+        cache_path.mkdir(parents=True, exist_ok=True)
+        cache_file = cache_path / f"{symbol}_{start}_{end}.csv"
+        if cache_file.exists():
+            try:
+                cached_df = pd.read_csv(cache_file)
+                cached_df["date"] = pd.to_datetime(cached_df["date"])
+                cached_df = cached_df.set_index("date").sort_index()
+                return cached_df
+            except Exception:
+                # Cache read failed; fall through to fetch
+                pass
+
     # convert dates
     import calendar
     def _ts(d):
@@ -987,6 +1009,20 @@ def fetch_ohlcv_yahoo(symbol: str, start: str, end: str, max_retries: int = 3,
             df = df.dropna(subset=["close"]).sort_values("date").reset_index(drop=True)
             if "adjclose" in result["indicators"]:
                 df["adj_close"] = result["indicators"]["adjclose"][0]["adjclose"]
+
+            # Save to cache if cache_dir provided
+            if cache_dir is not None:
+                try:
+                    cache_path = Path(cache_dir)
+                    cache_path.mkdir(parents=True, exist_ok=True)
+                    cache_file = cache_path / f"{symbol}_{start}_{end}.csv"
+                    # Save with date column for readability
+                    df_to_save = df.copy()
+                    df_to_save.to_csv(cache_file, index=False)
+                except Exception:
+                    # Cache write failed; ignore and return data
+                    pass
+
             return df
         except urllib.error.HTTPError as e:
             last_err = e
@@ -1018,6 +1054,7 @@ def _build_parser():
     parser.add_argument("--output", "-o", help="Output CSV path for fetched data.")
     parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--timeout", type=int, default=20)
+    parser.add_argument("--cache-dir", help="Directory to cache fetched OHLCV data.")
     parser.add_argument("--validate", metavar="PATH", help="Validate an existing OHLCV file.")
     return parser
 
@@ -1034,6 +1071,7 @@ if __name__ == "__main__":
             df = fetch_ohlcv_yahoo(
                 args.fetch_yahoo, args.start, args.end,
                 max_retries=args.max_retries, timeout=args.timeout,
+                cache_dir=args.cache_dir,
             )
         except Exception as e:
             print(f"FETCH FAILED ({type(e).__name__}): {e}", file=sys.stderr)
