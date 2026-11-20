@@ -1,0 +1,4984 @@
+[
+  {
+    "scenario": "regime_shift",
+    "strategy": "sma_crossover",
+    "scenario_description": "Bull-to-bear transition with volatility spike",
+    "strategy_description": "Trend-following baseline",
+    "expected_challenge": "Validators should detect regime change; walk-forward should adapt parameters",
+    "regime_analysis": {
+      "success": true,
+      "combined_regime_counts": {
+        "bear_high": 1217,
+        "bull_high": 398,
+        "unknown": 199,
+        "sideways_high": 105,
+        "bear_low": 81
+      },
+      "hmm_regime_counts": {
+        "2": 939,
+        "1": 683,
+        "0": 378
+      },
+      "n_regime_changes": 18
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 29,
+      "total_oos_return": -0.6480509634493563,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 2.3858692799194614e-13,
+        "p_value": 0.9999999999997614,
+        "sharpe_ratio": -0.6566846358939591,
+        "expected_max_sharpe": 2.0106015874479386,
+        "z_score": -7.231639211684823,
+        "n_trials": 255,
+        "n_observations": 1834,
+        "skewness": -0.3542839376646225,
+        "kurtosis": 10.77716152594573
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 1834,
+        "n_parameter_trials": 255,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.512881682814912,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -0.6566846358939591,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.21391416800106292,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 1834 test observation(s), 255 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.5129 (observed -0.6567). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 5,
+      "total_oos_return": -0.05966859358351895,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.26406221153705145,
+        "p_value": 0.7359377884629486,
+        "sharpe_ratio": -0.13937004581551257,
+        "expected_max_sharpe": 0.3681382498947699,
+        "z_score": -0.6308716910862732,
+        "n_trials": 45,
+        "n_observations": 390,
+        "skewness": -0.13589154881421414,
+        "kurtosis": 9.560407927534664
+      },
+      "overfitting_risk": "low",
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 390,
+        "n_parameter_trials": 45,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 1.4145210300114968,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -0.13937004581551257,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.23337241024490438,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 390 test observation(s), 45 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 1.4145 (observed -0.1394)."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": {
+        "selected_params": {
+          "fast_period": 8,
+          "slow_period": 15
+        },
+        "val_total_return": -0.3148883265502541,
+        "val_sharpe": -0.8764922796512613,
+        "val_volatility": 0.2578953685523354,
+        "val_n_observations": 398,
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "test_performance": {
+        "test_total_return": -0.3310565397960833,
+        "test_sharpe": -1.2348982241162083,
+        "test_volatility": 0.205164528210559,
+        "test_n_observations": 398,
+        "test_returns": "date\n2021-02-22    0.000000\n2021-02-23   -0.000000\n2021-02-24   -0.000000\n2021-02-25    0.000000\n2021-02-26    0.000000\n                ...   \n2022-08-25    0.000000\n2022-08-26    0.000000\n2022-08-29   -0.000000\n2022-08-30   -0.000000\n2022-08-31    0.056086\nLength: 398, dtype: float64",
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "selected_params": {
+        "fast_period": 8,
+        "slow_period": 15
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 398,
+        "n_parameter_trials": 126,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.1746244783391946,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -1.2348982241162083,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.205164528210559,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 398 test observation(s), 126 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.1746 (observed -1.2349). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [
+        {
+          "params": {
+            "fast_period": 5,
+            "slow_period": 15
+          },
+          "sharpe": -0.5166241422241241,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.027321346094295873,
+            "p_value": 0.9726786539057042,
+            "sharpe_ratio": -0.5166241422241241,
+            "expected_max_sharpe": 0.16421075580616898,
+            "z_score": -1.9217065533918543,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.22575666269744432,
+            "kurtosis": 8.686918327780443
+          },
+          "total_return": -0.6310519001836413
+        },
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 10
+          },
+          "sharpe": -0.5661254817789118,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.019707590569803257,
+            "p_value": 0.9802924094301968,
+            "sharpe_ratio": -0.5661254817789118,
+            "expected_max_sharpe": 0.16421075580616898,
+            "z_score": -2.059825967717031,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.16791259997489888,
+            "kurtosis": 7.9948458410848335
+          },
+          "total_return": -0.6734098356427551
+        },
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 15
+          },
+          "sharpe": -0.6568346709915786,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.010141965082600124,
+            "p_value": 0.9898580349173999,
+            "sharpe_ratio": -0.6568346709915786,
+            "expected_max_sharpe": 0.16421075580616898,
+            "z_score": -2.3210539896948323,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.2853637025036012,
+            "kurtosis": 8.987192778052407
+          },
+          "total_return": -0.712246725352881
+        }
+      ],
+      "inert_grid_params": null
+    }
+  },
+  {
+    "scenario": "regime_shift",
+    "strategy": "ema_crossover",
+    "scenario_description": "Bull-to-bear transition with volatility spike",
+    "strategy_description": "EMA trend-following",
+    "expected_challenge": "Validators should detect regime change; walk-forward should adapt parameters",
+    "regime_analysis": {
+      "success": true,
+      "combined_regime_counts": {
+        "bear_high": 1217,
+        "bull_high": 398,
+        "unknown": 199,
+        "sideways_high": 105,
+        "bear_low": 81
+      },
+      "hmm_regime_counts": {
+        "2": 939,
+        "1": 683,
+        "0": 378
+      },
+      "n_regime_changes": 18
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 28,
+      "total_oos_return": -0.5274848750837802,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 5.514968254294317e-08,
+        "p_value": 0.9999999448503174,
+        "sharpe_ratio": -0.431229700675279,
+        "expected_max_sharpe": 1.5670797628167663,
+        "z_score": -5.308882570770045,
+        "n_trials": 252,
+        "n_observations": 1771,
+        "skewness": -0.22877689579890512,
+        "kurtosis": 8.440057689091095
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": {
+        "cause": "no_position_in_validation_window",
+        "message": "The walk_forward analysis selected a parameter in 28 of its 29 out-of-sample periods; the other 1 produced no selection. Every flat period has the same cause (no_position_in_validation_window): no parameter combination took a position in the window. So the overfitting-risk verdict rests on 28 of the 29 out-of-sample periods, and the thinnest of them held a position for only 10 bars. To give the strategy room to trade, shorten the indicator lookbacks in the parameter grid, use a longer --test-months window, or give the training split more history -- but the flat periods are already as long as the periods in which the strategy traded, so if the signal never triggers on that stretch of the sample, no window length will change the outcome.",
+        "details": {
+          "validation_method": "walk_forward",
+          "n_validation_windows": 29,
+          "n_windows_with_selected_params": 28,
+          "n_flat_windows": 1,
+          "flat_windows": [
+            {
+              "window": 28,
+              "fold": null,
+              "cause": "no_position_in_validation_window",
+              "reason": "signal_never_triggered",
+              "bars": 65,
+              "train_bars": 1891,
+              "test_returns_bars": 0,
+              "test_sharpe": null,
+              "max_position_bars": 0,
+              "test_start": "2022-04-01",
+              "test_end": "2022-07-01",
+              "outcome_tally": {
+                "no_position_in_validation_window": 9,
+                "no_estimable_training_sharpe": 0,
+                "all_combinations_failed": 0
+              },
+              "text": "Period 28 (65 bars, 2022-04-01 to 2022-07-01): no parameter combination took a position in the window (0 out-of-sample return bars, 0 bars with a position); the window holds at least as many bars as the shortest window in which the strategy traded (64 bars), so its length does not by itself explain the failure: the signal never triggered on it."
+            }
+          ],
+          "traded_windows": [
+            {
+              "window": 0,
+              "bars": 65,
+              "position_bars": 21,
+              "test_sharpe": -2.489961868298602,
+              "test_start": "2015-04-01",
+              "test_end": "2015-07-01"
+            },
+            {
+              "window": 1,
+              "bars": 66,
+              "position_bars": 39,
+              "test_sharpe": 0.399252225566031,
+              "test_start": "2015-07-01",
+              "test_end": "2015-10-01"
+            },
+            {
+              "window": 2,
+              "bars": 66,
+              "position_bars": 40,
+              "test_sharpe": -0.7776664147609347,
+              "test_start": "2015-10-01",
+              "test_end": "2016-01-01"
+            },
+            {
+              "window": 3,
+              "bars": 65,
+              "position_bars": 46,
+              "test_sharpe": 4.039468328946355,
+              "test_start": "2016-01-01",
+              "test_end": "2016-04-01"
+            },
+            {
+              "window": 4,
+              "bars": 65,
+              "position_bars": 39,
+              "test_sharpe": 0.14175952563502262,
+              "test_start": "2016-04-01",
+              "test_end": "2016-07-01"
+            },
+            {
+              "window": 5,
+              "bars": 66,
+              "position_bars": 27,
+              "test_sharpe": 1.206684374722314,
+              "test_start": "2016-07-01",
+              "test_end": "2016-10-01"
+            },
+            {
+              "window": 6,
+              "bars": 65,
+              "position_bars": 27,
+              "test_sharpe": -0.7458557214622134,
+              "test_start": "2016-10-01",
+              "test_end": "2017-01-01"
+            },
+            {
+              "window": 7,
+              "bars": 65,
+              "position_bars": 19,
+              "test_sharpe": -1.4444580480372797,
+              "test_start": "2017-01-01",
+              "test_end": "2017-04-01"
+            },
+            {
+              "window": 8,
+              "bars": 65,
+              "position_bars": 16,
+              "test_sharpe": -2.755788487267275,
+              "test_start": "2017-04-01",
+              "test_end": "2017-07-01"
+            },
+            {
+              "window": 9,
+              "bars": 65,
+              "position_bars": 18,
+              "test_sharpe": -0.3881629810224797,
+              "test_start": "2017-07-01",
+              "test_end": "2017-10-01"
+            },
+            {
+              "window": 10,
+              "bars": 65,
+              "position_bars": 31,
+              "test_sharpe": 0.10488542322209712,
+              "test_start": "2017-10-01",
+              "test_end": "2018-01-01"
+            },
+            {
+              "window": 11,
+              "bars": 65,
+              "position_bars": 22,
+              "test_sharpe": 1.3904231462962295,
+              "test_start": "2018-01-01",
+              "test_end": "2018-04-01"
+            },
+            {
+              "window": 12,
+              "bars": 65,
+              "position_bars": 10,
+              "test_sharpe": -2.862411559714383,
+              "test_start": "2018-04-01",
+              "test_end": "2018-07-01"
+            },
+            {
+              "window": 13,
+              "bars": 65,
+              "position_bars": 37,
+              "test_sharpe": 1.8877178958824428,
+              "test_start": "2018-07-01",
+              "test_end": "2018-10-01"
+            },
+            {
+              "window": 14,
+              "bars": 66,
+              "position_bars": 32,
+              "test_sharpe": 0.5604915859050555,
+              "test_start": "2018-10-01",
+              "test_end": "2019-01-01"
+            },
+            {
+              "window": 15,
+              "bars": 64,
+              "position_bars": 38,
+              "test_sharpe": 1.180354070600258,
+              "test_start": "2019-01-01",
+              "test_end": "2019-04-01"
+            },
+            {
+              "window": 16,
+              "bars": 65,
+              "position_bars": 33,
+              "test_sharpe": -1.8798864538509432,
+              "test_start": "2019-04-01",
+              "test_end": "2019-07-01"
+            },
+            {
+              "window": 17,
+              "bars": 66,
+              "position_bars": 17,
+              "test_sharpe": -0.44430670641107634,
+              "test_start": "2019-07-01",
+              "test_end": "2019-10-01"
+            },
+            {
+              "window": 18,
+              "bars": 66,
+              "position_bars": 37,
+              "test_sharpe": -0.24527713453601163,
+              "test_start": "2019-10-01",
+              "test_end": "2020-01-01"
+            },
+            {
+              "window": 19,
+              "bars": 65,
+              "position_bars": 30,
+              "test_sharpe": 0.20300978192973143,
+              "test_start": "2020-01-01",
+              "test_end": "2020-04-01"
+            },
+            {
+              "window": 20,
+              "bars": 65,
+              "position_bars": 36,
+              "test_sharpe": 1.1598044553076468,
+              "test_start": "2020-04-01",
+              "test_end": "2020-07-01"
+            },
+            {
+              "window": 21,
+              "bars": 66,
+              "position_bars": 31,
+              "test_sharpe": 1.6442399032350645,
+              "test_start": "2020-07-01",
+              "test_end": "2020-10-01"
+            },
+            {
+              "window": 22,
+              "bars": 66,
+              "position_bars": 19,
+              "test_sharpe": -3.0183271728874415,
+              "test_start": "2020-10-01",
+              "test_end": "2021-01-01"
+            },
+            {
+              "window": 23,
+              "bars": 64,
+              "position_bars": 29,
+              "test_sharpe": 0.5524699418715716,
+              "test_start": "2021-01-01",
+              "test_end": "2021-04-01"
+            },
+            {
+              "window": 24,
+              "bars": 65,
+              "position_bars": 11,
+              "test_sharpe": -3.113671998657498,
+              "test_start": "2021-04-01",
+              "test_end": "2021-07-01"
+            },
+            {
+              "window": 25,
+              "bars": 66,
+              "position_bars": 13,
+              "test_sharpe": -3.4055929453025207,
+              "test_start": "2021-07-01",
+              "test_end": "2021-10-01"
+            },
+            {
+              "window": 26,
+              "bars": 66,
+              "position_bars": 16,
+              "test_sharpe": -3.5927346021511752,
+              "test_start": "2021-10-01",
+              "test_end": "2022-01-01"
+            },
+            {
+              "window": 27,
+              "bars": 64,
+              "position_bars": 22,
+              "test_sharpe": -3.15943186568113,
+              "test_start": "2022-01-01",
+              "test_end": "2022-04-01"
+            }
+          ],
+          "flat_window_causes": {
+            "no_position_in_validation_window": 1
+          },
+          "dominant_cause": "no_position_in_validation_window",
+          "min_traded_window_bars": 64,
+          "min_traded_position_bars": 10,
+          "traded_window_bars": [
+            65,
+            66,
+            66,
+            65,
+            65,
+            66,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            66,
+            64,
+            65,
+            66,
+            66,
+            65,
+            65,
+            66,
+            66,
+            64,
+            65,
+            66,
+            66,
+            64
+          ],
+          "train_split_bars": 2000,
+          "param_grid": {
+            "fast_period": [
+              3,
+              5,
+              8
+            ],
+            "slow_period": [
+              10,
+              15,
+              20
+            ]
+          },
+          "analysis_path": "walk_forward",
+          "window_noun": "period",
+          "selection_basis": "overfitting_risk_verdict",
+          "train_months": 3,
+          "test_months": 3,
+          "step_months": 3,
+          "cli_flags": {
+            "train_months": "--train-months",
+            "test_months": "--test-months",
+            "step_months": "--step-months"
+          }
+        }
+      },
+      "test_resolution": {
+        "n_test_observations": 1771,
+        "n_parameter_trials": 252,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.0652266575614386,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -0.431229700675279,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.23142572137914338,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 1771 test observation(s), 252 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.0652 (observed -0.4312). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 5,
+      "total_oos_return": -0.07244895535285123,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.1734009763071898,
+        "p_value": 0.8265990236928102,
+        "sharpe_ratio": -0.1929359684350666,
+        "expected_max_sharpe": 0.5652750272812247,
+        "z_score": -0.9408105516431554,
+        "n_trials": 45,
+        "n_observations": 390,
+        "skewness": 0.1871534518958209,
+        "kurtosis": 9.633047914135137
+      },
+      "overfitting_risk": "low",
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 390,
+        "n_parameter_trials": 45,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 1.598321248538407,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -0.1929359684350666,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.2248854409667346,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 390 test observation(s), 45 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 1.5983 (observed -0.1929)."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": {
+        "selected_params": {
+          "fast_period": 3,
+          "slow_period": 10
+        },
+        "val_total_return": -0.060822894423549045,
+        "val_sharpe": -0.10637787814351309,
+        "val_volatility": 0.2555195590764267,
+        "val_n_observations": 398,
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "test_performance": {
+        "test_total_return": -0.4423350649629374,
+        "test_sharpe": -1.7737624486747967,
+        "test_volatility": 0.20739500270775055,
+        "test_n_observations": 398,
+        "test_returns": "date\n2021-02-22    0.031303\n2021-02-23   -0.035402\n2021-02-24   -0.008274\n2021-02-25    0.034019\n2021-02-26    0.012277\n                ...   \n2022-08-25    0.000000\n2022-08-26    0.006821\n2022-08-29   -0.002785\n2022-08-30   -0.013676\n2022-08-31    0.056386\nLength: 398, dtype: float64",
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "selected_params": {
+        "fast_period": 3,
+        "slow_period": 10
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 398,
+        "n_parameter_trials": 126,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.309947587742183,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -1.7737624486747967,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.20739500270775055,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 398 test observation(s), 126 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.3099 (observed -1.7738). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 10
+          },
+          "sharpe": -0.39445155985001895,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.015017022916567313,
+            "p_value": 0.9849829770834326,
+            "sharpe_ratio": -0.39445155985001895,
+            "expected_max_sharpe": 0.37507833558276493,
+            "z_score": -2.169641092496744,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.17201983126763276,
+            "kurtosis": 8.62485814459372
+          },
+          "total_return": -0.5241996012097392
+        },
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 15
+          },
+          "sharpe": -0.4763461648761315,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.00808317242086265,
+            "p_value": 0.9919168275791374,
+            "sharpe_ratio": -0.4763461648761315,
+            "expected_max_sharpe": 0.37507833558276493,
+            "z_score": -2.405138336107396,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.2960745060637275,
+            "kurtosis": 9.781573195121167
+          },
+          "total_return": -0.5764950835319569
+        },
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 20
+          },
+          "sharpe": -0.5217889539049287,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.005575022658735773,
+            "p_value": 0.9944249773412642,
+            "sharpe_ratio": -0.5217889539049287,
+            "expected_max_sharpe": 0.37507833558276493,
+            "z_score": -2.5379608616545606,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.3947039221235196,
+            "kurtosis": 10.565666963032424
+          },
+          "total_return": -0.5883392623370164
+        }
+      ],
+      "inert_grid_params": null
+    }
+  },
+  {
+    "scenario": "fat_tail_crash",
+    "strategy": "sma_crossover",
+    "scenario_description": "Fat-tailed crash events with jump-diffusion",
+    "strategy_description": "Trend-following baseline",
+    "expected_challenge": "Extreme returns test robustness of Sharpe-based selection; CPCV should handle fat tails",
+    "regime_analysis": {
+      "success": true,
+      "combined_regime_counts": {
+        "bear_high": 508,
+        "bull_low": 391,
+        "bull_high": 387,
+        "bear_low": 317,
+        "unknown": 199,
+        "sideways_high": 127,
+        "sideways_low": 71
+      },
+      "hmm_regime_counts": {
+        "1": 980,
+        "0": 802,
+        "2": 218
+      },
+      "n_regime_changes": 40
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 29,
+      "total_oos_return": 1.4209699323689078,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.0005113032198120759,
+        "p_value": 0.9994886967801879,
+        "sharpe_ratio": 0.6922438632000143,
+        "expected_max_sharpe": 1.900469392518821,
+        "z_score": -3.284232166824492,
+        "n_trials": 259,
+        "n_observations": 1834,
+        "skewness": 0.4332980904591599,
+        "kurtosis": 8.019760958676137
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 1834,
+        "n_parameter_trials": 259,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.3695301653144316,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 0.6922438632000143,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.16663174539410447,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 1834 test observation(s), 259 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.3695 (observed 0.6922). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 5,
+      "total_oos_return": -0.03284976237805948,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.11521240153055545,
+        "p_value": 0.8847875984694445,
+        "sharpe_ratio": -0.21182325857992668,
+        "expected_max_sharpe": 0.7562797760360486,
+        "z_score": -1.1992653004245675,
+        "n_trials": 45,
+        "n_observations": 390,
+        "skewness": 0.4208843783372936,
+        "kurtosis": 7.735483367109356
+      },
+      "overfitting_risk": "low",
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 390,
+        "n_parameter_trials": 45,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 1.7742606528244964,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -0.21182325857992668,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.1461353689120067,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 390 test observation(s), 45 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 1.7743 (observed -0.2118)."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": {
+        "selected_params": {
+          "fast_period": 8,
+          "slow_period": 10
+        },
+        "val_total_return": 0.2485251370152104,
+        "val_sharpe": 0.6030164169898939,
+        "val_volatility": 0.2590087954207598,
+        "val_n_observations": 398,
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "test_performance": {
+        "test_total_return": 0.4627407524371048,
+        "test_sharpe": 1.2980546801657187,
+        "test_volatility": 0.1830448036934234,
+        "test_n_observations": 398,
+        "test_returns": "date\n2021-02-22    0.000000\n2021-02-23   -0.000000\n2021-02-24    0.000000\n2021-02-25   -0.000000\n2021-02-26    0.000000\n                ...   \n2022-08-25    0.009411\n2022-08-26   -0.019612\n2022-08-29   -0.000300\n2022-08-30   -0.000000\n2022-08-31   -0.000000\nLength: 398, dtype: float64",
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "selected_params": {
+        "fast_period": 8,
+        "slow_period": 10
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 398,
+        "n_parameter_trials": 124,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.2306032004812955,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 1.2980546801657187,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.1830448036934234,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 398 test observation(s), 124 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.2306 (observed 1.2981). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [
+        {
+          "params": {
+            "fast_period": 8,
+            "slow_period": 20
+          },
+          "sharpe": 0.9024569353931221,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.8881924220351448,
+            "p_value": 0.11180757796485519,
+            "sharpe_ratio": 0.9024569353931221,
+            "expected_max_sharpe": 0.47147521601777054,
+            "z_score": 1.2169712467550986,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 0.17897179305334443,
+            "kurtosis": 6.019902422001305
+          },
+          "total_return": 2.709925567382392
+        },
+        {
+          "params": {
+            "fast_period": 5,
+            "slow_period": 20
+          },
+          "sharpe": 0.7010642842407866,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.7415744160270971,
+            "p_value": 0.25842558397290294,
+            "sharpe_ratio": 0.7010642842407866,
+            "expected_max_sharpe": 0.47147521601777054,
+            "z_score": 0.6482068563293727,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 0.1890723828349228,
+            "kurtosis": 6.130872107763464
+          },
+          "total_return": 1.7653279038202943
+        },
+        {
+          "params": {
+            "fast_period": 8,
+            "slow_period": 15
+          },
+          "sharpe": 0.6928353018881478,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.7341174501618422,
+            "p_value": 0.26588254983815784,
+            "sharpe_ratio": 0.6928353018881478,
+            "expected_max_sharpe": 0.47147521601777054,
+            "z_score": 0.6253138377870873,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 0.2159893568988999,
+            "kurtosis": 6.243971190525652
+          },
+          "total_return": 1.7285022085366508
+        }
+      ],
+      "inert_grid_params": null
+    }
+  },
+  {
+    "scenario": "fat_tail_crash",
+    "strategy": "ema_crossover",
+    "scenario_description": "Fat-tailed crash events with jump-diffusion",
+    "strategy_description": "EMA trend-following",
+    "expected_challenge": "Extreme returns test robustness of Sharpe-based selection; CPCV should handle fat tails",
+    "regime_analysis": {
+      "success": true,
+      "combined_regime_counts": {
+        "bear_high": 508,
+        "bull_low": 391,
+        "bull_high": 387,
+        "bear_low": 317,
+        "unknown": 199,
+        "sideways_high": 127,
+        "sideways_low": 71
+      },
+      "hmm_regime_counts": {
+        "1": 980,
+        "0": 802,
+        "2": 218
+      },
+      "n_regime_changes": 40
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 29,
+      "total_oos_return": 2.7652766043244923,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.00500847738903476,
+        "p_value": 0.9949915226109652,
+        "sharpe_ratio": 0.9816538113205278,
+        "expected_max_sharpe": 1.9331930422334702,
+        "z_score": -2.575243470529773,
+        "n_trials": 261,
+        "n_observations": 1834,
+        "skewness": 0.19407281325006875,
+        "kurtosis": 6.301864632746082
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 1834,
+        "n_parameter_trials": 261,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.408623403614062,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 0.9816538113205278,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.18212559805775957,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 1834 test observation(s), 261 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.4086 (observed 0.9817). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 5,
+      "total_oos_return": 0.04866031668330306,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.3292585335275965,
+        "p_value": 0.6707414664724035,
+        "sharpe_ratio": 0.14576942440393825,
+        "expected_max_sharpe": 0.5001945029127082,
+        "z_score": -0.44196149849604555,
+        "n_trials": 45,
+        "n_observations": 390,
+        "skewness": 0.8109654228844813,
+        "kurtosis": 9.161406938038262
+      },
+      "overfitting_risk": "low",
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 390,
+        "n_parameter_trials": 45,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 1.5010823538376168,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 0.14576942440393825,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.14726921484257394,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 390 test observation(s), 45 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 1.5011 (observed 0.1458)."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": {
+        "selected_params": {
+          "fast_period": 3,
+          "slow_period": 15
+        },
+        "val_total_return": 0.711568058019711,
+        "val_sharpe": 1.7444140058857605,
+        "val_volatility": 0.19451793105369766,
+        "val_n_observations": 398,
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "test_performance": {
+        "test_total_return": 0.5858335118858797,
+        "test_sharpe": 1.5417332115624616,
+        "test_volatility": 0.18791673862325295,
+        "test_n_observations": 398,
+        "test_returns": "date\n2021-02-22    0.000000\n2021-02-23   -0.000000\n2021-02-24    0.000000\n2021-02-25   -0.000000\n2021-02-26    0.000000\n                ...   \n2022-08-25    0.009411\n2022-08-26   -0.019612\n2022-08-29    0.001875\n2022-08-30   -0.016598\n2022-08-31   -0.000300\nLength: 398, dtype: float64",
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "selected_params": {
+        "fast_period": 3,
+        "slow_period": 15
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 398,
+        "n_parameter_trials": 126,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.2616174129775657,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 1.5417332115624616,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.18791673862325295,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 398 test observation(s), 126 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.2616 (observed 1.5417). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [
+        {
+          "params": {
+            "fast_period": 8,
+            "slow_period": 15
+          },
+          "sharpe": 0.8874703066931082,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.9742656135154406,
+            "p_value": 0.02573438648455939,
+            "sharpe_ratio": 0.8874703066931082,
+            "expected_max_sharpe": 0.19720215581480555,
+            "z_score": 1.9475504884901087,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 0.1538940203855892,
+            "kurtosis": 6.235599913579376
+          },
+          "total_return": 2.5816582192912865
+        },
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 15
+          },
+          "sharpe": 0.8448439507406279,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.9662280328535797,
+            "p_value": 0.03377196714642028,
+            "sharpe_ratio": 0.8448439507406279,
+            "expected_max_sharpe": 0.19720215581480555,
+            "z_score": 1.8280374302124158,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 0.17251008896369227,
+            "kurtosis": 6.432310837473677
+          },
+          "total_return": 2.400533693130362
+        },
+        {
+          "params": {
+            "fast_period": 5,
+            "slow_period": 15
+          },
+          "sharpe": 0.7989234425006156,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.9550883085850708,
+            "p_value": 0.04491169141492923,
+            "sharpe_ratio": 0.7989234425006156,
+            "expected_max_sharpe": 0.19720215581480555,
+            "z_score": 1.69633010195626,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 0.12224523780644943,
+            "kurtosis": 6.168155952076179
+          },
+          "total_return": 2.193678220654943
+        }
+      ],
+      "inert_grid_params": null
+    }
+  },
+  {
+    "scenario": "liquidity_crisis",
+    "strategy": "sma_crossover",
+    "scenario_description": "Volume dry-up with impact cost amplification",
+    "strategy_description": "Trend-following baseline",
+    "expected_challenge": "Capacity estimation should reflect reduced liquidity; impact model should capture stress",
+    "regime_analysis": {
+      "success": true,
+      "combined_regime_counts": {
+        "bear_high": 551,
+        "bull_low": 426,
+        "bull_high": 325,
+        "bear_low": 252,
+        "unknown": 199,
+        "sideways_high": 134,
+        "sideways_low": 113
+      },
+      "hmm_regime_counts": {
+        "1": 995,
+        "0": 860,
+        "2": 145
+      },
+      "n_regime_changes": 44
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 29,
+      "total_oos_return": -0.3321680127855329,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 1.9751080437835355e-08,
+        "p_value": 0.9999999802489196,
+        "sharpe_ratio": -0.21204186118644194,
+        "expected_max_sharpe": 1.8140379675791376,
+        "z_score": -5.4930630830946985,
+        "n_trials": 259,
+        "n_observations": 1834,
+        "skewness": -0.9248165456526769,
+        "kurtosis": 44.080789755546924
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 1834,
+        "n_parameter_trials": 259,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.3719701583627986,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -0.21204186118644194,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.22977116850903326,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 1834 test observation(s), 259 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.3720 (observed -0.2120). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 5,
+      "total_oos_return": -0.3504170484357232,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.0068615681100989145,
+        "p_value": 0.993138431889901,
+        "sharpe_ratio": -1.3167235920000746,
+        "expected_max_sharpe": 0.6932910680695141,
+        "z_score": -2.464430010031799,
+        "n_trials": 45,
+        "n_observations": 390,
+        "skewness": -0.04549849085593581,
+        "kurtosis": 18.814932682567626
+      },
+      "overfitting_risk": "low",
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 390,
+        "n_parameter_trials": 45,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 1.7549984754559282,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -1.3167235920000746,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.21002704338114553,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 390 test observation(s), 45 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 1.7550 (observed -1.3167)."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": {
+        "selected_params": {
+          "fast_period": 8,
+          "slow_period": 20
+        },
+        "val_total_return": 0.4299662126781938,
+        "val_sharpe": 0.7222000976219319,
+        "val_volatility": 0.393327850931934,
+        "val_n_observations": 398,
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "test_performance": {
+        "test_total_return": 0.5552894639872965,
+        "test_sharpe": 1.5044235140295812,
+        "test_volatility": 0.18385557332299585,
+        "test_n_observations": 398,
+        "test_returns": "date\n2021-02-22   -0.000000\n2021-02-23   -0.000000\n2021-02-24   -0.000000\n2021-02-25   -0.000000\n2021-02-26   -0.000000\n                ...   \n2022-08-25   -0.000000\n2022-08-26    0.000000\n2022-08-29    0.000000\n2022-08-30   -0.000000\n2022-08-31   -0.002665\nLength: 398, dtype: float64",
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "selected_params": {
+        "fast_period": 8,
+        "slow_period": 20
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 398,
+        "n_parameter_trials": 124,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.233105629922571,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 1.5044235140295812,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.18385557332299585,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 398 test observation(s), 124 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.2331 (observed 1.5044). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [
+        {
+          "params": {
+            "fast_period": 8,
+            "slow_period": 20
+          },
+          "sharpe": 0.4464684492003447,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.7415774611897133,
+            "p_value": 0.25842253881028665,
+            "sharpe_ratio": 0.4464684492003447,
+            "expected_max_sharpe": 0.21357651751418677,
+            "z_score": 0.6482162739451455,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.5666338230434845,
+            "kurtosis": 36.372539419238585
+          },
+          "total_return": 1.1763655599192648
+        },
+        {
+          "params": {
+            "fast_period": 5,
+            "slow_period": 10
+          },
+          "sharpe": 0.4272803872857992,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.7302556254560989,
+            "p_value": 0.2697443745439011,
+            "sharpe_ratio": 0.4272803872857992,
+            "expected_max_sharpe": 0.21357651751418677,
+            "z_score": 0.6135862845875018,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 1.775225969903985,
+            "kurtosis": 51.0479531721665
+          },
+          "total_return": 1.125607728049013
+        },
+        {
+          "params": {
+            "fast_period": 8,
+            "slow_period": 10
+          },
+          "sharpe": 0.42505481026197683,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.7266118516130181,
+            "p_value": 0.2733881483869819,
+            "sharpe_ratio": 0.42505481026197683,
+            "expected_max_sharpe": 0.21357651751418677,
+            "z_score": 0.6025977812091066,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 1.2088970501114737,
+            "kurtosis": 47.74732215528542
+          },
+          "total_return": 1.1398780779014785
+        }
+      ],
+      "inert_grid_params": null
+    }
+  },
+  {
+    "scenario": "liquidity_crisis",
+    "strategy": "ema_crossover",
+    "scenario_description": "Volume dry-up with impact cost amplification",
+    "strategy_description": "EMA trend-following",
+    "expected_challenge": "Capacity estimation should reflect reduced liquidity; impact model should capture stress",
+    "regime_analysis": {
+      "success": true,
+      "combined_regime_counts": {
+        "bear_high": 551,
+        "bull_low": 426,
+        "bull_high": 325,
+        "bear_low": 252,
+        "unknown": 199,
+        "sideways_high": 134,
+        "sideways_low": 113
+      },
+      "hmm_regime_counts": {
+        "1": 995,
+        "0": 860,
+        "2": 145
+      },
+      "n_regime_changes": 44
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 29,
+      "total_oos_return": 0.519772923584501,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 8.442371966427276e-05,
+        "p_value": 0.9999155762803358,
+        "sharpe_ratio": 0.27342816019251326,
+        "expected_max_sharpe": 1.6609820288601003,
+        "z_score": -3.7615740159197646,
+        "n_trials": 261,
+        "n_observations": 1834,
+        "skewness": 0.7778555336878666,
+        "kurtosis": 43.34867965581547
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 1834,
+        "n_parameter_trials": 261,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.1570310436100275,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 0.27342816019251326,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.2734158820002992,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 1834 test observation(s), 261 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.1570 (observed 0.2734). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 5,
+      "total_oos_return": -0.1777194655192742,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.10454085034501037,
+        "p_value": 0.8954591496549896,
+        "sharpe_ratio": -0.43824332773680885,
+        "expected_max_sharpe": 0.6491336778747193,
+        "z_score": -1.2560945256668032,
+        "n_trials": 45,
+        "n_observations": 390,
+        "skewness": 5.089980580477219,
+        "kurtosis": 86.54619673263795
+      },
+      "overfitting_risk": "low",
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 390,
+        "n_parameter_trials": 45,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 1.5175769281936142,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -0.43824332773680885,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.26038857796350307,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 390 test observation(s), 45 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 1.5176 (observed -0.4382)."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": {
+        "selected_params": {
+          "fast_period": 3,
+          "slow_period": 20
+        },
+        "val_total_return": 0.48142348637084287,
+        "val_sharpe": 0.7645881492971572,
+        "val_volatility": 0.4045282347137252,
+        "val_n_observations": 398,
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "test_performance": {
+        "test_total_return": 0.3399444147130035,
+        "test_sharpe": 1.0133547296134615,
+        "test_volatility": 0.17887491925946114,
+        "test_n_observations": 398,
+        "test_returns": "date\n2021-02-22   -0.013920\n2021-02-23   -0.000836\n2021-02-24   -0.016635\n2021-02-25   -0.000300\n2021-02-26   -0.000000\n                ...   \n2022-08-25   -0.004925\n2022-08-26    0.013200\n2022-08-29    0.003837\n2022-08-30   -0.014112\n2022-08-31   -0.002365\nLength: 398, dtype: float64",
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "selected_params": {
+        "fast_period": 3,
+        "slow_period": 20
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 398,
+        "n_parameter_trials": 126,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.1061163695042278,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 1.0133547296134615,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.17887491925946114,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 398 test observation(s), 126 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.1061 (observed 1.0134). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 15
+          },
+          "sharpe": 0.5211621189252116,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.8703303501348401,
+            "p_value": 0.12966964986515994,
+            "sharpe_ratio": 0.5211621189252116,
+            "expected_max_sharpe": 0.1270772940814363,
+            "z_score": 1.127954110813471,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 1.4053685882284985,
+            "kurtosis": 50.97936466207584
+          },
+          "total_return": 1.5634130393095362
+        },
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 20
+          },
+          "sharpe": 0.5147105591147698,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.8644159156598332,
+            "p_value": 0.13558408434016678,
+            "sharpe_ratio": 0.5147105591147698,
+            "expected_max_sharpe": 0.1270772940814363,
+            "z_score": 1.1003763725476536,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 0.938530704795344,
+            "kurtosis": 53.682505098611614
+          },
+          "total_return": 1.4742344220791672
+        },
+        {
+          "params": {
+            "fast_period": 5,
+            "slow_period": 10
+          },
+          "sharpe": 0.5125737897138309,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.8650107929625603,
+            "p_value": 0.13498920703743966,
+            "sharpe_ratio": 0.5125737897138309,
+            "expected_max_sharpe": 0.1270772940814363,
+            "z_score": 1.1031122675735592,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 1.3954359663730276,
+            "kurtosis": 50.271918521989264
+          },
+          "total_return": 1.5255733908474727
+        }
+      ],
+      "inert_grid_params": null
+    }
+  },
+  {
+    "scenario": "trend_persistence",
+    "strategy": "sma_crossover",
+    "scenario_description": "Prolonged smooth trend (mean reversion breakdown)",
+    "strategy_description": "Trend-following baseline",
+    "expected_challenge": "Mean-reversion strategies should fail; trend-following should be selected",
+    "regime_analysis": {
+      "success": true,
+      "combined_regime_counts": {
+        "bull_high": 689,
+        "bull_low": 491,
+        "bear_high": 455,
+        "unknown": 199,
+        "sideways_high": 132,
+        "sideways_low": 34
+      },
+      "hmm_regime_counts": {
+        "1": 793,
+        "0": 605,
+        "2": 602
+      },
+      "n_regime_changes": 34
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 29,
+      "total_oos_return": 0.23308792512379162,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.0008050496935149143,
+        "p_value": 0.9991949503064851,
+        "sharpe_ratio": 0.1389568431835127,
+        "expected_max_sharpe": 1.3099311545497045,
+        "z_score": -3.1540709459481255,
+        "n_trials": 255,
+        "n_observations": 1834,
+        "skewness": -0.27594800481246995,
+        "kurtosis": 8.949653653213458
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 1834,
+        "n_parameter_trials": 255,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 1.798409373172719,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 0.1389568431835127,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.09746589880664708,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 1834 test observation(s), 255 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 1.7984 (observed 0.1390)."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 5,
+      "total_oos_return": 0.07913805531483886,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.3019599084294276,
+        "p_value": 0.6980400915705725,
+        "sharpe_ratio": 0.2996263110167798,
+        "expected_max_sharpe": 0.7175138654388629,
+        "z_score": -0.5187718981407946,
+        "n_trials": 45,
+        "n_observations": 390,
+        "skewness": -0.060811095380613765,
+        "kurtosis": 6.614311462117934
+      },
+      "overfitting_risk": "medium",
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 390,
+        "n_parameter_trials": 45,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 1.761313149769208,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 0.2996263110167798,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.12249568309131545,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 390 test observation(s), 45 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 1.7613 (observed 0.2996)."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": {
+        "selected_params": {
+          "fast_period": 8,
+          "slow_period": 15
+        },
+        "val_total_return": 0.006321146325036331,
+        "val_sharpe": -0.06986158949934358,
+        "val_volatility": 0.12229524453051407,
+        "val_n_observations": 398,
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "test_performance": {
+        "test_total_return": -0.20293945769848998,
+        "test_sharpe": -1.2260190653290792,
+        "test_volatility": 0.12685803521446667,
+        "test_n_observations": 398,
+        "test_returns": "date\n2021-02-22   -0.000000\n2021-02-23   -0.000000\n2021-02-24    0.000000\n2021-02-25    0.000000\n2021-02-26    0.000000\n                ...   \n2022-08-25    0.000000\n2022-08-26   -0.000000\n2022-08-29   -0.000000\n2022-08-30    0.033573\n2022-08-31   -0.006657\nLength: 398, dtype: float64",
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "selected_params": {
+        "fast_period": 8,
+        "slow_period": 15
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 398,
+        "n_parameter_trials": 126,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.1250633629949323,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -1.2260190653290792,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.12685803521446667,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 398 test observation(s), 126 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.1251 (observed -1.2260). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [
+        {
+          "params": {
+            "fast_period": 8,
+            "slow_period": 20
+          },
+          "sharpe": 0.2770126794885586,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.6455435146216124,
+            "p_value": 0.3544564853783876,
+            "sharpe_ratio": 0.2770126794885586,
+            "expected_max_sharpe": 0.1443596565614824,
+            "z_score": 0.37331640150666023,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.006987356343999449,
+            "kurtosis": 7.194735181863898
+          },
+          "total_return": 0.4212699161984752
+        },
+        {
+          "params": {
+            "fast_period": 5,
+            "slow_period": 10
+          },
+          "sharpe": 0.2227451414395148,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.5872027388237403,
+            "p_value": 0.4127972611762597,
+            "sharpe_ratio": 0.2227451414395148,
+            "expected_max_sharpe": 0.1443596565614824,
+            "z_score": 0.22035521378483477,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.17524449149225615,
+            "kurtosis": 7.35792732446366
+          },
+          "total_return": 0.3590796827205469
+        },
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 20
+          },
+          "sharpe": 0.22037358204367913,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.5846896127247736,
+            "p_value": 0.4153103872752264,
+            "sharpe_ratio": 0.22037358204367913,
+            "expected_max_sharpe": 0.1443596565614824,
+            "z_score": 0.21390546995685514,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.029941356193084818,
+            "kurtosis": 7.674997696360667
+          },
+          "total_return": 0.35322977149651025
+        }
+      ],
+      "inert_grid_params": null
+    }
+  },
+  {
+    "scenario": "trend_persistence",
+    "strategy": "ema_crossover",
+    "scenario_description": "Prolonged smooth trend (mean reversion breakdown)",
+    "strategy_description": "EMA trend-following",
+    "expected_challenge": "Mean-reversion strategies should fail; trend-following should be selected",
+    "regime_analysis": {
+      "success": true,
+      "combined_regime_counts": {
+        "bull_high": 689,
+        "bull_low": 491,
+        "bear_high": 455,
+        "unknown": 199,
+        "sideways_high": 132,
+        "sideways_low": 34
+      },
+      "hmm_regime_counts": {
+        "1": 793,
+        "0": 605,
+        "2": 602
+      },
+      "n_regime_changes": 34
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 28,
+      "total_oos_return": 0.10821545541039157,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.0016516612181355916,
+        "p_value": 0.9983483387818644,
+        "sharpe_ratio": 0.00936362816792529,
+        "expected_max_sharpe": 1.117997526422681,
+        "z_score": -2.9380044861839525,
+        "n_trials": 252,
+        "n_observations": 1771,
+        "skewness": -0.17129100462434851,
+        "kurtosis": 7.523433933261288
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": {
+        "cause": "no_position_in_validation_window",
+        "message": "The walk_forward analysis selected a parameter in 28 of its 29 out-of-sample periods; the other 1 produced no selection. Every flat period has the same cause (no_position_in_validation_window): no parameter combination took a position in the window. So the overfitting-risk verdict rests on 28 of the 29 out-of-sample periods, and the thinnest of them held a position for only 15 bars. To give the strategy room to trade, shorten the indicator lookbacks in the parameter grid, use a longer --test-months window, or give the training split more history -- but the flat periods are already as long as the periods in which the strategy traded, so if the signal never triggers on that stretch of the sample, no window length will change the outcome.",
+        "details": {
+          "validation_method": "walk_forward",
+          "n_validation_windows": 29,
+          "n_windows_with_selected_params": 28,
+          "n_flat_windows": 1,
+          "flat_windows": [
+            {
+              "window": 28,
+              "fold": null,
+              "cause": "no_position_in_validation_window",
+              "reason": "signal_never_triggered",
+              "bars": 65,
+              "train_bars": 1891,
+              "test_returns_bars": 0,
+              "test_sharpe": null,
+              "max_position_bars": 0,
+              "test_start": "2022-04-01",
+              "test_end": "2022-07-01",
+              "outcome_tally": {
+                "no_position_in_validation_window": 9,
+                "no_estimable_training_sharpe": 0,
+                "all_combinations_failed": 0
+              },
+              "text": "Period 28 (65 bars, 2022-04-01 to 2022-07-01): no parameter combination took a position in the window (0 out-of-sample return bars, 0 bars with a position); the window holds at least as many bars as the shortest window in which the strategy traded (64 bars), so its length does not by itself explain the failure: the signal never triggered on it."
+            }
+          ],
+          "traded_windows": [
+            {
+              "window": 0,
+              "bars": 65,
+              "position_bars": 21,
+              "test_sharpe": -2.94345791173682,
+              "test_start": "2015-04-01",
+              "test_end": "2015-07-01"
+            },
+            {
+              "window": 1,
+              "bars": 66,
+              "position_bars": 51,
+              "test_sharpe": -0.8648940440164796,
+              "test_start": "2015-07-01",
+              "test_end": "2015-10-01"
+            },
+            {
+              "window": 2,
+              "bars": 66,
+              "position_bars": 40,
+              "test_sharpe": -0.29413664504126746,
+              "test_start": "2015-10-01",
+              "test_end": "2016-01-01"
+            },
+            {
+              "window": 3,
+              "bars": 65,
+              "position_bars": 57,
+              "test_sharpe": 3.180902233058792,
+              "test_start": "2016-01-01",
+              "test_end": "2016-04-01"
+            },
+            {
+              "window": 4,
+              "bars": 65,
+              "position_bars": 45,
+              "test_sharpe": -0.08244450276500037,
+              "test_start": "2016-04-01",
+              "test_end": "2016-07-01"
+            },
+            {
+              "window": 5,
+              "bars": 66,
+              "position_bars": 42,
+              "test_sharpe": 0.07338747341591229,
+              "test_start": "2016-07-01",
+              "test_end": "2016-10-01"
+            },
+            {
+              "window": 6,
+              "bars": 65,
+              "position_bars": 35,
+              "test_sharpe": 1.7651088384674956,
+              "test_start": "2016-10-01",
+              "test_end": "2017-01-01"
+            },
+            {
+              "window": 7,
+              "bars": 65,
+              "position_bars": 35,
+              "test_sharpe": -2.0068908399238543,
+              "test_start": "2017-01-01",
+              "test_end": "2017-04-01"
+            },
+            {
+              "window": 8,
+              "bars": 65,
+              "position_bars": 38,
+              "test_sharpe": -1.813369069454418,
+              "test_start": "2017-04-01",
+              "test_end": "2017-07-01"
+            },
+            {
+              "window": 9,
+              "bars": 65,
+              "position_bars": 30,
+              "test_sharpe": 0.5371719644455013,
+              "test_start": "2017-07-01",
+              "test_end": "2017-10-01"
+            },
+            {
+              "window": 10,
+              "bars": 65,
+              "position_bars": 45,
+              "test_sharpe": 1.652244324215911,
+              "test_start": "2017-10-01",
+              "test_end": "2018-01-01"
+            },
+            {
+              "window": 11,
+              "bars": 65,
+              "position_bars": 33,
+              "test_sharpe": 2.389475807585282,
+              "test_start": "2018-01-01",
+              "test_end": "2018-04-01"
+            },
+            {
+              "window": 12,
+              "bars": 65,
+              "position_bars": 20,
+              "test_sharpe": -1.3423162654683585,
+              "test_start": "2018-04-01",
+              "test_end": "2018-07-01"
+            },
+            {
+              "window": 13,
+              "bars": 65,
+              "position_bars": 53,
+              "test_sharpe": 1.8231034270678823,
+              "test_start": "2018-07-01",
+              "test_end": "2018-10-01"
+            },
+            {
+              "window": 14,
+              "bars": 66,
+              "position_bars": 52,
+              "test_sharpe": 3.5007548323621185,
+              "test_start": "2018-10-01",
+              "test_end": "2019-01-01"
+            },
+            {
+              "window": 15,
+              "bars": 64,
+              "position_bars": 45,
+              "test_sharpe": 2.729684943504054,
+              "test_start": "2019-01-01",
+              "test_end": "2019-04-01"
+            },
+            {
+              "window": 16,
+              "bars": 65,
+              "position_bars": 42,
+              "test_sharpe": -1.9177086001932888,
+              "test_start": "2019-04-01",
+              "test_end": "2019-07-01"
+            },
+            {
+              "window": 17,
+              "bars": 66,
+              "position_bars": 31,
+              "test_sharpe": -0.7899906797642058,
+              "test_start": "2019-07-01",
+              "test_end": "2019-10-01"
+            },
+            {
+              "window": 18,
+              "bars": 66,
+              "position_bars": 45,
+              "test_sharpe": 0.29220291601728887,
+              "test_start": "2019-10-01",
+              "test_end": "2020-01-01"
+            },
+            {
+              "window": 19,
+              "bars": 65,
+              "position_bars": 45,
+              "test_sharpe": 1.2446708397074464,
+              "test_start": "2020-01-01",
+              "test_end": "2020-04-01"
+            },
+            {
+              "window": 20,
+              "bars": 65,
+              "position_bars": 54,
+              "test_sharpe": 2.5712573329909243,
+              "test_start": "2020-04-01",
+              "test_end": "2020-07-01"
+            },
+            {
+              "window": 21,
+              "bars": 66,
+              "position_bars": 33,
+              "test_sharpe": 0.9410676710799358,
+              "test_start": "2020-07-01",
+              "test_end": "2020-10-01"
+            },
+            {
+              "window": 22,
+              "bars": 66,
+              "position_bars": 21,
+              "test_sharpe": -3.369511705653871,
+              "test_start": "2020-10-01",
+              "test_end": "2021-01-01"
+            },
+            {
+              "window": 23,
+              "bars": 64,
+              "position_bars": 30,
+              "test_sharpe": 0.9674325332289498,
+              "test_start": "2021-01-01",
+              "test_end": "2021-04-01"
+            },
+            {
+              "window": 24,
+              "bars": 65,
+              "position_bars": 21,
+              "test_sharpe": -1.2944179749495353,
+              "test_start": "2021-04-01",
+              "test_end": "2021-07-01"
+            },
+            {
+              "window": 25,
+              "bars": 66,
+              "position_bars": 15,
+              "test_sharpe": -3.678830174664806,
+              "test_start": "2021-07-01",
+              "test_end": "2021-10-01"
+            },
+            {
+              "window": 26,
+              "bars": 66,
+              "position_bars": 19,
+              "test_sharpe": -0.6913004296470098,
+              "test_start": "2021-10-01",
+              "test_end": "2022-01-01"
+            },
+            {
+              "window": 27,
+              "bars": 64,
+              "position_bars": 26,
+              "test_sharpe": -2.8338553706426444,
+              "test_start": "2022-01-01",
+              "test_end": "2022-04-01"
+            }
+          ],
+          "flat_window_causes": {
+            "no_position_in_validation_window": 1
+          },
+          "dominant_cause": "no_position_in_validation_window",
+          "min_traded_window_bars": 64,
+          "min_traded_position_bars": 15,
+          "traded_window_bars": [
+            65,
+            66,
+            66,
+            65,
+            65,
+            66,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            66,
+            64,
+            65,
+            66,
+            66,
+            65,
+            65,
+            66,
+            66,
+            64,
+            65,
+            66,
+            66,
+            64
+          ],
+          "train_split_bars": 2000,
+          "param_grid": {
+            "fast_period": [
+              3,
+              5,
+              8
+            ],
+            "slow_period": [
+              10,
+              15,
+              20
+            ]
+          },
+          "analysis_path": "walk_forward",
+          "window_noun": "period",
+          "selection_basis": "overfitting_risk_verdict",
+          "train_months": 3,
+          "test_months": 3,
+          "step_months": 3,
+          "cli_flags": {
+            "train_months": "--train-months",
+            "test_months": "--test-months",
+            "step_months": "--step-months"
+          }
+        }
+      },
+      "test_resolution": {
+        "n_test_observations": 1771,
+        "n_parameter_trials": 252,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 1.6097417567354073,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 0.00936362816792529,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.11348365801435292,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 1771 test observation(s), 252 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 1.6097 (observed 0.0094)."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 5,
+      "total_oos_return": 0.1123263083393895,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.3404532575395208,
+        "p_value": 0.6595467424604792,
+        "sharpe_ratio": 0.4330143914933921,
+        "expected_max_sharpe": 0.7630650135786949,
+        "z_score": -0.4112264228756862,
+        "n_trials": 45,
+        "n_observations": 390,
+        "skewness": 0.2484564601739847,
+        "kurtosis": 7.169128967156862
+      },
+      "overfitting_risk": "low",
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 390,
+        "n_parameter_trials": 45,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 1.7902028811615316,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 0.4330143914933921,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.13304268215122816,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 390 test observation(s), 45 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 1.7902 (observed 0.4330)."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": {
+        "selected_params": {
+          "fast_period": 3,
+          "slow_period": 10
+        },
+        "val_total_return": 0.1073875990128823,
+        "val_sharpe": 0.44759496074757155,
+        "val_volatility": 0.11415068692500568,
+        "val_n_observations": 398,
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "test_performance": {
+        "test_total_return": -0.29077962140864566,
+        "test_sharpe": -1.7670165095641712,
+        "test_volatility": 0.12961725717405814,
+        "test_n_observations": 398,
+        "test_returns": "date\n2021-02-22   -0.021303\n2021-02-23   -0.004575\n2021-02-24   -0.000300\n2021-02-25    0.007451\n2021-02-26    0.003034\n                ...   \n2022-08-25    0.004668\n2022-08-26   -0.001272\n2022-08-29   -0.007832\n2022-08-30    0.033873\n2022-08-31   -0.006657\nLength: 398, dtype: float64",
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "selected_params": {
+        "fast_period": 3,
+        "slow_period": 10
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 398,
+        "n_parameter_trials": 126,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.00842846586286,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -1.7670165095641712,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.12961725717405814,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 398 test observation(s), 126 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.0084 (observed -1.7670). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [
+        {
+          "params": {
+            "fast_period": 5,
+            "slow_period": 10
+          },
+          "sharpe": 0.21277040239226866,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.5413417968081667,
+            "p_value": 0.45865820319183326,
+            "sharpe_ratio": 0.21277040239226866,
+            "expected_max_sharpe": 0.17588440682363646,
+            "z_score": 0.103814692702736,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.009327994546961716,
+            "kurtosis": 7.595156756628567
+          },
+          "total_return": 0.34592408204300895
+        },
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 20
+          },
+          "sharpe": 0.17687287039760188,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.5011097361608521,
+            "p_value": 0.4988902638391479,
+            "sharpe_ratio": 0.17687287039760188,
+            "expected_max_sharpe": 0.17588440682363646,
+            "z_score": 0.002781699625565236,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.03944060226348354,
+            "kurtosis": 7.502143662478084
+          },
+          "total_return": 0.30286178750827486
+        },
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 10
+          },
+          "sharpe": 0.174776534071775,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.4987565422722214,
+            "p_value": 0.5012434577277787,
+            "sharpe_ratio": 0.174776534071775,
+            "expected_max_sharpe": 0.17588440682363646,
+            "z_score": -0.003116891345523622,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.08883969308280712,
+            "kurtosis": 7.798423150310399
+          },
+          "total_return": 0.30250735482875935
+        }
+      ],
+      "inert_grid_params": null
+    }
+  },
+  {
+    "scenario": "structural_break",
+    "strategy": "sma_crossover",
+    "scenario_description": "Abrupt change in return distribution",
+    "strategy_description": "Trend-following baseline",
+    "expected_challenge": "Validators should detect break; out-of-sample should not overfit pre-break regime",
+    "regime_analysis": {
+      "success": true,
+      "combined_regime_counts": {
+        "bear_high": 864,
+        "bull_high": 471,
+        "sideways_high": 272,
+        "unknown": 199,
+        "bear_low": 84,
+        "bull_low": 59,
+        "sideways_low": 51
+      },
+      "hmm_regime_counts": {
+        "0": 855,
+        "2": 675,
+        "1": 470
+      },
+      "n_regime_changes": 34
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 29,
+      "total_oos_return": -0.20098556467758433,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 2.619802528858184e-06,
+        "p_value": 0.9999973801974711,
+        "sharpe_ratio": -0.1702159981311294,
+        "expected_max_sharpe": 1.5171760650051878,
+        "z_score": -4.554957982071864,
+        "n_trials": 255,
+        "n_observations": 1834,
+        "skewness": -0.19128189463424872,
+        "kurtosis": 10.34248931470768
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 1834,
+        "n_parameter_trials": 255,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.0067474700611956,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -0.1702159981311294,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.1911237121896529,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 1834 test observation(s), 255 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.0067 (observed -0.1702). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 5,
+      "total_oos_return": -0.060270355541342524,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.2386297893370225,
+        "p_value": 0.7613702106629775,
+        "sharpe_ratio": -0.17856140093821704,
+        "expected_max_sharpe": 0.39271550805426136,
+        "z_score": -0.7107170713923979,
+        "n_trials": 45,
+        "n_observations": 390,
+        "skewness": -0.2540976684054456,
+        "kurtosis": 7.676591705504996
+      },
+      "overfitting_risk": "low",
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 390,
+        "n_parameter_trials": 45,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 1.4430513578550512,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -0.17856140093821704,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.21155966986630448,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 390 test observation(s), 45 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 1.4431 (observed -0.1786)."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": {
+        "selected_params": {
+          "fast_period": 8,
+          "slow_period": 20
+        },
+        "val_total_return": -0.04435812070603529,
+        "val_sharpe": -0.06746910502288714,
+        "val_volatility": 0.25192637302148857,
+        "val_n_observations": 398,
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "test_performance": {
+        "test_total_return": -0.32024762900623804,
+        "test_sharpe": -1.4047062074704555,
+        "test_volatility": 0.17691745736658765,
+        "test_n_observations": 398,
+        "test_returns": "date\n2021-02-22    0.0\n2021-02-23   -0.0\n2021-02-24   -0.0\n2021-02-25    0.0\n2021-02-26    0.0\n             ... \n2022-08-25    0.0\n2022-08-26    0.0\n2022-08-29   -0.0\n2022-08-30   -0.0\n2022-08-31    0.0\nLength: 398, dtype: float64",
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "selected_params": {
+        "fast_period": 8,
+        "slow_period": 20
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 398,
+        "n_parameter_trials": 126,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.137549195114239,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -1.4047062074704555,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.17691745736658765,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 398 test observation(s), 126 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.1375 (observed -1.4047). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 15
+          },
+          "sharpe": -0.3716356987772995,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.06027369469548577,
+            "p_value": 0.9397263053045142,
+            "sharpe_ratio": -0.3716356987772995,
+            "expected_max_sharpe": 0.1789062035337677,
+            "z_score": -1.552480105287194,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.1883184376866863,
+            "kurtosis": 8.115841846541889
+          },
+          "total_return": -0.47107616304474953
+        },
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 10
+          },
+          "sharpe": -0.49242399765555744,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.02914047614275539,
+            "p_value": 0.9708595238572446,
+            "sharpe_ratio": -0.49242399765555744,
+            "expected_max_sharpe": 0.1789062035337677,
+            "z_score": -1.8935787050165533,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.18220734646082393,
+            "kurtosis": 8.094775061550031
+          },
+          "total_return": -0.5742732452700774
+        },
+        {
+          "params": {
+            "fast_period": 5,
+            "slow_period": 15
+          },
+          "sharpe": -0.5252550218456243,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.023462469700136657,
+            "p_value": 0.9765375302998633,
+            "sharpe_ratio": -0.5252550218456243,
+            "expected_max_sharpe": 0.1789062035337677,
+            "z_score": -1.9869770567836411,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.20102344955873463,
+            "kurtosis": 7.979351594392559
+          },
+          "total_return": -0.5877639736980531
+        }
+      ],
+      "inert_grid_params": null
+    }
+  },
+  {
+    "scenario": "structural_break",
+    "strategy": "ema_crossover",
+    "scenario_description": "Abrupt change in return distribution",
+    "strategy_description": "EMA trend-following",
+    "expected_challenge": "Validators should detect break; out-of-sample should not overfit pre-break regime",
+    "regime_analysis": {
+      "success": true,
+      "combined_regime_counts": {
+        "bear_high": 864,
+        "bull_high": 471,
+        "sideways_high": 272,
+        "unknown": 199,
+        "bear_low": 84,
+        "bull_low": 59,
+        "sideways_low": 51
+      },
+      "hmm_regime_counts": {
+        "0": 855,
+        "2": 675,
+        "1": 470
+      },
+      "n_regime_changes": 34
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 28,
+      "total_oos_return": -0.5132987831845782,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 6.796910064610362e-06,
+        "p_value": 0.9999932030899354,
+        "sharpe_ratio": -0.4725673744797777,
+        "expected_max_sharpe": 1.1641570439599263,
+        "z_score": -4.350321296689217,
+        "n_trials": 252,
+        "n_observations": 1771,
+        "skewness": -0.24927797579331878,
+        "kurtosis": 8.39226068748222
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": {
+        "cause": "no_position_in_validation_window",
+        "message": "The walk_forward analysis selected a parameter in 28 of its 29 out-of-sample periods; the other 1 produced no selection. Every flat period has the same cause (no_position_in_validation_window): no parameter combination took a position in the window. So the overfitting-risk verdict rests on 28 of the 29 out-of-sample periods, and the thinnest of them held a position for only 9 bars. To give the strategy room to trade, shorten the indicator lookbacks in the parameter grid, use a longer --test-months window, or give the training split more history -- but the flat periods are already as long as the periods in which the strategy traded, so if the signal never triggers on that stretch of the sample, no window length will change the outcome.",
+        "details": {
+          "validation_method": "walk_forward",
+          "n_validation_windows": 29,
+          "n_windows_with_selected_params": 28,
+          "n_flat_windows": 1,
+          "flat_windows": [
+            {
+              "window": 28,
+              "fold": null,
+              "cause": "no_position_in_validation_window",
+              "reason": "signal_never_triggered",
+              "bars": 65,
+              "train_bars": 1891,
+              "test_returns_bars": 0,
+              "test_sharpe": null,
+              "max_position_bars": 0,
+              "test_start": "2022-04-01",
+              "test_end": "2022-07-01",
+              "outcome_tally": {
+                "no_position_in_validation_window": 9,
+                "no_estimable_training_sharpe": 0,
+                "all_combinations_failed": 0
+              },
+              "text": "Period 28 (65 bars, 2022-04-01 to 2022-07-01): no parameter combination took a position in the window (0 out-of-sample return bars, 0 bars with a position); the window holds at least as many bars as the shortest window in which the strategy traded (64 bars), so its length does not by itself explain the failure: the signal never triggered on it."
+            }
+          ],
+          "traded_windows": [
+            {
+              "window": 0,
+              "bars": 65,
+              "position_bars": 9,
+              "test_sharpe": -3.856366651757597,
+              "test_start": "2015-04-01",
+              "test_end": "2015-07-01"
+            },
+            {
+              "window": 1,
+              "bars": 66,
+              "position_bars": 27,
+              "test_sharpe": -0.7573595423552318,
+              "test_start": "2015-07-01",
+              "test_end": "2015-10-01"
+            },
+            {
+              "window": 2,
+              "bars": 66,
+              "position_bars": 36,
+              "test_sharpe": -1.6832060123700687,
+              "test_start": "2015-10-01",
+              "test_end": "2016-01-01"
+            },
+            {
+              "window": 3,
+              "bars": 65,
+              "position_bars": 41,
+              "test_sharpe": 3.578747090109467,
+              "test_start": "2016-01-01",
+              "test_end": "2016-04-01"
+            },
+            {
+              "window": 4,
+              "bars": 65,
+              "position_bars": 37,
+              "test_sharpe": -0.3333383606666106,
+              "test_start": "2016-04-01",
+              "test_end": "2016-07-01"
+            },
+            {
+              "window": 5,
+              "bars": 66,
+              "position_bars": 33,
+              "test_sharpe": 1.2405492678694565,
+              "test_start": "2016-07-01",
+              "test_end": "2016-10-01"
+            },
+            {
+              "window": 6,
+              "bars": 65,
+              "position_bars": 33,
+              "test_sharpe": 0.930292462212463,
+              "test_start": "2016-10-01",
+              "test_end": "2017-01-01"
+            },
+            {
+              "window": 7,
+              "bars": 65,
+              "position_bars": 24,
+              "test_sharpe": -2.626594487627209,
+              "test_start": "2017-01-01",
+              "test_end": "2017-04-01"
+            },
+            {
+              "window": 8,
+              "bars": 65,
+              "position_bars": 22,
+              "test_sharpe": -3.2281576483617753,
+              "test_start": "2017-04-01",
+              "test_end": "2017-07-01"
+            },
+            {
+              "window": 9,
+              "bars": 65,
+              "position_bars": 20,
+              "test_sharpe": -0.8957201621502461,
+              "test_start": "2017-07-01",
+              "test_end": "2017-10-01"
+            },
+            {
+              "window": 10,
+              "bars": 65,
+              "position_bars": 38,
+              "test_sharpe": 1.1766018470817692,
+              "test_start": "2017-10-01",
+              "test_end": "2018-01-01"
+            },
+            {
+              "window": 11,
+              "bars": 65,
+              "position_bars": 25,
+              "test_sharpe": 1.3175857922589083,
+              "test_start": "2018-01-01",
+              "test_end": "2018-04-01"
+            },
+            {
+              "window": 12,
+              "bars": 65,
+              "position_bars": 13,
+              "test_sharpe": -2.580179781289863,
+              "test_start": "2018-04-01",
+              "test_end": "2018-07-01"
+            },
+            {
+              "window": 13,
+              "bars": 65,
+              "position_bars": 41,
+              "test_sharpe": 0.7212085552732906,
+              "test_start": "2018-07-01",
+              "test_end": "2018-10-01"
+            },
+            {
+              "window": 14,
+              "bars": 66,
+              "position_bars": 32,
+              "test_sharpe": 0.17389591536347537,
+              "test_start": "2018-10-01",
+              "test_end": "2019-01-01"
+            },
+            {
+              "window": 15,
+              "bars": 64,
+              "position_bars": 38,
+              "test_sharpe": 1.298814283985647,
+              "test_start": "2019-01-01",
+              "test_end": "2019-04-01"
+            },
+            {
+              "window": 16,
+              "bars": 65,
+              "position_bars": 33,
+              "test_sharpe": -1.79280181252704,
+              "test_start": "2019-04-01",
+              "test_end": "2019-07-01"
+            },
+            {
+              "window": 17,
+              "bars": 66,
+              "position_bars": 17,
+              "test_sharpe": -0.38425079010913954,
+              "test_start": "2019-07-01",
+              "test_end": "2019-10-01"
+            },
+            {
+              "window": 18,
+              "bars": 66,
+              "position_bars": 37,
+              "test_sharpe": -0.14992362147900107,
+              "test_start": "2019-10-01",
+              "test_end": "2020-01-01"
+            },
+            {
+              "window": 19,
+              "bars": 65,
+              "position_bars": 30,
+              "test_sharpe": 0.28610242294378707,
+              "test_start": "2020-01-01",
+              "test_end": "2020-04-01"
+            },
+            {
+              "window": 20,
+              "bars": 65,
+              "position_bars": 36,
+              "test_sharpe": 1.2463017278868405,
+              "test_start": "2020-04-01",
+              "test_end": "2020-07-01"
+            },
+            {
+              "window": 21,
+              "bars": 66,
+              "position_bars": 31,
+              "test_sharpe": 1.7392328759780356,
+              "test_start": "2020-07-01",
+              "test_end": "2020-10-01"
+            },
+            {
+              "window": 22,
+              "bars": 66,
+              "position_bars": 19,
+              "test_sharpe": -2.959274045686278,
+              "test_start": "2020-10-01",
+              "test_end": "2021-01-01"
+            },
+            {
+              "window": 23,
+              "bars": 64,
+              "position_bars": 29,
+              "test_sharpe": 0.640010736772602,
+              "test_start": "2021-01-01",
+              "test_end": "2021-04-01"
+            },
+            {
+              "window": 24,
+              "bars": 65,
+              "position_bars": 13,
+              "test_sharpe": -1.6903812755646248,
+              "test_start": "2021-04-01",
+              "test_end": "2021-07-01"
+            },
+            {
+              "window": 25,
+              "bars": 66,
+              "position_bars": 14,
+              "test_sharpe": -3.3293461062930376,
+              "test_start": "2021-07-01",
+              "test_end": "2021-10-01"
+            },
+            {
+              "window": 26,
+              "bars": 66,
+              "position_bars": 17,
+              "test_sharpe": -3.666815870751085,
+              "test_start": "2021-10-01",
+              "test_end": "2022-01-01"
+            },
+            {
+              "window": 27,
+              "bars": 64,
+              "position_bars": 22,
+              "test_sharpe": -3.084954463167939,
+              "test_start": "2022-01-01",
+              "test_end": "2022-04-01"
+            }
+          ],
+          "flat_window_causes": {
+            "no_position_in_validation_window": 1
+          },
+          "dominant_cause": "no_position_in_validation_window",
+          "min_traded_window_bars": 64,
+          "min_traded_position_bars": 9,
+          "traded_window_bars": [
+            65,
+            66,
+            66,
+            65,
+            65,
+            66,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            66,
+            64,
+            65,
+            66,
+            66,
+            65,
+            65,
+            66,
+            66,
+            64,
+            65,
+            66,
+            66,
+            64
+          ],
+          "train_split_bars": 2000,
+          "param_grid": {
+            "fast_period": [
+              3,
+              5,
+              8
+            ],
+            "slow_period": [
+              10,
+              15,
+              20
+            ]
+          },
+          "analysis_path": "walk_forward",
+          "window_noun": "period",
+          "selection_basis": "overfitting_risk_verdict",
+          "train_months": 3,
+          "test_months": 3,
+          "step_months": 3,
+          "cli_flags": {
+            "train_months": "--train-months",
+            "test_months": "--test-months",
+            "step_months": "--step-months"
+          }
+        }
+      },
+      "test_resolution": {
+        "n_test_observations": 1771,
+        "n_parameter_trials": 252,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 1.658766593982659,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -0.4725673744797777,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.2116034950023674,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 1771 test observation(s), 252 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 1.6588 (observed -0.4726)."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 5,
+      "total_oos_return": 0.1192192627491675,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.4232332449947628,
+        "p_value": 0.5767667550052372,
+        "sharpe_ratio": 0.35880995877809213,
+        "expected_max_sharpe": 0.5145296304812207,
+        "z_score": -0.19362887128130885,
+        "n_trials": 45,
+        "n_observations": 390,
+        "skewness": 0.10505098964926486,
+        "kurtosis": 6.905537661170353
+      },
+      "overfitting_risk": "low",
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 390,
+        "n_parameter_trials": 45,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 1.547966644120205,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 0.35880995877809213,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.20613506454951544,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 390 test observation(s), 45 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 1.5480 (observed 0.3588)."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": {
+        "selected_params": {
+          "fast_period": 3,
+          "slow_period": 10
+        },
+        "val_total_return": -0.033401516391753594,
+        "val_sharpe": -0.03501154233687372,
+        "val_volatility": 0.2556107658875573,
+        "val_n_observations": 398,
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "test_performance": {
+        "test_total_return": -0.40156458669700723,
+        "test_sharpe": -1.5310880880389954,
+        "test_volatility": 0.210694916324586,
+        "test_n_observations": 398,
+        "test_returns": "date\n2021-02-22    0.031509\n2021-02-23   -0.035209\n2021-02-24   -0.008076\n2021-02-25    0.034226\n2021-02-26    0.012479\n                ...   \n2022-08-25    0.000000\n2022-08-26    0.007023\n2022-08-29   -0.002585\n2022-08-30   -0.013479\n2022-08-31    0.056597\nLength: 398, dtype: float64",
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "selected_params": {
+        "fast_period": 3,
+        "slow_period": 10
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 398,
+        "n_parameter_trials": 126,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.1956906002518384,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -1.5310880880389954,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.210694916324586,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 398 test observation(s), 126 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.1957 (observed -1.5311). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 10
+          },
+          "sharpe": -0.3814257015374638,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.027980451529331818,
+            "p_value": 0.9720195484706682,
+            "sharpe_ratio": -0.3814257015374638,
+            "expected_max_sharpe": 0.2967606490146424,
+            "z_score": -1.9113399904470265,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.139403981025705,
+            "kurtosis": 8.267738940020429
+          },
+          "total_return": -0.4741894758948876
+        },
+        {
+          "params": {
+            "fast_period": 5,
+            "slow_period": 10
+          },
+          "sharpe": -0.4186478191129732,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.02200990072348008,
+            "p_value": 0.9779900992765199,
+            "sharpe_ratio": -0.4186478191129732,
+            "expected_max_sharpe": 0.2967606490146424,
+            "z_score": -2.0139022103272852,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.050533535613817265,
+            "kurtosis": 8.782754553433051
+          },
+          "total_return": -0.49932823113653635
+        },
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 15
+          },
+          "sharpe": -0.5051047013072284,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.011869519064936995,
+            "p_value": 0.9881304809350631,
+            "sharpe_ratio": -0.5051047013072284,
+            "expected_max_sharpe": 0.2967606490146424,
+            "z_score": -2.261326634080512,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": -0.17366472723267393,
+            "kurtosis": 8.790792322086517
+          },
+          "total_return": -0.555409881625458
+        }
+      ],
+      "inert_grid_params": null
+    }
+  },
+  {
+    "scenario": "volatility_clustering",
+    "strategy": "sma_crossover",
+    "scenario_description": "Volatility clustering (GARCH-like behavior)",
+    "strategy_description": "Trend-following baseline",
+    "expected_challenge": "Regime detection should identify vol regimes; position sizing should adapt",
+    "regime_analysis": {
+      "success": true,
+      "combined_regime_counts": {
+        "bull_high": 484,
+        "bear_high": 382,
+        "bear_low": 318,
+        "bull_low": 276,
+        "sideways_low": 205,
+        "unknown": 199,
+        "sideways_high": 136
+      },
+      "hmm_regime_counts": {
+        "1": 1169,
+        "2": 582,
+        "0": 249
+      },
+      "n_regime_changes": 39
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 29,
+      "total_oos_return": 0.07175911788291467,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 5.947276621176556e-08,
+        "p_value": 0.9999999405272337,
+        "sharpe_ratio": 0.012260728067011051,
+        "expected_max_sharpe": 1.9755316922886987,
+        "z_score": -5.295108857948619,
+        "n_trials": 261,
+        "n_observations": 1834,
+        "skewness": 0.08510000095476979,
+        "kurtosis": 19.089399500737297
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 1834,
+        "n_parameter_trials": 261,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.4731085406916065,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 0.012260728067011051,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.15756213402344585,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 1834 test observation(s), 261 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.4731 (observed 0.0123). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 5,
+      "total_oos_return": -0.029502038758901894,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.18455431932088362,
+        "p_value": 0.8154456806791164,
+        "sharpe_ratio": -0.28546336831139707,
+        "expected_max_sharpe": 0.43526942315179834,
+        "z_score": -0.8981442726248997,
+        "n_trials": 45,
+        "n_observations": 390,
+        "skewness": -0.3937104380754885,
+        "kurtosis": 14.896823171850436
+      },
+      "overfitting_risk": "low",
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 390,
+        "n_parameter_trials": 45,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 1.5014018147296488,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -0.28546336831139707,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.1147748359290417,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 390 test observation(s), 45 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 1.5014 (observed -0.2855)."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": {
+        "selected_params": {
+          "fast_period": 8,
+          "slow_period": 10
+        },
+        "val_total_return": 0.2145971069507131,
+        "val_sharpe": 0.5683330603028856,
+        "val_volatility": 0.22544102254145892,
+        "val_n_observations": 398,
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "test_performance": {
+        "test_total_return": 0.41983245668372704,
+        "test_sharpe": 1.3169289431308748,
+        "test_volatility": 0.16348229090175137,
+        "test_n_observations": 398,
+        "test_returns": "date\n2021-02-22   -0.000000\n2021-02-23    0.000000\n2021-02-24    0.000000\n2021-02-25   -0.000000\n2021-02-26    0.000000\n                ...   \n2022-08-25    0.013469\n2022-08-26   -0.000255\n2022-08-29   -0.006946\n2022-08-30   -0.000362\n2022-08-31    0.000560\nLength: 398, dtype: float64",
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "selected_params": {
+        "fast_period": 8,
+        "slow_period": 10
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 398,
+        "n_parameter_trials": 126,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.1937461275089394,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 1.3169289431308748,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.16348229090175137,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 398 test observation(s), 126 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.1937 (observed 1.3169). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [
+        {
+          "params": {
+            "fast_period": 8,
+            "slow_period": 15
+          },
+          "sharpe": 0.32834957079353616,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.5613766417026131,
+            "p_value": 0.43862335829738686,
+            "sharpe_ratio": 0.32834957079353616,
+            "expected_max_sharpe": 0.273856430356858,
+            "z_score": 0.15446042040126912,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 0.7489057690677792,
+            "kurtosis": 18.11623686053435
+          },
+          "total_return": 0.6478626873410513
+        },
+        {
+          "params": {
+            "fast_period": 8,
+            "slow_period": 20
+          },
+          "sharpe": 0.3180892596328884,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.5498186050752305,
+            "p_value": 0.4501813949247695,
+            "sharpe_ratio": 0.3180892596328884,
+            "expected_max_sharpe": 0.273856430356858,
+            "z_score": 0.12520306622760427,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 0.6324496516030162,
+            "kurtosis": 18.58998990712407
+          },
+          "total_return": 0.6182724935072055
+        },
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 20
+          },
+          "sharpe": 0.31587102308904136,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.5474051133171417,
+            "p_value": 0.4525948866828583,
+            "sharpe_ratio": 0.31587102308904136,
+            "expected_max_sharpe": 0.273856430356858,
+            "z_score": 0.11910802450783295,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 0.7872377080265652,
+            "kurtosis": 18.248771308320173
+          },
+          "total_return": 0.6095927414567188
+        }
+      ],
+      "inert_grid_params": null
+    }
+  },
+  {
+    "scenario": "volatility_clustering",
+    "strategy": "ema_crossover",
+    "scenario_description": "Volatility clustering (GARCH-like behavior)",
+    "strategy_description": "EMA trend-following",
+    "expected_challenge": "Regime detection should identify vol regimes; position sizing should adapt",
+    "regime_analysis": {
+      "success": true,
+      "combined_regime_counts": {
+        "bull_high": 484,
+        "bear_high": 382,
+        "bear_low": 318,
+        "bull_low": 276,
+        "sideways_low": 205,
+        "unknown": 199,
+        "sideways_high": 136
+      },
+      "hmm_regime_counts": {
+        "1": 1169,
+        "2": 582,
+        "0": 249
+      },
+      "n_regime_changes": 39
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 29,
+      "total_oos_return": 0.38456608967982264,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 1.644498873742961e-07,
+        "p_value": 0.9999998355501126,
+        "sharpe_ratio": 0.22808281207651412,
+        "expected_max_sharpe": 2.112718876627994,
+        "z_score": -5.106086157823177,
+        "n_trials": 261,
+        "n_observations": 1834,
+        "skewness": 0.6910162424565789,
+        "kurtosis": 17.530139248055853
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 1834,
+        "n_parameter_trials": 261,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.587217509981229,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 0.22808281207651412,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.17569398722432963,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 1834 test observation(s), 261 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.5872 (observed 0.2281). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 5,
+      "total_oos_return": -0.03157020573295466,
+      "oos_sharpe": null,
+      "deflated_sharpe": {
+        "deflated_sharpe_ratio": 0.1747924333414944,
+        "p_value": 0.8252075666585056,
+        "sharpe_ratio": -0.29976833084128984,
+        "expected_max_sharpe": 0.44903398195682076,
+        "z_score": -0.9353948176060564,
+        "n_trials": 45,
+        "n_observations": 390,
+        "skewness": -0.631358020879802,
+        "kurtosis": 13.829415897128063
+      },
+      "overfitting_risk": "low",
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 390,
+        "n_parameter_trials": 45,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 1.526099549193651,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": -0.29976833084128984,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.11412140955966585,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 390 test observation(s), 45 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 1.5261 (observed -0.2998)."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": {
+        "selected_params": {
+          "fast_period": 3,
+          "slow_period": 15
+        },
+        "val_total_return": 0.44013322556961976,
+        "val_sharpe": 1.0241197091343657,
+        "val_volatility": 0.2318940854381238,
+        "val_n_observations": 398,
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "test_performance": {
+        "test_total_return": 0.3506935671349496,
+        "test_sharpe": 1.107590091145924,
+        "test_volatility": 0.1662641990990008,
+        "test_n_observations": 398,
+        "test_returns": "date\n2021-02-22   -0.051482\n2021-02-23   -0.000300\n2021-02-24    0.000000\n2021-02-25   -0.000000\n2021-02-26    0.000000\n                ...   \n2022-08-25    0.013469\n2022-08-26   -0.000255\n2022-08-29   -0.006946\n2022-08-30   -0.000362\n2022-08-31    0.000560\nLength: 398, dtype: float64",
+        "capacity": null,
+        "capacity_trend": null,
+        "capacity_book": null,
+        "capacity_book_trend": null,
+        "capacity_book_notional_weighted": null,
+        "capacity_book_notional_weighted_trend": null,
+        "book_diagnostic": null
+      },
+      "selected_params": {
+        "fast_period": 3,
+        "slow_period": 15
+      },
+      "overfitting_risk": null,
+      "no_selection_diagnosis": null,
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": 398,
+        "n_parameter_trials": 126,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": 2.470838340138998,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": 1.107590091145924,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": 0.1662641990990008,
+        "sharpe_status": "resolvable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": true,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "With 398 test observation(s), 126 parameter trial(s): the Deflated Sharpe test can only confirm an annualized Sharpe of at least 2.4708 (observed 1.1076). The Deflated Sharpe threshold(s) exceed the stated plausibility bound, so at this sample size their outcome measures the sample, not the strategy."
+      },
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [
+        {
+          "params": {
+            "fast_period": 8,
+            "slow_period": 10
+          },
+          "sharpe": 0.5255716543595184,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.7630953691126146,
+            "p_value": 0.23690463088738545,
+            "sharpe_ratio": 0.5255716543595184,
+            "expected_max_sharpe": 0.2743399179321629,
+            "z_score": 0.7162949218209679,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 0.9032677795105161,
+            "kurtosis": 18.393828506971843
+          },
+          "total_return": 1.1730094635831572
+        },
+        {
+          "params": {
+            "fast_period": 5,
+            "slow_period": 15
+          },
+          "sharpe": 0.4986283020016721,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.7384739538809554,
+            "p_value": 0.2615260461190446,
+            "sharpe_ratio": 0.4986283020016721,
+            "expected_max_sharpe": 0.2743399179321629,
+            "z_score": 0.6386477781241835,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 0.8562201918491001,
+            "kurtosis": 18.37345839764473
+          },
+          "total_return": 1.095007607435865
+        },
+        {
+          "params": {
+            "fast_period": 3,
+            "slow_period": 15
+          },
+          "sharpe": 0.46436429567526166,
+          "deflated_sharpe": {
+            "deflated_sharpe_ratio": 0.7056282552804383,
+            "p_value": 0.29437174471956173,
+            "sharpe_ratio": 0.46436429567526166,
+            "expected_max_sharpe": 0.2743399179321629,
+            "z_score": 0.540657772471915,
+            "n_trials": 9,
+            "n_observations": 1998,
+            "skewness": 0.8428221903575457,
+            "kurtosis": 17.751619820406084
+          },
+          "total_return": 0.9625326657513729
+        }
+      ],
+      "inert_grid_params": null
+    }
+  },
+  {
+    "scenario": "correlation_breakdown",
+    "strategy": "sma_crossover",
+    "scenario_description": "Multi-asset correlation breakdown (diversification failure)",
+    "strategy_description": "Trend-following baseline",
+    "expected_challenge": "Panel strategies should fail; HRP allocation should adapt",
+    "regime_analysis": {
+      "success": false,
+      "error": "'close'"
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 0,
+      "total_oos_return": null,
+      "oos_sharpe": null,
+      "deflated_sharpe": {},
+      "overfitting_risk": null,
+      "no_selection_diagnosis": {
+        "cause": "no_position_in_validation_window",
+        "message": "The walk_forward analysis produced 29 out-of-sample window(s) but no parameter combination took a position in any of them (the longest window holds 66 bars). A combination is skipped when the strategy stays flat over the whole window, which usually means the indicator warm-up is longer than the window: shorten the indicator lookbacks in the parameter grid, use a longer --test-months window, or give the training split more history.",
+        "details": {
+          "validation_method": "walk_forward",
+          "n_validation_windows": 29,
+          "n_windows_with_selected_params": 0,
+          "train_split_bars": 2000,
+          "param_grid": {
+            "fast_period": [
+              3,
+              5,
+              8
+            ],
+            "slow_period": [
+              10,
+              15,
+              20
+            ]
+          },
+          "validation_window_bars": [
+            65,
+            66,
+            66,
+            65,
+            65,
+            66,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            66,
+            64,
+            65,
+            66,
+            66,
+            65,
+            65,
+            66,
+            66,
+            64,
+            65,
+            66,
+            66,
+            64,
+            65
+          ],
+          "analysis_path": "walk_forward",
+          "train_months": 3,
+          "test_months": 3,
+          "step_months": 3,
+          "cli_flags": {
+            "train_months": "--train-months",
+            "test_months": "--test-months",
+            "step_months": "--step-months"
+          }
+        }
+      },
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": null,
+        "n_parameter_trials": null,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": null,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": null,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": null,
+        "sharpe_status": "not_applicable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "No significance test was run on this record, so there is no test resolution to report."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 0,
+      "total_oos_return": null,
+      "oos_sharpe": null,
+      "deflated_sharpe": {},
+      "overfitting_risk": null,
+      "no_selection_diagnosis": {
+        "cause": "no_position_in_validation_window",
+        "message": "The cpcv analysis produced 5 out-of-sample window(s) but no parameter combination took a position in any of them (the longest window holds 80 bars). A combination is skipped when the strategy stays flat over the whole window, which usually means the indicator warm-up is longer than the window: raise --test-size (it is the fraction of each group used as the test set) or lower --n-splits so a fold's test window holds enough bars for the strategy to take a position. With --test-size 0.2 and --n-splits 5, the effective out-of-sample fraction is 0.2/5 = 0.04 of the data, because the test size is the fraction of each group.",
+        "details": {
+          "validation_method": "cpcv",
+          "n_validation_windows": 5,
+          "n_windows_with_selected_params": 0,
+          "train_split_bars": 2000,
+          "param_grid": {
+            "fast_period": [
+              3,
+              5,
+              8
+            ],
+            "slow_period": [
+              10,
+              15,
+              20
+            ]
+          },
+          "validation_window_bars": [
+            80,
+            80,
+            80,
+            80,
+            80
+          ],
+          "analysis_path": "cpcv",
+          "cpcv_n_splits": 5,
+          "cpcv_test_size": 0.2,
+          "cpcv_purge_size": 0.0,
+          "cpcv_embargo_size": 0.0,
+          "cli_flags": {
+            "n_splits": "--n-splits",
+            "test_size": "--test-size"
+          }
+        }
+      },
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": null,
+        "n_parameter_trials": null,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": null,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": null,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": null,
+        "sharpe_status": "not_applicable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "No significance test was run on this record, so there is no test resolution to report."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": null,
+      "test_performance": null,
+      "selected_params": null,
+      "overfitting_risk": null,
+      "no_selection_diagnosis": {
+        "cause": "no_position_in_validation_window",
+        "message": "The walk_forward analysis produced 14 out-of-sample window(s) but no parameter combination took a position in any of them (the longest window holds 66 bars). A combination is skipped when the strategy stays flat over the whole window, which usually means the indicator warm-up is longer than the window: shorten the indicator lookbacks in the parameter grid, use a longer --wf-test-months window, or give the training split more history.",
+        "details": {
+          "validation_method": "walk_forward",
+          "n_validation_windows": 14,
+          "n_windows_with_selected_params": 0,
+          "train_split_bars": 1200,
+          "param_grid": {
+            "fast_period": [
+              3,
+              5,
+              8
+            ],
+            "slow_period": [
+              10,
+              15,
+              20
+            ]
+          },
+          "validation_window_bars": [
+            65,
+            65,
+            66,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            66,
+            64,
+            65
+          ],
+          "walk_forward_window": {
+            "requested": {
+              "train_months": 12,
+              "test_months": 3,
+              "step_months": 3
+            },
+            "effective": {
+              "train_months": 12,
+              "test_months": 3,
+              "step_months": 3
+            },
+            "adapted": false,
+            "train_span_months": 55.1622,
+            "requested_periods": 14,
+            "effective_periods": 14,
+            "reason": null
+          },
+          "analysis_path": "out_of_sample",
+          "walk_forward_train_months": 12,
+          "walk_forward_test_months": 3,
+          "walk_forward_step_months": 3,
+          "cli_flags": {
+            "train_months": "--wf-train-months",
+            "test_months": "--wf-test-months",
+            "step_months": "--wf-step-months"
+          }
+        }
+      },
+      "partial_selection_diagnosis": null,
+      "test_resolution": null,
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [],
+      "inert_grid_params": null
+    }
+  },
+  {
+    "scenario": "correlation_breakdown",
+    "strategy": "ema_crossover",
+    "scenario_description": "Multi-asset correlation breakdown (diversification failure)",
+    "strategy_description": "EMA trend-following",
+    "expected_challenge": "Panel strategies should fail; HRP allocation should adapt",
+    "regime_analysis": {
+      "success": false,
+      "error": "'close'"
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 0,
+      "total_oos_return": null,
+      "oos_sharpe": null,
+      "deflated_sharpe": {},
+      "overfitting_risk": null,
+      "no_selection_diagnosis": {
+        "cause": "no_position_in_validation_window",
+        "message": "The walk_forward analysis produced 29 out-of-sample window(s) but no parameter combination took a position in any of them (the longest window holds 66 bars). A combination is skipped when the strategy stays flat over the whole window, which usually means the indicator warm-up is longer than the window: shorten the indicator lookbacks in the parameter grid, use a longer --test-months window, or give the training split more history.",
+        "details": {
+          "validation_method": "walk_forward",
+          "n_validation_windows": 29,
+          "n_windows_with_selected_params": 0,
+          "train_split_bars": 2000,
+          "param_grid": {
+            "fast_period": [
+              3,
+              5,
+              8
+            ],
+            "slow_period": [
+              10,
+              15,
+              20
+            ]
+          },
+          "validation_window_bars": [
+            65,
+            66,
+            66,
+            65,
+            65,
+            66,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            66,
+            64,
+            65,
+            66,
+            66,
+            65,
+            65,
+            66,
+            66,
+            64,
+            65,
+            66,
+            66,
+            64,
+            65
+          ],
+          "analysis_path": "walk_forward",
+          "train_months": 3,
+          "test_months": 3,
+          "step_months": 3,
+          "cli_flags": {
+            "train_months": "--train-months",
+            "test_months": "--test-months",
+            "step_months": "--step-months"
+          }
+        }
+      },
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": null,
+        "n_parameter_trials": null,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": null,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": null,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": null,
+        "sharpe_status": "not_applicable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "No significance test was run on this record, so there is no test resolution to report."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 0,
+      "total_oos_return": null,
+      "oos_sharpe": null,
+      "deflated_sharpe": {},
+      "overfitting_risk": null,
+      "no_selection_diagnosis": {
+        "cause": "no_position_in_validation_window",
+        "message": "The cpcv analysis produced 5 out-of-sample window(s) but no parameter combination took a position in any of them (the longest window holds 80 bars). A combination is skipped when the strategy stays flat over the whole window, which usually means the indicator warm-up is longer than the window: raise --test-size (it is the fraction of each group used as the test set) or lower --n-splits so a fold's test window holds enough bars for the strategy to take a position. With --test-size 0.2 and --n-splits 5, the effective out-of-sample fraction is 0.2/5 = 0.04 of the data, because the test size is the fraction of each group.",
+        "details": {
+          "validation_method": "cpcv",
+          "n_validation_windows": 5,
+          "n_windows_with_selected_params": 0,
+          "train_split_bars": 2000,
+          "param_grid": {
+            "fast_period": [
+              3,
+              5,
+              8
+            ],
+            "slow_period": [
+              10,
+              15,
+              20
+            ]
+          },
+          "validation_window_bars": [
+            80,
+            80,
+            80,
+            80,
+            80
+          ],
+          "analysis_path": "cpcv",
+          "cpcv_n_splits": 5,
+          "cpcv_test_size": 0.2,
+          "cpcv_purge_size": 0.0,
+          "cpcv_embargo_size": 0.0,
+          "cli_flags": {
+            "n_splits": "--n-splits",
+            "test_size": "--test-size"
+          }
+        }
+      },
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": null,
+        "n_parameter_trials": null,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": null,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": null,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": null,
+        "sharpe_status": "not_applicable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "No significance test was run on this record, so there is no test resolution to report."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": null,
+      "test_performance": null,
+      "selected_params": null,
+      "overfitting_risk": null,
+      "no_selection_diagnosis": {
+        "cause": "no_position_in_validation_window",
+        "message": "The walk_forward analysis produced 14 out-of-sample window(s) but no parameter combination took a position in any of them (the longest window holds 66 bars). A combination is skipped when the strategy stays flat over the whole window, which usually means the indicator warm-up is longer than the window: shorten the indicator lookbacks in the parameter grid, use a longer --wf-test-months window, or give the training split more history.",
+        "details": {
+          "validation_method": "walk_forward",
+          "n_validation_windows": 14,
+          "n_windows_with_selected_params": 0,
+          "train_split_bars": 1200,
+          "param_grid": {
+            "fast_period": [
+              3,
+              5,
+              8
+            ],
+            "slow_period": [
+              10,
+              15,
+              20
+            ]
+          },
+          "validation_window_bars": [
+            65,
+            65,
+            66,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            66,
+            64,
+            65
+          ],
+          "walk_forward_window": {
+            "requested": {
+              "train_months": 12,
+              "test_months": 3,
+              "step_months": 3
+            },
+            "effective": {
+              "train_months": 12,
+              "test_months": 3,
+              "step_months": 3
+            },
+            "adapted": false,
+            "train_span_months": 55.1622,
+            "requested_periods": 14,
+            "effective_periods": 14,
+            "reason": null
+          },
+          "analysis_path": "out_of_sample",
+          "walk_forward_train_months": 12,
+          "walk_forward_test_months": 3,
+          "walk_forward_step_months": 3,
+          "cli_flags": {
+            "train_months": "--wf-train-months",
+            "test_months": "--wf-test-months",
+            "step_months": "--wf-step-months"
+          }
+        }
+      },
+      "partial_selection_diagnosis": null,
+      "test_resolution": null,
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [],
+      "inert_grid_params": null
+    }
+  },
+  {
+    "scenario": "multi_asset_vol_clustering",
+    "strategy": "sma_crossover",
+    "scenario_description": "Synchronized multi-asset volatility clustering",
+    "strategy_description": "Trend-following baseline",
+    "expected_challenge": "Regime detection should work on panel; portfolio vol should spike together",
+    "regime_analysis": {
+      "success": false,
+      "error": "'close'"
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 0,
+      "total_oos_return": null,
+      "oos_sharpe": null,
+      "deflated_sharpe": {},
+      "overfitting_risk": null,
+      "no_selection_diagnosis": {
+        "cause": "no_position_in_validation_window",
+        "message": "The walk_forward analysis produced 29 out-of-sample window(s) but no parameter combination took a position in any of them (the longest window holds 66 bars). A combination is skipped when the strategy stays flat over the whole window, which usually means the indicator warm-up is longer than the window: shorten the indicator lookbacks in the parameter grid, use a longer --test-months window, or give the training split more history.",
+        "details": {
+          "validation_method": "walk_forward",
+          "n_validation_windows": 29,
+          "n_windows_with_selected_params": 0,
+          "train_split_bars": 2000,
+          "param_grid": {
+            "fast_period": [
+              3,
+              5,
+              8
+            ],
+            "slow_period": [
+              10,
+              15,
+              20
+            ]
+          },
+          "validation_window_bars": [
+            65,
+            66,
+            66,
+            65,
+            65,
+            66,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            66,
+            64,
+            65,
+            66,
+            66,
+            65,
+            65,
+            66,
+            66,
+            64,
+            65,
+            66,
+            66,
+            64,
+            65
+          ],
+          "analysis_path": "walk_forward",
+          "train_months": 3,
+          "test_months": 3,
+          "step_months": 3,
+          "cli_flags": {
+            "train_months": "--train-months",
+            "test_months": "--test-months",
+            "step_months": "--step-months"
+          }
+        }
+      },
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": null,
+        "n_parameter_trials": null,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": null,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": null,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": null,
+        "sharpe_status": "not_applicable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "No significance test was run on this record, so there is no test resolution to report."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 0,
+      "total_oos_return": null,
+      "oos_sharpe": null,
+      "deflated_sharpe": {},
+      "overfitting_risk": null,
+      "no_selection_diagnosis": {
+        "cause": "no_position_in_validation_window",
+        "message": "The cpcv analysis produced 5 out-of-sample window(s) but no parameter combination took a position in any of them (the longest window holds 80 bars). A combination is skipped when the strategy stays flat over the whole window, which usually means the indicator warm-up is longer than the window: raise --test-size (it is the fraction of each group used as the test set) or lower --n-splits so a fold's test window holds enough bars for the strategy to take a position. With --test-size 0.2 and --n-splits 5, the effective out-of-sample fraction is 0.2/5 = 0.04 of the data, because the test size is the fraction of each group.",
+        "details": {
+          "validation_method": "cpcv",
+          "n_validation_windows": 5,
+          "n_windows_with_selected_params": 0,
+          "train_split_bars": 2000,
+          "param_grid": {
+            "fast_period": [
+              3,
+              5,
+              8
+            ],
+            "slow_period": [
+              10,
+              15,
+              20
+            ]
+          },
+          "validation_window_bars": [
+            80,
+            80,
+            80,
+            80,
+            80
+          ],
+          "analysis_path": "cpcv",
+          "cpcv_n_splits": 5,
+          "cpcv_test_size": 0.2,
+          "cpcv_purge_size": 0.0,
+          "cpcv_embargo_size": 0.0,
+          "cli_flags": {
+            "n_splits": "--n-splits",
+            "test_size": "--test-size"
+          }
+        }
+      },
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": null,
+        "n_parameter_trials": null,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": null,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": null,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": null,
+        "sharpe_status": "not_applicable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "No significance test was run on this record, so there is no test resolution to report."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": null,
+      "test_performance": null,
+      "selected_params": null,
+      "overfitting_risk": null,
+      "no_selection_diagnosis": {
+        "cause": "no_position_in_validation_window",
+        "message": "The walk_forward analysis produced 14 out-of-sample window(s) but no parameter combination took a position in any of them (the longest window holds 66 bars). A combination is skipped when the strategy stays flat over the whole window, which usually means the indicator warm-up is longer than the window: shorten the indicator lookbacks in the parameter grid, use a longer --wf-test-months window, or give the training split more history.",
+        "details": {
+          "validation_method": "walk_forward",
+          "n_validation_windows": 14,
+          "n_windows_with_selected_params": 0,
+          "train_split_bars": 1200,
+          "param_grid": {
+            "fast_period": [
+              3,
+              5,
+              8
+            ],
+            "slow_period": [
+              10,
+              15,
+              20
+            ]
+          },
+          "validation_window_bars": [
+            65,
+            65,
+            66,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            66,
+            64,
+            65
+          ],
+          "walk_forward_window": {
+            "requested": {
+              "train_months": 12,
+              "test_months": 3,
+              "step_months": 3
+            },
+            "effective": {
+              "train_months": 12,
+              "test_months": 3,
+              "step_months": 3
+            },
+            "adapted": false,
+            "train_span_months": 55.1622,
+            "requested_periods": 14,
+            "effective_periods": 14,
+            "reason": null
+          },
+          "analysis_path": "out_of_sample",
+          "walk_forward_train_months": 12,
+          "walk_forward_test_months": 3,
+          "walk_forward_step_months": 3,
+          "cli_flags": {
+            "train_months": "--wf-train-months",
+            "test_months": "--wf-test-months",
+            "step_months": "--wf-step-months"
+          }
+        }
+      },
+      "partial_selection_diagnosis": null,
+      "test_resolution": null,
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [],
+      "inert_grid_params": null
+    }
+  },
+  {
+    "scenario": "multi_asset_vol_clustering",
+    "strategy": "ema_crossover",
+    "scenario_description": "Synchronized multi-asset volatility clustering",
+    "strategy_description": "EMA trend-following",
+    "expected_challenge": "Regime detection should work on panel; portfolio vol should spike together",
+    "regime_analysis": {
+      "success": false,
+      "error": "'close'"
+    },
+    "walk_forward": {
+      "success": true,
+      "periods_with_position": 0,
+      "total_oos_return": null,
+      "oos_sharpe": null,
+      "deflated_sharpe": {},
+      "overfitting_risk": null,
+      "no_selection_diagnosis": {
+        "cause": "no_position_in_validation_window",
+        "message": "The walk_forward analysis produced 29 out-of-sample window(s) but no parameter combination took a position in any of them (the longest window holds 66 bars). A combination is skipped when the strategy stays flat over the whole window, which usually means the indicator warm-up is longer than the window: shorten the indicator lookbacks in the parameter grid, use a longer --test-months window, or give the training split more history.",
+        "details": {
+          "validation_method": "walk_forward",
+          "n_validation_windows": 29,
+          "n_windows_with_selected_params": 0,
+          "train_split_bars": 2000,
+          "param_grid": {
+            "fast_period": [
+              3,
+              5,
+              8
+            ],
+            "slow_period": [
+              10,
+              15,
+              20
+            ]
+          },
+          "validation_window_bars": [
+            65,
+            66,
+            66,
+            65,
+            65,
+            66,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            66,
+            64,
+            65,
+            66,
+            66,
+            65,
+            65,
+            66,
+            66,
+            64,
+            65,
+            66,
+            66,
+            64,
+            65
+          ],
+          "analysis_path": "walk_forward",
+          "train_months": 3,
+          "test_months": 3,
+          "step_months": 3,
+          "cli_flags": {
+            "train_months": "--train-months",
+            "test_months": "--test-months",
+            "step_months": "--step-months"
+          }
+        }
+      },
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": null,
+        "n_parameter_trials": null,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": null,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": null,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": null,
+        "sharpe_status": "not_applicable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "No significance test was run on this record, so there is no test resolution to report."
+      },
+      "capacity": null,
+      "capacity_trend": null,
+      "regime_analysis": null
+    },
+    "cpcv": {
+      "success": true,
+      "folds_with_position": 0,
+      "total_oos_return": null,
+      "oos_sharpe": null,
+      "deflated_sharpe": {},
+      "overfitting_risk": null,
+      "no_selection_diagnosis": {
+        "cause": "no_position_in_validation_window",
+        "message": "The cpcv analysis produced 5 out-of-sample window(s) but no parameter combination took a position in any of them (the longest window holds 80 bars). A combination is skipped when the strategy stays flat over the whole window, which usually means the indicator warm-up is longer than the window: raise --test-size (it is the fraction of each group used as the test set) or lower --n-splits so a fold's test window holds enough bars for the strategy to take a position. With --test-size 0.2 and --n-splits 5, the effective out-of-sample fraction is 0.2/5 = 0.04 of the data, because the test size is the fraction of each group.",
+        "details": {
+          "validation_method": "cpcv",
+          "n_validation_windows": 5,
+          "n_windows_with_selected_params": 0,
+          "train_split_bars": 2000,
+          "param_grid": {
+            "fast_period": [
+              3,
+              5,
+              8
+            ],
+            "slow_period": [
+              10,
+              15,
+              20
+            ]
+          },
+          "validation_window_bars": [
+            80,
+            80,
+            80,
+            80,
+            80
+          ],
+          "analysis_path": "cpcv",
+          "cpcv_n_splits": 5,
+          "cpcv_test_size": 0.2,
+          "cpcv_purge_size": 0.0,
+          "cpcv_embargo_size": 0.0,
+          "cli_flags": {
+            "n_splits": "--n-splits",
+            "test_size": "--test-size"
+          }
+        }
+      },
+      "partial_selection_diagnosis": null,
+      "test_resolution": {
+        "n_test_observations": null,
+        "n_parameter_trials": null,
+        "n_benchmarks": null,
+        "target_p_value": 0.1,
+        "min_detectable_sharpe": null,
+        "min_detectable_alpha": null,
+        "observed_annualized_sharpe": null,
+        "observed_annualized_alpha": null,
+        "realized_annualized_volatility": null,
+        "sharpe_status": "not_applicable",
+        "alpha_status": "not_applicable",
+        "sharpe_reason": null,
+        "alpha_reason": null,
+        "sharpe_beyond_plausible_bound": false,
+        "alpha_beyond_plausible_bound": false,
+        "plausible_max_annualized_sharpe": 2.0,
+        "plausible_max_annualized_alpha": 0.1,
+        "message": "No significance test was run on this record, so there is no test resolution to report."
+      },
+      "capacity": null,
+      "capacity_trend": null
+    },
+    "out_of_sample": {
+      "success": true,
+      "validation_performance": null,
+      "test_performance": null,
+      "selected_params": null,
+      "overfitting_risk": null,
+      "no_selection_diagnosis": {
+        "cause": "no_position_in_validation_window",
+        "message": "The walk_forward analysis produced 14 out-of-sample window(s) but no parameter combination took a position in any of them (the longest window holds 66 bars). A combination is skipped when the strategy stays flat over the whole window, which usually means the indicator warm-up is longer than the window: shorten the indicator lookbacks in the parameter grid, use a longer --wf-test-months window, or give the training split more history.",
+        "details": {
+          "validation_method": "walk_forward",
+          "n_validation_windows": 14,
+          "n_windows_with_selected_params": 0,
+          "train_split_bars": 1200,
+          "param_grid": {
+            "fast_period": [
+              3,
+              5,
+              8
+            ],
+            "slow_period": [
+              10,
+              15,
+              20
+            ]
+          },
+          "validation_window_bars": [
+            65,
+            65,
+            66,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            65,
+            66,
+            64,
+            65
+          ],
+          "walk_forward_window": {
+            "requested": {
+              "train_months": 12,
+              "test_months": 3,
+              "step_months": 3
+            },
+            "effective": {
+              "train_months": 12,
+              "test_months": 3,
+              "step_months": 3
+            },
+            "adapted": false,
+            "train_span_months": 55.1622,
+            "requested_periods": 14,
+            "effective_periods": 14,
+            "reason": null
+          },
+          "analysis_path": "out_of_sample",
+          "walk_forward_train_months": 12,
+          "walk_forward_test_months": 3,
+          "walk_forward_step_months": 3,
+          "cli_flags": {
+            "train_months": "--wf-train-months",
+            "test_months": "--wf-test-months",
+            "step_months": "--wf-step-months"
+          }
+        }
+      },
+      "partial_selection_diagnosis": null,
+      "test_resolution": null,
+      "train_val_test_split": {
+        "disjoint": true,
+        "chronological": true,
+        "train_val_overlap": 0,
+        "val_test_overlap": 0,
+        "train_test_overlap": 0,
+        "train_end": "2019-08-07 00:00:00",
+        "val_start": "2019-08-08 00:00:00",
+        "val_end": "2021-02-17 00:00:00",
+        "test_start": "2021-02-18 00:00:00",
+        "train_size": 1200,
+        "val_size": 400,
+        "test_size": 400
+      }
+    },
+    "parameter_optimization": {
+      "success": true,
+      "top_configs": [],
+      "inert_grid_params": null
+    }
+  }
+]
