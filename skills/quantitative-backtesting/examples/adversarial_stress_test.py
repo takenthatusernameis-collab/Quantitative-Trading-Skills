@@ -12,7 +12,7 @@ This is a stress test OF the validation framework, not just the strategies.
 import json
 import sys
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -37,9 +37,13 @@ from walk_forward import (
     out_of_sample_validation,
     parameter_optimization,
 )
-from strategy_builder import build_strategy
+from strategy_builder import build_strategy, StrategyBase
 from performance import calculate_metrics
-from regime_detection import detect_combined_regime, RegimeConfig
+from regime_detection import (
+    detect_combined_regime,
+    RegimeConfig,
+    regime_aware_position_size,
+)
 
 
 # Adversarial scenarios to test
@@ -113,11 +117,24 @@ STRATEGIES = {
 }
 
 
-def run_walk_forward_stress(data: pd.DataFrame, strategy_name: str, param_grid: Dict) -> Dict[str, Any]:
-    """Run walk-forward analysis on adversarial data."""
+def run_walk_forward_stress(
+    data: pd.DataFrame,
+    strategy_name: str,
+    param_grid: Dict,
+    strategy_factory: Optional[Callable[[Dict[str, Any]], Any]] = None,
+    regime_cost_multipliers: Optional[Dict[str, float]] = None,
+) -> Dict[str, Any]:
+    """Run walk-forward analysis on adversarial data.
+
+    ``strategy_factory`` overrides the default ``build_strategy`` factory and
+    is used to inject regime-aware position sizing overlays.
+    ``regime_cost_multipliers`` is passed straight through to
+    ``walk_forward_analysis`` as a regime-dependent transaction-cost overlay.
+    """
     try:
         import json
-        strategy_factory = lambda params: build_strategy(strategy_name, json.dumps(params))
+        if strategy_factory is None:
+            strategy_factory = lambda params: build_strategy(strategy_name, json.dumps(params))
         result = walk_forward_analysis(
             data=data,
             strategy_factory=strategy_factory,
@@ -127,6 +144,7 @@ def run_walk_forward_stress(data: pd.DataFrame, strategy_name: str, param_grid: 
             step_months=3,
             apply_deflation=True,
             validate_pit=True,
+            regime_cost_multipliers=regime_cost_multipliers,
         )
         return {
             "success": True,
@@ -268,6 +286,52 @@ def analyze_regime_detection(data: pd.DataFrame) -> Dict[str, Any]:
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+class RegimeAwareStrategy(StrategyBase):
+    """Wraps a base strategy and rescales its signals to a constant per-regime
+    annualized volatility target via ``regime_aware_position_size``.
+
+    This is a position-sizing overlay, not a new signal: direction is preserved
+    and size shrinks in high-volatility regimes and grows in calm regimes. The
+    regime labels are supplied causally (combined regime detection is a
+    trailing detector), so no look-ahead is introduced.
+    """
+
+    def __init__(
+        self,
+        base_strategy: StrategyBase,
+        regimes: pd.Series,
+        target_vol: float,
+        lookback: int = 20,
+    ) -> None:
+        self.base = base_strategy
+        self.config = base_strategy.config
+        self.name = base_strategy.name
+        self.parameters = base_strategy.parameters
+        self.regimes = regimes
+        self.target_vol = float(target_vol)
+        self.lookback = int(lookback)
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+        base_sig = self.base.generate_signals(data)
+        regimes_sub = self.regimes.reindex(data.index)
+        target_by_regime = {
+            str(label): self.target_vol for label in pd.unique(regimes_sub.dropna())
+        }
+        return regime_aware_position_size(
+            base_sig,
+            data["close"],
+            regimes_sub,
+            target_by_regime,
+            lookback=self.lookback,
+            default_target_vol=self.target_vol,
+            min_leverage=0.0,
+            max_leverage=2.0,
+        )
+
+    def generate_target_weights(self, data=None) -> None:
+        return None
 
 
 def run_scenario_stress_test(
@@ -480,6 +544,107 @@ def main():
             print(f"   - Combined regimes detected: {ra.get('combined_regime_counts')}")
             print(f"   - HMM regimes detected: {ra.get('hmm_regime_counts')}")
             print(f"   - Regime changes: {ra.get('n_regime_changes')}")
+
+    # ------------------------------------------------------------------
+    # REGIME-AWARE VARIANTS vs committed baseline
+    # regime_aware_position_sizing and regime_cost_multipliers on the two
+    # scenarios where session 141 flagged the weakest readings (regime shift:
+    # negative baseline returns; volatility clustering: position sizing should
+    # adapt to vol regimes). Validators are expected to register the
+    # regime-adaptive change; no profitability or robustness claim is made.
+    # ------------------------------------------------------------------
+    print(f"\n{'='*80}")
+    print("REGIME-AWARE VARIANTS (baseline: committed adversarial_stress_test_results.json)")
+    print(f"{'='*80}")
+
+    VARIANT_SCENARIOS = ["volatility_clustering", "regime_shift"]
+    TARGET_VOL = 0.10
+    COST_MULTIPLIER = 1.5
+
+    def wf_line(label: str, wf: Dict[str, Any]) -> str:
+        if not wf.get("success"):
+            return f"{label}: FAILED - {wf.get('error', 'Unknown')}"
+        dsr = wf.get("deflated_sharpe", {}) or {}
+        return (
+            f"{label}: OOS Sharpe={fmt(wf.get('oos_sharpe'))}, "
+            f"return={fmt(wf.get('total_oos_return'))}, "
+            f"DSR p={fmt(dsr.get('p_value'))}, "
+            f"risk={wf.get('overfitting_risk')}, "
+            f"periods={wf.get('periods_with_position')}"
+        )
+
+    baseline_path = Path("adversarial_stress_test_results.json")
+    if not baseline_path.exists():
+        baseline_path = Path(__file__).resolve().parent / "adversarial_stress_test_results.json"
+    baseline_index: Dict[tuple, Dict[str, Any]] = {}
+    if baseline_path.exists():
+        with open(baseline_path) as f:
+            baseline_records = json.load(f)
+        baseline_index = {
+            (r["scenario"], r["strategy"]): r["walk_forward"]
+            for r in baseline_records
+            if r.get("walk_forward", {}).get("success")
+        }
+        print(f"  Loaded baseline for {len(baseline_index)} scenario/strategy pairs")
+
+    variant_records = []
+    for scenario_name in VARIANT_SCENARIOS:
+        scenario_config = SCENARIOS[scenario_name]
+        config = ScenarioConfig(seed=42, periods=5000)
+        data = scenario_config["generator"](config, **scenario_config["kwargs"])
+        if isinstance(data, pd.DataFrame) and "date" in data.columns:
+            data = data.set_index("date")
+            data.index = pd.DatetimeIndex(data.index)
+
+        regimes = detect_combined_regime(data["close"], config=RegimeConfig())
+        high_vol_labels = [str(l) for l in pd.unique(regimes.dropna()) if "_high" in str(l)]
+        cost_multipliers = {l: COST_MULTIPLIER for l in high_vol_labels}
+
+        for strategy_name, strategy_config in STRATEGIES.items():
+            base_wf = baseline_index.get((scenario_name, strategy_name), {})
+
+            # Variant A: regime-aware position sizing overlay
+            ra_factory = (
+                lambda params, sn=strategy_name, rg=regimes, tv=TARGET_VOL: RegimeAwareStrategy(
+                    build_strategy(sn, json.dumps(params)), rg, tv
+                )
+            )
+            ra_wf = run_walk_forward_stress(
+                data, strategy_name, strategy_config["param_grid"], strategy_factory=ra_factory
+            )
+
+            # Variant B: regime cost multiplier on high-vol regimes
+            cm_wf = run_walk_forward_stress(
+                data,
+                strategy_name,
+                strategy_config["param_grid"],
+                regime_cost_multipliers=cost_multipliers,
+            )
+
+            print(f"  [{scenario_name:22s}] {strategy_name:15s}")
+            print(f"    baseline   : {wf_line('baseline', base_wf)}")
+            print(f"    regime-sized(target_vol={TARGET_VOL}): {wf_line('regime-sized', ra_wf)}")
+            print(
+                f"    cost-mult x{COST_MULTIPLIER} on {high_vol_labels}: {wf_line('cost-mult', cm_wf)}"
+            )
+
+            variant_records.append(
+                {
+                    "scenario": scenario_name,
+                    "strategy": strategy_name,
+                    "target_vol": TARGET_VOL,
+                    "cost_multiplier": COST_MULTIPLIER,
+                    "high_vol_regimes": high_vol_labels,
+                    "baseline": base_wf,
+                    "regime_sized": ra_wf,
+                    "cost_multiplied": cm_wf,
+                }
+            )
+
+    out_path = Path(__file__).resolve().parent / "adversarial_stress_test_regime_aware.json"
+    with open(out_path, "w") as f:
+        json.dump(variant_records, f, indent=2, default=str)
+    print(f"\nVariant results saved to: {out_path}")
 
     return all_results
 

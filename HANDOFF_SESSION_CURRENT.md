@@ -1,79 +1,38 @@
-# Handoff — Session 141 (2026-11-20): Adversarial Stress Test Results Documented
+# Handoff — Session 142 (2026-11-20): Regime-aware variants added to adversarial stress test
 
 ## Baseline
-- HEAD `18298e0` (walk_forward parameter-optimization capacity recording), branch `main`, up to date with origin/main. Working tree clean.
-- Session 140 completed parallel quant gate execution (1177 non-real tests passed).
-- pytest-xdist 3.8.0 installed and pinned in requirements.txt.
+- HEAD `314036f` (session 141 adversarial stress test results committed), branch `main`, working tree clean at session start.
+- Session 140 completed parallel quant gate execution (1535 passed, EXIT 0 with `-n 4`).
 
 ## What this session changed
-**Documented the adversarial stress test results** by converting `adversarial_stress_test_results.json` to a comprehensive markdown report with visualizations.
+**Extended `skills/quantitative-backtesting/examples/adversarial_stress_test.py`** with regime-aware variants:
+1. `RegimeAwareStrategy(StrategyBase)` wrapper: rescales base strategy signals to a constant per-regime annualized vol target (0.10) via `regime_aware_position_size` (PIT-safe overlay).
+2. `run_walk_forward_stress` accepts optional `strategy_factory` override and threads `regime_cost_multipliers` to `walk_forward_analysis`.
+3. `main()` variant section on `volatility_clustering` and `regime_shift` vs committed baseline; results saved to `skills/quantitative-backtesting/examples/adversarial_stress_test_regime_aware.json`.
 
-### Files created:
-1. `skills/quantitative-backtesting/examples/adversarial_stress_test_report.py` - Generation script
-2. `skills/quantitative-backtesting/examples/adversarial_stress_test_report.md` - Generated markdown report (1000 lines)
-
-### Report contents:
-- **Summary table** with all 16 scenario×strategy combinations (8 scenarios × 2 strategies: sma_crossover, ema_crossover)
-- **Per-scenario detail** including:
-  - Regime detection results (combined regime counts, HMM regime counts, regime changes)
-  - Walk-forward analysis (OOS return, Sharpe, Deflated Sharpe Ratio, test resolution, overfitting risk)
-  - Walk-forward regime performance breakdown (per-regime metrics: return, volatility, Sharpe, max DD, win rate)
-  - CPCV analysis (folds with position, OOS return, Deflated Sharpe)
-  - Out-of-sample validation (OOS Sharpe, total return, selected params)
-- **Conclusions** summarizing key findings:
-  1. Regime detection works across all scenarios
-  2. Validation framework robust under extreme conditions
-  3. Deflated Sharpe correctly corrects for multiple testing
-  4. Test resolution limits inference (sample size often insufficient)
-  5. Walk-forward adapts to regimes
+### Files changed:
+1. `skills/quantitative-backtesting/examples/adversarial_stress_test.py` (+171/-6)
+2. `skills/quantitative-backtesting/examples/adversarial_stress_test_regime_aware.json` (new, variant results)
 
 ## What was actually verified (ground truth)
-- All 16 adversarial scenario/strategy combinations executed successfully
-- No validation method crashed or failed
-- Deflated Sharpe p-values generally high (consistent with noise under multiple testing)
-- Test resolution often exceeds plausible bounds (expected for sample sizes)
-- Regime-aware walk-forward performance breakdowns captured
-
-## Key Findings
-1. **Correlation breakdown scenarios** (multi-asset) returned N/A for walk-forward metrics - these strategies don't trade in those conditions
-2. **Fat-tail crash** scenario showed highest walk-forward returns (1.42-2.77) but Deflated Sharpe p-values still ~0.99-0.995 (not significant after multiple testing correction)
-3. **Regime shift** scenario showed negative returns for both strategies (-0.65, -0.53) with p-value 1.0
-4. **All validation methods robust** - no failures across fat tails, liquidity crises, structural breaks, volatility clustering
+- Script runs end-to-end: walk_forward 16/16, CPCV 16/16, out_of_sample 16/16 successful; PIT validation passed on all runs.
+- Regenerated baseline byte-identical to committed `adversarial_stress_test_results.json` (reproducible; `git status` shows no change to it).
+- Regime-aware sizing took effect: regime_shift sma_crossover OOS Sharpe -0.266 → -0.132 (return -0.734 → 0.099); volatility_clustering ema_crossover 0.277 → 0.176 (return 1.836 → 0.495).
+- All readings statistically insignificant (Deflated Sharpe p = 1.0) — **no profitability claim supported**.
+- Offline tests: `test_regime_aware_position_sizing.py`, `test_regime_cost_multiplier.py`, `test_generate_adversarial_scenarios.py`: **51 passed**.
+- Core test `test_falsifiable_hypothesis_example_runs_end_to_end` still passes (example imports cleanly).
 
 ## What remains unresolved
-- The 363 real-data tests (named `*real*`) still require live market data fetching and are the bottleneck for full parallel gate
-- No test result caching for real-data tests implemented yet
-- Out-of-sample test window sizing fix not addressed
-- Panel pricing mode tests not added
-- Regime-aware strategy extensions to adversarial stress test not implemented
+- Variant per-regime breakdowns vs baseline not yet compared to confirm lower exposure in `*_high` regimes.
+- Full 1535-test gate not re-run (change confined to an example outside gate coverage).
+- 363 real-data tests still require live market data (pre-existing bottleneck).
+- HANDOFF_NEXT.md participation-rate cap task: stale — already implemented in tree (`walk_forward.py:628`, `run_backtest.py:86`, reporting-only cap); nothing left to do.
 
 ## Approaches already tried / failed
-- N/A (documentation task completed successfully)
+- HANDOFF_NEXT.md cap wiring: not applicable, already committed.
+- Cost-multiplier label filter matched `"high_vol"` but actual labels are `bull_high`/`bear_high`/`sideways_high` — fixed to `"_high"` match; confirmed working on second run.
 
 ## One precise next task
-**Pick one high-value task from the remaining items:**
-
-1. **Add test result caching for real-data tests** (highest impact):
-   - Cache fetched OHLCV data locally (e.g., `tests/fixtures/real_data/`)
-   - Modify real-data tests to use cached data when available
-   - Enable full 1540-test parallel gate to complete in <30 min
-
-2. **Fix Out-of-Sample test window sizing** (from Session 139 handoff):
-   - Increase scenario periods to 5000+ or adjust validation fractions for test/validation windows ≥200 bars
-   - Enable meaningful Sharpe calculation on held-out test set
-
-3. **Add panel pricing mode tests** (from Session 139 handoff):
-   - Run stress test with `--panel-pricing book` on multi-asset scenarios
-   - Test HRP allocation and cross-sectional strategies on `correlation_breakdown`
-
-4. **Extend adversarial stress test with regime-aware strategies** (from Session 139 handoff):
-   - Test `regime_aware_position_sizing` and `regime_cost_multipliers` on `volatility_clustering` and `regime_shift` scenarios
-   - Verify validators correctly identify improved performance under regime-aware sizing
-
-## Evidence
-- Generated report: `skills/quantitative-backtesting/examples/adversarial_stress_test_report.md`
-- Generation script: `skills/quantitative-backtesting/examples/adversarial_stress_test_report.py`
-- Source data: `skills/quantitative-backtesting/examples/adversarial_stress_test_results.json`
-- Core test still passes: `test_falsifiable_hypothesis_example_runs_end_to_end` ✓
+Compare per-regime walk-forward breakdowns between baseline and regime-sized variants using the saved variant json; confirm exposure shrinks in `*_high` regimes. Then decide whether to promote the overlay into a worked example with an explicit falsification criterion (currently falsified: regime-sized Sharpe 0.176 < baseline 0.277 in volatility_clustering — a valid null result). Do not claim profitability.
 
 (End of file)
