@@ -389,8 +389,14 @@ def main():
             if oos["success"]:
                 test_perf = oos.get("test_performance") or {}
                 val_perf = oos.get("validation_performance") or {}
-                print(f"    Out-of-Sample: Test Sharpe={fmt(test_perf.get('sharpe_ratio'))}, "
-                      f"Val Sharpe={fmt(val_perf.get('sharpe_ratio'))}, "
+                # The out-of-sample summary exposes the held-out test Sharpe
+                # under both `test_sharpe` and the backward-compatible
+                # `sharpe_ratio` alias (mirroring the walk-forward / CPCV
+                # summaries); the per-window dicts carry the same alias.
+                test_sharpe = test_perf.get("sharpe_ratio", test_perf.get("test_sharpe"))
+                val_sharpe = val_perf.get("sharpe_ratio", val_perf.get("val_sharpe"))
+                print(f"    Out-of-Sample: Test Sharpe={fmt(test_sharpe)}, "
+                      f"Val Sharpe={fmt(val_sharpe)}, "
                       f"Risk={oos.get('overfitting_risk', 'N/A')}, "
                       f"Split OK={oos.get('train_val_test_split', {}).get('disjoint', 'N/A')}")
             else:

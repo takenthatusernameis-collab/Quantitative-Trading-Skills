@@ -7088,6 +7088,10 @@ def out_of_sample_validation(
         "selected_params": selected_params,
         "val_total_return": val_total_return,
         "val_sharpe": val_sharpe,
+        # Backward-compatible alias mirroring the `sharpe_ratio` key the
+        # walk-forward / CPCV summaries expose for their aggregate OOS Sharpe.
+        # Both names carry the same value; no number changes.
+        "sharpe_ratio": val_sharpe,
         "val_volatility": float(val_returns.std() * np.sqrt(ann_factor)) if len(val_returns) > 1 else 0.0,
         # The number of return observations the validation statistics were
         # computed on -- `len(val_returns)`, the same series the Sharpe and
@@ -7185,9 +7189,14 @@ def out_of_sample_validation(
                 "capacity_notional_weighted_trend"
             )
 
-    test_performance = {
+test_performance = {
      "test_total_return": test_total_return,
          "test_sharpe": test_sharpe,
+         # Backward-compatible alias for the held-out test Sharpe, mirroring
+         # the `sharpe_ratio` key the walk-forward / CPCV summaries expose for
+         # their aggregate OOS Sharpe. Both names carry the same value; no
+         # number changes.
+         "sharpe_ratio": test_sharpe,
          "test_volatility": float(test_returns.std() * np.sqrt(ann_factor_test)) if len(test_returns) > 1 else 0.0,
          # The held-out window is counted in OBSERVATIONS (one per return
          # observation, e.g. one daily bar), not in independent periods. The
@@ -7203,24 +7212,24 @@ def out_of_sample_validation(
          "capacity_book": test_capacity_book,
          "capacity_book_trend": test_capacity_book_trend,
          # Notional-weighted book capacity for the held-out test window.
-         "capacity_book_notional_weighted": test_capacity_book_nw,
-         "capacity_book_notional_weighted_trend": test_capacity_book_nw_trend,
-         # Panel book diagnostic for the held-out test window. Measurement
-         # only -- the reported test performance is unchanged.
-         "book_diagnostic": _window_book_diagnostic(
-             strategy_factory,
-             selected_params,
-             test_data,
-             test_returns,
-             latency=latency,
-             fill_rate=fill_rate,
-             panel_pricing=panel_pricing,
-             impact_coefficient=impact_coefficient,
-             adv_window=adv_window,
-             initial_capital=initial_capital,
-             impact_aggregation=impact_aggregation,
-         ),
-     }
+"capacity_book_notional_weighted": test_capacity_book_nw,
+          "capacity_book_notional_weighted_trend": test_capacity_book_nw_trend,
+          # Panel book diagnostic for the held-out test window. Measurement
+          # only -- the reported test performance is unchanged.
+          "book_diagnostic": _window_book_diagnostic(
+              strategy_factory,
+              selected_params,
+              test_data,
+              test_returns,
+              latency=latency,
+              fill_rate=fill_rate,
+              panel_pricing=panel_pricing,
+              impact_coefficient=impact_coefficient,
+              adv_window=adv_window,
+              initial_capital=initial_capital,
+              impact_aggregation=impact_aggregation,
+          ),
+      }
 
     # Benchmark comparison on test set
     test_benchmark = None
@@ -7296,6 +7305,14 @@ def out_of_sample_validation(
         "test_book_diagnostic": test_performance.get("book_diagnostic"),
         "test_total_return": test_total_return,
         "test_sharpe": test_sharpe,
+        # Backward-compatible alias for the held-out test Sharpe. The
+        # walk-forward / CPCV summaries expose their aggregate OOS Sharpe as
+        # `summary["sharpe_ratio"]`, but the out-of-sample summary used
+        # `summary["test_sharpe"]` instead -- a naming inconsistency that made
+        # the stress-test print "N/A" for the test Sharpe while the same
+        # validator's own `test_performance["test_sharpe"]` was populated.
+        # Both names now carry the same value; no number changes.
+        "sharpe_ratio": test_sharpe,
         "test_volatility": test_performance["test_volatility"],
         # Average OUT-OF-SAMPLE test Sharpe of the selected parameter set
         # across the validation periods/folds where it was chosen. This is

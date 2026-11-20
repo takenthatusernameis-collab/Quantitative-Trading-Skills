@@ -1390,6 +1390,53 @@ def test_out_of_sample_validation_with_splits():
         assert test_bench.get("benchmark_cost_is_periodic") is True
 
 
+def test_out_of_sample_summary_carries_sharpe_ratio_alias():
+    """The out-of-sample summary exposes the held-out test Sharpe under both
+    `test_sharpe` and the backward-compatible `sharpe_ratio` key.
+
+    The walk-forward / CPCV summaries use `summary["sharpe_ratio"]` for their
+    aggregate out-of-sample Sharpe, but the out-of-sample summary only carried
+    `summary["test_sharpe"]`. That inconsistency made the adversarial stress
+    test print "N/A" for the test Sharpe even though the same validator's own
+    `test_performance["test_sharpe"]` was populated. The two keys now carry the
+    same value; no number changes.
+    """
+    data = _make_ohlcv_data(periods=400, seed=42)
+    strategy_type = "sma_crossover"
+    param_grid = {"fast_period": [3, 5], "slow_period": [8, 10]}
+
+    results = out_of_sample_validation(
+        data=data,
+        strategy_factory=lambda params: build_strategy(strategy_type, json.dumps(params)),
+        param_grid=param_grid,
+        train_frac=0.6,
+        val_frac=0.2,
+        test_frac=0.2,
+        validation_method="walk_forward",
+        walk_forward_train_months=6,
+        walk_forward_test_months=2,
+        walk_forward_step_months=2,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        validate_pit=True,
+    )
+
+    summary = results["summary"]
+    test_sharpe = summary.get("test_sharpe")
+    assert test_sharpe is not None, "test_sharpe should be populated"
+    assert "sharpe_ratio" in summary, (
+        "out-of-sample summary must carry a sharpe_ratio key "
+        "(backward-compatible alias for test_sharpe)"
+    )
+    assert summary["sharpe_ratio"] == test_sharpe, (
+        f"sharpe_ratio {summary['sharpe_ratio']} must equal test_sharpe {test_sharpe}"
+    )
+    # The held-out test performance dict carries the same value under its
+    # own key, so the alias is consistent with the per-window record.
+    assert results["test_performance"]["test_sharpe"] == test_sharpe
+
+
 def test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model():
     """A benchmark with a corporate action must be split-adjusted under BOTH
     cost models.
