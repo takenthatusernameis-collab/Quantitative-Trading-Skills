@@ -74,6 +74,7 @@ _KELLY_CRITERION_PATH = SKILLS_DIR / "examples" / "kelly_criterion_hypothesis.py
 _WF_COMPARE_TRIPLE_PATH = SKILLS_DIR / "examples" / "walk_forward_compare_triple.py"
 _COMPARE_DUAL_CS_PATH = SKILLS_DIR / "examples" / "compare_dual_vs_cross_sectional_triple.py"
 _HRP_ALLOC_PATH = SKILLS_DIR / "examples" / "hrp_portfolio_allocation_example.py"
+_ADVERSARIAL_STRESS_PATH = SKILLS_DIR / "examples" / "adversarial_stress_test.py"
 
 _REAL_MARKET_DATA = SKILLS_DIR / "assets" / "example_data" / "real_market_data"
 _REALITY_CHECK_FAMILY_PATH = SKILLS_DIR / "examples" / "reality_check_family_example.py"

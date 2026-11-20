@@ -132,7 +132,7 @@ def run_walk_forward_stress(data: pd.DataFrame, strategy_name: str, param_grid: 
             "success": True,
             "periods_with_position": result["summary"].get("periods_with_position", 0),
             "total_oos_return": result["summary"].get("total_oos_return"),
-            "oos_sharpe": result["summary"].get("sharpe_ratio"),
+            "oos_sharpe": result["summary"].get("oos_sharpe"),
             "deflated_sharpe": result["summary"].get("deflated_sharpe", {}),
             "overfitting_risk": result["summary"].get("overfitting_risk"),
             "no_selection_diagnosis": result["summary"].get("no_selection_diagnosis"),
@@ -140,7 +140,7 @@ def run_walk_forward_stress(data: pd.DataFrame, strategy_name: str, param_grid: 
             "test_resolution": result["summary"].get("test_resolution"),
             "capacity": result["summary"].get("capacity"),
             "capacity_trend": result["summary"].get("capacity_trend"),
-            "regime_analysis": result.get("regime_analysis"),
+            "regime_analysis": result["summary"].get("regime_analysis"),
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -164,7 +164,7 @@ def run_cpcv_stress(data: pd.DataFrame, strategy_name: str, param_grid: Dict) ->
             "success": True,
             "folds_with_position": result["summary"].get("folds_with_position", 0),
             "total_oos_return": result["summary"].get("total_oos_return"),
-            "oos_sharpe": result["summary"].get("sharpe_ratio"),
+            "oos_sharpe": result["summary"].get("oos_sharpe"),
             "deflated_sharpe": result["summary"].get("deflated_sharpe", {}),
             "overfitting_risk": result["summary"].get("overfitting_risk"),
             "no_selection_diagnosis": result["summary"].get("no_selection_diagnosis"),
@@ -172,6 +172,7 @@ def run_cpcv_stress(data: pd.DataFrame, strategy_name: str, param_grid: Dict) ->
             "test_resolution": result["summary"].get("test_resolution"),
             "capacity": result["summary"].get("capacity"),
             "capacity_trend": result["summary"].get("capacity_trend"),
+            "regime_analysis": result["summary"].get("regime_analysis"),
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -206,7 +207,8 @@ def run_out_of_sample_stress(data: pd.DataFrame, strategy_name: str, param_grid:
             "no_selection_diagnosis": result.get("summary", {}).get("no_selection_diagnosis"),
             "partial_selection_diagnosis": result.get("summary", {}).get("partial_selection_diagnosis"),
             "test_resolution": result.get("summary", {}).get("test_resolution"),
-            "train_val_test_split": result.get("summary", {}).get("train_val_test_split", {}).get("separation_check"),
+            "train_val_test_split": result.get("train_val_test_split", {}).get("separation_check"),
+            "regime_analysis": result.get("summary", {}).get("regime_analysis"),
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -348,7 +350,14 @@ def main():
             oos = result["out_of_sample"]
 
             def fmt(val, fmt_str="{:.3f}"):
-                return fmt_str.format(val) if val is not None else "N/A"
+                if val is None:
+                    return "N/A"
+                if isinstance(val, str):
+                    return val
+                try:
+                    return fmt_str.format(val)
+                except (ValueError, TypeError):
+                    return str(val)
 
             # Extract OOS Sharpe from DSR if available
             wf_oos_sharpe = wf.get('oos_sharpe')
