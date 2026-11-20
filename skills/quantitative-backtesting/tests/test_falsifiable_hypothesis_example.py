@@ -63,10 +63,23 @@ SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 sys.path.insert(0, str(SKILLS_DIR / "examples"))
 
+
+class LiveFetchUnavailable(Exception):
+    """Raised by a network-dependent test when the live fetch cannot run.
+
+    Carries the underlying cause (HTTP 429 / Retry-After exhaustion, network
+    error, fetch_ohlcv_yahoo unavailable) so ``main()`` can SKIP the test
+    instead of failing it: a rate-limited fetch is an environment limitation,
+    not a regression in the machinery.
+    """
+
+
 from falsifiable_hypothesis_example import (  # noqa: E402
+    BENCHMARK_FILES,
     COMMISSION,
     COST_SWEEP_LEVELS,
     SLIPPAGE,
+    _ensure_real_market_data,
     run_cost_sensitivity_sweep,
     run_hypothesis_test,
 )
@@ -2007,6 +2020,131 @@ def test_fetch_failure_surfaces_underlying_cause_offline():
         httpd.server_close()
 
 
+def test_falsifiable_machinery_on_live_fetched_real_market_data():
+    """Live-fetched real-market out-of-sample evidence (network-dependent).
+
+    Fetches a FRESH real AAPL series from Yahoo Finance via
+    ``data_loader.fetch_ohlcv_yahoo`` (bounded, honors 429/Retry-After) into a
+    temp fixtures dir so the committed fixtures are never touched, then runs
+    the example's full falsifiable machinery against it with the committed
+    benchmark set (N=2).
+
+    This closes the session-NEXT_EXECUTED gap: the bounded fetch existed but was
+    never exercised end-to-end by a test. The verdict (SUPPORTED / NOT
+    SUPPORTED) is NOT asserted -- both are valid scientific outcomes -- only
+    that the machinery runs on a live-fetched real series, evaluates all five
+    pre-registered criteria, and passes the chronological split-separation
+    audit. Network failures are surfaced as RuntimeError with the underlying
+    cause, never swallowed.
+
+    Labelled real-market evidence: the series is live OHLCV for a real equity,
+    not a synthetic formula. It is not a claim of profitability or robustness.
+    """
+    import contextlib
+    import io
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    symbol = "AAPL"
+    start = "2020-01-01"
+    end = "2025-12-31"
+
+    with tempfile.TemporaryDirectory() as td:
+        fixtures = Path(td) / "real_market_data"
+        fixtures.mkdir(parents=True, exist_ok=True)
+        # Fetch the live series under its own name first (so a failed fetch
+        # never leaves a half-written sample_ohlcv.csv), then rename it to the
+        # canonical sibling name run_hypothesis_test resolves BENCHMARK_FILES
+        # against, and copy the committed benchmark into the same temp dir so
+        # the run is a genuine N=2 comparison on live data. BENCHMARK_FILES is
+        # the contract this mirrors: the fetched primary must sit alongside
+        # the same two sibling filenames the default run expects.
+        assert len(BENCHMARK_FILES) >= 2, "BENCHMARK_FILES must name >= 2 siblings"
+        fetched, err = _ensure_real_market_data(
+            symbol=symbol,
+            start=start,
+            end=end,
+            fixtures_dir=fixtures,
+            return_error=True,
+        )
+        if fetched is None:
+            raise LiveFetchUnavailable(
+                f"live fetch unavailable (network/rate-limited): {err}"
+            )
+        sample_ohlcv = fixtures / "sample_ohlcv.csv"
+        fetched.replace(sample_ohlcv)
+        committed_benchmark = (
+            SKILLS_DIR
+            / "assets"
+            / "example_data"
+            / "real_market_data"
+            / "sample_benchmark.csv"
+        )
+        assert committed_benchmark.exists(), "committed benchmark fixture missing"
+        shutil.copyfile(committed_benchmark, fixtures / "sample_benchmark.csv")
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            result = run_hypothesis_test(sample_ohlcv)
+        assert isinstance(result, dict)
+        assert result["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
+        assert result["pit_passed"] is True
+        assert result["bias_controls_engaged"] is True
+        # The fetched fixture must actually have been written to the temp dir
+        # and renamed to the canonical sibling name.
+        assert sample_ohlcv.exists(), (
+            "live fetch must write a normalized fixture before running"
+        )
+
+        obs = result["observed"]
+        for key in ("oos_sharpe", "oos_total_return", "deflated_sharpe_pvalue",
+                    "benchmark_alpha", "benchmark_alpha_pvalue",
+                    "benchmark_alpha_pvalue_corrected",
+                    "benchmark_alpha_correction_applied",
+                    "benchmark_total_return", "deflated_alpha_ratio",
+                    "deflated_alpha_pvalue", "n_benchmarks",
+                    "selected_params", "test_n_observations"):
+            assert key in obs, f"observed metrics missing {key}"
+        assert obs["test_n_observations"] and obs["test_n_observations"] > 0
+        # The default benchmark set is N=2, so the Deflated Alpha Ratio
+        # multiple-testing control is engaged on live data.
+        assert obs["n_benchmarks"] and obs["n_benchmarks"] >= 2
+
+        criteria = result["criteria"]
+        assert len(criteria) == 5
+        names = {c["name"] for c in criteria}
+        assert names == {
+            "oos_sharpe_gt_zero",
+            "deflated_sharpe_pvalue_lt_0.10",
+            "benchmark_alpha_pvalue_lt_0.05",
+            "oos_total_return_gt_benchmark",
+            "deflated_alpha_ratio_gt_0.90",
+        }
+        for c in criteria:
+            assert isinstance(c["passed"], bool)
+            assert c["description"]
+        assert result["all_pass"] == all(c["passed"] for c in criteria)
+        assert result["verdict"] == ("SUPPORTED" if result["all_pass"] else "NOT SUPPORTED")
+
+        sep = result["separation_check"]
+        assert sep.get("disjoint") is True
+        assert sep.get("chronological") is True
+        for overlap in ("train_val_overlap", "val_test_overlap", "train_test_overlap"):
+            assert sep.get(overlap) == 0
+        assert sep.get("train_size") and sep.get("val_size") and sep.get("test_size")
+
+        res = result["resolution"]
+        for key in ("n_test_observations", "n_parameter_trials", "n_benchmarks",
+                    "min_detectable_sharpe", "min_detectable_alpha",
+                    "min_detectable_benchmark_alpha",
+                    "criteria_beyond_resolution",
+                    "plausible_max_annualized_sharpe",
+                    "plausible_max_annualized_alpha"):
+            assert key in res, f"resolution block missing {key}"
+        assert res["n_test_observations"] == obs["test_n_observations"]
+
+
 def test_the_verdict_run_does_not_execute_the_expensive_resolution_curves():
     """The verdict is computed without the multi-minute resolution curves.
 
@@ -2135,15 +2273,19 @@ def test_the_cli_json_artifact_carries_the_cost_sweep():
 def main() -> int:
     tests = TEST_REGISTRY
     failures = 0
+    skips = 0
     for name, fn in tests:
         try:
             fn()
             print(f"PASS  {name}")
+        except LiveFetchUnavailable as e:
+            skips += 1
+            print(f"SKIP  {name} ({e})")
         except Exception:
             failures += 1
             print(f"FAIL  {name}")
             traceback.print_exc()
-    print(f"\n{len(tests) - failures}/{len(tests)} tests passed")
+    print(f"\n{len(tests) - failures - skips}/{len(tests)} tests passed ({skips} skipped)")
     return 1 if failures else 0
 
 
@@ -2183,6 +2325,7 @@ TEST_REGISTRY = [
     ("test_real_market_machinery_separation_audit_longer_windows", test_real_market_machinery_separation_audit_longer_windows),
     ("test_real_market_fetch_save_and_run_path_is_offline_safe", test_real_market_fetch_save_and_run_path_is_offline_safe),
     ("test_fetch_failure_surfaces_underlying_cause_offline", test_fetch_failure_surfaces_underlying_cause_offline),
+    ("test_falsifiable_machinery_on_live_fetched_real_market_data", test_falsifiable_machinery_on_live_fetched_real_market_data),
     ("test_the_verdict_run_does_not_execute_the_expensive_resolution_curves", test_the_verdict_run_does_not_execute_the_expensive_resolution_curves),
     ("test_the_cli_json_artifact_carries_the_cost_sweep", test_the_cli_json_artifact_carries_the_cost_sweep),
 ]
