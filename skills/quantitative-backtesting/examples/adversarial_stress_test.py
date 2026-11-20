@@ -280,8 +280,11 @@ def run_scenario_stress_test(
     """Run full stress test for one scenario-strategy pair."""
     print(f"  Testing {strategy_name} on {scenario_name}...")
 
-    # Generate scenario data with more periods for validation
-    config = ScenarioConfig(seed=seed, periods=2000)
+    # Generate scenario data with enough periods so held-out CPCV test folds
+    # and out-of-sample test/validation windows are >= 200 bars, enabling a
+    # meaningful Sharpe estimate on held-out data (session 139 finding #1:
+    # ~66-bar windows were too short for a meaningful Sharpe).
+    config = ScenarioConfig(seed=seed, periods=5000)
     data = scenario_config["generator"](config, **scenario_config["kwargs"])
 
     # Ensure DatetimeIndex for validation pipeline
