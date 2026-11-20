@@ -1,75 +1,79 @@
-# Handoff — Session 140 (2026-11-20): Parallel Quant Gate Execution Complete
+# Handoff — Session 141 (2026-11-20): Adversarial Stress Test Results Documented
 
 ## Baseline
 - HEAD `18298e0` (walk_forward parameter-optimization capacity recording), branch `main`, up to date with origin/main. Working tree clean.
-- Session 139 completed adversarial stress test integration; all existing tests pass.
-- pytest-xdist 3.8.0 installed; quantitative-backtesting dependencies (pandas, numpy, scipy, matplotlib) installed.
+- Session 140 completed parallel quant gate execution (1177 non-real tests passed).
+- pytest-xdist 3.8.0 installed and pinned in requirements.txt.
 
 ## What this session changed
-**Executed the parallel quant gate** with pytest-xdist on the core test suite (excluding slow real-data tests) to verify parallel execution matches serial baseline.
+**Documented the adversarial stress test results** by converting `adversarial_stress_test_results.json` to a comprehensive markdown report with visualizations.
 
-### Parallel gate results:
-| Test subset | Tests collected | Passed | Time |
-|---|---|---|---|
-| Core unit tests (walk_forward, monte_carlo, run_backtest, strategy_builder, data_loader, performance, reporting) | ~563 | **563 passed** | ~3.5 min |
-| Validation framework tests (execution_warmup, out_of_sample_window, inert_param_grid, no_selection_diagnosis, test_resolution) | ~120 | **120 passed** | ~40 sec |
-| Falsifiable hypothesis & resolution tests | ~117 | **117 passed** | ~8 min |
-| Regime detection, HRP, reality check, regime-aware tests | ~206 | **206 passed** | ~9.5 min |
-| PIT, panel, survivorship, HMM tests | ~34 | **34 passed** | ~25 sec |
-| **All non-real tests (1177 total)** | **1177** | **1177 passed** | **~14 min** |
+### Files created:
+1. `skills/quantitative-backtesting/examples/adversarial_stress_test_report.py` - Generation script
+2. `skills/quantitative-backtesting/examples/adversarial_stress_test_report.md` - Generated markdown report (1000 lines)
 
-**No failures, no errors** — only expected warnings (symmetric quantile warnings for CrossSectionalMomentum, runtime warnings from numpy).
+### Report contents:
+- **Summary table** with all 16 scenario×strategy combinations (8 scenarios × 2 strategies: sma_crossover, ema_crossover)
+- **Per-scenario detail** including:
+  - Regime detection results (combined regime counts, HMM regime counts, regime changes)
+  - Walk-forward analysis (OOS return, Sharpe, Deflated Sharpe Ratio, test resolution, overfitting risk)
+  - Walk-forward regime performance breakdown (per-regime metrics: return, volatility, Sharpe, max DD, win rate)
+  - CPCV analysis (folds with position, OOS return, Deflated Sharpe)
+  - Out-of-sample validation (OOS Sharpe, total return, selected params)
+- **Conclusions** summarizing key findings:
+  1. Regime detection works across all scenarios
+  2. Validation framework robust under extreme conditions
+  3. Deflated Sharpe correctly corrects for multiple testing
+  4. Test resolution limits inference (sample size often insufficient)
+  5. Walk-forward adapts to regimes
 
 ## What was actually verified (ground truth)
-- pytest-xdist parallel execution works correctly with the quantitative-backtesting test suite
-- All 1177 core/validation/framework tests pass in parallel (matches serial baseline expectation)
-- The 363 remaining "real" tests (named `*real*`) require live market data fetching and are inherently slow (~20+ min each in serial); they were verified in Session 138 serial run (1540 total passed)
-- Adversarial stress test integration from Session 139 remains intact (no regressions)
+- All 16 adversarial scenario/strategy combinations executed successfully
+- No validation method crashed or failed
+- Deflated Sharpe p-values generally high (consistent with noise under multiple testing)
+- Test resolution often exceeds plausible bounds (expected for sample sizes)
+- Regime-aware walk-forward performance breakdowns captured
 
 ## Key Findings
-1. **Parallel gate is functional**: pytest-xdist 3.8.0 + pytest 9.x runs the core suite in ~14 min vs ~45+ min serial
-2. **No flaky tests detected** in parallel execution (all 1177 passed cleanly)
-3. **Real-data tests are the bottleneck**: 363 tests with `*real*` pattern fetch AAPL/MSFT/GOOGL data — these dominate runtime but are integration-style tests, not unit tests
-4. **Serial baseline confirmed**: Session 138 reported 1540 passed serial; 1177 non-real + ~363 real ≈ 1540 total
+1. **Correlation breakdown scenarios** (multi-asset) returned N/A for walk-forward metrics - these strategies don't trade in those conditions
+2. **Fat-tail crash** scenario showed highest walk-forward returns (1.42-2.77) but Deflated Sharpe p-values still ~0.99-0.995 (not significant after multiple testing correction)
+3. **Regime shift** scenario showed negative returns for both strategies (-0.65, -0.53) with p-value 1.0
+4. **All validation methods robust** - no failures across fat tails, liquidity crises, structural breaks, volatility clustering
 
 ## What remains unresolved
-- **Full 1540-test parallel gate not completed**: Real-data tests would take ~2+ hours in parallel; recommend running them selectively or in CI with caching
-- **Real-data test caching**: No local caching of fetched market data; each run re-downloads
-- **Test timeout handling**: Some real-data tests may need explicit timeout configuration for CI
+- The 363 real-data tests (named `*real*`) still require live market data fetching and are the bottleneck for full parallel gate
+- No test result caching for real-data tests implemented yet
+- Out-of-sample test window sizing fix not addressed
+- Panel pricing mode tests not added
+- Regime-aware strategy extensions to adversarial stress test not implemented
 
 ## Approaches already tried / failed
-- Initial parallel run timed out at 10 min (full suite) — resolved by excluding `*real*` tests
-- Full suite with 20 min timeout still incomplete — real-data tests are the limiting factor
+- N/A (documentation task completed successfully)
 
 ## One precise next task
-**Pick one high-value task:**
+**Pick one high-value task from the remaining items:**
 
-1. **Add test result caching for real-data tests**:
+1. **Add test result caching for real-data tests** (highest impact):
    - Cache fetched OHLCV data locally (e.g., `tests/fixtures/real_data/`)
    - Modify real-data tests to use cached data when available
    - Enable full 1540-test parallel gate to complete in <30 min
 
-2. **Extend adversarial stress test with regime-aware strategies** (from Session 139 handoff):
-   - Test `regime_aware_position_sizing` and `regime_cost_multipliers` on `volatility_clustering` and `regime_shift` scenarios
-   - Verify validators correctly identify improved performance under regime-aware sizing
-
-3. **Fix Out-of-Sample test window sizing** (from Session 139 handoff):
+2. **Fix Out-of-Sample test window sizing** (from Session 139 handoff):
    - Increase scenario periods to 5000+ or adjust validation fractions for test/validation windows ≥200 bars
    - Enable meaningful Sharpe calculation on held-out test set
 
-4. **Add panel pricing mode tests** (from Session 139 handoff):
+3. **Add panel pricing mode tests** (from Session 139 handoff):
    - Run stress test with `--panel-pricing book` on multi-asset scenarios
    - Test HRP allocation and cross-sectional strategies on `correlation_breakdown`
 
-5. **Document stress test results** (from Session 139 handoff):
-   - Convert `adversarial_stress_test_results.json` to markdown report
-   - Add to `examples/example_output/adversarial_stress_test/` with visualizations
+4. **Extend adversarial stress test with regime-aware strategies** (from Session 139 handoff):
+   - Test `regime_aware_position_sizing` and `regime_cost_multipliers` on `volatility_clustering` and `regime_shift` scenarios
+   - Verify validators correctly identify improved performance under regime-aware sizing
 
 ## Evidence
-- Parallel gate output: 1177 passed, 0 failed, 0 errors
-- Test collection: 1541 total tests discovered (1177 non-real + 364 real)
-- Serial baseline: Session 138 — 1540 passed, 0 failed
-- Adversarial stress test: `skills/quantitative-backtesting/examples/adversarial_stress_test.py` (Session 139)
-- Results artifact: `skills/quantitative-backtesting/examples/adversarial_stress_test_results.json`
+- Generated report: `skills/quantitative-backtesting/examples/adversarial_stress_test_report.md`
+- Generation script: `skills/quantitative-backtesting/examples/adversarial_stress_test_report.py`
+- Source data: `skills/quantitative-backtesting/examples/adversarial_stress_test_results.json`
+- Core test still passes: `test_falsifiable_hypothesis_example_runs_end_to_end` ✓
 
 (End of file)
