@@ -270,7 +270,12 @@ def test_the_validation_window_rename_moved_no_metric():
         "the renamed key carries a different number than before the rename"
     )
     # Same key set, modulo the rename itself (the new key and nothing else).
-    current_keys = set(validation_performance) - {"val_n_observations"}
+    # The `sharpe_ratio` alias is an intentional, separately pinned addition
+    # (test_out_of_sample_summary_carries_sharpe_ratio_alias) that post-dates
+    # this baseline; it is excluded here so the rename guard still bites on any
+    # *other* key that appears or disappears.
+    expected.pop("sharpe_ratio", None)
+    current_keys = set(validation_performance) - {"val_n_observations", "sharpe_ratio"}
     assert set(expected) == current_keys, (
         "the rename added or removed a key beyond the rename itself"
     )

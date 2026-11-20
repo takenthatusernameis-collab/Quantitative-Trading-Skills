@@ -7189,47 +7189,47 @@ def out_of_sample_validation(
                 "capacity_notional_weighted_trend"
             )
 
-test_performance = {
-     "test_total_return": test_total_return,
-         "test_sharpe": test_sharpe,
-         # Backward-compatible alias for the held-out test Sharpe, mirroring
-         # the `sharpe_ratio` key the walk-forward / CPCV summaries expose for
-         # their aggregate OOS Sharpe. Both names carry the same value; no
-         # number changes.
-         "sharpe_ratio": test_sharpe,
-         "test_volatility": float(test_returns.std() * np.sqrt(ann_factor_test)) if len(test_returns) > 1 else 0.0,
-         # The held-out window is counted in OBSERVATIONS (one per return
-         # observation, e.g. one daily bar), not in independent periods. The
-         # two are not interchangeable: 100 daily bars are not 100
-         # independent periods, and the resolution arithmetic (min
-         # detectable Sharpe / alpha) needs the observation count. The
-         # walk-forward PERIOD count lives in `summary["n_periods"]`.
-         "test_n_observations": len(test_returns),
-         "test_returns": test_returns,
-         "capacity": test_capacity_point,
-         "capacity_trend": test_capacity_trend,
-         # Book-based capacity for the held-out test window (see above).
-         "capacity_book": test_capacity_book,
-         "capacity_book_trend": test_capacity_book_trend,
-         # Notional-weighted book capacity for the held-out test window.
-"capacity_book_notional_weighted": test_capacity_book_nw,
-          "capacity_book_notional_weighted_trend": test_capacity_book_nw_trend,
-          # Panel book diagnostic for the held-out test window. Measurement
-          # only -- the reported test performance is unchanged.
-          "book_diagnostic": _window_book_diagnostic(
-              strategy_factory,
-              selected_params,
-              test_data,
-              test_returns,
-              latency=latency,
-              fill_rate=fill_rate,
-              panel_pricing=panel_pricing,
-              impact_coefficient=impact_coefficient,
-              adv_window=adv_window,
-              initial_capital=initial_capital,
-              impact_aggregation=impact_aggregation,
-          ),
-      }
+    test_performance = {
+            "test_total_return": test_total_return,
+            "test_sharpe": test_sharpe,
+            # Backward-compatible alias for the held-out test Sharpe, mirroring
+            # the `sharpe_ratio` key the walk-forward / CPCV summaries expose for
+            # their aggregate OOS Sharpe. Both names carry the same value; no
+            # number changes.
+            "sharpe_ratio": test_sharpe,
+            "test_volatility": float(test_returns.std() * np.sqrt(ann_factor_test)) if len(test_returns) > 1 else 0.0,
+            # The held-out window is counted in OBSERVATIONS (one per return
+            # observation, e.g. one daily bar), not in independent periods. The
+            # two are not interchangeable: 100 daily bars are not 100
+            # independent periods, and the resolution arithmetic (min
+            # detectable Sharpe / alpha) needs the observation count. The
+            # walk-forward PERIOD count lives in `summary["n_periods"]`.
+            "test_n_observations": len(test_returns),
+            "test_returns": test_returns,
+            "capacity": test_capacity_point,
+            "capacity_trend": test_capacity_trend,
+            # Book-based capacity for the held-out test window (see above).
+            "capacity_book": test_capacity_book,
+            "capacity_book_trend": test_capacity_book_trend,
+            # Notional-weighted book capacity for the held-out test window.
+            "capacity_book_notional_weighted": test_capacity_book_nw,
+            "capacity_book_notional_weighted_trend": test_capacity_book_nw_trend,
+            # Panel book diagnostic for the held-out test window. Measurement
+            # only -- the reported test performance is unchanged.
+            "book_diagnostic": _window_book_diagnostic(
+                strategy_factory,
+                selected_params,
+                test_data,
+                test_returns,
+                latency=latency,
+                fill_rate=fill_rate,
+                panel_pricing=panel_pricing,
+                impact_coefficient=impact_coefficient,
+                adv_window=adv_window,
+                initial_capital=initial_capital,
+                impact_aggregation=impact_aggregation,
+            ),
+        }
 
     # Benchmark comparison on test set
     test_benchmark = None
