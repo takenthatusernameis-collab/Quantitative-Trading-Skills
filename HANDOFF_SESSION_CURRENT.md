@@ -1,23 +1,27 @@
-# Handoff — Current State (2026-11-21): TSMOM real-panel cost-sensitivity audit COMPLETE
+# Handoff — Current State (2026-11-21): TSMOM borrow/funding-cost realism audit COMPLETE
 
 ## Baseline
 - HEAD `569ff2f`, branch `main`. Working tree has this session's UNCOMMITTED
   changes only (do NOT commit unless asked):
-  - `skills/quantitative-backtesting/scripts/returns_based_regime_detector.py` (rewritten: parametrized sweep + per-regime test + ffill-order bug fix)
-  - `skills/quantitative-backtesting/examples/returns_based_regime_results.json` (new 2-section schema)
-  - `skills/quantitative-backtesting/scripts/_diag_returns_regime.py` (new, untracked diagnostic)
-- No library modules were modified. Focused tests (regime_detection, regime_aware_position_sizing, generate_adversarial_scenarios) → 85 passed. Full archive: `HANDOFF_SESSION_149.md`.
+  - `AUDIT_BORROW_COST_REALISM.md` (new audit report)
+- Focused tests (borrow_cost_realism_short_capable, borrow_funding_cost_sweep, regime_cost_sweep_short_capable, capacity_sensitivity) → all pass (but short-capable sweeps pass vacuously due to bug).
 
 ## Where the thread landed
-- **Sparse crash-focused bear_high is achievable** (21d/-0.20 → 5.66% of bars, precision 1.00, first trigger 368 vs first true crash 366; recall 0.31). Prior "degenerate 47.9%" was inflated by an ffill-order bug (fixed).
-- **Uniform tv=0.20: OOS Sharpe is INVARIANT to regime labels** across all settings (SMA delta -0.0533, EMA -0.3701 identical for bear% 5.3→33%). The deltas measure the uniform vol-target overlay (lookback 20) vs the baseline's plain crossover sizing, NOT the detector. This retroactively explains all prior uniform-tv "detector variants".
-- **Crash de-risking is worse**: sparse bear_high with bear_high_vol=0.10 → SMA -0.0874, EMA -0.3737 (worse than uniform).
-- **Thread EXHAUSTED.** No profitability / significance claim; synthetic data only.
+- **CRITICAL BUG**: Short-capable sweeps (`run_borrow_cost_sweep_short_capable`, `run_regime_cost_sweep_short_capable`) use fixed `lookback=252` incompatible with 12-month test windows (~252 trading days). All signals NaN → zero positions → all metrics NaN. Tests pass vacuously (directional assertions skipped when metrics are None).
+- **CORRECTED RESULTS** (using proper grid [126, 189, 252] with `allow_short=True`):
+  - Frictionless: OOS Sharpe=1.40, Total Return=0.80, DSR p=0.45
+  - 5% borrow: OOS Sharpe=1.34, Total Return=0.73, DSR p=0.49
+  - **Directional claim HOLDS**: Higher borrow cost monotonically reduces net performance.
+  - **Hypothesis NOT SUPPORTED at all levels**: Deflated Sharpe criterion (p < 0.10) fails (all p > 0.44).
+  - 2/3 pre-registered criteria pass (Sharpe > 0, Return > 0), but DSR fails.
+- **Borrow/Funding sweep (long/flat)**: Works correctly, negative performance at all levels, NOT SUPPORTED.
+- **Capacity sweep**: Works correctly, capacity falls with impact.
 
 ## Approaches already failed (do not repeat)
-- Any fat_tail_crash regime-detector tuning at uniform tv (labels irrelevant to sizing).
-- Crash de-risking via lower target_vol in a sparse crash regime (worse than uniform).
-- Threshold/window tuning to "improve" uniform-tv OOS Sharpe (mathematically cannot).
+- Using fixed `lookback=252` for short-capable sweeps with 12-month test windows.
+- Interpreting vacuous test passes as evidence.
 
 ## One precise next task
 See `HANDOFF_SESSION_NEXT.md`.
+
+(End of file - total 23 lines)
