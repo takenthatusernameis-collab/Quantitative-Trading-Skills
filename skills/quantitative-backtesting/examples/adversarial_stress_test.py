@@ -653,7 +653,7 @@ def main():
                     "strategy": strategy_name,
                     "target_vol": TARGET_VOL,
                     "cost_multiplier": COST_MULTIPLIER,
-                    "high_vol_regimes": high_vol_regimes,
+                    "high_vol_regimes": high_vol_labels,
                     "baseline": base_wf,
                     "regime_sized": ra_wf,
                     "cost_multiplied": cm_wf,
