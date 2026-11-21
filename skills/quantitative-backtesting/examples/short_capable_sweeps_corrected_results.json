@@ -1,0 +1,190 @@
+{
+  "borrow_cost_sweep_short_capable": [
+    {
+      "borrow_cost": 0.0,
+      "borrow_cost_bps_per_year": 0.0,
+      "sharpe_ratio": 1.4026070365739016,
+      "total_return": 0.797451851692508,
+      "deflated_sharpe_pvalue": 0.44979117904313215,
+      "criteria": [
+        {
+          "name": "oos_sharpe_gt_zero",
+          "passed": true
+        },
+        {
+          "name": "oos_total_return_positive",
+          "passed": true
+        },
+        {
+          "name": "deflated_sharpe_pvalue_lt_0.10",
+          "passed": false
+        }
+      ],
+      "verdict": "NOT SUPPORTED",
+      "all_pass": false
+    },
+    {
+      "borrow_cost": 0.01,
+      "borrow_cost_bps_per_year": 100.0,
+      "sharpe_ratio": 1.3898973816632612,
+      "total_return": 0.7843506697492006,
+      "deflated_sharpe_pvalue": 0.45722269868917476,
+      "criteria": [
+        {
+          "name": "oos_sharpe_gt_zero",
+          "passed": true
+        },
+        {
+          "name": "oos_total_return_positive",
+          "passed": true
+        },
+        {
+          "name": "deflated_sharpe_pvalue_lt_0.10",
+          "passed": false
+        }
+      ],
+      "verdict": "NOT SUPPORTED",
+      "all_pass": false
+    },
+    {
+      "borrow_cost": 0.03,
+      "borrow_cost_bps_per_year": 300.0,
+      "sharpe_ratio": 1.3644738046462592,
+      "total_return": 0.7584294687610105,
+      "deflated_sharpe_pvalue": 0.47214514876329816,
+      "criteria": [
+        {
+          "name": "oos_sharpe_gt_zero",
+          "passed": true
+        },
+        {
+          "name": "oos_total_return_positive",
+          "passed": true
+        },
+        {
+          "name": "deflated_sharpe_pvalue_lt_0.10",
+          "passed": false
+        }
+      ],
+      "verdict": "NOT SUPPORTED",
+      "all_pass": false
+    },
+    {
+      "borrow_cost": 0.05,
+      "borrow_cost_bps_per_year": 500.0,
+      "sharpe_ratio": 1.3390448612939434,
+      "total_return": 0.7328787579195775,
+      "deflated_sharpe_pvalue": 0.48712950826525836,
+      "criteria": [
+        {
+          "name": "oos_sharpe_gt_zero",
+          "passed": true
+        },
+        {
+          "name": "oos_total_return_positive",
+          "passed": true
+        },
+        {
+          "name": "deflated_sharpe_pvalue_lt_0.10",
+          "passed": false
+        }
+      ],
+      "verdict": "NOT SUPPORTED",
+      "all_pass": false
+    }
+  ],
+  "regime_cost_sweep_short_capable": [
+    {
+      "regime_multiplier": 1.0,
+      "borrow_cost": 0.03,
+      "sharpe_ratio": 1.3644738046462592,
+      "total_return": 0.7584294687610105,
+      "deflated_sharpe_pvalue": 0.47214514876329816,
+      "criteria": [
+        {
+          "name": "oos_sharpe_gt_zero",
+          "passed": true
+        },
+        {
+          "name": "oos_total_return_positive",
+          "passed": true
+        },
+        {
+          "name": "deflated_sharpe_pvalue_lt_0.10",
+          "passed": false
+        }
+      ],
+      "verdict": "NOT SUPPORTED",
+      "all_pass": false
+    },
+    {
+      "regime_multiplier": 2.0,
+      "borrow_cost": 0.03,
+      "sharpe_ratio": 1.3576369337831502,
+      "total_return": 0.7515805009284462,
+      "deflated_sharpe_pvalue": 0.47620891488913875,
+      "criteria": [
+        {
+          "name": "oos_sharpe_gt_zero",
+          "passed": true
+        },
+        {
+          "name": "oos_total_return_positive",
+          "passed": true
+        },
+        {
+          "name": "deflated_sharpe_pvalue_lt_0.10",
+          "passed": false
+        }
+      ],
+      "verdict": "NOT SUPPORTED",
+      "all_pass": false
+    },
+    {
+      "regime_multiplier": 5.0,
+      "borrow_cost": 0.03,
+      "sharpe_ratio": 1.3370755449788634,
+      "total_return": 0.7311603953565251,
+      "deflated_sharpe_pvalue": 0.48846929259200056,
+      "criteria": [
+        {
+          "name": "oos_sharpe_gt_zero",
+          "passed": true
+        },
+        {
+          "name": "oos_total_return_positive",
+          "passed": true
+        },
+        {
+          "name": "deflated_sharpe_pvalue_lt_0.10",
+          "passed": false
+        }
+      ],
+      "verdict": "NOT SUPPORTED",
+      "all_pass": false
+    },
+    {
+      "regime_multiplier": 10.0,
+      "borrow_cost": 0.03,
+      "sharpe_ratio": 1.3026458534351901,
+      "total_return": 0.697546637746927,
+      "deflated_sharpe_pvalue": 0.5090986429086368,
+      "criteria": [
+        {
+          "name": "oos_sharpe_gt_zero",
+          "passed": true
+        },
+        {
+          "name": "oos_total_return_positive",
+          "passed": true
+        },
+        {
+          "name": "deflated_sharpe_pvalue_lt_0.10",
+          "passed": false
+        }
+      ],
+      "verdict": "NOT SUPPORTED",
+      "all_pass": false
+    }
+  ]
+}

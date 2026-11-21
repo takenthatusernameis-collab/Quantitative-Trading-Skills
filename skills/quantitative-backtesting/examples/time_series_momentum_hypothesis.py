@@ -521,12 +521,23 @@ def run_borrow_funding_cost_sweep(grid=BORROW_FUNDING_COST_SWEEP_LEVELS):
     return rows
 
 
-def _run_walk_forward_short_capable(borrow_cost=0.0, lookback=252,
+def _run_walk_forward_short_capable(borrow_cost=0.0, param_grid=None,
                                     regime_cost_multipliers=None):
-    """Run walk-forward on the triple panel with allow_short=True (short-capable)."""
+    """Run walk-forward on the triple panel with allow_short=True (short-capable).
+
+    Uses the full pre-registered PARAM_GRID (lookback 126/189/252) plus
+    allow_short=True by default. A fixed lookback=252 is incompatible with the
+    12-month test windows (~252 trading days): pct_change(252) is NaN for the
+    whole window, so no positions are taken and every metric is NaN. The full
+    grid includes lookbacks that fit inside each test window, producing
+    non-NaN, non-vacuous OOS metrics.
+    """
     sys.path.insert(0, str(SCRIPTS_DIR))
     from walk_forward import walk_forward_analysis
     from strategy_builder import build_strategy
+
+    if param_grid is None:
+        param_grid = {**PARAM_GRID, "allow_short": [True]}
 
     def factory(params):
         return build_strategy("time_series_momentum", json.dumps(params))
@@ -536,7 +547,7 @@ def _run_walk_forward_short_capable(borrow_cost=0.0, lookback=252,
         result = walk_forward_analysis(
             data=_build_triple_panel(),
             strategy_factory=factory,
-            param_grid={"lookback": [lookback], "allow_short": [True]},
+            param_grid=param_grid,
             train_months=TRAIN_MONTHS,
             test_months=TEST_MONTHS,
             step_months=STEP_MONTHS,
@@ -606,6 +617,19 @@ def run_borrow_cost_sweep_short_capable(grid=BORROW_COST_SWEEP_SHORT_CAPABLE_LEV
     assert rows[0]["borrow_cost"] == 0.0, "first borrow cost level must be frictionless"
     for prev, curr in zip(rows, rows[1:]):
         assert curr["borrow_cost"] > prev["borrow_cost"], "borrow cost levels not strictly ascending"
+    # Non-vacuity guard: the walk-forward must produce real metrics at every
+    # level (a fixed lookback=252 silently produced all-NaN results before).
+    for r in rows:
+        assert r["sharpe_ratio"] is not None, (
+            f"vacuous NaN Sharpe at borrow_cost={r['borrow_cost']}: the "
+            "walk-forward produced no tradable positions"
+        )
+        assert r["total_return"] is not None, (
+            f"vacuous NaN total_return at borrow_cost={r['borrow_cost']}"
+        )
+        assert r["deflated_sharpe_pvalue"] is not None, (
+            f"vacuous NaN deflated_sharpe_pvalue at borrow_cost={r['borrow_cost']}"
+        )
     for r in rows:
         assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
         assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
@@ -618,16 +642,14 @@ def run_borrow_cost_sweep_short_capable(grid=BORROW_COST_SWEEP_SHORT_CAPABLE_LEV
         }
     # Directional claim: net performance must not improve as borrow cost rises.
     for prev, curr in zip(rows, rows[1:]):
-        if prev["sharpe_ratio"] is not None and curr["sharpe_ratio"] is not None:
-            assert curr["sharpe_ratio"] <= prev["sharpe_ratio"] + 1e-12, (
-                "Sharpe improves with borrow cost on short-capable variant: "
-                f"{prev['sharpe_ratio']} -> {curr['sharpe_ratio']}"
-            )
-        if prev["total_return"] is not None and curr["total_return"] is not None:
-            assert curr["total_return"] <= prev["total_return"] + 1e-12, (
-                "total return improves with borrow cost on short-capable variant: "
-                f"{prev['total_return']} -> {curr['total_return']}"
-            )
+        assert curr["sharpe_ratio"] <= prev["sharpe_ratio"] + 1e-12, (
+            "Sharpe improves with borrow cost on short-capable variant: "
+            f"{prev['sharpe_ratio']} -> {curr['sharpe_ratio']}"
+        )
+        assert curr["total_return"] <= prev["total_return"] + 1e-12, (
+            "total return improves with borrow cost on short-capable variant: "
+            f"{prev['total_return']} -> {curr['total_return']}"
+        )
 
     print("\n  Borrow cost sweep completed: borrow is a real cost that never improves net performance.")
     print("=" * 80)
@@ -704,6 +726,19 @@ def run_regime_cost_sweep_short_capable(grid=REGIME_COST_SWEEP_SHORT_CAPABLE_LEV
     assert rows[0]["regime_multiplier"] == 1.0, "first regime multiplier level must be the baseline (1.0)"
     for prev, curr in zip(rows, rows[1:]):
         assert curr["regime_multiplier"] > prev["regime_multiplier"], "regime multiplier levels not strictly ascending"
+    # Non-vacuity guard: the walk-forward must produce real metrics at every
+    # level (a fixed lookback=252 silently produced all-NaN results before).
+    for r in rows:
+        assert r["sharpe_ratio"] is not None, (
+            f"vacuous NaN Sharpe at regime_multiplier={r['regime_multiplier']}: the "
+            "walk-forward produced no tradable positions"
+        )
+        assert r["total_return"] is not None, (
+            f"vacuous NaN total_return at regime_multiplier={r['regime_multiplier']}"
+        )
+        assert r["deflated_sharpe_pvalue"] is not None, (
+            f"vacuous NaN deflated_sharpe_pvalue at regime_multiplier={r['regime_multiplier']}"
+        )
     for r in rows:
         assert r["verdict"] in ("SUPPORTED", "NOT SUPPORTED")
         assert r["all_pass"] == all(c["passed"] for c in r["criteria"])
@@ -717,16 +752,14 @@ def run_regime_cost_sweep_short_capable(grid=REGIME_COST_SWEEP_SHORT_CAPABLE_LEV
     # Directional claim: net performance must not improve as the stressed-regime
     # cost load rises (borrow is real, not inert, on the short-capable path).
     for prev, curr in zip(rows, rows[1:]):
-        if prev["sharpe_ratio"] is not None and curr["sharpe_ratio"] is not None:
-            assert curr["sharpe_ratio"] <= prev["sharpe_ratio"] + 1e-12, (
-                "Sharpe improves with stressed-regime cost load on short-capable variant: "
-                f"{prev['sharpe_ratio']} -> {curr['sharpe_ratio']}"
-            )
-        if prev["total_return"] is not None and curr["total_return"] is not None:
-            assert curr["total_return"] <= prev["total_return"] + 1e-12, (
-                "total return improves with stressed-regime cost load on short-capable variant: "
-                f"{prev['total_return']} -> {curr['total_return']}"
-            )
+        assert curr["sharpe_ratio"] <= prev["sharpe_ratio"] + 1e-12, (
+            "Sharpe improves with stressed-regime cost load on short-capable variant: "
+            f"{prev['sharpe_ratio']} -> {curr['sharpe_ratio']}"
+        )
+        assert curr["total_return"] <= prev["total_return"] + 1e-12, (
+            "total return improves with stressed-regime cost load on short-capable variant: "
+            f"{prev['total_return']} -> {curr['total_return']}"
+        )
 
     print("\n  Stressed-regime cost sweep completed: higher stressed-regime cost load never improves net performance.")
     print("=" * 80)
