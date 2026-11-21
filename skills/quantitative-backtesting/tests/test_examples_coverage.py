@@ -15,6 +15,7 @@ and prints its completion banner.  No claim is made about the verdicts or
 metric values themselves; these tests guard executability and API stability.
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -75,6 +76,7 @@ _WF_COMPARE_TRIPLE_PATH = SKILLS_DIR / "examples" / "walk_forward_compare_triple
 _COMPARE_DUAL_CS_PATH = SKILLS_DIR / "examples" / "compare_dual_vs_cross_sectional_triple.py"
 _HRP_ALLOC_PATH = SKILLS_DIR / "examples" / "hrp_portfolio_allocation_example.py"
 _ADVERSARIAL_STRESS_PATH = SKILLS_DIR / "examples" / "adversarial_stress_test.py"
+_REGIME_ATTRIBUTION_PATH = SKILLS_DIR / "examples" / "regime_attribution_analysis.py"
 
 _REAL_MARKET_DATA = SKILLS_DIR / "assets" / "example_data" / "real_market_data"
 _REALITY_CHECK_FAMILY_PATH = SKILLS_DIR / "examples" / "reality_check_family_example.py"
@@ -1265,3 +1267,36 @@ def test_hrp_portfolio_allocation_example_runs():
     assert "hrp:" in result.stdout
     assert "equal_weight:" in result.stdout
     assert "inverse_volatility:" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# regime_attribution_analysis.py
+# ---------------------------------------------------------------------------
+
+def test_regime_attribution_analysis_imports():
+    # The module executes its attribution on import and reads a fixture
+    # relative to the working directory, so run it from the repo root.
+    _orig_cwd = os.getcwd()
+    try:
+        os.chdir(str(SKILLS_DIR.parent.parent))
+        module = _import_module("regime_attribution_analysis", _REGIME_ATTRIBUTION_PATH)
+    finally:
+        os.chdir(_orig_cwd)
+    assert module is not None
+
+
+def test_regime_attribution_analysis_runs():
+    result = subprocess.run(
+        [sys.executable, str(_REGIME_ATTRIBUTION_PATH)],
+        cwd=str(SKILLS_DIR.parent.parent),
+        capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == 0, (
+        f"regime_attribution_analysis exited {result.returncode}\n"
+        f"stdout:\n{result.stdout[-3000:]}\nstderr:\n{result.stderr[-3000:]}"
+    )
+    assert "Per-regime attribution" in result.stdout
+    assert "combined-regime Sharpe" in result.stdout
+    assert "base_sharpe" in result.stdout
+    assert "sized_sharpe" in result.stdout
+    assert "delta" in result.stdout
