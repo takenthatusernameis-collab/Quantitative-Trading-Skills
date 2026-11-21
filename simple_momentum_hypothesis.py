@@ -195,6 +195,22 @@ def _resolve_benchmarks(data_path, benchmark_path=None):
     return result
 
 
+def _extract_benchmark_metrics(metrics):
+    """Extract the headline benchmark comparison from a metrics dict.
+
+    ``calculate_metrics`` (performance.py) attaches ``alpha`` (annualized
+    strategy-alpha vs the aligned benchmark) and ``benchmark_total_return``
+    (buy-and-hold benchmark total return) whenever a benchmark is aligned with
+    the strategy returns. Return both so callers can report them without
+    reaching into the metrics dict directly; missing keys yield None rather
+    than raising, matching the "measurement, not a correction" convention used
+    for test_resolution and capacity.
+    """
+    if not isinstance(metrics, dict):
+        return None, None
+    return metrics.get("alpha"), metrics.get("benchmark_total_return")
+
+
 def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1):
     scripts_dir = Path(__file__).resolve().parent / "skills" / "quantitative-backtesting" / "scripts"
     data_path = Path(data_path)

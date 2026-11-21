@@ -71,13 +71,14 @@ IMPACT = smh.CAPACITY_SWEEP_SETTINGS[-1][1]  # advertised impact_coefficient
 
 def test_pre_registered_criteria_are_present():
     criteria = smh.CRITERIA
-    assert len(criteria) == 4
+    assert len(criteria) == 5
     names = {c[0] for c in criteria}
     assert names == {
         "oos_sharpe_gt_zero",
         "oos_total_return_positive",
         "deflated_alpha_ratio_gt_threshold",
         "capacity_gt_initial_capital",
+        "walk_forward_oos_sharpe_gt_zero",
     }
     for name, desc in criteria:
         assert isinstance(name, str) and name
