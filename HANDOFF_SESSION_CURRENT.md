@@ -9,8 +9,9 @@
 ## What was actually verified
 
 - `test_out_of_sample_summary_carries_sharpe_ratio_alias` (previously failing): **passes**.
-- Full suite `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` → **1542 passed, 0 failed** in 40m54s (offline, committed fixtures only, repo root). Note: the handoff-cited "994 passed" baseline is stale; the actual suite count is 1542.
+- Full suite `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` → **1546 passed, 0 failed** in 43m52s (offline, committed fixtures only, repo root; session 150). Note: the earlier "1542 passed" / "994 passed" citations are stale; the actual collected count is 1546.
 - Both CPCV diagnosis tests (4 total) pass.
+- The `HANDOFF_SESSION_NEXT.md` DSR trial-count robustness + Sharpe gap decomposition task is complete (verdict robust at n_trials=3, p=0.3644; gap broad across folds; GOOGL-only positive short-capable asset leg). Working tree clean; no source changes this session.
 
 ## What remains unresolved
 
