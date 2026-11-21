@@ -557,9 +557,28 @@ def main():
     print("REGIME-AWARE VARIANTS (baseline: committed adversarial_stress_test_results.json)")
     print(f"{'='*80}")
 
-    VARIANT_SCENARIOS = ["volatility_clustering", "regime_shift"]
+    VARIANT_SCENARIOS = [
+        "volatility_clustering",
+        "regime_shift",
+        "fat_tail_crash",
+        "liquidity_crisis",
+        "structural_break",
+        "trend_persistence",
+    ]
     TARGET_VOL = 0.10
     COST_MULTIPLIER = 1.5
+
+    # Pre-registered falsification criterion for the regime-aware overlay sweep.
+    # The overlay must improve OOS Sharpe vs baseline on at least one
+    # scenario-strategy combination across the adversarial suite. If no
+    # combination improves, the null result (reduces risk but not
+    # risk-adjusted returns) is confirmed as generalizable.
+    FALSIFICATION_CRITERION = (
+        "Regime-aware vol targeting to 10% annualized vol per regime must "
+        "improve OOS Sharpe vs baseline on at least one scenario-strategy "
+        "combination across the adversarial suite; otherwise the null result "
+        "is confirmed as generalizable."
+    )
 
     def wf_line(label: str, wf: Dict[str, Any]) -> str:
         if not wf.get("success"):
@@ -634,17 +653,94 @@ def main():
                     "strategy": strategy_name,
                     "target_vol": TARGET_VOL,
                     "cost_multiplier": COST_MULTIPLIER,
-                    "high_vol_regimes": high_vol_labels,
+                    "high_vol_regimes": high_vol_regimes,
                     "baseline": base_wf,
                     "regime_sized": ra_wf,
                     "cost_multiplied": cm_wf,
                 }
             )
 
+    # ------------------------------------------------------------------
+    # SUMMARY & FALSIFICATION VERDICT (regime-aware variant sweep)
+    # ------------------------------------------------------------------
+    print(f"\n{'='*80}")
+    print("REGIME-AWARE VARIANT SWEEP: SUMMARY & FALSIFICATION VERDICT")
+    print(f"{'='*80}")
+    print(f"  Criterion: {FALSIFICATION_CRITERION}")
+    print()
+    print(
+        f"  {'Scenario':<22} {'Strategy':<16} {'Baseline Sharpe':>16} "
+        f"{'Regime-Sized Sharpe':>20} {'Delta':>10} {'Improved':>9}"
+    )
+    print(f"  {'-'*80}")
+
+    n_improved = 0
+    n_evaluable = 0
+    for rec in variant_records:
+        sc = rec["scenario"]
+        st = rec["strategy"]
+        base = rec["baseline"] or {}
+        ra = rec["regime_sized"] or {}
+        base_sharpe = base.get("oos_sharpe") if isinstance(base, dict) else None
+        ra_sharpe = ra.get("oos_sharpe") if isinstance(ra, dict) else None
+        improved = bool(
+            base_sharpe is not None
+            and ra_sharpe is not None
+            and ra_sharpe > base_sharpe
+        )
+        if base_sharpe is not None and ra_sharpe is not None:
+            n_evaluable += 1
+            if improved:
+                n_improved += 1
+        delta = ra_sharpe - base_sharpe if (base_sharpe is not None and ra_sharpe is not None) else None
+        print(
+            f"  {sc:<22} {st:<16} {fmt(base_sharpe):>16} "
+            f"{fmt(ra_sharpe):>20} {fmt(delta):>10} {str(improved):>9}"
+        )
+
+    criterion_passed = n_improved >= 1
+    verdict = (
+        "NOT FALSIFIED (criterion passed)"
+        if criterion_passed
+        else "FALSIFIED (null confirmed as generalizable)"
+    )
+    print()
+    print(f"  Evaluable combinations: {n_evaluable}")
+    print(f"  Combinations where regime-sizing improved OOS Sharpe: {n_improved}")
+    print(f"  Criterion PASSED: {criterion_passed}")
+    print(f"  VERDICT: {verdict}")
+    print()
+    if criterion_passed:
+        print("  At least one scenario-strategy combination showed a genuine")
+        print("  OOS Sharpe improvement from the regime-aware overlay. The null")
+        print("  result does NOT generalize universally; conditional value is")
+        print("  possible and warrants scenario-specific investigation.")
+    else:
+        print("  No scenario-strategy combination showed an OOS Sharpe improvement.")
+        print("  The regime-aware overlay reduces exposure in high-volatility")
+        print("  regimes but reduces returns proportionally more across the")
+        print("  adversarial suite. The null result is confirmed as generalizable.")
+
+    # Save extended results
+    ext_path = Path(__file__).resolve().parent / "adversarial_stress_test_regime_aware_extended.json"
+    extended = {
+        "falsification_criterion": FALSIFICATION_CRITERION,
+        "target_vol": TARGET_VOL,
+        "cost_multiplier": COST_MULTIPLIER,
+        "criterion_passed": criterion_passed,
+        "n_improved": n_improved,
+        "n_evaluable": n_evaluable,
+        "verdict": verdict,
+        "variants": variant_records,
+    }
+    with open(ext_path, "w") as f:
+        json.dump(extended, f, indent=2, default=str)
+    print(f"\nExtended variant results saved to: {ext_path}")
+
     out_path = Path(__file__).resolve().parent / "adversarial_stress_test_regime_aware.json"
     with open(out_path, "w") as f:
         json.dump(variant_records, f, indent=2, default=str)
-    print(f"\nVariant results saved to: {out_path}")
+    print(f"Variant results saved to: {out_path}")
 
     return all_results
 
