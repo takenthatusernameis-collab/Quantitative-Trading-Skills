@@ -39,7 +39,12 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from generate_adversarial_scenarios import (  # noqa: E402
-    SCENARIOS,
+    generate_fat_tail_crash,
+    generate_liquidity_crisis,
+    generate_regime_shift,
+    generate_structural_break,
+    generate_trend_persistence,
+    generate_volatility_clustering,
     ScenarioConfig,
 )
 from strategy_builder import build_strategy  # noqa: E402
@@ -50,12 +55,12 @@ from regime_detection import (  # noqa: E402
     regime_aware_position_size,
 )
 
+EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
+BASELINE_PATH = Path(__file__).resolve().parent.parent.parent.parent / "adversarial_stress_test_results.json"
+OUT_PATH = EXAMPLES_DIR / "adversarial_stress_test_regime_aware_sweep.json"
+
 sys.path.insert(0, str(EXAMPLES_DIR))
 from adversarial_stress_test import RegimeAwareStrategy, run_walk_forward_stress, STRATEGIES  # noqa: E402
-
-EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
-BASELINE_PATH = Path(__file__).resolve().parent.parent.parent / "adversarial_stress_test_results.json"
-OUT_PATH = EXAMPLES_DIR / "adversarial_stress_test_regime_aware_sweep.json"
 
 TARGET_VOLS = [0.05, 0.10, 0.15, 0.20]
 VOL_WINDOWS = [21, 63, 126]
@@ -74,6 +79,15 @@ VARIANT_SCENARIOS = [
 IMPROVING = ["regime_shift", "liquidity_crisis", "structural_break", "trend_persistence"]
 DEGRADING = ["volatility_clustering", "fat_tail_crash"]
 REF_CELL = (0.10, 63)
+
+VARIANT_GENS = {
+    "regime_shift": lambda cfg: generate_regime_shift(cfg, bull_months=18, bear_months=18, transition_months=3),
+    "structural_break": lambda cfg: generate_structural_break(cfg),
+    "liquidity_crisis": lambda cfg: generate_liquidity_crisis(cfg),
+    "trend_persistence": lambda cfg: generate_trend_persistence(cfg),
+    "fat_tail_crash": lambda cfg: generate_fat_tail_crash(cfg),
+    "volatility_clustering": lambda cfg: generate_volatility_clustering(cfg),
+}
 
 
 def fmt(x):
@@ -96,10 +110,10 @@ def load_baseline() -> Dict[tuple, Dict[str, Any]]:
 def run_sweep(baseline_index: Dict[tuple, Dict[str, Any]]) -> List[Dict[str, Any]]:
     records: List[Dict[str, Any]] = []
     for scenario_name in VARIANT_SCENARIOS:
-        scenario_config = SCENARIOS[scenario_name]
+        gen = VARIANT_GENS[scenario_name]
         for vol_window in VOL_WINDOWS:
             config = ScenarioConfig(seed=42, periods=5000)
-            data = scenario_config["generator"](config, **scenario_config["kwargs"])
+            data = gen(config)
             if isinstance(data, pd.DataFrame) and "date" in data.columns:
                 data = data.set_index("date")
                 data.index = pd.DatetimeIndex(data.index)
@@ -189,7 +203,7 @@ def evaluate(records: List[Dict[str, Any]]) -> None:
         cell_records = [r for r in records if (r["target_vol"], r["vol_window"]) == cell]
         degrading_ok = all(
             r["delta"] is not None
-            and ref.get((r["scenario"], r["strategy"])] is not None
+            and ref.get((r["scenario"], r["strategy"])) is not None
             and r["delta"] > ref[(r["scenario"], r["strategy"])]
             for r in cell_records
             if r["scenario"] in DEGRADING

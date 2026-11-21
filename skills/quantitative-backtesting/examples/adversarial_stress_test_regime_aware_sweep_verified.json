@@ -1,0 +1,110 @@
+{
+  "reference_cell": [
+    0.1,
+    63
+  ],
+  "n_records": 144,
+  "cells": [
+    {
+      "target_vol": 0.05,
+      "vol_window": 21,
+      "degrading_ok": false,
+      "improving_ok": false,
+      "ok": false,
+      "score": -2.31729737713117
+    },
+    {
+      "target_vol": 0.05,
+      "vol_window": 63,
+      "degrading_ok": false,
+      "improving_ok": false,
+      "ok": false,
+      "score": -2.31729737713117
+    },
+    {
+      "target_vol": 0.05,
+      "vol_window": 126,
+      "degrading_ok": false,
+      "improving_ok": false,
+      "ok": false,
+      "score": -2.31729737713117
+    },
+    {
+      "target_vol": 0.1,
+      "vol_window": 21,
+      "degrading_ok": false,
+      "improving_ok": true,
+      "ok": false,
+      "score": 0.7007122568106127
+    },
+    {
+      "target_vol": 0.1,
+      "vol_window": 63,
+      "degrading_ok": false,
+      "improving_ok": true,
+      "ok": false,
+      "score": 0.7007122568106127
+    },
+    {
+      "target_vol": 0.1,
+      "vol_window": 126,
+      "degrading_ok": false,
+      "improving_ok": true,
+      "ok": false,
+      "score": 0.7007122568106127
+    },
+    {
+      "target_vol": 0.15,
+      "vol_window": 21,
+      "degrading_ok": true,
+      "improving_ok": true,
+      "ok": true,
+      "score": 1.679916293010904
+    },
+    {
+      "target_vol": 0.15,
+      "vol_window": 63,
+      "degrading_ok": true,
+      "improving_ok": true,
+      "ok": true,
+      "score": 1.679916293010904
+    },
+    {
+      "target_vol": 0.15,
+      "vol_window": 126,
+      "degrading_ok": true,
+      "improving_ok": true,
+      "ok": true,
+      "score": 1.679916293010904
+    },
+    {
+      "target_vol": 0.2,
+      "vol_window": 21,
+      "degrading_ok": true,
+      "improving_ok": true,
+      "ok": true,
+      "score": 2.0804334044864943
+    },
+    {
+      "target_vol": 0.2,
+      "vol_window": 63,
+      "degrading_ok": true,
+      "improving_ok": true,
+      "ok": true,
+      "score": 2.0804334044864943
+    },
+    {
+      "target_vol": 0.2,
+      "vol_window": 126,
+      "degrading_ok": true,
+      "improving_ok": true,
+      "ok": true,
+      "score": 2.0804334044864943
+    }
+  ],
+  "best_cell": [
+    0.2,
+    21
+  ],
+  "best_score": 2.0804334044864943
+}
