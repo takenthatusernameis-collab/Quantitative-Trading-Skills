@@ -1,11 +1,24 @@
 {
-  "target_vol": 0.2,
-  "regime_counts": {
-    "unknown": 67,
-    "bear_high": 588,
-    "bull_low": 70,
-    "bull_high": 62,
-    "sideways_high": 37,
-    "bear_low": 176
-  }
+  "fat_tail_crash_returns_based": [
+    {
+      "strategy": "sma_crossover",
+      "detector": "returns_based",
+      "target_vol": 0.2,
+      "first_bear_high_idx": 298,
+      "bear_high_count": 2397,
+      "baseline_sharpe": -0.005968193462106325,
+      "returns_based_sharpe": -0.059302226921384545,
+      "delta": -0.05333403345927822
+    },
+    {
+      "strategy": "ema_crossover",
+      "detector": "returns_based",
+      "target_vol": 0.2,
+      "first_bear_high_idx": 298,
+      "bear_high_count": 2397,
+      "baseline_sharpe": 0.2141694907798975,
+      "returns_based_sharpe": -0.15595894861312773,
+      "delta": -0.3701284393930252
+    }
+  ]
 }
