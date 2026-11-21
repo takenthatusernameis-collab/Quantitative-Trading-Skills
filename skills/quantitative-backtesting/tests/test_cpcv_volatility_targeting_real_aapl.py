@@ -110,6 +110,14 @@ def test_cpcv_volatility_targeting_real_aapl_runs():
     # Only folds that took a position select a parameter; a flat fold keeps
     # best_params=None (the honest "no position" outcome, not a failure).
     assert sum(f["best_params"] is not None for f in result["folds"]) == 4
+    # Partial selection diagnosis: exactly one fold (fold 0, no warmup at the
+    # dataset start) stays flat because no parameter combination triggers a
+    # position in its validation window; this is a partial selection, not a
+    # total no-selection failure.
+    assert summary.get("no_selection_diagnosis") is None
+    partial = summary.get("partial_selection_diagnosis")
+    assert isinstance(partial, dict)
+    assert partial.get("cause") == "no_position_in_validation_window"
     out = buffer.getvalue()
     assert "Point-in-time validation passed" in out
 

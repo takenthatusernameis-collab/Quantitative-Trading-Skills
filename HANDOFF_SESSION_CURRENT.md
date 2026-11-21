@@ -1,32 +1,25 @@
-# Handoff — Current State: CPCV EMA/SMA crossover audit complete
+# Handoff — Current State: Kelly/volatility CPCV partial selection diagnosis verified
 
-## Audit findings
+## What changed
 
-**EMA crossover (test_cpcv_ema_crossover_real_aapl.py):**
-- 5/5 folds trade — EMA with `adjust=False` produces valid values from bar 1, no warmup needed
-- No lookback/window mismatch
-- Pinned metrics verified
+- `skills/quantitative-backtesting/tests/test_cpcv_kelly_criterion_real_aapl.py` (`test_cpcv_kelly_criterion_real_aapl_runs`): added partial selection diagnosis assertions — `summary["no_selection_diagnosis"] is None`, `partial_selection_diagnosis` is a dict with `cause == "no_position_in_validation_window"`.
+- `skills/quantitative-backtesting/tests/test_cpcv_volatility_targeting_real_aapl.py` (`test_cpcv_volatility_targeting_real_aapl_runs`): same assertions added.
 
-**SMA crossover (test_cpcv_sma_crossover_real_aapl.py):**
-- 4/5 folds trade — fold 0 has no warmup data (starts at index 0), SMA needs 50 bars for first valid value, 60-bar test window leaves only 10 valid bars, no crossover occurs
-- This is documented and expected: `folds_with_position == 4`, `partial_selection_diagnosis` correctly identifies `no_position_in_validation_window`
-- Pinned metrics verified on the 4 trading folds
+Both now match the completeness of `test_cpcv_dual_momentum_real_aapl_googl_structure.py`, which explicitly asserts `partial["cause"] == "no_position_in_validation_window"` and `summary["no_selection_diagnosis"] is None`.
 
-**Vacuous NaN metrics:**
-- None found — code correctly returns `None` (not NaN) for metrics when no folds trade
-- `no_selection_diagnosis` and `partial_selection_diagnosis` provide clear explanations
-- All summary metrics are either finite numbers or `None`
+## What was actually verified
 
-**Other CPCV tests with 4/5 folds (same root cause — fold 0 lacks warmup):**
-- dual_momentum (lookback=252)
-- kelly_criterion (lookback=63)
-- volatility_targeting (lookback=63)
-- All properly document and assert the partial selection
+- Inspected live `cpcv_analysis` output for both strategies (lookback=63, n_splits=5, test_size=0.2, committed AAPL fixture): `folds_with_position == 4`, `no_selection_diagnosis is None`, `partial_selection_diagnosis.cause == "no_position_in_validation_window"` (fold 0 flat — no warmup at dataset start; folds 1-4 trade).
+- `python3 -m pytest tests/test_cpcv_kelly_criterion_real_aapl.py tests/test_cpcv_volatility_targeting_real_aapl.py -p no:cacheprovider -q` → **4 passed**.
 
-## Verdict
+## What remains unresolved
 
-No fix needed. The CPCV warmup mechanism works correctly for folds 1-4. Fold 0 cannot have warmup data because it's at the start of the dataset — this is a fundamental limitation, not a bug. Tests honestly record the partial selection.
+- Full suite re-run: `HANDOFF_SESSION_NEXT_EXECUTED.md` still lists confirming **994 passed, 0 failed** across `skills/quantitative-backtesting/tests/` as the final insurance check (992 + 2 mean-reversion fixes). Not re-run end-to-end this turn.
 
-## Next task
+## Approaches already tried / failed
 
-Investigate CPCV Kelly criterion and volatility targeting tests (both expect 4/5 folds with lookback=63) to verify their partial selection diagnosis is as complete as the dual_momentum test, which explicitly asserts on `partial_selection_diagnosis.cause == "no_position_in_validation_window"`.
+- None; the diagnosis assertions directly matched the observed (already-correct) `partial_selection_diagnosis` output, so no code change to `walk_forward.py` or fixtures was needed.
+
+## One precise next task
+
+Re-run the full `skills/quantitative-backtesting/tests/` suite once more to confirm **994 passed, 0 failed** with no regressions, and record the summary. Run from repo root via the `skills/quantitative-backtesting/tests/` path, offline/committed fixtures only, as before. If any other failure appears, treat it as pre-existing/environmental and document it; do not widen scope.
