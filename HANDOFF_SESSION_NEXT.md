@@ -1,39 +1,44 @@
-# Handoff — Next Task: Verify TSMOM borrow/funding cost realism does not flip the NOT SUPPORTED verdict
+# Handoff — Next Task: Is the short-capable TSMOM NOT SUPPORTED verdict robust to the DSR trial-count convention?
 
-## What changed / was verified this session
+## Prior task (session 151) — completed & verified
+Assigned task from the previous HANDOFF_SESSION_NEXT.md (borrow/funding cost realism
+on the TSMOM triple panel) is **done**:
+- Both tests pass offline (committed fixtures only): **2 passed, 0 failed (7.31 s)**.
+- Long/flat borrow+funding sweep (0/0 -> 5%/5%): Sharpe -0.1241 -> -0.2025,
+  Return -0.1443 -> -0.1973, DSR p 0.918 -> 0.934. **NOT SUPPORTED at every level;
+  verdict stable, no flip.**
+- Short-capable borrow sweep (0 -> 5%/yr): Sharpe 1.4026 -> 1.3390,
+  Return 0.7975 -> 0.7329, DSR p 0.450 -> 0.487. **NOT SUPPORTED at every level;
+  verdict stable, no flip.** Raw Sharpe/return are positive but the DSR (<0.10)
+  criterion fails — NOT a profitability claim.
+- Full evidence + DSR internals: see `HANDOFF_SESSION_151.md`.
 
-- **CPCV partial-selection diagnosis contract (assigned task, HANDOFF_SESSION_150.md / HANDOFF_SESSION_NEXT.md): verified.**
-  - Confirmed `test_cpcv_kelly_criterion_real_aapl.py:120-123`, `test_cpcv_volatility_targeting_real_aapl.py:117-120`, and `test_cpcv_dual_momentum_real_aapl_googl_structure.py:134-137` all assert `summary["no_selection_diagnosis"] is None` and `partial_selection_diagnosis["cause"] == "no_position_in_validation_window"`.
-  - Ran the three files: `python3 -m pytest <the three files> -p no:cacheprovider -q` → **6 passed, 0 failed** (14 s), offline, committed fixtures only.
+## What was checked and found sound
+- DSR uses proper Bailey/Lopez-de-Prado skew/kurtosis correction
+  (`walk_forward.py:2180-2336`). At the frictionless short-capable level:
+  `n_trials=6` (= 3 lookbacks x 2 folds, config x period), `expected_max_sharpe=1.2477`,
+  observed Sharpe 1.4026 -> DSR p=0.4498. Counting config x period over-counts
+  independent trials, so deflation is **conservative**. No under-counting defect.
 
-- **Cost-realism audit (session-149 open item): executed and recorded.**
-  - Ran `test_walk_forward_time_series_momentum_cost_sensitivity_real_triple_aapl_msft_googl.py` → **1 passed** (6.7 s).
-  - Sweep output (triple panel AAPL/MSFT/GOOGL, time-series momentum, walk-forward):
-    - 0bp+0bp: Sharpe -0.1082, Return -0.1333, NOT SUPPORTED (all 3 criteria fail)
-    - 1bp+0bp: Sharpe -0.1135, Return -0.1369, NOT SUPPORTED
-    - 2bp+1bp (advertised): Sharpe -0.1241, Return -0.1443, NOT SUPPORTED
-    - 5bp+2.5bp: Sharpe -0.1479, Return -0.1606, NOT SUPPORTED
-    - 10bp+5bp: Sharpe -0.1877, Return -0.1871, NOT SUPPORTED
-  - Conclusion: hypothesis is NOT SUPPORTED even frictionless; higher costs only degrade net performance; directional claim holds. **No profitability claim.** (time_series_momentum_hypothesis.py:68-74, :223-278)
-
-- **Already in tree, no work needed:** `--max-participation-rate` CLI arg (walk_forward.py:12222) is threaded through `walk_forward_analysis`/`cpcv_analysis`/`out_of_sample_validation`/`estimate_capacity`, recorded in summaries, and validated (walk_forward.py:628, 4168, 6635, 3646). Borrow/funding cost-sweep tests already exist for the TSMOM triple panel.
-
-## What remains unresolved
-
-- Nothing blocking; full suite is green (session 150: 1546 passed, 0 failed). Working tree clean.
-
-## Approaches already tried / failed (this session)
-
-- None; both verification runs passed on the first attempt.
+## Open methodological question (→ this task)
+The same TSMOM signal on the same triple panel gives Sharpe -0.12 (long/flat) vs
++1.40 (short-capable). Two things worth pinning down, both tied to honest reporting
+and multiple-testing controls:
+1. Is the NOT SUPPORTED verdict robust if the trial count is the most lenient
+   defensible value (3 distinct configs) instead of 6?
+2. Is the short-capable positive raw Sharpe broad, or concentrated in one fold/asset?
 
 ## One precise next task
+Offline, committed fixtures only
+(`assets/example_data/real_market_data/{AAPL,MSFT,GOOGL}.csv`):
+1. Via `time_series_momentum_hypothesis._run_walk_forward_short_capable(0.0)` capture
+   `oos_returns` and per-period `trial_sharpes`; recompute
+   `walk_forward.deflated_sharpe_ratio` with `n_trials=3` vs `n_trials=6`. Report both
+   p-values. If p stays > 0.10 at n_trials=3, record the verdict is robust and stop;
+   if p drops < 0.10, document the fragility and add a focused regression test pinning
+   the current (conservative) convention.
+2. Decompose the long/flat vs short-capable Sharpe gap by walk-forward fold and by
+   asset leg; report whether the short-capable result is concentrated (no profitability claim).
 
-Verify borrow/funding cost realism on the TSMOM triple panel and report whether it changes the NOT SUPPORTED verdict:
-
-Run the two committed-fixture tests offline from repo root:
-- `skills/quantitative-backtesting/tests/test_walk_forward_time_series_momentum_borrow_funding_cost_sweep_real_triple_aapl_msft_googl.py`
-- `skills/quantitative-backtesting/tests/test_walk_forward_time_series_momentum_borrow_cost_realism_short_capable_real_triple_aapl_msft_googl.py`
-
-Report the net numbers per borrow/funding level (Sharpe, total return, DSR p-value, verdict) and state explicitly whether the verdict flips from NOT SUPPORTED. Note the module caveat (time_series_momentum_hypothesis.py:90-99): long/flat TSMOM never shorts so borrow is inert for it; funding applies to gross exposure above 1x and can bite on the triple panel where several assets can be long concurrently. This is a sensitivity analysis, not a profitability claim — do not tune to force SUPPORT.
-
-Constraints: offline/committed fixtures only (`assets/example_data/real_market_data/{AAPL,MSFT,GOOGL}.csv`); do not widen scope into unrelated files; require focused-test EXIT 0; do not commit unless explicitly asked.
+Constraints: do not widen scope; require focused-test EXIT 0; do not commit unless
+explicitly asked; do not tune to force SUPPORT.
