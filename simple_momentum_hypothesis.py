@@ -12,6 +12,11 @@ FALSIFICATION CRITERIA:
     3. Deflated Alpha Ratio > 0.5 (multiple-benchmark deflated alpha)
     4. Strategy capacity (notional) > initial capital at the advertised
        market-impact level.
+    5. Walk-forward rolling out-of-sample Sharpe ratio (net of costs) > 0.
+       Criteria 1-4 are measured on a single held-out 0.6/0.2/0.2 test split;
+       criterion 5 re-runs the same strategy on rolling chronological
+       train/test windows so the verdict is backed by genuinely out-of-sample
+       evidence across the whole sample rather than one split.
 
 The script also runs two cost sweeps, both regression guards rather than
 research conclusions:
@@ -68,6 +73,7 @@ CRITERIA = [
     ("oos_total_return_positive", "oos_total_return > 0 (net of costs)"),
     ("deflated_alpha_ratio_gt_threshold", "deflated_alpha_ratio > 0.5 (multiple-benchmark deflated alpha)"),
     ("capacity_gt_initial_capital", "strategy capacity (notional) > initial capital at advertised impact level"),
+    ("walk_forward_oos_sharpe_gt_zero", "walk-forward rolling OOS Sharpe > 0 (net of costs)"),
 ]
 
 DEFLATED_ALPHA_THRESHOLD = 0.5
@@ -97,6 +103,24 @@ CAPACITY_SENSITIVITY_LEVELS = [0.0, 0.05, 0.1, 0.2]
 
 COMMISSION = 0.0002
 SLIPPAGE = 0.0001
+
+# Walk-forward robustness layer. The headline falsification above rests on a
+# single chronological 0.6/0.2/0.2 test split (a small, fixed sample). A single
+# split cannot show that the strategy's out-of-sample behaviour is stable across
+# the sample; the record itself flags that its Deflated Alpha criterion is not
+# resolvable at that sample size. The walk-forward layer re-evaluates the same
+# strategy on ROLLING chronological train/test windows, so the verdict is
+# backed by genuinely out-of-sample evidence across the whole sample rather than
+# one held-out slice. Windows are measured in months of the fixture's calendar
+# (the sample is ~504 trading days), kept short so several disjoint out-of-sample
+# windows fit.
+WF_TRAIN_MONTHS = 8
+WF_TEST_MONTHS = 2
+WF_STEP_MONTHS = 2
+# The walk-forward grid is the same family as the headline fixed-parameter run
+# (SMA crossover); a small grid keeps the in-sample selection honest without
+# turning the robustness layer into a parameter search.
+WF_PARAM_GRID = {"fast_period": [8, 10, 12], "slow_period": [24, 30, 36]}
 
 # Cost settings exercised by the cost sweep. The advertised setting is the
 # hypothesis's operating assumption; the zero-cost setting is the frictionless
@@ -337,6 +361,23 @@ def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1):
     print(f"  [{'PASS' if ok4 else 'FAIL'}] {CRITERIA[3][0]}: {CRITERIA[3][1]} "
           f"(capacity={_fmt_num(capacity)})")
 
+    # Walk-forward robustness layer (criterion 5). The headline criteria above
+    # are measured on a single held-out split; this criterion asks whether the
+    # same strategy's out-of-sample Sharpe survives a rolling chronological
+    # walk-forward across the sample. It is a genuine out-of-sample reading,
+    # not a parameter-tuned one: the in-sample grid is re-selected per window.
+    wf = run_walk_forward_robustness(data_path, impact_coefficient=impact_coefficient)
+    ok5 = wf["ok"]
+    passes.append(ok5)
+    criterion_results.append({
+        "name": CRITERIA[4][0],
+        "description": CRITERIA[4][1],
+        "passed": bool(ok5),
+        "observed": wf["oos_sharpe"],
+    })
+    print(f"  [{'PASS' if ok5 else 'FAIL'}] {CRITERIA[4][0]}: {CRITERIA[4][1]} "
+          f"(oos_sharpe={_fmt_num(wf['oos_sharpe'])})")
+
     all_pass = all(passes)
     verdict = "SUPPORTED" if all_pass else "NOT SUPPORTED"
 
@@ -351,6 +392,7 @@ def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1):
         "verdict": verdict,
         "all_pass": all_pass,
         "criteria": criterion_results,
+        "walk_forward": wf,
         "metrics": {
             "sharpe_ratio": sharpe,
             "total_return": ret,
@@ -407,7 +449,123 @@ def _run_backtest_metrics(data_path, benchmark_path, commission, slippage, tmpdi
     return metrics
 
 
-def _extract_benchmark_metrics(metrics):
+def run_walk_forward_robustness(data_path, benchmark_path=None,
+                                impact_coefficient=0.1):
+    """Roll the same SMA-crossover strategy through chronological walk-forward
+    windows and return the out-of-sample robustness reading.
+
+    This is a robustness layer, not a verdict: it re-runs the strategy on
+    rolling train/test windows so the falsification is backed by genuinely
+    out-of-sample evidence across the sample rather than a single held-out
+    split. It returns the parsed walk-forward summary plus a normalized dict
+    with the fields the record reports.
+    """
+    scripts_dir = Path(__file__).resolve().parent / "skills" / "quantitative-backtesting" / "scripts"
+    data_path = Path(data_path)
+    bench_paths = _resolve_benchmarks(data_path, benchmark_path)
+
+    print("=" * 80)
+    print("WALK-FORWARD ROBUSTNESS (rolling chronological OOS)")
+    print("=" * 80)
+    print(f"Data: {data_path}")
+    print(f"Windows: train={WF_TRAIN_MONTHS}m, test={WF_TEST_MONTHS}m, "
+          f"step={WF_STEP_MONTHS}m")
+    print(f"Param grid: {WF_PARAM_GRID}")
+    print(f"Trading costs: {COMMISSION*10000:.0f} bps commission + "
+          f"{SLIPPAGE*10000:.0f} bps slippage")
+    print("=" * 80)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        out_path = tmpdir_path / "results"
+        cmd = [
+            sys.executable,
+            str(scripts_dir / "walk_forward.py"),
+            "walk-forward",
+            "--data", str(data_path),
+            "--strategy", "sma_crossover",
+            "--symbol", "SPY",
+            "--param-grid", json.dumps(WF_PARAM_GRID),
+            "--train-months", str(WF_TRAIN_MONTHS),
+            "--test-months", str(WF_TEST_MONTHS),
+            "--step-months", str(WF_STEP_MONTHS),
+            "--commission", str(COMMISSION),
+            "--slippage", str(SLIPPAGE),
+            "--validate-point-in-time",
+            "--impact-coefficient", str(impact_coefficient),
+            "--output", str(out_path),
+        ]
+        if bench_paths:
+            cmd.extend(["--benchmark"] + [str(p) for p in bench_paths])
+
+        result = subprocess.run(cmd, cwd=str(scripts_dir),
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            print("STDOUT:", result.stdout[-800:])
+            print("STDERR:", result.stderr[-800:])
+            raise RuntimeError(
+                f"walk_forward failed with code {result.returncode}"
+            )
+
+        wf_summary = {}
+        for cand in (
+            out_path / "walk_forward_summary.json",
+            scripts_dir / "results" / "walk_forward_summary.json",
+            Path("results") / "walk_forward_summary.json",
+        ):
+            if cand.exists() and cand.is_file():
+                with open(cand) as f:
+                    wf_summary = json.load(f)
+                break
+
+    summary = wf_summary.get("summary", wf_summary)
+    oos_sharpe = summary.get("oos_sharpe")
+    total_oos_return = summary.get("total_oos_return")
+    n_periods = summary.get("n_periods")
+    periods_with_position = summary.get("periods_with_position")
+    win_rate = summary.get("win_rate_periods")
+    sharpe_ci = summary.get("sharpe_ci") or {}
+    partial_diag = summary.get("partial_selection_diagnosis")
+
+    print("\n1. WALK-FORWARD OUT-OF-SAMPLE PERFORMANCE (net of costs)")
+    print(f"  Windows: {n_periods} (periods with a position: "
+          f"{periods_with_position})")
+    print(f"  Total OOS Return: {_fmt_pct(total_oos_return)}")
+    print(f"  OOS Sharpe Ratio: {_fmt_num(oos_sharpe)}")
+    print(f"  OOS Volatility: {_fmt_num(summary.get('oos_volatility'))}")
+    if win_rate is not None:
+        print(f"  Win rate (periods): {_fmt_num(win_rate)}")
+    if sharpe_ci.get("status") == "resolvable":
+        print(f"  Sharpe 95% bootstrap CI: "
+              f"[{_fmt_num(sharpe_ci.get('lower'))}, "
+              f"{_fmt_num(sharpe_ci.get('upper'))}] "
+              f"(stationary bootstrap, n={sharpe_ci.get('n_observations')})")
+    if partial_diag:
+        print(f"  Partial selection: {partial_diag.get('message')}")
+
+    ok = oos_sharpe is not None and float(oos_sharpe) > 0
+    print(f"\n  [{ 'PASS' if ok else 'FAIL'}] "
+          f"walk-forward OOS Sharpe > 0: {_fmt_num(oos_sharpe)}")
+    print("  (Robustness reading only; the verdict is set by the full criteria.)")
+
+    return {
+        "ok": bool(ok),
+        "oos_sharpe": oos_sharpe,
+        "total_oos_return": total_oos_return,
+        "oos_volatility": summary.get("oos_volatility"),
+        "n_periods": n_periods,
+        "periods_with_position": periods_with_position,
+        "win_rate_periods": win_rate,
+        "sharpe_ci": sharpe_ci,
+        "partial_selection_diagnosis": partial_diag,
+        "window": {
+            "train_months": WF_TRAIN_MONTHS,
+            "test_months": WF_TEST_MONTHS,
+            "step_months": WF_STEP_MONTHS,
+        },
+        "param_grid": WF_PARAM_GRID,
+        "raw_summary": summary,
+    }
     """Pull the primary-benchmark alpha / total return out of a metrics dict.
 
     With multiple benchmarks the framework keys metrics per benchmark
@@ -838,6 +996,27 @@ def _build_record(result, data_path, cost_rows, cost_sens_rows, capacity_rows, c
             "impact_coefficient": CAPACITY_SWEEP_SETTINGS[-1][1],
             "initial_capital": CAPACITY_INITIAL_CAPITAL,
             "test_n_observations": tr.get("n_test_observations"),
+            "walk_forward_window": result["walk_forward"]["window"],
+        },
+        "walk_forward_robustness": {
+            "kind": "rolling_chronological_out_of_sample",
+            "engine": "skills/quantitative-backtesting/scripts/walk_forward.py",
+            "note": "Robustness layer for the single-split falsification above: "
+                    "re-evaluates the same SMA-crossover strategy on rolling "
+                    "chronological train/test windows. The in-sample grid is "
+                    "re-selected per window, so this is genuinely out-of-sample.",
+            "window": result["walk_forward"]["window"],
+            "param_grid": result["walk_forward"]["param_grid"],
+            "n_periods": result["walk_forward"]["n_periods"],
+            "periods_with_position": result["walk_forward"]["periods_with_position"],
+            "oos_sharpe": result["walk_forward"]["oos_sharpe"],
+            "total_oos_return": result["walk_forward"]["total_oos_return"],
+            "oos_volatility": result["walk_forward"]["oos_volatility"],
+            "win_rate_periods": result["walk_forward"]["win_rate_periods"],
+            "sharpe_ci": result["walk_forward"]["sharpe_ci"],
+            "partial_selection_diagnosis": result["walk_forward"]["partial_selection_diagnosis"],
+            "criterion": "walk_forward_oos_sharpe_gt_zero",
+            "passed": result["walk_forward"]["ok"],
         },
         "hypothesis": HYPOTHESIS,
         "verdict": result["verdict"],
@@ -857,6 +1036,7 @@ def _build_record(result, data_path, cost_rows, cost_sens_rows, capacity_rows, c
             "This is a falsification exercise, not a claim of profitability. Do not describe the result as profitable, robust, or production-ready.",
             "The fixture is synthetic (bundled sample data), not market evidence; it says nothing about any real security.",
             "All internal regression guards (cost sweep, cost-sensitivity sweep, capacity sweep, capacity-sensitivity sweep) passed; the script exited 0.",
+            "The walk-forward robustness layer re-evaluates the strategy on rolling chronological train/test windows; it is an out-of-sample robustness reading, not an additional fitted parameter search.",
         ],
     }
 
