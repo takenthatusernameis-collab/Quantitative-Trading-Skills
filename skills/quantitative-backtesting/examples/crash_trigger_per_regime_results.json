@@ -1,0 +1,84 @@
+{
+  "fat_tail_crash_per_regime_test": [
+    {
+      "strategy": "sma_crossover",
+      "config_name": "default_detector_uniform_0.20",
+      "detector": "default",
+      "target_vol_scheme": "uniform",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": -0.005968193462106325,
+      "regime_sized_sharpe": -0.059302226921384545,
+      "delta": -0.05333403345927822
+    },
+    {
+      "strategy": "sma_crossover",
+      "config_name": "crash_trigger_uniform_0.20",
+      "detector": "crash_trigger",
+      "target_vol_scheme": "uniform",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": -0.005968193462106325,
+      "regime_sized_sharpe": -0.059302226921384545,
+      "delta": -0.05333403345927822
+    },
+    {
+      "strategy": "sma_crossover",
+      "config_name": "default_detector_per_regime",
+      "detector": "default",
+      "target_vol_scheme": "per_regime",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": -0.005968193462106325,
+      "regime_sized_sharpe": -0.1743756046913052,
+      "delta": -0.16840741122919886
+    },
+    {
+      "strategy": "sma_crossover",
+      "config_name": "crash_trigger_per_regime",
+      "detector": "crash_trigger",
+      "target_vol_scheme": "per_regime",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": -0.005968193462106325,
+      "regime_sized_sharpe": -0.20091969416273892,
+      "delta": -0.19495150070063258
+    },
+    {
+      "strategy": "ema_crossover",
+      "config_name": "default_detector_uniform_0.20",
+      "detector": "default",
+      "target_vol_scheme": "uniform",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": 0.2141694907798975,
+      "regime_sized_sharpe": -0.15595894861312773,
+      "delta": -0.3701284393930252
+    },
+    {
+      "strategy": "ema_crossover",
+      "config_name": "crash_trigger_uniform_0.20",
+      "detector": "crash_trigger",
+      "target_vol_scheme": "uniform",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": 0.2141694907798975,
+      "regime_sized_sharpe": -0.15595894861312773,
+      "delta": -0.3701284393930252
+    },
+    {
+      "strategy": "ema_crossover",
+      "config_name": "default_detector_per_regime",
+      "detector": "default",
+      "target_vol_scheme": "per_regime",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": 0.2141694907798975,
+      "regime_sized_sharpe": -0.20480169443777305,
+      "delta": -0.4189711852176705
+    },
+    {
+      "strategy": "ema_crossover",
+      "config_name": "crash_trigger_per_regime",
+      "detector": "crash_trigger",
+      "target_vol_scheme": "per_regime",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": 0.2141694907798975,
+      "regime_sized_sharpe": -0.1990739649423712,
+      "delta": -0.4132434557222687
+    }
+  ]
+}

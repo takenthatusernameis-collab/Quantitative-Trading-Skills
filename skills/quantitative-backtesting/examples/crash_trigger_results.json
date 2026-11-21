@@ -1,0 +1,100 @@
+{
+  "fat_tail_crash_crash_trigger": [
+    {
+      "strategy": "sma_crossover",
+      "config_name": "crash_trigger_5pct_10day",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": -0.005968193462106325,
+      "regime_sized_sharpe": -0.059302226921384545,
+      "delta": -0.05333403345927822
+    },
+    {
+      "strategy": "sma_crossover",
+      "config_name": "crash_trigger_5pct_20day",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": -0.005968193462106325,
+      "regime_sized_sharpe": -0.059302226921384545,
+      "delta": -0.05333403345927822
+    },
+    {
+      "strategy": "sma_crossover",
+      "config_name": "crash_trigger_5pct_30day",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": -0.005968193462106325,
+      "regime_sized_sharpe": -0.059302226921384545,
+      "delta": -0.05333403345927822
+    },
+    {
+      "strategy": "sma_crossover",
+      "config_name": "crash_trigger_3pct_10day",
+      "first_bear_high_idx": 119,
+      "baseline_sharpe": -0.005968193462106325,
+      "regime_sized_sharpe": -0.059302226921384545,
+      "delta": -0.05333403345927822
+    },
+    {
+      "strategy": "sma_crossover",
+      "config_name": "crash_trigger_7pct_10day",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": -0.005968193462106325,
+      "regime_sized_sharpe": -0.059302226921384545,
+      "delta": -0.05333403345927822
+    },
+    {
+      "strategy": "sma_crossover",
+      "config_name": "hybrid_crash_5pct_20day",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": -0.005968193462106325,
+      "regime_sized_sharpe": -0.059302226921384545,
+      "delta": -0.05333403345927822
+    },
+    {
+      "strategy": "ema_crossover",
+      "config_name": "crash_trigger_5pct_10day",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": 0.2141694907798975,
+      "regime_sized_sharpe": -0.15595894861312773,
+      "delta": -0.3701284393930252
+    },
+    {
+      "strategy": "ema_crossover",
+      "config_name": "crash_trigger_5pct_20day",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": 0.2141694907798975,
+      "regime_sized_sharpe": -0.15595894861312773,
+      "delta": -0.3701284393930252
+    },
+    {
+      "strategy": "ema_crossover",
+      "config_name": "crash_trigger_5pct_30day",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": 0.2141694907798975,
+      "regime_sized_sharpe": -0.15595894861312773,
+      "delta": -0.3701284393930252
+    },
+    {
+      "strategy": "ema_crossover",
+      "config_name": "crash_trigger_3pct_10day",
+      "first_bear_high_idx": 119,
+      "baseline_sharpe": 0.2141694907798975,
+      "regime_sized_sharpe": -0.15595894861312773,
+      "delta": -0.3701284393930252
+    },
+    {
+      "strategy": "ema_crossover",
+      "config_name": "crash_trigger_7pct_10day",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": 0.2141694907798975,
+      "regime_sized_sharpe": -0.15595894861312773,
+      "delta": -0.3701284393930252
+    },
+    {
+      "strategy": "ema_crossover",
+      "config_name": "hybrid_crash_5pct_20day",
+      "first_bear_high_idx": 325,
+      "baseline_sharpe": 0.2141694907798975,
+      "regime_sized_sharpe": -0.15595894861312773,
+      "delta": -0.3701284393930252
+    }
+  ]
+}
