@@ -6999,6 +6999,7 @@ TEST_REGISTRY = [
     ("test_add_benchmark_to_summary_splits_path", test_add_benchmark_to_summary_splits_path),
     ("test_out_of_sample_validation_with_splits", test_out_of_sample_validation_with_splits),
     ("test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model", test_out_of_sample_validation_splits_adjusted_regardless_of_cost_model),
+    ("test_out_of_sample_summary_carries_sharpe_ratio_alias", test_out_of_sample_summary_carries_sharpe_ratio_alias),
     ("test_out_of_sample_validation_n_trials_matches_evaluated_combinations", test_out_of_sample_validation_n_trials_matches_evaluated_combinations),
     ("test_split_train_val_test_boundaries_are_chronological_and_non_overlapping", test_split_train_val_test_boundaries_are_chronological_and_non_overlapping),
     ("test_walk_forward_analysis_rejects_overlapping_oos_test_windows", test_walk_forward_analysis_rejects_overlapping_oos_test_windows),
