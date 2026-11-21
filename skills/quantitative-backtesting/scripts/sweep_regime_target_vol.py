@@ -56,7 +56,11 @@ from regime_detection import (  # noqa: E402
 )
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
-BASELINE_PATH = Path(__file__).resolve().parent.parent.parent.parent / "adversarial_stress_test_results.json"
+BASELINE_CANDIDATES = [
+    Path(__file__).resolve().parent.parent.parent.parent / "adversarial_stress_test_results.json",
+    EXAMPLES_DIR / "adversarial_stress_test_results.json",
+    Path("adversarial_stress_test_results.json"),
+]
 OUT_PATH = EXAMPLES_DIR / "adversarial_stress_test_regime_aware_sweep.json"
 
 sys.path.insert(0, str(EXAMPLES_DIR))
@@ -95,11 +99,17 @@ def fmt(x):
 
 
 def load_baseline() -> Dict[tuple, Dict[str, Any]]:
-    if not BASELINE_PATH.exists():
-        print(f"WARNING: baseline {BASELINE_PATH} not found; deltas will be unavailable")
+    baseline_path = None
+    for candidate in BASELINE_CANDIDATES:
+        if candidate.exists():
+            baseline_path = candidate
+            break
+    if baseline_path is None:
+        print(f"WARNING: baseline not found in {BASELINE_CANDIDATES}; deltas will be unavailable")
         return {}
-    with open(BASELINE_PATH) as f:
+    with open(baseline_path) as f:
         records = json.load(f)
+    print(f"Loaded baseline from {baseline_path}")
     return {
         (r["scenario"], r["strategy"]): r["walk_forward"]
         for r in records
@@ -235,7 +245,7 @@ def evaluate(records: List[Dict[str, Any]]) -> None:
 
 
 def main():
-    print(f"Baseline: {BASELINE_PATH} (exists={BASELINE_PATH.exists()})")
+    print(f"Baseline candidates: {[str(p) for p in BASELINE_CANDIDATES]}")
     baseline_index = load_baseline()
     print(f"Loaded baseline for {len(baseline_index)} scenario/strategy pairs")
     print(f"Grid: target_vol={TARGET_VOLS} x vol_window={VOL_WINDOWS} "

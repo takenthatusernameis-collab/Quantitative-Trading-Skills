@@ -11,7 +11,7 @@
       "degrading_ok": false,
       "improving_ok": false,
       "ok": false,
-      "score": -2.31729737713117
+      "score": -2.317297
     },
     {
       "target_vol": 0.05,
@@ -19,7 +19,7 @@
       "degrading_ok": false,
       "improving_ok": false,
       "ok": false,
-      "score": -2.31729737713117
+      "score": -2.317297
     },
     {
       "target_vol": 0.05,
@@ -27,7 +27,7 @@
       "degrading_ok": false,
       "improving_ok": false,
       "ok": false,
-      "score": -2.31729737713117
+      "score": -2.317297
     },
     {
       "target_vol": 0.1,
@@ -35,7 +35,7 @@
       "degrading_ok": false,
       "improving_ok": true,
       "ok": false,
-      "score": 0.7007122568106127
+      "score": 0.700712
     },
     {
       "target_vol": 0.1,
@@ -43,7 +43,7 @@
       "degrading_ok": false,
       "improving_ok": true,
       "ok": false,
-      "score": 0.7007122568106127
+      "score": 0.700712
     },
     {
       "target_vol": 0.1,
@@ -51,7 +51,7 @@
       "degrading_ok": false,
       "improving_ok": true,
       "ok": false,
-      "score": 0.7007122568106127
+      "score": 0.700712
     },
     {
       "target_vol": 0.15,
@@ -59,7 +59,7 @@
       "degrading_ok": true,
       "improving_ok": true,
       "ok": true,
-      "score": 1.679916293010904
+      "score": 1.679916
     },
     {
       "target_vol": 0.15,
@@ -67,7 +67,7 @@
       "degrading_ok": true,
       "improving_ok": true,
       "ok": true,
-      "score": 1.679916293010904
+      "score": 1.679916
     },
     {
       "target_vol": 0.15,
@@ -75,7 +75,7 @@
       "degrading_ok": true,
       "improving_ok": true,
       "ok": true,
-      "score": 1.679916293010904
+      "score": 1.679916
     },
     {
       "target_vol": 0.2,
@@ -83,7 +83,7 @@
       "degrading_ok": true,
       "improving_ok": true,
       "ok": true,
-      "score": 2.0804334044864943
+      "score": 2.080433
     },
     {
       "target_vol": 0.2,
@@ -91,7 +91,7 @@
       "degrading_ok": true,
       "improving_ok": true,
       "ok": true,
-      "score": 2.0804334044864943
+      "score": 2.080433
     },
     {
       "target_vol": 0.2,
@@ -99,12 +99,13 @@
       "degrading_ok": true,
       "improving_ok": true,
       "ok": true,
-      "score": 2.0804334044864943
+      "score": 2.080433
     }
   ],
   "best_cell": [
     0.2,
     21
   ],
-  "best_score": 2.0804334044864943
+  "best_score": 2.080433,
+  "regenerated_from": "adversarial_stress_test_regime_aware_sweep.json (baseline-fixed run, 2026-11-21)"
 }

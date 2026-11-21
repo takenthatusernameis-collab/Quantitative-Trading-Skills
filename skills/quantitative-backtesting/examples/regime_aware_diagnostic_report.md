@@ -231,3 +231,88 @@ From each baseline's `regime_periods`: the worst single regime period (lowest to
 - The pattern is **scenario- and regime-dependent, not universal**: a uniform 10% target vol with fixed regime windows (trend MA 50/200, vol window 63, quantiles 0.25/0.75) cannot be optimal across all return-generating processes. Per-regime target_vol tuning or a faster/slower regime detector is the logical next experiment.
 
 No statistical significance is claimed: all Deflated Sharpe p-values ≈ 1.0 and test resolution ≈ 2.0 Sharpe. This is a point-estimate mechanism diagnostic on synthetic adversarial data, not a profitability claim.
+
+## 5. Target_vol sweep findings
+
+Source: `skills/quantitative-backtesting/scripts/sweep_regime_target_vol.py`
+(output `adversarial_stress_test_regime_aware_sweep.json`, aggregates in
+`adversarial_stress_test_regime_aware_sweep_verified.json`). The sweep re-runs
+the regime-aware walk-forward variant (session 145/146 setup: combined regime
+detection + `RegimeAwareStrategy` overlay, `walk_forward_analysis` with
+deflation and PIT controls) with `target_vol ∈ {0.05, 0.10, 0.15, 0.20}` and
+`vol_window ∈ {21, 63, 126}` across all 12 single-asset scenario-strategy
+pairs (6 scenarios × SMA/EMA), baseline = committed
+`adversarial_stress_test_results.json` walk-forward OOS Sharpe. 144
+walk-forwards in total. As before, no statistical-significance or
+profitability claim is made (synthetic adversarial data, DSR p ≈ 1.0, test
+resolution ≈ 2.0 Sharpe); verdicts are methodological, not performance claims.
+
+### 5.1 Regime-sized OOS Sharpe by target_vol (baseline vs overlay)
+
+| Scenario | Strategy | Baseline Sharpe | tv = 0.05 | tv = 0.10 | tv = 0.15 | tv = 0.20 | Best tv | Best Δ vs baseline |
+|----------|----------|-----------------|-----------|-----------|-----------|-----------|---------|--------------------|
+| volatility_clustering | sma_crossover | +0.0919 | −0.1924 | +0.0405 | +0.1058 | +0.1455 | 0.20 | +0.0537 |
+| volatility_clustering | ema_crossover | +0.2766 | −0.0776 | +0.1759 | +0.2552 | +0.2880 | 0.20 | +0.0115 |
+| fat_tail_crash | sma_crossover | −0.0060 | −0.4344 | −0.1807 | −0.0998 | −0.0593 | 0.20 | −0.0533 |
+| fat_tail_crash | ema_crossover | +0.2142 | −0.5217 | −0.2763 | −0.1961 | −0.1560 | 0.20 | −0.3701 |
+| liquidity_crisis | sma_crossover | +0.0108 | −0.2017 | +0.0371 | +0.1205 | +0.1622 | 0.20 | +0.1514 |
+| liquidity_crisis | ema_crossover | +0.0437 | −0.0794 | +0.1726 | +0.2566 | +0.2986 | 0.20 | +0.2550 |
+| regime_shift | sma_crossover | −0.2657 | −0.4003 | −0.1319 | −0.0424 | +0.0431 | 0.20 | +0.3088 |
+| regime_shift | ema_crossover | −0.1623 | −0.2758 | +0.0138 | +0.0985 | +0.1484 | 0.20 | +0.3107 |
+| structural_break | sma_crossover | +0.1306 | −0.1261 | +0.1476 | +0.2360 | +0.2803 | 0.20 | +0.1496 |
+| structural_break | ema_crossover | +0.0127 | −0.1488 | +0.1019 | +0.1905 | +0.2348 | 0.20 | +0.2221 |
+| trend_persistence | sma_crossover | +0.5007 | +0.7098 | +0.9261 | +1.0240 | +1.0350 | 0.20 | +0.5343 |
+| trend_persistence | ema_crossover | +0.5936 | +0.8717 | +1.1147 | +1.1995 | +1.2307 | 0.20 | +0.6371 |
+
+`vol_window ∈ {21, 63, 126}` produced identical regime-sized Sharpe values on
+these seeds, so the target_vol dimension drives all movement in the grid.
+
+### 5.2 Answers to the sweep questions
+
+**Q1 — Per-pair best target_vol:** `target_vol = 0.20` maximizes regime-sized
+OOS Sharpe for all 12 scenario-strategy pairs. Within the tested grid, Sharpe
+rises monotonically with target_vol for every pair (including the degrading
+scenarios), so 0.20 is best-of-grid, not a claim of optimality beyond it.
+
+**Q2 — Does any single target_vol improve all pairs?** No. At `tv = 0.20`
+(10/12 pairs improve vs baseline), the only pairs still below baseline are
+`fat_tail_crash/sma_crossover` (−0.0533) and `fat_tail_crash/ema_crossover`
+(−0.3701). `fat_tail_crash` is degraded at every target_vol tested, so
+target_vol retuning alone cannot recover it — consistent with the session-146
+lag diagnosis (trailing `bear_high` detection cuts exposure during the crash
+recovery). A faster/slower regime detector or scenario-specific target_vol
+would be required there, not just a re-tuned uniform target.
+
+**Q3 — Per-regime targets vs one uniform target:** For 11 of 12 pairs, a
+uniform `tv = 0.20` strictly dominates the committed `tv = 0.10` reference
+within the grid. Only `fat_tail_crash` resists all uniform targets, so
+per-regime (or per-scenario) target_vol is warranted specifically for that
+return-generating process, while a uniform 20% annualized target is the better
+single setting elsewhere in this suite.
+
+### 5.3 Session-146 falsification criterion check
+
+Pre-registered criterion (session 146): degrading scenario deltas less
+negative than at the (0.10, 63) reference cell, and improving scenario deltas
+≥ 0.
+
+- `tv = 0.05`: fails (2/12 pairs improve; all degrading deltas more negative).
+- `tv = 0.10`: improves on 8/12 pairs but all four degrading deltas stay negative (the reference cell itself).
+- `tv = 0.15`: passes — 9/12 pairs improve; all degrading deltas less negative than reference.
+- `tv = 0.20`: passes — 10/12 pairs improve; all degrading deltas less negative than reference (best cell, score +2.0804; vol_window immaterial).
+
+The uniform 10% target is therefore not the best uniform choice in this grid:
+20% annualized target vol dominates it on every pair tested, recovers both
+`volatility_clustering` pairs to positive delta, and narrows (but does not
+eliminate) the `fat_tail_crash` degradation.
+
+### 5.4 Caveats
+
+- Point estimates only: all Deflated Sharpe p-values ≈ 1.0 and test
+  resolution ≈ 2.0 Sharpe on synthetic adversarial data; no reproducibility
+  or profitability claim.
+- Best-of-grid is not an optimal target: values outside {0.05, 0.10, 0.15,
+  0.20} were not tested, and a still-higher target was not evaluated.
+- `fat_tail_crash` remains unresolved by this sweep: its degradation is a
+  regime-detection timing problem (session 146, section 3), not a
+  target_vol problem.
