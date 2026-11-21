@@ -1,24 +1,127 @@
 {
-  "fat_tail_crash_returns_based": [
+  "fat_tail_crash_returns_based_sweep": [
     {
-      "strategy": "sma_crossover",
-      "detector": "returns_based",
+      "setting": "prior_degenerate",
+      "cum_return_window": 63,
+      "cum_return_threshold": -0.1,
       "target_vol": 0.2,
+      "bear_high_count": 1654,
+      "bear_high_fraction_pct": 33.08,
+      "trigger_count": 23,
       "first_bear_high_idx": 298,
-      "bear_high_count": 2397,
-      "baseline_sharpe": -0.005968193462106325,
-      "returns_based_sharpe": -0.059302226921384545,
-      "delta": -0.05333403345927822
+      "crash_precision": 0.2609,
+      "crash_recall": 0.2308,
+      "strategies": {
+        "sma_crossover": {
+          "oos_sharpe": -0.059302226921384545,
+          "delta": -0.05333403345927822,
+          "baseline_sharpe": -0.005968193462106325
+        },
+        "ema_crossover": {
+          "oos_sharpe": -0.15595894861312773,
+          "delta": -0.3701284393930252,
+          "baseline_sharpe": 0.2141694907798975
+        }
+      }
     },
     {
-      "strategy": "ema_crossover",
-      "detector": "returns_based",
+      "setting": "sparse_21d_m20",
+      "cum_return_window": 21,
+      "cum_return_threshold": -0.2,
       "target_vol": 0.2,
-      "first_bear_high_idx": 298,
-      "bear_high_count": 2397,
-      "baseline_sharpe": 0.2141694907798975,
-      "returns_based_sharpe": -0.15595894861312773,
-      "delta": -0.3701284393930252
+      "bear_high_count": 283,
+      "bear_high_fraction_pct": 5.66,
+      "trigger_count": 9,
+      "first_bear_high_idx": 368,
+      "crash_precision": 1.0,
+      "crash_recall": 0.3077,
+      "strategies": {
+        "sma_crossover": {
+          "oos_sharpe": -0.059302226921384545,
+          "delta": -0.05333403345927822,
+          "baseline_sharpe": -0.005968193462106325
+        },
+        "ema_crossover": {
+          "oos_sharpe": -0.15595894861312773,
+          "delta": -0.3701284393930252,
+          "baseline_sharpe": 0.2141694907798975
+        }
+      }
+    },
+    {
+      "setting": "sparse_21d_m18",
+      "cum_return_window": 21,
+      "cum_return_threshold": -0.18,
+      "target_vol": 0.2,
+      "bear_high_count": 331,
+      "bear_high_fraction_pct": 6.62,
+      "trigger_count": 10,
+      "first_bear_high_idx": 368,
+      "crash_precision": 1.0,
+      "crash_recall": 0.3846,
+      "strategies": {
+        "sma_crossover": {
+          "oos_sharpe": -0.059302226921384545,
+          "delta": -0.05333403345927822,
+          "baseline_sharpe": -0.005968193462106325
+        },
+        "ema_crossover": {
+          "oos_sharpe": -0.15595894861312773,
+          "delta": -0.3701284393930252,
+          "baseline_sharpe": 0.2141694907798975
+        }
+      }
+    },
+    {
+      "setting": "sparse_10d_m15",
+      "cum_return_window": 10,
+      "cum_return_threshold": -0.15,
+      "target_vol": 0.2,
+      "bear_high_count": 265,
+      "bear_high_fraction_pct": 5.3,
+      "trigger_count": 11,
+      "first_bear_high_idx": 366,
+      "crash_precision": 1.0,
+      "crash_recall": 0.4615,
+      "strategies": {
+        "sma_crossover": {
+          "oos_sharpe": -0.059302226921384545,
+          "delta": -0.05333403345927822,
+          "baseline_sharpe": -0.005968193462106325
+        },
+        "ema_crossover": {
+          "oos_sharpe": -0.15595894861312773,
+          "delta": -0.3701284393930252,
+          "baseline_sharpe": 0.2141694907798975
+        }
+      }
+    }
+  ],
+  "fat_tail_crash_returns_based_per_regime": [
+    {
+      "setting": "sparse_21d_m20_per_regime_bear010",
+      "cum_return_window": 21,
+      "cum_return_threshold": -0.2,
+      "bear_high_target_vol": 0.1,
+      "other_target_vol": 0.2,
+      "bear_high_count": 283,
+      "bear_high_fraction_pct": 5.66,
+      "trigger_count": 9,
+      "first_bear_high_idx": 368,
+      "crash_precision": 1.0,
+      "crash_recall": 0.3077,
+      "strategies": {
+        "sma_crossover": {
+          "oos_sharpe": -0.09333862244723007,
+          "delta": -0.08737042898512375,
+          "baseline_sharpe": -0.005968193462106325
+        },
+        "ema_crossover": {
+          "oos_sharpe": -0.1595382481101951,
+          "delta": -0.37370773889009257,
+          "baseline_sharpe": 0.2141694907798975
+        }
+      }
     }
   ]
 }

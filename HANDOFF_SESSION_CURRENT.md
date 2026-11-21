@@ -1,30 +1,23 @@
-# Handoff — Next Session (2026-11-21): baseline verified; fat_tail_crash detector thread exhausted
+# Handoff — Current State (2026-11-21): fat_tail_crash regime thread CLOSED
 
 ## Baseline
-- HEAD `6cef808`, branch `main`; working tree clean except one uncommitted change (the `TEST_REGISTRY` fix below). Do NOT commit unless asked.
-- Session 148 completed the crash-trigger detector experiment for `fat_tail_crash` (see `HANDOFF_SESSION_148.md`). Detector-tuning thread is EXHAUSTED: uniform target_vol 0.20 is best; no regime-sizing variant recovers the degradation. Best deltas vs default: SMA -0.0533, EMA -0.3701 (uniform tv=0.20). All results are point estimates on synthetic adversarial data (DSR p ≈ 1.0); no profitability claim.
+- HEAD `569ff2f`, branch `main`. Working tree has this session's UNCOMMITTED
+  changes only (do NOT commit unless asked):
+  - `skills/quantitative-backtesting/scripts/returns_based_regime_detector.py` (rewritten: parametrized sweep + per-regime test + ffill-order bug fix)
+  - `skills/quantitative-backtesting/examples/returns_based_regime_results.json` (new 2-section schema)
+  - `skills/quantitative-backtesting/scripts/_diag_returns_regime.py` (new, untracked diagnostic)
+- No library modules were modified. Focused tests (regime_detection, regime_aware_position_sizing, generate_adversarial_scenarios) → 85 passed. Full archive: `HANDOFF_SESSION_149.md`.
 
-## What changed this session
-- Ran full quant suite: `skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` → **1541 passed, 1 failed** (was 1540 passed, 2 failed before the fix).
-- Fixed deterministic failure: `test_out_of_sample_summary_carries_sharpe_ratio_alias` (`skills/quantitative-backtesting/tests/test_walk_forward.py:1393`) was defined but missing from `TEST_REGISTRY` (line 6985). Registered it → `test_main_registers_every_module_level_test` now passes. This is a one-line addition to `TEST_REGISTRY`.
-- Reverted unrelated timestamp regenerations in `results/simple_momentum_hypothesis.json` and `skills/quantitative-backtesting/examples/example_reproducible_output/{data_provenance.json,tear_sheet.html,tear_sheet_summary.json}` caused by test-suite output rewrites (load_timestamp/generated_at). Working tree contains only the `TEST_REGISTRY` addition.
-- `skills/quantitative-backtesting/requirements.txt` already pins `pytest-xdist==3.8.0`; `/tmp/venv` has pytest 9.2.0 + pytest-xdist.
-
-## What was actually verified
-- `test_walk_forward.py`: **226 passed, 0 failed** (single worker and `-n 4` parallel).
-- Full suite: **1541 passed, 1 failed**. The sole remaining failure is a pre-existing `sharpe_ratio` summary key-set assertion that reproduces ONLY under full-suite `-n 4`, never in any isolated file run — not caused by this session's change (pytest does not use `TEST_REGISTRY`).
-- Evidence: full-suite set diff shows `sharpe_ratio` missing/extra among keys `{book_diagnostic, capacity*, test_sharpe, test_total_return, test_volatility}`.
-
-## What remains unresolved
-- Identify/fix the non-reproducible full-parallel `sharpe_ratio` key-set failure (appears only in full-suite `-n 4`). Not blocking focused verification.
-- Then begin the new quant research thread (below).
+## Where the thread landed
+- **Sparse crash-focused bear_high is achievable** (21d/-0.20 → 5.66% of bars, precision 1.00, first trigger 368 vs first true crash 366; recall 0.31). Prior "degenerate 47.9%" was inflated by an ffill-order bug (fixed).
+- **Uniform tv=0.20: OOS Sharpe is INVARIANT to regime labels** across all settings (SMA delta -0.0533, EMA -0.3701 identical for bear% 5.3→33%). The deltas measure the uniform vol-target overlay (lookback 20) vs the baseline's plain crossover sizing, NOT the detector. This retroactively explains all prior uniform-tv "detector variants".
+- **Crash de-risking is worse**: sparse bear_high with bear_high_vol=0.10 → SMA -0.0874, EMA -0.3737 (worse than uniform).
+- **Thread EXHAUSTED.** No profitability / significance claim; synthetic data only.
 
 ## Approaches already failed (do not repeat)
-- Crash-trigger / crash-only / per-regime target_vol detector tuning on `fat_tail_crash` (session 148): all worse than uniform tv=0.20; thread exhausted.
+- Any fat_tail_crash regime-detector tuning at uniform tv (labels irrelevant to sizing).
+- Crash de-risking via lower target_vol in a sparse crash regime (worse than uniform).
+- Threshold/window tuning to "improve" uniform-tv OOS Sharpe (mathematically cannot).
 
 ## One precise next task
-Start the new quant research methodology thread recommended in `HANDOFF_SESSION_148.md`:
-**Option 2 — Returns-based regime detection on `fat_tail_crash` at uniform tv=0.20.**
-Detect `bear_high` from cumulative negative returns instead of volatility quantiles; reuse `detect_combined_regime` + `walk_forward_analysis`; no statistical-significance or profitability claims; synthetic adversarial data; do not commit unless asked. Compare delta vs the uniform-tv=0.20 baseline (SMA -0.0533, EMA -0.3701).
-
-Evidence locations: `skills/quantitative-backtesting/scripts/crash_only_detector.py`, `skills/quantitative-backtesting/examples/crash_only_results.json`, baseline repo-root `adversarial_stress_test_results.json`. Environment: `source /tmp/venv/bin/activate`.
+See `HANDOFF_SESSION_NEXT.md`.
