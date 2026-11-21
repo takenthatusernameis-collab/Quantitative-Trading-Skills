@@ -1,4 +1,4 @@
-# Handoff — Current State (2026-11-21): fat_tail_crash regime thread CLOSED
+# Handoff — Current State (2026-11-21): TSMOM real-panel cost-sensitivity audit COMPLETE
 
 ## Baseline
 - HEAD `569ff2f`, branch `main`. Working tree has this session's UNCOMMITTED

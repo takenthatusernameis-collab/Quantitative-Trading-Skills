@@ -1,4 +1,4 @@
-# Handoff — Next Task (2026-11-21): move to a real-data quant methodology thread
+# Handoff — Next Task (2026-11-21): audit cross-sectional momentum cost/borrow realism on real triple panel
 
 ## Context
 The synthetic `fat_tail_crash` regime-detector thread is CLOSED (`HANDOFF_SESSION_149.md`).
