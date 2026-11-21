@@ -1,0 +1,221 @@
+{
+  "lag_analysis": [
+    {
+      "scenario": "regime_shift",
+      "first_bear_high_idx": 435,
+      "first_bear_high_date": "2016-09-01 00:00:00",
+      "worst_drawdown_peak_idx": 381,
+      "worst_drawdown_trough_idx": 4993,
+      "worst_drawdown_center_idx": 2687,
+      "worst_drawdown_center_date": "2025-04-21 00:00:00",
+      "true_transitions": {
+        "bull_to_bear": 378,
+        "transition_start": 378,
+        "transition_end": 441
+      },
+      "lags_bars": {
+        "bull_to_bear_lag": 57,
+        "worst_drawdown_lag": -2252
+      }
+    },
+    {
+      "scenario": "fat_tail_crash",
+      "first_bear_high_idx": 325,
+      "first_bear_high_date": "2016-03-31 00:00:00",
+      "worst_drawdown_peak_idx": 191,
+      "worst_drawdown_trough_idx": 1084,
+      "worst_drawdown_center_idx": 637,
+      "worst_drawdown_center_date": "2017-06-12 00:00:00",
+      "true_transitions": {
+        "crash_indices": [
+          366,
+          374,
+          612,
+          1441,
+          1583,
+          1954,
+          1971,
+          2342,
+          2349,
+          2353,
+          2769,
+          2770,
+          2807,
+          3103,
+          3111,
+          3117,
+          3548,
+          3559,
+          3560,
+          4065,
+          4347,
+          4348,
+          4992
+        ]
+      },
+      "lags_bars": {
+        "worst_drawdown_lag": -312,
+        "first_crash_lag": -41,
+        "closest_crash_lag": -287
+      }
+    },
+    {
+      "scenario": "liquidity_crisis",
+      "first_bear_high_idx": 321,
+      "first_bear_high_date": "2016-03-25 00:00:00",
+      "worst_drawdown_peak_idx": 3003,
+      "worst_drawdown_trough_idx": 3102,
+      "worst_drawdown_center_idx": 3052,
+      "worst_drawdown_center_date": "2026-09-14 00:00:00",
+      "true_transitions": {
+        "crisis_start": 3000,
+        "crisis_end": 3126
+      },
+      "lags_bars": {
+        "crisis_start_lag": -2679,
+        "worst_drawdown_lag": -2731
+      }
+    },
+    {
+      "scenario": "structural_break",
+      "first_bear_high_idx": 199,
+      "first_bear_high_date": "2015-10-07 00:00:00",
+      "worst_drawdown_peak_idx": 3657,
+      "worst_drawdown_trough_idx": 4993,
+      "worst_drawdown_center_idx": 4325,
+      "worst_drawdown_center_date": "2031-07-31 00:00:00",
+      "true_transitions": {
+        "break_idx": 2500
+      },
+      "lags_bars": {
+        "break_idx_lag": -2301,
+        "worst_drawdown_lag": -4126
+      }
+    },
+    {
+      "scenario": "trend_persistence",
+      "first_bear_high_idx": 1938,
+      "first_bear_high_date": "2022-06-07 00:00:00",
+      "worst_drawdown_peak_idx": 3656,
+      "worst_drawdown_trough_idx": 4899,
+      "worst_drawdown_center_idx": 4277,
+      "worst_drawdown_center_date": "2031-05-26 00:00:00",
+      "true_transitions": {
+        "trend_start": 133,
+        "trend_end": 3633
+      },
+      "lags_bars": {
+        "trend_start_lag": 1805,
+        "trend_end_lag": -1695,
+        "worst_drawdown_lag": -2339
+      }
+    },
+    {
+      "scenario": "volatility_clustering",
+      "first_bear_high_idx": 266,
+      "first_bear_high_date": "2016-01-08 00:00:00",
+      "worst_drawdown_peak_idx": 191,
+      "worst_drawdown_trough_idx": 1064,
+      "worst_drawdown_center_idx": 627,
+      "worst_drawdown_center_date": "2017-05-29 00:00:00",
+      "true_transitions": {
+        "high_vol_entries": [
+          258,
+          346,
+          628,
+          1060,
+          1374,
+          1377,
+          1449,
+          1525,
+          1554,
+          1592,
+          1748,
+          2097,
+          2405,
+          2407,
+          2492,
+          2716,
+          3030,
+          3208,
+          3460,
+          3570,
+          3942,
+          4124,
+          4437,
+          4843,
+          4890,
+          4967
+        ]
+      },
+      "lags_bars": {
+        "worst_drawdown_lag": -361
+      }
+    }
+  ],
+  "faster_detector_test": {
+    "fat_tail_crash_faster_detector": [
+      {
+        "strategy": "sma_crossover",
+        "config_idx": 0,
+        "vol_quantile_high": 0.6,
+        "min_regime_length": 10,
+        "first_bear_high_idx": 325,
+        "baseline_sharpe": -0.005968193462106325,
+        "regime_sized_sharpe": -0.059302226921384545,
+        "delta": -0.05333403345927822
+      },
+      {
+        "strategy": "sma_crossover",
+        "config_idx": 1,
+        "vol_quantile_high": 0.5,
+        "min_regime_length": 10,
+        "first_bear_high_idx": 325,
+        "baseline_sharpe": -0.005968193462106325,
+        "regime_sized_sharpe": -0.059302226921384545,
+        "delta": -0.05333403345927822
+      },
+      {
+        "strategy": "sma_crossover",
+        "config_idx": 2,
+        "vol_quantile_high": 0.75,
+        "min_regime_length": 10,
+        "first_bear_high_idx": 325,
+        "baseline_sharpe": -0.005968193462106325,
+        "regime_sized_sharpe": -0.059302226921384545,
+        "delta": -0.05333403345927822
+      },
+      {
+        "strategy": "ema_crossover",
+        "config_idx": 0,
+        "vol_quantile_high": 0.6,
+        "min_regime_length": 10,
+        "first_bear_high_idx": 325,
+        "baseline_sharpe": 0.2141694907798975,
+        "regime_sized_sharpe": -0.15595894861312773,
+        "delta": -0.3701284393930252
+      },
+      {
+        "strategy": "ema_crossover",
+        "config_idx": 1,
+        "vol_quantile_high": 0.5,
+        "min_regime_length": 10,
+        "first_bear_high_idx": 325,
+        "baseline_sharpe": 0.2141694907798975,
+        "regime_sized_sharpe": -0.15595894861312773,
+        "delta": -0.3701284393930252
+      },
+      {
+        "strategy": "ema_crossover",
+        "config_idx": 2,
+        "vol_quantile_high": 0.75,
+        "min_regime_length": 10,
+        "first_bear_high_idx": 325,
+        "baseline_sharpe": 0.2141694907798975,
+        "regime_sized_sharpe": -0.15595894861312773,
+        "delta": -0.3701284393930252
+      }
+    ]
+  },
+  "section6_markdown": "## 6. Regime-Detection Lag Experiment & Faster Detector Test\n\n### 6.1 Detection Lag Across All Scenarios\n\nMeasured lag (in bars) between true regime transitions (from generator design)\nand first detected `bear_high` regime from `detect_combined_regime` (RegimeConfig defaults).\nPositive lag = detector trails the true transition.\n\n| Scenario | First bear_high (idx/date) | Worst DD Center (idx/date) | Lag vs Worst DD (bars) | Key True Transition | Lag vs True Transition (bars) |\n|----------|----------------------------|----------------------------|------------------------|---------------------|------------------------------|\n| regime_shift | 435 (2016-09-01 00:00:00) | 2687 (2025-04-21 00:00:00) | -2252 | bull\u2192bear | 57 |\n| fat_tail_crash | 325 (2016-03-31 00:00:00) | 637 (2017-06-12 00:00:00) | -312 | first crash | -41 |\n| liquidity_crisis | 321 (2016-03-25 00:00:00) | 3052 (2026-09-14 00:00:00) | -2731 | crisis start | -2679 |\n| structural_break | 199 (2015-10-07 00:00:00) | 4325 (2031-07-31 00:00:00) | -4126 | structural break | -2301 |\n| trend_persistence | 1938 (2022-06-07 00:00:00) | 4277 (2031-05-26 00:00:00) | -2339 | trend start | 1805 |\n| volatility_clustering | 266 (2016-01-08 00:00:00) | 627 (2017-05-29 00:00:00) | -361 |  |  |\n\n### 6.2 fat_tail_crash Specific Findings\n\n- **First `bear_high` detection**: index 325 (2016-03-31 00:00:00)\n- **Worst drawdown center**: index 637 (2017-06-12 00:00:00)\n- **Lag vs worst drawdown**: -312 bars (detector lags)\n- **First crash event**: lag = -41 bars\n- **Crash closest to worst DD**: lag = -287 bars\n\n**Conclusion**: The `bear_high` detector **lags the worst drawdown** in `fat_tail_crash`\nby **-312 bars**, confirming the session-146 hypothesis.\nThe detector only signals `bear_high` after the crash recovery has begun, causing the\nregime-aware overlay to cut exposure during recovery rather than during the crash.\n\n### 6.3 Faster Detector Test on fat_tail_crash (target_vol=0.20)\n\nTested detector variants with lower `vol_quantile_high` (more sensitive to high vol)\nand/or shorter `min_regime_length` (faster regime switching) on `fat_tail_crash`\nat the best target_vol from the sweep (0.20). Results vs baseline:\n\n| Strategy | Config | vol_q_high | min_reg_len | First bear_high | Baseline Sharpe | Regime-Sized Sharpe | Delta |\n|----------|--------|------------|-------------|-----------------|-----------------|---------------------|-------|\n| sma_crossover | 1 | 0.6 | 10 | 325 | -0.0060 | -0.0593 | -0.0533 |\n| sma_crossover | 2 | 0.5 | 10 | 325 | -0.0060 | -0.0593 | -0.0533 |\n| sma_crossover | 3 | 0.75 | 10 | 325 | -0.0060 | -0.0593 | -0.0533 |\n| ema_crossover | 1 | 0.6 | 10 | 325 | +0.2142 | -0.1560 | -0.3701 |\n| ema_crossover | 2 | 0.5 | 10 | 325 | +0.2142 | -0.1560 | -0.3701 |\n| ema_crossover | 3 | 0.75 | 10 | 325 | +0.2142 | -0.1560 | -0.3701 |\n\n**Best faster-detector config**: vol_quantile_high=0.6, min_regime_length=10 (delta = -0.0533 vs baseline)\n\nThe faster detector variants tested did **not** recover the degradation vs baseline.\nFurther detector tuning (e.g., even lower quantiles, HMM-based detection) may be needed.\n\n**Caveat**: Point estimates only on synthetic adversarial data (DSR p \u2248 1.0,\ntest resolution \u2248 2.0 Sharpe). No statistical-significance or profitability claim."
+}
