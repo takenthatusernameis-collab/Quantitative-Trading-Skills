@@ -7300,6 +7300,10 @@ def out_of_sample_validation(
         "test_book_diagnostic": test_performance.get("book_diagnostic"),
         "test_total_return": test_total_return,
         "test_sharpe": test_sharpe,
+        # Backward-compatible alias mirroring the `sharpe_ratio` key the
+        # walk-forward / CPCV summaries use for their aggregate out-of-sample
+        # Sharpe. Carries the same value as `test_sharpe`; no number changes.
+        "sharpe_ratio": test_sharpe,
         "test_volatility": test_performance["test_volatility"],
         # Average OUT-OF-SAMPLE test Sharpe of the selected parameter set
         # across the validation periods/folds where it was chosen. This is
