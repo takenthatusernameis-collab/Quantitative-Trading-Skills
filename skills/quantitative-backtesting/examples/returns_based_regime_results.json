@@ -1,0 +1,11 @@
+{
+  "target_vol": 0.2,
+  "regime_counts": {
+    "unknown": 67,
+    "bear_high": 588,
+    "bull_low": 70,
+    "bull_high": 62,
+    "sideways_high": 37,
+    "bear_low": 176
+  }
+}
