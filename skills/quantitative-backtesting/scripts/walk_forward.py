@@ -7192,11 +7192,6 @@ def out_of_sample_validation(
     test_performance = {
             "test_total_return": test_total_return,
             "test_sharpe": test_sharpe,
-            # Backward-compatible alias for the held-out test Sharpe, mirroring
-            # the `sharpe_ratio` key the walk-forward / CPCV summaries expose for
-            # their aggregate OOS Sharpe. Both names carry the same value; no
-            # number changes.
-            "sharpe_ratio": test_sharpe,
             "test_volatility": float(test_returns.std() * np.sqrt(ann_factor_test)) if len(test_returns) > 1 else 0.0,
             # The held-out window is counted in OBSERVATIONS (one per return
             # observation, e.g. one daily bar), not in independent periods. The
@@ -7305,14 +7300,6 @@ def out_of_sample_validation(
         "test_book_diagnostic": test_performance.get("book_diagnostic"),
         "test_total_return": test_total_return,
         "test_sharpe": test_sharpe,
-        # Backward-compatible alias for the held-out test Sharpe. The
-        # walk-forward / CPCV summaries expose their aggregate OOS Sharpe as
-        # `summary["sharpe_ratio"]`, but the out-of-sample summary used
-        # `summary["test_sharpe"]` instead -- a naming inconsistency that made
-        # the stress-test print "N/A" for the test Sharpe while the same
-        # validator's own `test_performance["test_sharpe"]` was populated.
-        # Both names now carry the same value; no number changes.
-        "sharpe_ratio": test_sharpe,
         "test_volatility": test_performance["test_volatility"],
         # Average OUT-OF-SAMPLE test Sharpe of the selected parameter set
         # across the validation periods/folds where it was chosen. This is
