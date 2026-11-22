@@ -7025,6 +7025,64 @@ def test_cli_walk_forward_participation_rate_cap_written_to_summary():
             )
 
 
+def test_cli_walk_forward_output_format_csv_writes_capacity_rows():
+    """CLI walk-forward with --output-format csv emits walk_forward_summary.csv
+    with flattened per-period capacity columns alongside the JSON, while the
+    default json format writes only the JSON artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+
+        base_argv = [
+            "walk_forward", "walk-forward",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5], "slow_period": [10, 12]}',
+            "--impact-coefficient", "0.5",
+        ]
+
+        csv_out = os.path.join(tmpdir, "csv_out")
+        argv_csv = base_argv + ["--output", csv_out, "--output-format", "csv"]
+        with patch.object(sys, "argv", argv_csv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, "CLI walk-forward --output-format csv should exit 0"
+        csv_artifact = os.path.join(csv_out, "walk_forward_summary.csv")
+        assert os.path.exists(csv_artifact), "walk_forward_summary.csv not written"
+        assert os.path.exists(os.path.join(csv_out, "walk_forward_summary.json")), (
+            "walk_forward_summary.json still written when --output-format csv"
+        )
+
+        import csv as _csv
+        with open(csv_artifact, newline="") as f:
+            rows = list(_csv.DictReader(f))
+        assert rows, "walk_forward_summary.csv should contain per-period rows"
+        expected = {
+            "period", "test_start", "test_end",
+            "impact_capacity", "participation_capacity",
+            "cost_adjusted_capacity", "cost_drag", "holding_period_years",
+        }
+        assert set(rows[0].keys()) == expected, (
+            f"unexpected CSV columns: {set(rows[0].keys())}"
+        )
+        # With impact enabled, the cost-aware capacity columns are populated.
+        populated = [r for r in rows if r.get("cost_adjusted_capacity") not in ("", None)]
+        assert populated, "expected at least one period with cost_adjusted_capacity populated"
+
+        # Default format (json) must not emit the csv artifact.
+        json_out = os.path.join(tmpdir, "json_out")
+        argv_json = base_argv + ["--output", json_out]
+        with patch.object(sys, "argv", argv_json), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0
+        assert os.path.exists(os.path.join(json_out, "walk_forward_summary.json"))
+        assert not os.path.exists(os.path.join(json_out, "walk_forward_summary.csv")), (
+            "default json format must not emit walk_forward_summary.csv"
+        )
+
+
 def test_cli_rejects_invalid_participation_rate_in_every_subcommand():
     """Every walk_forward.py subcommand rejects a non-positive participation
     rate up front instead of silently reporting an uncapped capacity."""
@@ -7841,6 +7899,7 @@ TEST_REGISTRY.extend([
     ("test_cpcv_analysis_participation_rate_caps_per_fold_and_summary", test_cpcv_analysis_participation_rate_caps_per_fold_and_summary),
     ("test_out_of_sample_validation_participation_rate_caps_splits_and_summary", test_out_of_sample_validation_participation_rate_caps_splits_and_summary),
     ("test_cli_walk_forward_participation_rate_cap_written_to_summary", test_cli_walk_forward_participation_rate_cap_written_to_summary),
+    ("test_cli_walk_forward_output_format_csv_writes_capacity_rows", test_cli_walk_forward_output_format_csv_writes_capacity_rows),
     ("test_cli_rejects_invalid_participation_rate_in_every_subcommand", test_cli_rejects_invalid_participation_rate_in_every_subcommand),
 ])
 TEST_REGISTRY.extend([
