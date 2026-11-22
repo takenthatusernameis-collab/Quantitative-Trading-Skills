@@ -53,19 +53,31 @@ def test_borrow_funding_cost_sensitivity_runs_on_triple_real_panel_time_series_m
             "oos_total_return_positive",
             "deflated_sharpe_pvalue_lt_0.10",
         }
+    # Non-vacuity guard: every level must report real (non-NaN) OOS metrics.
+    # The walk-forward must produce tradable positions; if it ever produced
+    # all-NaN results the directional assertions below would pass vacuously.
+    for r in rows:
+        assert r["sharpe_ratio"] is not None, (
+            f"vacuous NaN Sharpe at borrow={r['borrow_cost']}/funding={r['funding_cost']}: "
+            "the walk-forward produced no tradable positions"
+        )
+        assert r["total_return"] is not None, (
+            f"vacuous NaN total_return at borrow={r['borrow_cost']}/funding={r['funding_cost']}"
+        )
+        assert r["deflated_sharpe_pvalue"] is not None, (
+            f"vacuous NaN deflated_sharpe_pvalue at borrow={r['borrow_cost']}/funding={r['funding_cost']}"
+        )
     # Directional claim: net out-of-sample performance must not improve as
-    # borrow/funding cost rises (Sharpe and total return are non-increasing).
+    # borrow/funding cost rises (borrow/funding are real costs).
     for prev, curr in zip(rows, rows[1:]):
-        if prev["sharpe_ratio"] is not None and curr["sharpe_ratio"] is not None:
-            assert curr["sharpe_ratio"] <= prev["sharpe_ratio"] + 1e-12, (
-                "Sharpe improves with borrow/funding cost: "
-                f"{prev['sharpe_ratio']} -> {curr['sharpe_ratio']}"
-            )
-        if prev["total_return"] is not None and curr["total_return"] is not None:
-            assert curr["total_return"] <= prev["total_return"] + 1e-12, (
-                "total return improves with borrow/funding cost: "
-                f"{prev['total_return']} -> {curr['total_return']}"
-            )
+        assert curr["sharpe_ratio"] <= prev["sharpe_ratio"] + 1e-12, (
+            "Sharpe improves with borrow/funding cost: "
+            f"{prev['sharpe_ratio']} -> {curr['sharpe_ratio']}"
+        )
+        assert curr["total_return"] <= prev["total_return"] + 1e-12, (
+            "total return improves with borrow/funding cost: "
+            f"{prev['total_return']} -> {curr['total_return']}"
+        )
 
 
 if __name__ == "__main__":
