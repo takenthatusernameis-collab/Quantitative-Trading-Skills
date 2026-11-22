@@ -76,6 +76,7 @@ sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
 from walk_forward import walk_forward_analysis  # noqa: E402
 from strategy_builder import build_strategy  # noqa: E402
+from utils import bonferroni_correction  # noqa: E402
 
 SRC = SKILLS_DIR / "assets" / "example_data" / "real_market_data"
 
@@ -283,16 +284,29 @@ def test_sole_pass_does_not_survive_protocol_multiplicity():
     does not correct for the 4 protocols tried on MSFT. A Bonferroni
     correction across those 4 protocols pushes the p-value above 0.10.
     """
-    summary = _run_cell(*EXPECTED_SOLE_PASS)
-    dsr = summary.get("deflated_sharpe") or {}
-    p = dsr.get("p_value")
-    assert p is not None, "sole-pass cell has no Deflated Sharpe p-value"
+    # Collect DSR p-values across the 4 informative MSFT protocols
+    dsr_p_values = []
+    for protocol in INFORMATIVE_PROTOCOLS:
+        summary = _run_cell("MSFT", protocol)
+        dsr = summary.get("deflated_sharpe") or {}
+        p_val = dsr.get("p_value")
+        dsr_p_values.append(p_val)
 
-    n_protocols = len(INFORMATIVE_PROTOCOLS)
-    corrected = float(p) * n_protocols
-    assert corrected > DSR_PVALUE_THRESHOLD, (
-        f"sole-pass DSR p={p} x {n_protocols} protocols = {corrected} should "
-        f"exceed {DSR_PVALUE_THRESHOLD} (not robust to protocol multiplicity)"
+    # Apply Bonferroni correction across the protocol family
+    res = bonferroni_correction(dsr_p_values, alpha=DSR_PVALUE_THRESHOLD)
+
+    # The sole-pass cell is at index corresponding to (30, 12, 12)
+    sole_pass_idx = INFORMATIVE_PROTOCOLS.index(EXPECTED_SOLE_PASS[1])
+    best_adjusted = res["adjusted_p_values"][sole_pass_idx]
+
+    assert best_adjusted > DSR_PVALUE_THRESHOLD, (
+        f"sole-pass DSR p={dsr_p_values[sole_pass_idx]} Bonferroni-adjusted = {best_adjusted} "
+        f"should exceed {DSR_PVALUE_THRESHOLD} (not robust to protocol multiplicity)"
+    )
+
+    # No protocol should be rejected at the FWER threshold
+    assert res["n_rejected"] == 0, (
+        f"expected 0 rejections at alpha={DSR_PVALUE_THRESHOLD}, got {res['n_rejected']}"
     )
 
     # Isolation: the other MSFT informative protocols must not all pass.
