@@ -728,9 +728,8 @@ def walk_forward_analysis(
             impact_coefficient > 0, the reported strategy capacity is the
             minimum of the impact-based capacity and
             max_participation_rate * ADV_notional (scaled by n_assets for
-            panels). This is a reporting-only constraint; it does not scale
-            positions during the backtest. Opt-in; when None (default), the
-            impact-based capacity is reported without a participation-rate cap.
+            panels). Opt-in; when None (default), the impact-based capacity is
+            reported without a participation-rate cap.
         family_returns: Optional per-period return matrix for a *family* of
             strategies, shape ``(T, K)`` with one column per strategy, aligned
             to the same dates as the walk-forward out-of-sample record. When
@@ -1113,7 +1112,8 @@ def walk_forward_analysis(
         # impact is disabled or ADV is not estimable.
         _period_capacity = estimate_capacity(
             period["test_data"], impact_coefficient, adv_window=adv_window,
-            max_participation_rate=max_participation_rate
+            max_participation_rate=max_participation_rate,
+            borrow_cost=borrow_cost, funding_cost=funding_cost,
         )
         period["capacity"] = _period_capacity.get("estimated_capacity")
         # Capacity trend for the period's test window: the distribution of the
@@ -1320,7 +1320,8 @@ def walk_forward_analysis(
     # Surface market-impact capacity estimate in the summary when impact is
     # enabled and estimable; keep None (backward compatible) otherwise.
     _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window,
-                                  max_participation_rate=max_participation_rate)
+                                  max_participation_rate=max_participation_rate,
+                                  borrow_cost=borrow_cost, funding_cost=funding_cost)
     summary["capacity"] = _capacity.get("estimated_capacity")
     # Capacity trend over the whole sample: the distribution of the
     # per-period capacity readings, so a liquidity squeeze anywhere in the
@@ -1497,6 +1498,10 @@ def walk_forward_analysis(
 
     # Record max_participation_rate in the summary config for traceability
     summary["max_participation_rate"] = float(max_participation_rate) if max_participation_rate is not None else None
+    # Record borrow/funding cost for traceability; capacity already reflects
+    # the cost drag via estimate_capacity (zero drag when both are 0).
+    summary["borrow_cost"] = float(borrow_cost)
+    summary["funding_cost"] = float(funding_cost)
 
     return {
         "periods": periods,
@@ -1759,6 +1764,7 @@ def parameter_optimization(
                     _combo_cap = estimate_capacity(
                         data, impact_coefficient, adv_window=adv_window,
                         max_participation_rate=max_participation_rate,
+                        borrow_cost=borrow_cost, funding_cost=funding_cost,
                     )
                     result["capacity"] = _combo_cap.get("estimated_capacity")
                     result["capacity_trend"] = _combo_cap.get("capacity_trend")
@@ -3644,6 +3650,10 @@ def estimate_capacity(
     adv_window: int = 20,
     impact_model: str = DEFAULT_IMPACT_MODEL,
     max_participation_rate: Optional[float] = None,
+    borrow_cost: float = 0.0,
+    funding_cost: float = 0.0,
+    leverage: float = 1.0,
+    short_exposure: float = 0.0,
 ) -> Dict[str, Any]:
     """
     Estimate strategy capacity from the market-impact cost model with an
@@ -3710,17 +3720,37 @@ def estimate_capacity(
             capacity is the minimum of the impact-based capacity and
             ``max_participation_rate * ADV_notional`` (scaled by ``n_assets``
             for panels). Default ``None`` (no participation-rate limit).
+        borrow_cost: Annual borrow cost rate for short positions (as decimal,
+            e.g., 0.03 = 3% per year). Together with ``funding_cost`` it
+            reduces the reported capacity by the annualized cost drag over one
+            holding period; default 0.0 leaves capacity unchanged.
+        funding_cost: Annual funding cost rate for leveraged positions (as
+            decimal, e.g., 0.02 = 2% per year). Together with ``borrow_cost``
+            it reduces the reported capacity by the annualized cost drag over
+            one holding period; default 0.0 leaves capacity unchanged.
+        leverage: Gross leverage multiple of the position (default 1.0).
+            Drives the funding-cost leg of the capacity drag via
+            ``(leverage - 1) * funding_cost``.
+        short_exposure: Short notional as a fraction of portfolio notional
+            (default 0.0). Drives the borrow-cost leg of the capacity drag via
+            ``short_exposure * borrow_cost``.
 
     Returns:
         Dictionary with keys: impact_coefficient, max_impact, adv_window,
-        impact_model, max_participation_rate, price, adv_shares, adv_notional,
-        periods_per_year, max_notional_per_trade, estimated_capacity,
-        unconstrained, estimable, n_assets, binding_asset, capacity_trend.
+        impact_model, max_participation_rate, borrow_cost, funding_cost,
+        leverage, short_exposure, cost_drag, holding_period_years, price,
+        adv_shares, adv_notional, periods_per_year,
+        max_notional_per_trade, estimated_capacity, unconstrained, estimable,
+        n_assets, binding_asset, capacity_trend.
         ``unconstrained`` is True when impact is disabled. ``estimable`` is
         False when ADV cannot be computed (missing columns or empty data).
         ``capacity_trend`` describes the per-period capacity distribution
         inside the window (see ``_capacity_trend_from_series``); it is None
-        when impact is disabled or ADV is not estimable.
+        when impact is disabled or ADV is not estimable. ``cost_drag`` is
+        ``(leverage - 1) * funding_cost + short_exposure * borrow_cost`` and
+        ``holding_period_years`` is ``1 / periods_per_year``; the reported
+        capacity is divided by ``(1 + cost_drag * holding_period_years)`` so
+        that leveraged or short strategies carry a lower cost-aware capacity.
     """
     result = {
         "impact_coefficient": float(impact_coefficient),
@@ -3728,6 +3758,12 @@ def estimate_capacity(
         "adv_window": int(adv_window),
         "impact_model": impact_model,
         "max_participation_rate": float(max_participation_rate) if max_participation_rate is not None else None,
+        "borrow_cost": float(borrow_cost),
+        "funding_cost": float(funding_cost),
+        "leverage": float(leverage),
+        "short_exposure": float(short_exposure),
+        "cost_drag": None,
+        "holding_period_years": None,
         "price": None,
         "adv_shares": None,
         "adv_notional": None,
@@ -3751,6 +3787,18 @@ def estimate_capacity(
     if max_participation_rate is not None:
         if not np.isfinite(max_participation_rate) or max_participation_rate <= 0:
             raise ValueError(f"max_participation_rate must be positive and finite, got {max_participation_rate}")
+
+    if not np.isfinite(borrow_cost) or borrow_cost < 0:
+        raise ValueError(f"borrow_cost must be non-negative and finite, got {borrow_cost}")
+    if not np.isfinite(funding_cost) or funding_cost < 0:
+        raise ValueError(f"funding_cost must be non-negative and finite, got {funding_cost}")
+    if not np.isfinite(leverage) or leverage <= 0:
+        raise ValueError(f"leverage must be positive and finite, got {leverage}")
+    if not np.isfinite(short_exposure) or short_exposure < 0:
+        raise ValueError(f"short_exposure must be non-negative and finite, got {short_exposure}")
+
+    cost_drag = (float(leverage) - 1.0) * float(funding_cost) + float(short_exposure) * float(borrow_cost)
+    result["cost_drag"] = float(cost_drag)
 
     is_panel = isinstance(data.columns, pd.MultiIndex)
     if is_panel:
@@ -3776,6 +3824,9 @@ def estimate_capacity(
         return result
 
     ann_factor = _annualization_factor(data.index)
+    holding_period_years = 1.0 / float(ann_factor)
+    result["holding_period_years"] = float(holding_period_years)
+    _drag_denominator = 1.0 + cost_drag * holding_period_years
     adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
     adv_notional = adv_shares * close
 
@@ -3809,6 +3860,11 @@ def estimate_capacity(
             participation_capacity = n_assets * max_participation_rate * binding_adv_notional
             portfolio_capacity = min(portfolio_capacity, participation_capacity)
 
+        # Cost-aware capacity drag: borrow/funding costs reduce the capacity
+        # a leveraged or short strategy can economically support over one
+        # holding period. Default zero cost drag leaves capacity unchanged.
+        portfolio_capacity = portfolio_capacity / _drag_denominator
+
         # Capacity trend: the per-period portfolio capacity series, so a
         # liquidity squeeze *inside* the window is visible instead of being
         # hidden behind the last bar's reading. Each period's portfolio
@@ -3828,12 +3884,14 @@ def estimate_capacity(
             _capacity_series = _capacity_series.where(
                 _capacity_series <= _participation_series, _participation_series
             )
+        _capacity_series = _capacity_series / _drag_denominator
 
         result.update(
             price=binding_price,
             adv_shares=binding_adv_shares,
             adv_notional=binding_adv_notional,
             periods_per_year=float(ann_factor),
+            holding_period_years=float(holding_period_years),
             max_notional_per_trade=float(portfolio_capacity),
             estimated_capacity=float(portfolio_capacity),
             estimable=True,
@@ -3861,6 +3919,11 @@ def estimate_capacity(
         participation_capacity = max_participation_rate * last_adv_notional
         max_notional_per_trade = min(max_notional_per_trade, participation_capacity)
 
+    # Cost-aware capacity drag: borrow/funding costs reduce the capacity a
+    # leveraged or short strategy can economically support over one holding
+    # period. Default zero cost drag leaves capacity unchanged.
+    max_notional_per_trade = max_notional_per_trade / _drag_denominator
+
     # Capacity trend: the per-period capacity series across the window.
     _valid_adv = adv_notional.where(
         np.isfinite(adv_notional) & (adv_notional > 0)
@@ -3876,12 +3939,14 @@ def estimate_capacity(
         _capacity_series = _capacity_series.where(
             _capacity_series <= _participation_series, _participation_series
         )
+    _capacity_series = _capacity_series / _drag_denominator
 
     result.update(
         price=price,
         adv_shares=float(adv_shares.iloc[-1]),
         adv_notional=last_adv_notional,
         periods_per_year=float(ann_factor),
+        holding_period_years=float(holding_period_years),
         max_notional_per_trade=float(max_notional_per_trade),
         estimated_capacity=float(max_notional_per_trade),
         estimable=True,
@@ -4683,7 +4748,8 @@ def cpcv_analysis(
         # is None when impact is disabled or ADV is not estimable.
         _fold_capacity = estimate_capacity(
             fold["test_data"], impact_coefficient, adv_window=adv_window,
-            max_participation_rate=max_participation_rate
+            max_participation_rate=max_participation_rate,
+            borrow_cost=borrow_cost, funding_cost=funding_cost,
         )
         fold["capacity"] = _fold_capacity.get("estimated_capacity")
         # Capacity trend for the fold's test window (mirrors the per-period
@@ -4891,7 +4957,8 @@ def cpcv_analysis(
     # Surface market-impact capacity estimate in the summary when impact is
     # enabled and estimable; keep None (backward compatible) otherwise.
     _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window,
-                                  max_participation_rate=max_participation_rate)
+                                  max_participation_rate=max_participation_rate,
+                                  borrow_cost=borrow_cost, funding_cost=funding_cost)
     summary["capacity"] = _capacity.get("estimated_capacity")
     # Capacity trend over the whole sample (see the walk-forward summary for
     # the same key) plus the worst capacity seen in any out-of-sample fold.
@@ -5076,6 +5143,10 @@ def cpcv_analysis(
 
     # Record max_participation_rate in the summary config for traceability
     summary["max_participation_rate"] = float(max_participation_rate) if max_participation_rate is not None else None
+    # Record borrow/funding cost for traceability; capacity already reflects
+    # the cost drag via estimate_capacity (zero drag when both are 0).
+    summary["borrow_cost"] = float(borrow_cost)
+    summary["funding_cost"] = float(funding_cost)
 
     return {
         "folds": folds,
@@ -7052,7 +7123,8 @@ def out_of_sample_validation(
     # when impact is disabled or ADV is not estimable.
     val_capacity = estimate_capacity(
         val_data, impact_coefficient, adv_window=adv_window,
-        max_participation_rate=max_participation_rate
+        max_participation_rate=max_participation_rate,
+        borrow_cost=borrow_cost, funding_cost=funding_cost,
     )
     val_capacity_point = val_capacity.get("estimated_capacity")
     val_capacity_trend = val_capacity.get("capacity_trend")
@@ -7157,7 +7229,8 @@ def out_of_sample_validation(
 
     test_capacity = estimate_capacity(
         test_data, impact_coefficient, adv_window=adv_window,
-        max_participation_rate=max_participation_rate
+        max_participation_rate=max_participation_rate,
+        borrow_cost=borrow_cost, funding_cost=funding_cost,
     )
     test_capacity_point = test_capacity.get("estimated_capacity")
     test_capacity_trend = test_capacity.get("capacity_trend")
@@ -7518,7 +7591,8 @@ def out_of_sample_validation(
     # Surface market-impact capacity estimate in the summary when impact is
     # enabled and estimable; keep None (backward compatible) otherwise.
     _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window,
-                                  max_participation_rate=max_participation_rate)
+                                  max_participation_rate=max_participation_rate,
+                                  borrow_cost=borrow_cost, funding_cost=funding_cost)
     summary["capacity"] = _capacity.get("estimated_capacity")
     # Capacity trend over the whole sample (the per-period / per-fold
     # records carry the same key for their own window).
@@ -10773,7 +10847,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     # sweep rows stay comparable to the net-exposure path.
     try:
         _capacity = estimate_capacity(data, impact_coefficient, adv_window=args.adv_window,
-                                      max_participation_rate=max_participation_rate)
+                                      max_participation_rate=max_participation_rate,
+                                      borrow_cost=args.borrow_cost, funding_cost=args.funding_cost)
         _capacity_point = _capacity.get("estimated_capacity")
         _capacity_trend = _capacity.get("capacity_trend")
     except Exception:
@@ -11339,7 +11414,8 @@ def run_monte_carlo(args) -> int:
     try:
         _capacity = estimate_capacity(
             data, args.impact_coefficient, adv_window=args.adv_window,
-            max_participation_rate=max_participation_rate
+            max_participation_rate=max_participation_rate,
+            borrow_cost=args.borrow_cost, funding_cost=args.funding_cost,
         )
         mc_results["summary"]["capacity"] = _capacity.get("estimated_capacity")
         mc_results["summary"]["capacity_trend"] = _capacity.get("capacity_trend")

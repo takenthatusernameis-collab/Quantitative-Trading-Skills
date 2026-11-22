@@ -954,6 +954,7 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             _cap = estimate_capacity(
                 _cap_frame, args.impact_coefficient, adv_window=args.adv_window,
                 max_participation_rate=max_participation_rate,
+                borrow_cost=args.borrow_cost, funding_cost=args.funding_cost,
             )
             results["capacity"] = _cap.get("estimated_capacity")
             # Capacity trend: the per-period capacity distribution over the
