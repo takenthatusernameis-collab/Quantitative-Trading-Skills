@@ -626,6 +626,8 @@ def walk_forward_analysis(
     regime_cost_multipliers: Optional[Dict[str, float]] = None,
     max_impact: Optional[float] = None,
     max_participation_rate: Optional[float] = None,
+    leverage: float = 1.0,
+    short_exposure: float = 0.0,
     family_returns: Optional[pd.DataFrame] = None,
     family_stepdown: bool = False,
     family_seed: Optional[int] = None,
@@ -730,6 +732,14 @@ def walk_forward_analysis(
             max_participation_rate * ADV_notional (scaled by n_assets for
             panels). Opt-in; when None (default), the impact-based capacity is
             reported without a participation-rate cap.
+        leverage: Gross leverage multiple of the position (default 1.0).
+            Drives the funding-cost leg of the capacity cost drag via
+            ``(leverage - 1) * funding_cost``. A value above 1.0 lowers the
+            cost-aware capacity a leveraged strategy can support.
+        short_exposure: Short notional as a fraction of portfolio notional
+            (default 0.0). Drives the borrow-cost leg of the capacity cost drag
+            via ``short_exposure * borrow_cost``. A value above 0.0 lowers the
+            cost-aware capacity a short strategy can support.
         family_returns: Optional per-period return matrix for a *family* of
             strategies, shape ``(T, K)`` with one column per strategy, aligned
             to the same dates as the walk-forward out-of-sample record. When
@@ -1114,6 +1124,7 @@ def walk_forward_analysis(
             period["test_data"], impact_coefficient, adv_window=adv_window,
             max_participation_rate=max_participation_rate,
             borrow_cost=borrow_cost, funding_cost=funding_cost,
+            leverage=leverage, short_exposure=short_exposure,
         )
         period["capacity"] = _period_capacity.get("estimated_capacity")
         # Capacity trend for the period's test window: the distribution of the
@@ -1321,7 +1332,8 @@ def walk_forward_analysis(
     # enabled and estimable; keep None (backward compatible) otherwise.
     _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window,
                                   max_participation_rate=max_participation_rate,
-                                  borrow_cost=borrow_cost, funding_cost=funding_cost)
+                                  borrow_cost=borrow_cost, funding_cost=funding_cost,
+                                  leverage=leverage, short_exposure=short_exposure)
     summary["capacity"] = _capacity.get("estimated_capacity")
     # Capacity trend over the whole sample: the distribution of the
     # per-period capacity readings, so a liquidity squeeze anywhere in the
@@ -1502,6 +1514,10 @@ def walk_forward_analysis(
     # the cost drag via estimate_capacity (zero drag when both are 0).
     summary["borrow_cost"] = float(borrow_cost)
     summary["funding_cost"] = float(funding_cost)
+    # Record leverage and short exposure for traceability; these scale the
+    # borrow/funding cost drag applied to the capacity estimate.
+    summary["leverage"] = float(leverage)
+    summary["short_exposure"] = float(short_exposure)
 
     return {
         "periods": periods,
@@ -1765,6 +1781,7 @@ def parameter_optimization(
                         data, impact_coefficient, adv_window=adv_window,
                         max_participation_rate=max_participation_rate,
                         borrow_cost=borrow_cost, funding_cost=funding_cost,
+                        leverage=leverage, short_exposure=short_exposure,
                     )
                     result["capacity"] = _combo_cap.get("estimated_capacity")
                     result["capacity_trend"] = _combo_cap.get("capacity_trend")
@@ -4231,6 +4248,8 @@ def cpcv_analysis(
     regime_cost_multipliers: Optional[Dict[str, float]] = None,
     max_impact: Optional[float] = None,
     max_participation_rate: Optional[float] = None,
+    leverage: float = 1.0,
+    short_exposure: float = 0.0,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -4750,6 +4769,7 @@ def cpcv_analysis(
             fold["test_data"], impact_coefficient, adv_window=adv_window,
             max_participation_rate=max_participation_rate,
             borrow_cost=borrow_cost, funding_cost=funding_cost,
+            leverage=leverage, short_exposure=short_exposure,
         )
         fold["capacity"] = _fold_capacity.get("estimated_capacity")
         # Capacity trend for the fold's test window (mirrors the per-period
@@ -4958,7 +4978,8 @@ def cpcv_analysis(
     # enabled and estimable; keep None (backward compatible) otherwise.
     _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window,
                                   max_participation_rate=max_participation_rate,
-                                  borrow_cost=borrow_cost, funding_cost=funding_cost)
+                                  borrow_cost=borrow_cost, funding_cost=funding_cost,
+                                  leverage=leverage, short_exposure=short_exposure)
     summary["capacity"] = _capacity.get("estimated_capacity")
     # Capacity trend over the whole sample (see the walk-forward summary for
     # the same key) plus the worst capacity seen in any out-of-sample fold.
@@ -5147,6 +5168,10 @@ def cpcv_analysis(
     # the cost drag via estimate_capacity (zero drag when both are 0).
     summary["borrow_cost"] = float(borrow_cost)
     summary["funding_cost"] = float(funding_cost)
+    # Record leverage and short exposure for traceability; these scale the
+    # borrow/funding cost drag applied to the capacity estimate.
+    summary["leverage"] = float(leverage)
+    summary["short_exposure"] = float(short_exposure)
 
     return {
         "folds": folds,
@@ -6704,6 +6729,8 @@ def out_of_sample_validation(
     survivorship: Optional[Dict[str, Any]] = None,
     max_impact: Optional[float] = None,
     max_participation_rate: Optional[float] = None,
+    leverage: float = 1.0,
+    short_exposure: float = 0.0,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -7125,6 +7152,7 @@ def out_of_sample_validation(
         val_data, impact_coefficient, adv_window=adv_window,
         max_participation_rate=max_participation_rate,
         borrow_cost=borrow_cost, funding_cost=funding_cost,
+        leverage=leverage, short_exposure=short_exposure,
     )
     val_capacity_point = val_capacity.get("estimated_capacity")
     val_capacity_trend = val_capacity.get("capacity_trend")
@@ -7231,6 +7259,7 @@ def out_of_sample_validation(
         test_data, impact_coefficient, adv_window=adv_window,
         max_participation_rate=max_participation_rate,
         borrow_cost=borrow_cost, funding_cost=funding_cost,
+        leverage=leverage, short_exposure=short_exposure,
     )
     test_capacity_point = test_capacity.get("estimated_capacity")
     test_capacity_trend = test_capacity.get("capacity_trend")
@@ -7602,6 +7631,10 @@ def out_of_sample_validation(
     summary["max_participation_rate"] = (
         float(max_participation_rate) if max_participation_rate is not None else None
     )
+    # Record leverage and short exposure for traceability; these scale the
+    # borrow/funding cost drag applied to the capacity estimate.
+    summary["leverage"] = float(leverage)
+    summary["short_exposure"] = float(short_exposure)
     # Book-based capacity: the capacity implied by the trade sizes the
     # selected strategy actually executes in the held-out test window, next
     # to the basket-based number above. The validation window's own book
@@ -7793,7 +7826,8 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
                                     bench_commission, bench_slippage, bench_expense_ratio,
                                     impact_coefficient, borrow_cost=None, funding_cost=None,
                                     commission=None, slippage=None, latency=None, fill_rate=None,
-survivorship=None, pit_strict=None,
+                                    leverage=None, short_exposure=None,
+                                    survivorship=None, pit_strict=None,
                                      regime_impact_coefficients: Optional[Dict[str, float]] = None,
                                      regime_cost_multipliers: Optional[Dict[str, float]] = None):
     """Run walk-forward for a single cost coefficient (sweep helper).
@@ -7821,6 +7855,10 @@ survivorship=None, pit_strict=None,
         borrow_cost = args.borrow_cost
     if funding_cost is None:
         funding_cost = args.funding_cost
+    if leverage is None:
+        leverage = getattr(args, "leverage", 1.0)
+    if short_exposure is None:
+        short_exposure = getattr(args, "short_exposure", 0.0)
     if commission is None:
         commission = args.commission
     if slippage is None:
@@ -7878,6 +7916,8 @@ survivorship=None, pit_strict=None,
         regime_cost_multipliers=regime_cost_multipliers,
         max_impact=max_impact,
         max_participation_rate=max_participation_rate,
+        leverage=leverage,
+        short_exposure=short_exposure,
     )
     summary = results["summary"]
     dsr = summary.get("deflated_sharpe")
@@ -7885,6 +7925,8 @@ survivorship=None, pit_strict=None,
         "impact_coefficient": float(impact_coefficient),
         "borrow_cost": float(borrow_cost),
         "funding_cost": float(funding_cost),
+        "leverage": float(leverage),
+        "short_exposure": float(short_exposure),
         "commission": float(commission),
         "slippage": float(slippage),
         "latency": int(latency),
@@ -8086,6 +8128,7 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                            bench_commission, bench_slippage, bench_expense_ratio,
                            impact_coefficient, borrow_cost=None, funding_cost=None,
                            commission=None, slippage=None, latency=None, fill_rate=None,
+                           leverage=None, short_exposure=None,
                            pit_results=None, survivorship=None, pit_strict=None,
                            regime_cost_multipliers: Optional[Dict[str, float]] = None,
                            max_participation_rate: Optional[float] = None):
@@ -8117,6 +8160,10 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         borrow_cost = args.borrow_cost
     if funding_cost is None:
         funding_cost = args.funding_cost
+    if leverage is None:
+        leverage = getattr(args, "leverage", 1.0)
+    if short_exposure is None:
+        short_exposure = getattr(args, "short_exposure", 0.0)
     if commission is None:
         commission = args.commission
     if slippage is None:
@@ -8165,6 +8212,8 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         adv_window=args.adv_window,
         borrow_cost=borrow_cost,
         funding_cost=funding_cost,
+        leverage=leverage,
+        short_exposure=short_exposure,
         latency=latency,
         fill_rate=fill_rate,
         apply_deflation=args.deflate,
@@ -8187,6 +8236,8 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         "impact_coefficient": float(impact_coefficient),
         "borrow_cost": float(borrow_cost),
         "funding_cost": float(funding_cost),
+        "leverage": float(leverage),
+        "short_exposure": float(short_exposure),
         "commission": float(commission),
         "slippage": float(slippage),
         "latency": int(latency),
@@ -8232,7 +8283,8 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                             bench_commission, bench_slippage, bench_expense_ratio,
                             impact_coefficient, borrow_cost=None, funding_cost=None,
                             commission=None, slippage=None, latency=None, fill_rate=None,
-survivorship=None,
+                            leverage=None, short_exposure=None,
+                            survivorship=None,
                              regime_impact_coefficients: Optional[Dict[str, float]] = None,
                              regime_cost_multipliers: Optional[Dict[str, float]] = None):
     """Run CPCV for a single cost coefficient (sweep helper).
@@ -8263,6 +8315,10 @@ survivorship=None,
         borrow_cost = args.borrow_cost
     if funding_cost is None:
         funding_cost = args.funding_cost
+    if leverage is None:
+        leverage = getattr(args, "leverage", 1.0)
+    if short_exposure is None:
+        short_exposure = getattr(args, "short_exposure", 0.0)
     if commission is None:
         commission = args.commission
     if slippage is None:
@@ -8297,6 +8353,8 @@ survivorship=None,
         adv_window=args.adv_window,
         borrow_cost=borrow_cost,
         funding_cost=funding_cost,
+        leverage=leverage,
+        short_exposure=short_exposure,
         latency=latency,
         fill_rate=fill_rate,
         apply_deflation=args.deflate,
@@ -8318,6 +8376,8 @@ survivorship=None,
         "impact_coefficient": float(impact_coefficient),
         "borrow_cost": float(borrow_cost),
         "funding_cost": float(funding_cost),
+        "leverage": float(leverage),
+        "short_exposure": float(short_exposure),
         "commission": float(commission),
         "slippage": float(slippage),
         "latency": int(latency),
@@ -10661,6 +10721,7 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
                                      bench_commission, bench_slippage, bench_expense_ratio,
                                      impact_coefficient, borrow_cost=None, funding_cost=None,
                                      commission=None, slippage=None, latency=None, fill_rate=None,
+                                     leverage=None, short_exposure=None,
                                      regime_impact_coefficients=None,
                                      regime_cost_multipliers=None,
                                      pit_results=None, survivorship=None,
@@ -10696,6 +10757,10 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         borrow_cost = args.borrow_cost
     if funding_cost is None:
         funding_cost = args.funding_cost
+    if leverage is None:
+        leverage = getattr(args, "leverage", 1.0)
+    if short_exposure is None:
+        short_exposure = getattr(args, "short_exposure", 0.0)
     if commission is None:
         commission = args.commission
     if slippage is None:
@@ -10848,7 +10913,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
     try:
         _capacity = estimate_capacity(data, impact_coefficient, adv_window=args.adv_window,
                                       max_participation_rate=max_participation_rate,
-                                      borrow_cost=args.borrow_cost, funding_cost=args.funding_cost)
+                                      borrow_cost=borrow_cost, funding_cost=funding_cost,
+                                      leverage=leverage, short_exposure=short_exposure)
         _capacity_point = _capacity.get("estimated_capacity")
         _capacity_trend = _capacity.get("capacity_trend")
     except Exception:
@@ -10885,6 +10951,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         "impact_coefficient": float(impact_coefficient),
         "borrow_cost": float(borrow_cost),
         "funding_cost": float(funding_cost),
+        "leverage": float(leverage),
+        "short_exposure": float(short_exposure),
         "commission": float(commission),
         "slippage": float(slippage),
         "latency": int(latency),
@@ -12279,6 +12347,8 @@ def main():
     common_parser.add_argument("--adv-window", type=int, default=20, help="Rolling window for Average Daily Volume calculation")
     common_parser.add_argument("--borrow-cost", type=float, default=0.0, help="Annual borrow cost rate for short positions (as decimal, e.g., 0.03 = 3%% per year)")
     common_parser.add_argument("--funding-cost", type=float, default=0.0, help="Annual funding cost rate for leveraged positions (as decimal, e.g., 0.02 = 2%% per year)")
+    common_parser.add_argument("--leverage", type=float, default=1.0, help="Gross leverage multiple of the position (default 1.0). Drives the funding-cost leg of the capacity cost drag via (leverage - 1) * funding_cost; a value above 1.0 lowers cost-aware capacity for leveraged strategies.")
+    common_parser.add_argument("--short-exposure", type=float, default=0.0, help="Short notional as a fraction of portfolio notional (default 0.0). Drives the borrow-cost leg of the capacity cost drag via short_exposure * borrow_cost; a value above 0.0 lowers cost-aware capacity for short strategies.")
     common_parser.add_argument("--output", type=str, default="results", help="Output directory")
     common_parser.add_argument("--param-grid", type=str, required=True, help="Parameter grid as JSON string")
     common_parser.add_argument("--validate-point-in-time", action="store_true", default=True, help="Run point-in-time validation on the loaded data (temporal ordering, duplicate timestamps, stale-data warnings); enabled by default, use --no-validate-point-in-time to disable")
