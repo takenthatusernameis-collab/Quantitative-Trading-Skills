@@ -3973,6 +3973,66 @@ def test_cli_walk_forward_impact_sweep():
         )
 
 
+def test_cli_walk_forward_output_format_csv_writes_capacity_rows():
+    """--output-format csv writes walk_forward_summary.csv with flattened
+    per-period capacity rows; default json mode writes no CSV and leaves
+    the JSON artifact intact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward.py", "walk-forward",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5], "slow_period": [8, 10]}',
+            "--impact-coefficient", "0.5",
+            "--output-format", "csv",
+            "--output", out_dir,
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, f"CLI walk-forward --output-format csv should exit 0, got {rc}"
+
+        csv_out = os.path.join(out_dir, "walk_forward_summary.csv")
+        assert os.path.exists(csv_out), "walk_forward_summary.csv not written in csv mode"
+        frame = pd.read_csv(csv_out)
+        expected = [
+            "period", "test_start", "test_end",
+            "impact_capacity", "participation_capacity",
+            "cost_adjusted_capacity", "cost_drag", "holding_period_years",
+        ]
+        assert list(frame.columns) == expected, f"unexpected CSV columns: {list(frame.columns)}"
+        assert len(frame) > 0, "CSV should contain at least one per-period capacity row"
+        assert frame["cost_adjusted_capacity"].notna().all(), (
+            "cost_adjusted_capacity must be present on every row"
+        )
+        assert (frame["cost_adjusted_capacity"] > 0).all(), (
+            f"cost_adjusted_capacity must be positive: "
+            f"{frame['cost_adjusted_capacity'].tolist()}"
+        )
+
+        # Default (json) mode must not write a CSV and must write the JSON artifact.
+        out_dir_json = os.path.join(tmpdir, "out_json")
+        argv_json = [
+            "walk_forward.py", "walk-forward",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5], "slow_period": [8, 10]}',
+            "--impact-coefficient", "0.5",
+            "--output", out_dir_json,
+        ]
+        with patch.object(sys, "argv", argv_json), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0
+        assert not os.path.exists(os.path.join(out_dir_json, "walk_forward_summary.csv")), (
+            "default json mode must not write a CSV"
+        )
+        assert os.path.exists(os.path.join(out_dir_json, "walk_forward_summary.json"))
+
+
 def test_cli_walk_forward_borrow_sweep():
     """CLI walk-forward --borrow-costs writes a sweep artifact whose OOS
     returns degrade as the short-position borrow cost rises (MACD goes short)."""
