@@ -974,7 +974,7 @@ def fetch_ohlcv_yahoo(symbol: str, start: str, end: str, max_retries: int = 3,
             try:
                 cached_df = pd.read_csv(cache_file)
                 cached_df["date"] = pd.to_datetime(cached_df["date"])
-                cached_df = cached_df.set_index("date").sort_index()
+                cached_df = cached_df.sort_values("date").reset_index(drop=True)
                 return cached_df
             except Exception:
                 # Cache read failed; fall through to fetch

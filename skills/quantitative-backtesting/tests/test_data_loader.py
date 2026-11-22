@@ -867,6 +867,84 @@ def test_fetch_ohlcv_yahoo_raises_runtimeerror_after_429_exhaustion():
         _stop_local_server(httpd)
 
 
+def test_fetch_ohlcv_yahoo_uses_cache_when_available():
+    """A valid cached CSV is returned without any network request.
+
+    With ``always_429`` mode, any network hit would exhaust retries and raise
+    RuntimeError; returning the cached frame with zero server attempts proves
+    the cache short-circuits the fetch. Offline and deterministic.
+    """
+    from data_loader import fetch_ohlcv_yahoo
+
+    httpd, port = _start_local_server()
+    try:
+        _RateLimitHandler.attempts = 0
+        _RateLimitHandler.mode = "always_429"
+        cache_dir = Path(tempfile.mkdtemp())
+        cache_file = cache_dir / "AAPL_2023-01-01_2023-01-31.csv"
+        cached = pd.DataFrame({
+            "date": ["2023-01-01", "2023-01-02"],
+            "open": [100.0, 101.0],
+            "high": [102.0, 103.0],
+            "low": [99.0, 100.5],
+            "close": [101.0, 102.0],
+            "volume": [1000, 2000],
+        })
+        cached.to_csv(cache_file, index=False)
+        df = fetch_ohlcv_yahoo(
+            "AAPL", "2023-01-01", "2023-01-31",
+            max_retries=3, backoff_base=0.0, timeout=5,
+            base_url=f"http://127.0.0.1:{port}",
+            cache_dir=cache_dir,
+        )
+        assert _RateLimitHandler.attempts == 0, (
+            f"cache short-circuit failed: {_RateLimitHandler.attempts} request(s) made"
+        )
+        assert list(df.columns) == ["date", "open", "high", "low", "close", "volume"]
+        assert len(df) == 2
+        assert pd.api.types.is_datetime64_any_dtype(df["date"])
+        assert df["date"].is_monotonic_increasing
+        assert df["close"].tolist() == [101.0, 102.0]
+    finally:
+        _stop_local_server(httpd)
+
+
+def test_fetch_ohlcv_yahoo_writes_cache_on_fetch():
+    """A successful fetch writes the result to ``cache_dir`` so a later call
+    reuses it without additional network requests. Offline and deterministic."""
+    from data_loader import fetch_ohlcv_yahoo
+
+    httpd, port = _start_local_server()
+    try:
+        _RateLimitHandler.attempts = 0
+        _RateLimitHandler.mode = "retry_once"
+        cache_dir = Path(tempfile.mkdtemp())
+        cache_file = cache_dir / "AAPL_2023-01-01_2023-01-31.csv"
+        df = fetch_ohlcv_yahoo(
+            "AAPL", "2023-01-01", "2023-01-31",
+            max_retries=3, backoff_base=0.0, timeout=5,
+            base_url=f"http://127.0.0.1:{port}",
+            cache_dir=cache_dir,
+        )
+        assert cache_file.exists(), "fetch did not write the cache file"
+        attempts_after_first = _RateLimitHandler.attempts
+        assert attempts_after_first >= 1, "fetch made no request to populate the cache"
+        df2 = fetch_ohlcv_yahoo(
+            "AAPL", "2023-01-01", "2023-01-31",
+            max_retries=3, backoff_base=0.0, timeout=5,
+            base_url=f"http://127.0.0.1:{port}",
+            cache_dir=cache_dir,
+        )
+        assert _RateLimitHandler.attempts == attempts_after_first, (
+            "second call should reuse the cache and make no additional requests"
+        )
+        pd.testing.assert_frame_equal(
+            df.reset_index(drop=True), df2.reset_index(drop=True)
+        )
+    finally:
+        _stop_local_server(httpd)
+
+
 def test_main_registers_every_module_level_test():
     import inspect
 
@@ -1172,6 +1250,8 @@ TEST_REGISTRY = [
     ("test_adjustment_integrity_guard_multiple_splits", test_adjustment_integrity_guard_multiple_splits),
     ("test_adjustment_integrity_guard_splits_only_no_adj_close_mismatch", test_adjustment_integrity_guard_splits_only_no_adj_close_mismatch),
     ("test_adjustment_integrity_guard_details_populated", test_adjustment_integrity_guard_details_populated),
+    ("test_fetch_ohlcv_yahoo_uses_cache_when_available", test_fetch_ohlcv_yahoo_uses_cache_when_available),
+    ("test_fetch_ohlcv_yahoo_writes_cache_on_fetch", test_fetch_ohlcv_yahoo_writes_cache_on_fetch),
 ]
 
 def main() -> int:
