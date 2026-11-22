@@ -109,7 +109,7 @@ def test_panel_reference_matches_the_committed_artifact():
         "impact_traded_only_bps": diag.get("impact_traded_only_bps"),
         "impact_dilution_bps": diag.get("impact_dilution_bps"),
         "impact_participation_ratio": diag.get("impact_participation_ratio"),
-        "capacity": res["summary"].get("capacity"),
+        "capacity": res["summary"].get("capacity", {}).get("cost_adjusted_capacity"),
         "oos_min_capacity": res["summary"].get("oos_min_capacity"),
         "gross_book": diag.get("gross_book"),
         "gross_turnover": diag.get("gross_turnover"),

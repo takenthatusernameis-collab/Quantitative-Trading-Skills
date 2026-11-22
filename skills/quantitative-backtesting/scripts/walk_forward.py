@@ -1119,14 +1119,26 @@ def walk_forward_analysis(
         # degradation across regimes is observable. Capacity is a property of
         # the period's market data, so it is computed for every period (not
         # only periods whose grid search produced returns) and is None when
-        # impact is disabled or ADV is not estimable.
+        # impact is disabled or ADV is not estimable. The value is a cost-aware
+        # breakdown (impact vs participation vs cost drag) so leveraged or
+        # short strategies surface a realistic, cost-adjusted capacity.
         _period_capacity = estimate_capacity(
             period["test_data"], impact_coefficient, adv_window=adv_window,
             max_participation_rate=max_participation_rate,
             borrow_cost=borrow_cost, funding_cost=funding_cost,
             leverage=leverage, short_exposure=short_exposure,
         )
-        period["capacity"] = _period_capacity.get("estimated_capacity")
+        _period_cap = _period_capacity.get("cost_adjusted_capacity")
+        period["capacity"] = (
+            {
+                "impact_capacity": _period_capacity.get("impact_capacity"),
+                "participation_capacity": _period_capacity.get("participation_capacity"),
+                "cost_adjusted_capacity": _period_capacity.get("cost_adjusted_capacity"),
+                "cost_drag": _period_capacity.get("cost_drag"),
+                "holding_period_years": _period_capacity.get("holding_period_years"),
+            }
+            if _period_cap is not None else None
+        )
         # Capacity trend for the period's test window: the distribution of the
         # per-period capacity readings (min / median / max). The point-in-time
         # `capacity` above only reads the last bar of the window, so a
@@ -1329,12 +1341,25 @@ def walk_forward_analysis(
             summary["family_pbo_error"] = _pbo["error"]
 
     # Surface market-impact capacity estimate in the summary when impact is
-    # enabled and estimable; keep None (backward compatible) otherwise.
+    # enabled and estimable; keep None (backward compatible) otherwise. The
+    # value is a cost-aware breakdown (impact vs participation vs cost drag)
+    # so leveraged or short strategies surface a realistic, cost-adjusted
+    # capacity alongside the per-period breakdown.
     _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window,
                                   max_participation_rate=max_participation_rate,
                                   borrow_cost=borrow_cost, funding_cost=funding_cost,
                                   leverage=leverage, short_exposure=short_exposure)
-    summary["capacity"] = _capacity.get("estimated_capacity")
+    _summary_cap = _capacity.get("cost_adjusted_capacity")
+    summary["capacity"] = (
+        {
+            "impact_capacity": _capacity.get("impact_capacity"),
+            "participation_capacity": _capacity.get("participation_capacity"),
+            "cost_adjusted_capacity": _capacity.get("cost_adjusted_capacity"),
+            "cost_drag": _capacity.get("cost_drag"),
+            "holding_period_years": _capacity.get("holding_period_years"),
+        }
+        if _summary_cap is not None else None
+    )
     # Capacity trend over the whole sample: the distribution of the
     # per-period capacity readings, so a liquidity squeeze anywhere in the
     # sample is visible instead of being hidden behind the last bar's
@@ -3755,8 +3780,9 @@ def estimate_capacity(
     Returns:
         Dictionary with keys: impact_coefficient, max_impact, adv_window,
         impact_model, max_participation_rate, borrow_cost, funding_cost,
-        leverage, short_exposure, cost_drag, holding_period_years, price,
-        adv_shares, adv_notional, periods_per_year,
+        leverage, short_exposure, cost_drag, holding_period_years,
+        impact_capacity, participation_capacity, cost_adjusted_capacity,
+        price, adv_shares, adv_notional, periods_per_year,
         max_notional_per_trade, estimated_capacity, unconstrained, estimable,
         n_assets, binding_asset, capacity_trend.
         ``unconstrained`` is True when impact is disabled. ``estimable`` is
@@ -3768,6 +3794,12 @@ def estimate_capacity(
         ``holding_period_years`` is ``1 / periods_per_year``; the reported
         capacity is divided by ``(1 + cost_drag * holding_period_years)`` so
         that leveraged or short strategies carry a lower cost-aware capacity.
+        ``impact_capacity`` is the impact-model capacity before the
+        participation-rate limit and cost drag; ``participation_capacity`` is
+        the participation-rate-based capacity (None when no limit is set);
+        ``cost_adjusted_capacity`` (== ``estimated_capacity`` ==
+        ``max_notional_per_trade``) is the final capacity after both the
+        participation limit and the cost drag.
     """
     result = {
         "impact_coefficient": float(impact_coefficient),
@@ -3781,6 +3813,9 @@ def estimate_capacity(
         "short_exposure": float(short_exposure),
         "cost_drag": None,
         "holding_period_years": None,
+        "impact_capacity": None,
+        "participation_capacity": None,
+        "cost_adjusted_capacity": None,
         "price": None,
         "adv_shares": None,
         "adv_notional": None,
@@ -3870,9 +3905,13 @@ def estimate_capacity(
             per_asset_capacity = (max_impact / float(impact_coefficient)) ** 2 * binding_adv_notional
         else:
             per_asset_capacity = max_impact * binding_adv_notional / float(impact_coefficient)
-        portfolio_capacity = n_assets * per_asset_capacity
+        # Impact-based capacity before the participation-rate limit and the
+        # cost drag. This is the pure liquidity-driven number.
+        impact_capacity = n_assets * per_asset_capacity
+        portfolio_capacity = impact_capacity
 
-        # Apply participation-rate limit if set.
+        # Participation-rate limit (hard cap independent of the impact model).
+        participation_capacity = None
         if max_participation_rate is not None:
             participation_capacity = n_assets * max_participation_rate * binding_adv_notional
             portfolio_capacity = min(portfolio_capacity, participation_capacity)
@@ -3909,6 +3948,11 @@ def estimate_capacity(
             adv_notional=binding_adv_notional,
             periods_per_year=float(ann_factor),
             holding_period_years=float(holding_period_years),
+            impact_capacity=float(impact_capacity),
+            participation_capacity=(
+                float(participation_capacity) if participation_capacity is not None else None
+            ),
+            cost_adjusted_capacity=float(portfolio_capacity),
             max_notional_per_trade=float(portfolio_capacity),
             estimated_capacity=float(portfolio_capacity),
             estimable=True,
@@ -3930,8 +3974,12 @@ def estimate_capacity(
         max_notional_per_trade = (max_impact / float(impact_coefficient)) ** 2 * last_adv_notional
     else:
         max_notional_per_trade = max_impact * last_adv_notional / float(impact_coefficient)
+    # Impact-based capacity before the participation-rate limit and the cost
+    # drag. This is the pure liquidity-driven number.
+    impact_capacity = max_notional_per_trade
 
-    # Apply participation-rate limit if set.
+    # Participation-rate limit (hard cap independent of the impact model).
+    participation_capacity = None
     if max_participation_rate is not None:
         participation_capacity = max_participation_rate * last_adv_notional
         max_notional_per_trade = min(max_notional_per_trade, participation_capacity)
@@ -3964,6 +4012,11 @@ def estimate_capacity(
         adv_notional=last_adv_notional,
         periods_per_year=float(ann_factor),
         holding_period_years=float(holding_period_years),
+        impact_capacity=float(impact_capacity),
+        participation_capacity=(
+            float(participation_capacity) if participation_capacity is not None else None
+        ),
+        cost_adjusted_capacity=float(max_notional_per_trade),
         max_notional_per_trade=float(max_notional_per_trade),
         estimated_capacity=float(max_notional_per_trade),
         estimable=True,

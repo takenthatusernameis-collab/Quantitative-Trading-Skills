@@ -6794,8 +6794,8 @@ def test_walk_forward_analysis_participation_rate_caps_per_period_and_summary():
     assert uncapped["summary"]["max_participation_rate"] is None
     assert capped["summary"]["max_participation_rate"] == 0.0001
 
-    uncapped_cap = uncapped["summary"]["capacity"]
-    capped_cap = capped["summary"]["capacity"]
+    uncapped_cap = uncapped["summary"]["capacity"]["cost_adjusted_capacity"]
+    capped_cap = capped["summary"]["capacity"]["cost_adjusted_capacity"]
     assert uncapped_cap is not None and uncapped_cap > 0
     assert abs(capped_cap - 0.1 * uncapped_cap) <= 1e-9 * abs(uncapped_cap)
 
@@ -6804,15 +6804,18 @@ def test_walk_forward_analysis_participation_rate_caps_per_period_and_summary():
     for uncapped_period, capped_period in zip(
         uncapped["periods"], capped["periods"]
     ):
-        assert uncapped_period["capacity"] > 0
+        assert uncapped_period["capacity"]["cost_adjusted_capacity"] > 0
         assert abs(
-            capped_period["capacity"] - 0.1 * uncapped_period["capacity"]
-        ) <= 1e-9 * uncapped_period["capacity"]
+            capped_period["capacity"]["cost_adjusted_capacity"]
+            - 0.1 * uncapped_period["capacity"]["cost_adjusted_capacity"]
+        ) <= 1e-9 * uncapped_period["capacity"]["cost_adjusted_capacity"]
         # The trend must be capped too: its last reading matches the period's
         # point-in-time capacity instead of the impact-only number.
         trend = capped_period["capacity_trend"]
         assert trend is not None
-        assert trend["last_capacity"] == capped_period["capacity"]
+        assert trend["last_capacity"] == capped_period["capacity"][
+            "cost_adjusted_capacity"
+        ]
 
     summary_trend = capped["summary"]["capacity_trend"]
     assert summary_trend["last_capacity"] == capped_cap
@@ -6820,11 +6823,13 @@ def test_walk_forward_analysis_participation_rate_caps_per_period_and_summary():
     # A cap looser than the impact-based participation rate leaves every
     # published number unchanged (opt-in semantics).
     loose = walk_forward_analysis(**common, max_participation_rate=0.5)
-    assert loose["summary"]["capacity"] == uncapped_cap
+    assert loose["summary"]["capacity"]["cost_adjusted_capacity"] == uncapped_cap
     for uncapped_period, loose_period in zip(
         uncapped["periods"], loose["periods"]
     ):
-        assert loose_period["capacity"] == uncapped_period["capacity"]
+        assert loose_period["capacity"]["cost_adjusted_capacity"] == (
+            uncapped_period["capacity"]["cost_adjusted_capacity"]
+        )
 
 
 def test_cpcv_analysis_participation_rate_caps_per_fold_and_summary():
@@ -6938,8 +6943,9 @@ def test_cli_walk_forward_participation_rate_cap_written_to_summary():
         assert capped["summary"]["max_participation_rate"] == 0.0001
         assert uncapped["summary"]["capacity"] is not None
         assert abs(
-            capped["summary"]["capacity"] - 0.1 * uncapped["summary"]["capacity"]
-        ) <= 1e-9 * uncapped["summary"]["capacity"]
+            capped["summary"]["capacity"]["cost_adjusted_capacity"]
+            - 0.1 * uncapped["summary"]["capacity"]["cost_adjusted_capacity"]
+        ) <= 1e-9 * uncapped["summary"]["capacity"]["cost_adjusted_capacity"]
 
         assert len(capped["capacity_per_period"]) == len(
             uncapped["capacity_per_period"]
@@ -6948,13 +6954,14 @@ def test_cli_walk_forward_participation_rate_cap_written_to_summary():
         for uncapped_row, capped_row in zip(
             uncapped["capacity_per_period"], capped["capacity_per_period"]
         ):
-            assert uncapped_row["capacity"] > 0
+            assert uncapped_row["capacity"]["cost_adjusted_capacity"] > 0
             assert abs(
-                capped_row["capacity"] - 0.1 * uncapped_row["capacity"]
-            ) <= 1e-9 * uncapped_row["capacity"]
+                capped_row["capacity"]["cost_adjusted_capacity"]
+                - 0.1 * uncapped_row["capacity"]["cost_adjusted_capacity"]
+            ) <= 1e-9 * uncapped_row["capacity"]["cost_adjusted_capacity"]
             assert (
                 capped_row["capacity_trend"]["last_capacity"]
-                == capped_row["capacity"]
+                == capped_row["capacity"]["cost_adjusted_capacity"]
             )
 
 
@@ -7622,7 +7629,7 @@ def test_walk_forward_analysis_surfaces_capacity_in_summary():
     )
     assert "capacity" in res_on["summary"]
     assert res_on["summary"]["capacity"] is not None
-    assert res_on["summary"]["capacity"] > 0
+    assert res_on["summary"]["capacity"]["cost_adjusted_capacity"] > 0
 
     res_off = walk_forward_analysis(
         data=data,
@@ -7660,7 +7667,53 @@ def test_walk_forward_analysis_surfaces_capacity_per_period():
     for p in res["periods"]:
         assert "capacity" in p
         assert p["capacity"] is not None
-        assert p["capacity"] > 0
+        assert p["capacity"]["cost_adjusted_capacity"] > 0
+
+
+def test_walk_forward_summary_capacity_surfaces_cost_drag_and_holding_period():
+    """The walk-forward summary capacity carries a cost-aware breakdown with
+    cost_drag and holding_period_years, and borrow/funding costs reduce the
+    reported capacity relative to the impact-only number."""
+    data = _make_ohlcv_data(periods=500, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
+    base = dict(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        impact_coefficient=0.5,
+    )
+
+    uncapped = walk_forward_analysis(**base)
+    assert uncapped["summary"]["capacity"] is not None
+    cap = uncapped["summary"]["capacity"]
+    assert "cost_drag" in cap and "holding_period_years" in cap
+    assert cap["cost_drag"] == 0.0
+    assert cap["holding_period_years"] > 0
+    assert cap["cost_adjusted_capacity"] == cap["impact_capacity"]
+
+    leveraged = walk_forward_analysis(
+        **base, borrow_cost=0.03, funding_cost=0.02, leverage=1.5, short_exposure=0.2
+    )
+    lcap = leveraged["summary"]["capacity"]
+    assert lcap is not None
+    assert "cost_drag" in lcap and "holding_period_years" in lcap
+    assert lcap["cost_drag"] > 0
+    assert lcap["holding_period_years"] > 0
+    # Cost drag strictly reduces the reported capacity versus the impact-only
+    # number when leverage or short exposure carries a cost.
+    assert lcap["cost_adjusted_capacity"] < lcap["impact_capacity"]
+    assert abs(
+        lcap["cost_adjusted_capacity"]
+        - lcap["impact_capacity"]
+        / (1.0 + lcap["cost_drag"] * lcap["holding_period_years"])
+    ) < 1e-9
 
 
 TEST_REGISTRY.append(
@@ -7668,6 +7721,9 @@ TEST_REGISTRY.append(
 )
 TEST_REGISTRY.append(
     ("test_walk_forward_analysis_surfaces_capacity_per_period", test_walk_forward_analysis_surfaces_capacity_per_period)
+)
+TEST_REGISTRY.append(
+    ("test_walk_forward_summary_capacity_surfaces_cost_drag_and_holding_period", test_walk_forward_summary_capacity_surfaces_cost_drag_and_holding_period)
 )
 TEST_REGISTRY.extend([
     ("test_walk_forward_analysis_participation_rate_caps_per_period_and_summary", test_walk_forward_analysis_participation_rate_caps_per_period_and_summary),
@@ -8115,14 +8171,16 @@ def test_walk_forward_surfaces_capacity_trend_per_period_and_summary():
     assert summary_trend is not None
     assert summary_trend["min_capacity"] > 0
     assert summary_trend["median_capacity"] > 0
-    assert summary_trend["last_capacity"] == res_on["summary"]["capacity"]
+    assert summary_trend["last_capacity"] == res_on["summary"]["capacity"][
+        "cost_adjusted_capacity"
+    ]
 
     period_mins = []
     for p in res_on["periods"]:
         trend = p.get("capacity_trend")
         assert trend is not None, p
         assert trend["min_capacity"] > 0
-        assert trend["last_capacity"] == p["capacity"]
+        assert trend["last_capacity"] == p["capacity"]["cost_adjusted_capacity"]
         period_mins.append(trend["min_capacity"])
 
     # The OOS aggregate is the worst capacity in any out-of-sample window.
