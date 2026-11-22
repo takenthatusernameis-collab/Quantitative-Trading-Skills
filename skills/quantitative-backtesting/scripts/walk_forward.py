@@ -7621,7 +7621,8 @@ def out_of_sample_validation(
     # enabled and estimable; keep None (backward compatible) otherwise.
     _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window,
                                   max_participation_rate=max_participation_rate,
-                                  borrow_cost=borrow_cost, funding_cost=funding_cost)
+                                  borrow_cost=borrow_cost, funding_cost=funding_cost,
+                                  leverage=leverage, short_exposure=short_exposure)
     summary["capacity"] = _capacity.get("estimated_capacity")
     # Capacity trend over the whole sample (the per-period / per-fold
     # records carry the same key for their own window).
@@ -11484,6 +11485,8 @@ def run_monte_carlo(args) -> int:
             data, args.impact_coefficient, adv_window=args.adv_window,
             max_participation_rate=max_participation_rate,
             borrow_cost=args.borrow_cost, funding_cost=args.funding_cost,
+            leverage=getattr(args, "leverage", 1.0),
+            short_exposure=getattr(args, "short_exposure", 0.0),
         )
         mc_results["summary"]["capacity"] = _capacity.get("estimated_capacity")
         mc_results["summary"]["capacity_trend"] = _capacity.get("capacity_trend")

@@ -7475,6 +7475,103 @@ def test_estimate_capacity_participation_rate_none_when_impact_disabled():
     assert cap["capacity_trend"] is None
 
 
+def test_estimate_capacity_leverage_funding_cost_drag_reduces_capacity():
+    """A leveraged position (leverage > 1) with a funding cost lowers the
+    reported capacity by the annualized cost drag over one holding period.
+
+    cost_drag = (leverage - 1) * funding_cost; capacity is divided by
+    (1 + cost_drag * holding_period_years).
+    """
+    data = _make_ohlcv_data(periods=300, seed=42)
+    base = estimate_capacity(data, impact_coefficient=0.5)
+    lev = estimate_capacity(
+        data, impact_coefficient=0.5, leverage=2.0, funding_cost=0.04,
+    )
+    assert base["cost_drag"] == 0.0
+    assert abs(lev["cost_drag"] - 0.04) < 1e-12
+    assert lev["estimated_capacity"] < base["estimated_capacity"]
+    ann_factor = base["periods_per_year"]
+    denominator = 1.0 + 0.04 / ann_factor
+    expected = base["estimated_capacity"] / denominator
+    assert abs(lev["estimated_capacity"] - expected) < 1e-6
+    assert abs(lev["max_notional_per_trade"] - expected) < 1e-6
+
+
+def test_estimate_capacity_short_exposure_borrow_cost_drag_reduces_capacity():
+    """A short exposure (short_exposure > 0) with a borrow cost lowers the
+    reported capacity by the annualized cost drag over one holding period.
+
+    cost_drag = short_exposure * borrow_cost.
+    """
+    data = _make_ohlcv_data(periods=300, seed=42)
+    base = estimate_capacity(data, impact_coefficient=0.5)
+    short = estimate_capacity(
+        data, impact_coefficient=0.5, short_exposure=0.5, borrow_cost=0.06,
+    )
+    assert abs(short["cost_drag"] - 0.03) < 1e-12
+    assert short["estimated_capacity"] < base["estimated_capacity"]
+    ann_factor = base["periods_per_year"]
+    denominator = 1.0 + 0.03 / ann_factor
+    expected = base["estimated_capacity"] / denominator
+    assert abs(short["estimated_capacity"] - expected) < 1e-6
+
+
+def test_estimate_capacity_zero_cost_drag_is_identical():
+    """With leverage=1.0 and short_exposure=0.0 (or zero costs), capacity is
+    identical to the no-drag baseline."""
+    data = _make_ohlcv_data(periods=300, seed=42)
+    base = estimate_capacity(data, impact_coefficient=0.5)
+    explicit = estimate_capacity(
+        data, impact_coefficient=0.5, leverage=1.0, short_exposure=0.0,
+        borrow_cost=0.0, funding_cost=0.0,
+    )
+    zero_drag = estimate_capacity(
+        data, impact_coefficient=0.5, leverage=1.0, short_exposure=0.0,
+        borrow_cost=0.99, funding_cost=0.99,
+    )
+    assert base["estimated_capacity"] == explicit["estimated_capacity"]
+    assert base["estimated_capacity"] == zero_drag["estimated_capacity"]
+    assert base["capacity_trend"] == explicit["capacity_trend"]
+    assert base["capacity_trend"] == zero_drag["capacity_trend"]
+
+
+def test_estimate_capacity_cost_drag_rejects_invalid():
+    """Negative or non-finite borrow/funding/leverage/short_exposure must
+    raise ValueError instead of silently reporting a None capacity."""
+    data = _make_ohlcv_data(periods=300, seed=42)
+    for kwargs in (
+        {"borrow_cost": -0.01},
+        {"borrow_cost": float("nan")},
+        {"funding_cost": -0.01},
+        {"funding_cost": float("inf")},
+        {"leverage": 0.0},
+        {"leverage": -1.0},
+        {"short_exposure": -0.01},
+        {"short_exposure": float("nan")},
+    ):
+        try:
+            estimate_capacity(data, impact_coefficient=0.5, **kwargs)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"expected ValueError for {kwargs}")
+
+
+def test_estimate_capacity_cost_drag_also_scales_trend():
+    """The capacity trend is divided by the same drag denominator as the
+    point estimate, so every period reflects the cost-aware capacity."""
+    dates = pd.date_range("2020-01-01", periods=60, freq="B")
+    data = pd.DataFrame({"close": 100.0, "volume": 1_000_000.0}, index=dates)
+    base = estimate_capacity(data, impact_coefficient=0.5)
+    lev = estimate_capacity(
+        data, impact_coefficient=0.5, leverage=2.0, funding_cost=0.04,
+    )
+    ann_factor = base["periods_per_year"]
+    denominator = 1.0 + 0.04 / ann_factor
+    for key in ("min_capacity", "median_capacity", "max_capacity", "last_capacity"):
+        assert abs(lev["capacity_trend"][key] - base["capacity_trend"][key] / denominator) < 1e-6
+
+
 TEST_REGISTRY.extend([
     ("test_examples_coverage_deflated_alpha_imports", test_examples_coverage_deflated_alpha_imports),
     ("test_examples_coverage_deflated_alpha_runs", test_examples_coverage_deflated_alpha_runs),
@@ -7497,6 +7594,11 @@ TEST_REGISTRY.extend([
     ("test_estimate_capacity_participation_rate_trend_panel", test_estimate_capacity_participation_rate_trend_panel),
     ("test_estimate_capacity_participation_rate_rejects_invalid", test_estimate_capacity_participation_rate_rejects_invalid),
     ("test_estimate_capacity_participation_rate_none_when_impact_disabled", test_estimate_capacity_participation_rate_none_when_impact_disabled),
+    ("test_estimate_capacity_leverage_funding_cost_drag_reduces_capacity", test_estimate_capacity_leverage_funding_cost_drag_reduces_capacity),
+    ("test_estimate_capacity_short_exposure_borrow_cost_drag_reduces_capacity", test_estimate_capacity_short_exposure_borrow_cost_drag_reduces_capacity),
+    ("test_estimate_capacity_zero_cost_drag_is_identical", test_estimate_capacity_zero_cost_drag_is_identical),
+    ("test_estimate_capacity_cost_drag_rejects_invalid", test_estimate_capacity_cost_drag_rejects_invalid),
+    ("test_estimate_capacity_cost_drag_also_scales_trend", test_estimate_capacity_cost_drag_also_scales_trend),
     ("test_verify_split_separation_non_chronological_disjoint_raises", test_verify_split_separation_non_chronological_disjoint_raises),
     ("test_walk_forward_analysis_validate_pit_passes_on_clean_data", test_walk_forward_analysis_validate_pit_passes_on_clean_data),
 ])

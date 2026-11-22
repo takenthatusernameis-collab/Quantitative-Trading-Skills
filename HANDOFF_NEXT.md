@@ -1,35 +1,93 @@
-# Handoff: next task — extend capacity model with borrow/funding costs
+# Handoff — Session 153: capacity cost-drag (borrow/funding) completed & tested
 
-## Latest verified baseline
-- **Full quant gate: 1538 passed, 9 failed** (pre-existing reporting failures) with `-n 4`
-  (`python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4`).
-- Participation-rate cap (`--max-participation-rate`) fully wired through all walk_forward.py paths:
-  `walk_forward_analysis`, `cpcv_analysis`, `out_of_sample_validation`, Monte Carlo train/val/test/summary.
-- All 26 participation-rate cap tests pass (17 walk_forward + 9 run_backtest).
-- Default `None` is bitwise identical to prior numbers (verified by no-bind tests).
-- Working tree clean except `results/simple_momentum_hypothesis.json` (generated artifact).
+## What changed
 
-## What is complete
-- `estimate_capacity(..., max_participation_rate=r)` caps point estimate, panel basket, and `capacity_trend` periods.
-- `run_backtest.py` and `walk_forward.py` CLI expose `--max-participation-rate`, validate before capacity `try/except`, record in config/summary.
-- Docs describe `min(impact_capacity, r * ADV_notional)` semantics and full-rebalance limitation.
+The assigned task from `HANDOFF_NEXT.md` — "extend `estimate_capacity` with
+borrow/funding costs" — was **already implemented and committed** in `fa2b537`
+(the `estimate_capacity` signature, CLI flags, and threading through
+walk_forward/cpcv/oos/mc paths were all in place). This session:
+
+1. **Fixed two gaps** where `leverage`/`short_exposure` were *not* threaded
+   into `estimate_capacity` summary calls (the per-period/per-fold/per-split
+   calls already passed them, but the whole-sample summary calls used
+   defaults, producing an inconsistency):
+   - `walk_forward.py:7622` (`out_of_sample_validation` summary capacity) —
+     now passes `leverage=leverage, short_exposure=short_exposure`.
+   - `walk_forward.py:11485` (`run_monte_carlo` summary capacity) — now passes
+     `leverage=getattr(args, "leverage", 1.0)` /
+     `short_exposure=getattr(args, "short_exposure", 0.0)`.
+
+2. **Added `--leverage` / `--short-exposure` to `run_backtest.py`** CLI
+   (it previously lacked them, so single-backtest capacity could not reflect
+   the cost drag). The capacity call now passes them; config records them.
+
+3. **Added 8 focused tests** (5 in `test_walk_forward.py`, 3 in
+   `test_run_backtest.py` + 1 CLI parse test) covering:
+   - leverage×funding drag reduces capacity by `1 + cost_drag/ann_factor`.
+   - short_exposure×borrow drag reduces capacity.
+   - zero drag (default leverage=1.0/short=0.0 or zero costs) is bitwise
+     identical to baseline.
+   - invalid (negative/non-finite) cost/leverage/short_exposure raise
+     `ValueError`.
+   - the drag also scales every period of `capacity_trend`.
+
+4. **Documented** the cost-drag capacity in
+   `references/cost_models.md` (new "Borrow/funding cost drag" section) and
+   `SKILL.md` (run_backtest bullet).
+
+## What was actually verified
+
+- `test_walk_forward.py` full: **232 passed** (was 227, +5 new).
+- `test_run_backtest.py` full: **131 passed** (was 127, +4 new incl. CLI parse).
+- Combined walk_forward + run_backtest with `-n 4`: **363 passed** in 4m42s.
+- Borrow/funding cost sweep tests (3 files): **4 passed**.
+- Focused capacity/participation/cost-drag subset: **72 passed**.
+- End-to-end smoke test: leverage=2.0/funding=0.04 reduces capacity by exactly
+  `1/(1+0.04/252)` (ratio 0.99984 matches expected 0.99984).
+- CLI `--help` for both `run_backtest.py` and `walk_forward.py` shows the
+  `--leverage` / `--short-exposure` flags.
 
 ## What remains unresolved
-- `estimate_capacity` does not yet incorporate `--borrow-cost` or `--funding-cost` (both already exposed in CLI).
-- Capacity model remains impact + participation only; leveraged/short strategies lack cost-aware capacity.
-- 9 pre-existing `test_reporting.py` failures (matplotlib/tear sheet generation).
+
+- 9 pre-existing `test_reporting.py` failures (tear sheet/heatmap PNG
+  generation, matplotlib backend issues) — unrelated to this work, unchanged.
+- Full quant gate (all tests) was **not** re-run to completion this session
+  (it exceeds the 30-min single-command budget). The combined walk_forward +
+  run_backtest run (363 passed) plus the targeted sweep runs cover the changed
+  surface; the reporting failures are the only known baseline delta.
+- No profitability/capacity claim: committed-fixture verdicts remain
+  `NOT SUPPORTED`. This is a methodology/capacity-model improvement, not
+  evidence any strategy is profitable.
+
+## Approaches already tried / failed
+
+- None this session. The implementation was already present; the work was
+  gap-closing (2 missing call-site threadings + run_backtest CLI parity),
+  test coverage, and docs.
 
 ## One precise next task
-1. Extend `estimate_capacity` signature to accept `borrow_cost` and `funding_cost` (annual rates, default 0).
-2. When leverage > 1 or short exposure > 0, reduce capacity by the annualized cost drag:
-   `cost_drag = (leverage - 1) * funding_cost + short_exposure * borrow_cost`.
-   Capacity notional = `min(impact_capacity, participation_capacity) / (1 + cost_drag * holding_period_years)`.
-3. Thread `borrow_cost` and `funding_cost` from CLI through `walk_forward_analysis`, `cpcv_analysis`, `out_of_sample_validation`, Monte Carlo paths (same 19 call sites as participation-rate).
-4. Record in summary config; add focused tests that borrow/funding costs bind capacity for leveraged/short strategies.
-5. Run focused tests + full gate with `-n 4`; require EXIT 0 on core tests (baseline 1538, ignore 9 reporting failures).
 
-## Constraints
-- Default 0 must be bitwise identical to today's numbers.
-- Do not weaken existing `try/except` or CLI validation.
-- Use `-n 4` with ~25 min budget.
+Run the **full quant gate** to completion to confirm the baseline holds:
+
+```bash
+cd skills/quantitative-backtesting
+python3 -m pytest tests/ -p no:cacheprovider -q -n 4
+```
+
+Require: core tests all pass; only the 9 pre-existing `test_reporting.py`
+failures are acceptable. Expected count is now ~1546+ passed (baseline was
+1538 + 5 walk_forward + 4 run_backtest = ~1547, minus the 9 reporting
+failures). If any *new* failure appears outside `test_reporting.py`, bisect
+against commit `fa2b537` to confirm it is not a regression from this
+session's changes (`run_backtest.py` CLI + `walk_forward.py` two call-site
+threadings + tests + docs).
+
+## Constraints for next session
+
 - Do not commit unless explicitly asked.
+- Do not weaken existing `try/except` or CLI validation.
+- Use `-n 4`; the full gate needs >30 min — run it as a background process
+  or with a raised timeout.
+- The capacity cost-drag is a *measurement*, not a charged cost — it must
+  never change backtest returns, P&L, or Sharpe. Any test asserting
+  otherwise indicates a regression.

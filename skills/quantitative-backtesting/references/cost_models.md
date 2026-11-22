@@ -661,6 +661,51 @@ The cap assumes a full rebalance per period (the same assumption as the
 impact-based capacity), so it bounds per-rebalance participation, not the
 participation of an intraday execution schedule.
 
+### Borrow/funding cost drag (optional)
+
+A leveraged or short strategy's *economic* capacity is lower than its
+liquidity-only capacity, because the annualized cost of carrying the leverage
+or short exposure eats into the return the notional can support. When
+`borrow_cost` and/or `funding_cost` are non-zero (both are annual decimal
+rates already exposed as `--borrow-cost` / `--funding-cost` on every path),
+`estimate_capacity` reduces the reported capacity by a one-holding-period
+cost drag:
+
+```
+cost_drag       = (leverage - 1) * funding_cost + short_exposure * borrow_cost
+denominator     = 1 + cost_drag * holding_period_years
+capacity_notional = liquidity_capacity / denominator
+```
+
+where `holding_period_years = 1 / periods_per_year` (so a daily series uses
+`1/252`) and `liquidity_capacity` is the impact-only or
+participation-capped capacity computed above. The two legs are controlled
+independently:
+
+- `leverage` (gross leverage multiple, default `1.0`) drives the **funding**
+  leg via `(leverage - 1) * funding_cost`. Only leverage *above* 1x incurs a
+  funding charge, so a fully-funded 1x book is unaffected even with a
+  positive `funding_cost`.
+- `short_exposure` (short notional as a fraction of portfolio notional,
+  default `0.0`) drives the **borrow** leg via `short_exposure * borrow_cost`.
+
+Default `leverage=1.0`, `short_exposure=0.0`, or zero costs leave
+`cost_drag = 0` and the capacity **bitwise unchanged** from the
+liquidity-only number. The drag is applied to the point estimate **and**
+every period of `capacity_trend`, so the trend and the point reading never
+contradict each other. `run_backtest.py`, `walk_forward.py` (all
+subcommands: `walk-forward`, `optimize`, `cpcv`, `monte-carlo`,
+`out-of-sample`) expose `--leverage` / `--short-exposure` and record them
+in `results["config"]` / `summary` for traceability. Negative or non-finite
+`borrow_cost`, `funding_cost`, `leverage` (must be `> 0`), or
+`short_exposure` (must be `>= 0`) raise `ValueError`.
+
+The drag is a **capacity measurement**, not a charged cost: it lowers the
+reported capacity a leveraged/short strategy can economically support over
+one holding period, but it does not change any backtest return, P&L, or
+Sharpe number (those paths already charge borrow/funding costs dynamically
+from the actual position series).
+
 ### Capacity per regime (fold / period / window)
 
 The aggregate `summary["capacity"]` is computed on the whole sample, so it

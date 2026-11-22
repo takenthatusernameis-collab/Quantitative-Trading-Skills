@@ -88,6 +88,8 @@ def parse_args():
     parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="List of annual borrow costs to sweep (overrides --borrow-cost).")
     parser.add_argument("--funding-cost", type=float, default=0.0, help="Annual funding cost rate for leveraged positions (as decimal, e.g., 0.02 = 2%% per year)")
     parser.add_argument("--funding-costs", type=float, nargs="+", default=None, help="List of annual funding costs to sweep (overrides --funding-cost).")
+    parser.add_argument("--leverage", type=float, default=1.0, help="Gross leverage multiple of the position (default 1.0). Drives the funding-cost leg of the capacity cost drag via (leverage - 1) * funding_cost; a value above 1.0 lowers cost-aware capacity for leveraged strategies. Only affects the capacity estimate, not backtest returns (which derive leverage dynamically from positions).")
+    parser.add_argument("--short-exposure", type=float, default=0.0, help="Short notional as a fraction of portfolio notional (default 0.0). Drives the borrow-cost leg of the capacity cost drag via short_exposure * borrow_cost; a value above 0.0 lowers cost-aware capacity for short strategies. Only affects the capacity estimate, not backtest returns.")
     parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     parser.add_argument("--output", type=str, default="results", help="Output directory")
     parser.add_argument("--params", type=str, help="Strategy parameters as JSON string")
@@ -866,6 +868,8 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
             "adv_window": args.adv_window,
             "borrow_cost": args.borrow_cost,
             "funding_cost": args.funding_cost,
+            "leverage": getattr(args, "leverage", 1.0),
+            "short_exposure": getattr(args, "short_exposure", 0.0),
             "max_impact": getattr(args, "max_impact", None),
             "max_participation_rate": getattr(args, "max_participation_rate", None),
             "strategy": args.strategy,
@@ -955,6 +959,8 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
                 _cap_frame, args.impact_coefficient, adv_window=args.adv_window,
                 max_participation_rate=max_participation_rate,
                 borrow_cost=args.borrow_cost, funding_cost=args.funding_cost,
+                leverage=getattr(args, "leverage", 1.0),
+                short_exposure=getattr(args, "short_exposure", 0.0),
             )
             results["capacity"] = _cap.get("estimated_capacity")
             # Capacity trend: the per-period capacity distribution over the

@@ -111,7 +111,7 @@ class _Args:
                  impact_aggregation="panel",
                  train_frac=None, val_frac=None, test_frac=None, run_split=None,
                  max_impact=None, regime_impact_coefficients=None,
-                 max_participation_rate=None):
+                 max_participation_rate=None, leverage=1.0, short_exposure=0.0):
         self.commission = commission
         self.slippage = slippage
         self.initial_capital = initial_capital
@@ -138,6 +138,8 @@ class _Args:
         self.max_impact = max_impact
         self.regime_impact_coefficients = regime_impact_coefficients
         self.max_participation_rate = max_participation_rate
+        self.leverage = leverage
+        self.short_exposure = short_exposure
 
 
 def test_signals_active_detects_flat_and_active_series():
@@ -885,6 +887,25 @@ def test_parse_args_accepts_max_participation_rate():
     with patch.object(sys, "argv", ["prog", "--data", "d.csv"]):
         args = parse_args()
     assert args.max_participation_rate is None
+
+
+def test_parse_args_accepts_leverage_and_short_exposure():
+    """parse_args accepts --leverage / --short-exposure and defaults to
+    1.0 / 0.0 (zero cost drag)."""
+    from unittest.mock import patch
+
+    with patch.object(
+        sys, "argv",
+        ["prog", "--data", "d.csv", "--leverage", "2.0", "--short-exposure", "0.5"],
+    ):
+        args = parse_args()
+    assert args.leverage == 2.0
+    assert args.short_exposure == 0.5
+
+    with patch.object(sys, "argv", ["prog", "--data", "d.csv"]):
+        args = parse_args()
+    assert args.leverage == 1.0
+    assert args.short_exposure == 0.0
 
 
 def test_run_backtest_fill_rate_default_is_one():
@@ -2724,6 +2745,90 @@ def test_run_backtest_max_participation_rate_rejects_invalid():
     assert missing["capacity_trend"] is None
 
 
+def test_run_backtest_leverage_funding_cost_drag_reduces_capacity():
+    """A leveraged position (leverage > 1) with a funding cost lowers the
+    reported capacity by the annualized cost drag over one holding period.
+
+    cost_drag = (leverage - 1) * funding_cost. Capacity is divided by
+    (1 + cost_drag * holding_period_years). Default leverage=1.0 /
+    funding_cost=0.0 leaves capacity unchanged.
+    """
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+
+    base = run_backtest(data, strategy, _Args(impact_coefficient=0.5))
+    # leverage=2.0, funding_cost=0.04 -> cost_drag = (2-1)*0.04 = 0.04
+    lev = run_backtest(
+        data, strategy,
+        _Args(impact_coefficient=0.5, leverage=2.0, funding_cost=0.04),
+    )
+
+    assert base["config"]["leverage"] == 1.0
+    assert lev["config"]["leverage"] == 2.0
+    assert lev["config"]["funding_cost"] == 0.04
+    # Leveraged capacity must be strictly lower than the unlevered baseline.
+    assert lev["capacity"] < base["capacity"]
+    # Holding period = 1 / periods_per_year. Daily data -> 252 periods/year.
+    ann_factor = 252.0
+    cost_drag = (2.0 - 1.0) * 0.04
+    denominator = 1.0 + cost_drag / ann_factor
+    expected = base["capacity"] / denominator
+    assert abs(lev["capacity"] - expected) < 1e-6
+    # The trend's last_capacity reflects the same drag.
+    assert abs(lev["capacity_trend"]["last_capacity"] - expected) < 1e-6
+
+
+def test_run_backtest_short_exposure_borrow_cost_drag_reduces_capacity():
+    """A short exposure (short_exposure > 0) with a borrow cost lowers the
+    reported capacity by the annualized cost drag over one holding period.
+
+    cost_drag = short_exposure * borrow_cost.
+    """
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+
+    base = run_backtest(data, strategy, _Args(impact_coefficient=0.5))
+    # short_exposure=0.5, borrow_cost=0.06 -> cost_drag = 0.5*0.06 = 0.03
+    short = run_backtest(
+        data, strategy,
+        _Args(impact_coefficient=0.5, short_exposure=0.5, borrow_cost=0.06),
+    )
+
+    assert short["config"]["short_exposure"] == 0.5
+    assert short["config"]["borrow_cost"] == 0.06
+    assert short["capacity"] < base["capacity"]
+    ann_factor = 252.0
+    cost_drag = 0.5 * 0.06
+    denominator = 1.0 + cost_drag / ann_factor
+    expected = base["capacity"] / denominator
+    assert abs(short["capacity"] - expected) < 1e-6
+
+
+def test_run_backtest_zero_cost_drag_is_bitwise_identical():
+    """With leverage=1.0 and short_exposure=0.0 (or zero costs), the capacity
+    is bitwise identical to the no-drag baseline."""
+    data = _make_data()
+    strategy = build_strategy("sma_crossover", '{"fast_period": 10, "slow_period": 30}')
+
+    base = run_backtest(data, strategy, _Args(impact_coefficient=0.5))
+    # Explicit defaults should not change the number.
+    explicit = run_backtest(
+        data, strategy,
+        _Args(impact_coefficient=0.5, leverage=1.0, short_exposure=0.0,
+              borrow_cost=0.0, funding_cost=0.0),
+    )
+    # Non-zero costs but leverage=1/short=0 -> cost_drag=0 -> unchanged.
+    zero_drag = run_backtest(
+        data, strategy,
+        _Args(impact_coefficient=0.5, leverage=1.0, short_exposure=0.0,
+              borrow_cost=0.99, funding_cost=0.99),
+    )
+    assert base["capacity"] == explicit["capacity"]
+    assert base["capacity"] == zero_drag["capacity"]
+    assert base["capacity_trend"] == explicit["capacity_trend"]
+    assert base["capacity_trend"] == zero_drag["capacity_trend"]
+
+
 def test_run_backtest_surfaces_book_diagnostic_for_a_panel():
     """A panel backtest reports the book the strategy actually holds.
 
@@ -4304,6 +4409,7 @@ TEST_REGISTRY = [
     ("test_parse_args_accepts_fill_rate", test_parse_args_accepts_fill_rate),
     ("test_parse_args_accepts_max_impact", test_parse_args_accepts_max_impact),
     ("test_parse_args_accepts_max_participation_rate", test_parse_args_accepts_max_participation_rate),
+    ("test_parse_args_accepts_leverage_and_short_exposure", test_parse_args_accepts_leverage_and_short_exposure),
     ("test_run_backtest_fill_rate_default_is_one", test_run_backtest_fill_rate_default_is_one),
     ("test_run_backtest_fill_rate_one_identical_to_default", test_run_backtest_fill_rate_one_identical_to_default),
     ("test_run_backtest_fill_rate_scales_borrow_cost_with_position", test_run_backtest_fill_rate_scales_borrow_cost_with_position),
@@ -4359,6 +4465,9 @@ TEST_REGISTRY = [
     ("test_run_backtest_max_participation_rate_binds_capacity", test_run_backtest_max_participation_rate_binds_capacity),
     ("test_run_backtest_max_participation_rate_does_not_bind_capacity", test_run_backtest_max_participation_rate_does_not_bind_capacity),
     ("test_run_backtest_max_participation_rate_rejects_invalid", test_run_backtest_max_participation_rate_rejects_invalid),
+    ("test_run_backtest_leverage_funding_cost_drag_reduces_capacity", test_run_backtest_leverage_funding_cost_drag_reduces_capacity),
+    ("test_run_backtest_short_exposure_borrow_cost_drag_reduces_capacity", test_run_backtest_short_exposure_borrow_cost_drag_reduces_capacity),
+    ("test_run_backtest_zero_cost_drag_is_bitwise_identical", test_run_backtest_zero_cost_drag_is_bitwise_identical),
     ("test_run_backtest_capacity_omits_when_volume_unavailable", test_run_backtest_capacity_omits_when_volume_unavailable),
     ("test_run_backtest_surfaces_capacity_trend_in_results", test_run_backtest_surfaces_capacity_trend_in_results),
     ("test_run_backtest_surfaces_book_diagnostic_for_a_panel", test_run_backtest_surfaces_book_diagnostic_for_a_panel),
