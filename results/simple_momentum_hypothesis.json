@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "kind": "falsifiable_hypothesis_record",
-  "generated_at": "2026-11-22T17:19:41Z",
+  "generated_at": "2026-11-22T18:13:38Z",
   "generator": "simple_momentum_hypothesis.py",
   "generator_path": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/simple_momentum_hypothesis.py",
   "engine": "skills/quantitative-backtesting/scripts/run_backtest.py",

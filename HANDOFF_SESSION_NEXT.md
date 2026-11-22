@@ -1,23 +1,21 @@
-# Handoff — Next Task: establish clean full-gate baseline
+# Handoff — Next Task: make TSMOM protocol-sensitivity use the shared Bonferroni helper
 
 ## What changed this session (verified)
-
-- `--output-format {json,csv}` was already committed and works: walk-forward `--output-format csv` writes `walk_forward_summary.csv` with flattened per-period capacity columns (period, test_start, test_end, impact_capacity, participation_capacity, cost_adjusted_capacity, cost_drag, holding_period_years) alongside `walk_forward_summary.json`; default json emits no csv (bitwise-identical default behavior preserved).
-- Added `test_cli_walk_forward_output_format_csv_writes_capacity_rows` in `skills/quantitative-backtesting/tests/test_walk_forward.py` (registered in TEST_REGISTRY) → passes; structural `test_main_registers_every_module_level_test` → passes.
-- Capacity/participation/cost-drag subset `test_walk_forward.py -k "capacity or participation_rate or output_format or csv"` → **49 passed**, no regressions.
-- Borrow-cost realism short-capable sweep → passes (Sharpe 1.40→1.34, p 0.45→0.49 across borrow levels; real non-NaN metrics, matching AUDIT_BORROW_COST_REALISM.md corrected results).
-- Regime-cost sweep short-capable → passes (real non-NaN metrics; directional claim holds).
-- Participation-rate cap (`--max-participation-rate`) already present in common_parser and threaded through all paths (per HANDOFF_SESSION_CURRENT.md) — complete.
+- Session-157 multiplicity task completed and committed in `2ce6b65`:
+  - `bonferroni_correction` helper in `skills/quantitative-backtesting/scripts/utils.py`.
+  - `tests/test_protocol_multiplicity.py` (10 tests) → 11 passed.
+  - Cross-sectional protocol-sensitivity test refactored to call `bonferroni_correction(dsr_p_values, alpha=DSR_PVALUE_THRESHOLD)` (`test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py:286-292`).
+- Full gate on current HEAD: **1580 passed, 0 failed, 0 errors** (~30:36), including the new multiplicity test file. Baseline established.
 
 ## What remains unresolved
-
-- 9 pre-existing `test_reporting.py` failures (matplotlib backend), unrelated.
-- No profitability/capacity claim; committed-fixture verdicts remain `NOT SUPPORTED`.
-
-## Approaches already tried / failed
-
-- None this session.
+- The TSMOM protocol-sensitivity test still computes the across-protocol correction inline (`float(p) * n_protocols` at `test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple.py:291-295`), while the cross-sectional study uses the shared `bonferroni_correction` helper — an inconsistency; no single source of truth for the protocol-family FWER control across the two studies.
 
 ## One precise next task
+Refactor `test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple.py` (`test_sole_pass_does_not_survive_protocol_multiplicity`) to use the shared `bonferroni_correction` helper, mirroring the cross-sectional call pattern:
+- `from utils import bonferroni_correction  # noqa: E402`
+- Collect the DSR p-values across the 4 MSFT informative protocols into a family, call `bonferroni_correction(dsr_p_values, alpha=DSR_PVALUE_THRESHOLD)`, and assert the sole-pass cell's adjusted p-value > `DSR_PVALUE_THRESHOLD` with `n_rejected == 0`.
 
-Establish a clean full-gate baseline before any new research work: run `pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4` (offline/committed fixtures, ~29m) and confirm the only failures are the 9 pre-existing `test_reporting.py` ones; record pass/fail counts and any *new* failure. Do not treat a green subset as a full baseline. Constraints: offline/committed fixtures only; default JSON output bitwise identical; do not commit unless explicitly asked.
+## Constraints
+- Offline/committed fixtures only; default JSON output unchanged; do not commit unless explicitly asked.
+- Decision/measurement-only: the pinned `EXPECTED` matrix must stay **bit-identical** and the honest finding (protocol-dependent sign flip, NOT SUPPORTED across the board) must be unchanged — `p * 4 = 2.3584` (uncapped) and Bonferroni-capped `1.0` both exceed `0.10`, so the assertion outcome is identical.
+- Verify: `test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple.py` (5/5) plus `tests/test_protocol_multiplicity.py` (11/11); a focused rerun is sufficient since the full 1580-test gate is already green on current HEAD.
