@@ -3814,7 +3814,7 @@ def estimate_capacity(
     if not np.isfinite(short_exposure) or short_exposure < 0:
         raise ValueError(f"short_exposure must be non-negative and finite, got {short_exposure}")
 
-    cost_drag = (float(leverage) - 1.0) * float(funding_cost) + float(short_exposure) * float(borrow_cost)
+    cost_drag = float(funding_cost) + float(borrow_cost)
     result["cost_drag"] = float(cost_drag)
 
     is_panel = isinstance(data.columns, pd.MultiIndex)
