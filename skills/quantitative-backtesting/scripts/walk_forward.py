@@ -10350,6 +10350,29 @@ def run_walk_forward(args) -> int:
         json.dump(summary_data, f, indent=2, default=str)
     print(f"Walk-forward summary saved to: {summary_path}")
 
+    # Optionally emit a flattened per-period capacity CSV so the cost-aware
+    # capacity breakdown (impact vs participation vs cost drag) is directly
+    # consumable by spreadsheet/analysis tools alongside the JSON artifact.
+    if getattr(args, "output_format", "json") == "csv":
+        capacity_rows = []
+        for entry in summary_data.get("capacity_per_period", []):
+            cap = entry.get("capacity") or {}
+            capacity_rows.append(
+                {
+                    "period": entry.get("period"),
+                    "test_start": entry.get("test_start"),
+                    "test_end": entry.get("test_end"),
+                    "impact_capacity": cap.get("impact_capacity"),
+                    "participation_capacity": cap.get("participation_capacity"),
+                    "cost_adjusted_capacity": cap.get("cost_adjusted_capacity"),
+                    "cost_drag": cap.get("cost_drag"),
+                    "holding_period_years": cap.get("holding_period_years"),
+                }
+            )
+        csv_path = output_dir / "walk_forward_summary.csv"
+        pd.DataFrame(capacity_rows).to_csv(csv_path, index=False)
+        print(f"Walk-forward capacity CSV saved to: {csv_path}")
+
     # Generate full report if OOS returns available
     if len(results["oos_returns"]) > 0:
         equity = (1 + results["oos_returns"]).cumprod() * args.initial_capital
@@ -12515,6 +12538,7 @@ def main():
     common_parser.add_argument("--leverage", type=float, default=1.0, help="Gross leverage multiple of the position (default 1.0). Drives the funding-cost leg of the capacity cost drag via (leverage - 1) * funding_cost; a value above 1.0 lowers cost-aware capacity for leveraged strategies.")
     common_parser.add_argument("--short-exposure", type=float, default=0.0, help="Short notional as a fraction of portfolio notional (default 0.0). Drives the borrow-cost leg of the capacity cost drag via short_exposure * borrow_cost; a value above 0.0 lowers cost-aware capacity for short strategies.")
     common_parser.add_argument("--output", type=str, default="results", help="Output directory")
+    common_parser.add_argument("--output-format", type=str, default="json", choices=["json", "csv"], help="Summary artifact format. 'json' (default) writes walk_forward_summary.json only, matching existing behavior. 'csv' also writes walk_forward_summary.csv with flattened per-period capacity rows (period, test_start, test_end, impact_capacity, participation_capacity, cost_adjusted_capacity, cost_drag, holding_period_years) alongside the JSON.")
     common_parser.add_argument("--param-grid", type=str, required=True, help="Parameter grid as JSON string")
     common_parser.add_argument("--validate-point-in-time", action="store_true", default=True, help="Run point-in-time validation on the loaded data (temporal ordering, duplicate timestamps, stale-data warnings); enabled by default, use --no-validate-point-in-time to disable")
     common_parser.add_argument("--no-validate-point-in-time", action="store_false", dest="validate_point_in_time", help="Disable point-in-time validation (enabled by default)")
