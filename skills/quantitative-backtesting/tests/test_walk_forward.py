@@ -3543,6 +3543,52 @@ def test_cli_monte_carlo_surfaces_capacity_in_summary():
         )
 
 
+def test_cli_monte_carlo_participation_rate_cap_binds_summary_capacity():
+    """CLI monte_carlo with --max-participation-rate caps the summary
+    capacity and records the rate in the config."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=800)
+        out_dir_uncapped = os.path.join(tmpdir, "out_uncapped")
+        out_dir_capped = os.path.join(tmpdir, "out_capped")
+
+        base_argv = [
+            "walk_forward", "monte-carlo",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--n-simulations", "50",
+            "--impact-coefficient", "0.5",
+        ]
+
+        def run(out_dir, extra):
+            argv = base_argv + ["--output", out_dir] + extra
+            with patch.object(sys, "argv", argv), \
+                    redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                rc = walk_forward_main()
+            assert rc == 0, f"CLI monte_carlo should exit 0, got {rc}"
+            results_path = os.path.join(out_dir, "monte_carlo_results.json")
+            assert os.path.exists(results_path), "monte_carlo_results.json not written"
+            with open(results_path) as f:
+                return json.load(f)
+
+        uncapped = run(out_dir_uncapped, [])
+        capped = run(out_dir_capped, ["--max-participation-rate", "0.0001"])
+
+        assert uncapped["config"]["max_participation_rate"] is None
+        assert capped["config"]["max_participation_rate"] == 0.0001
+        assert uncapped["summary"]["max_participation_rate"] is None
+        assert capped["summary"]["max_participation_rate"] == 0.0001
+
+        uncapped_cap = uncapped["summary"]["capacity"]
+        capped_cap = capped["summary"]["capacity"]
+        assert uncapped_cap is not None and uncapped_cap > 0
+        # With a participation rate of 0.0001 (0.01%) and impact coefficient 0.5,
+        # the participation capacity is ~0.0002 * ADV_notional (factor of 10 tighter).
+        assert abs(capped_cap - 0.1 * uncapped_cap) <= 1e-9 * uncapped_cap
+
+
 def test_cli_monte_carlo_impact_sweep_records_capacity():
     """CLI monte-carlo --impact-coefficients writes a sweep artifact whose
     every row carries capacity and capacity_trend, with capacity degrading as
@@ -7034,6 +7080,7 @@ TEST_REGISTRY = [
     ("test_cli_monte_carlo_multiple_benchmarks", test_cli_monte_carlo_multiple_benchmarks),
     ("test_cli_monte_carlo_impact_sweep", test_cli_monte_carlo_impact_sweep),
     ("test_cli_monte_carlo_surfaces_capacity_in_summary", test_cli_monte_carlo_surfaces_capacity_in_summary),
+    ("test_cli_monte_carlo_participation_rate_cap_binds_summary_capacity", test_cli_monte_carlo_participation_rate_cap_binds_summary_capacity),
     ("test_cli_monte_carlo_impact_sweep_records_capacity", test_cli_monte_carlo_impact_sweep_records_capacity),
     ("test_monte_carlo_n_trials_uses_evaluated_combo_count", test_monte_carlo_n_trials_uses_evaluated_combo_count),
     ("test_cli_cpcv_impact_sweep", test_cli_cpcv_impact_sweep),

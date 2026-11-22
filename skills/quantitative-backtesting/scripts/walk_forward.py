@@ -8783,6 +8783,7 @@ def run_cpcv(args) -> int:
             "benchmark_expense_ratio": bench_expense_ratio,
             "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
             "multi_symbol": getattr(args, "multi_symbol", False),
+            "max_participation_rate": getattr(args, "max_participation_rate", None),
             # The execution warmup this run applied, so the saved artifact
             # records how many leading bars of every fold are not tradable.
             **execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency),
@@ -10022,6 +10023,7 @@ def run_walk_forward(args) -> int:
             "benchmark_expense_ratio": bench_expense_ratio,
             "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
             "multi_symbol": getattr(args, "multi_symbol", False),
+            "max_participation_rate": getattr(args, "max_participation_rate", None),
             # The execution warmup this run applied, so the saved artifact
             # records how many leading bars of every window are not tradable.
             **execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency),
@@ -11423,6 +11425,7 @@ def run_monte_carlo(args) -> int:
             "benchmark_expense_ratio": bench_expense_ratio,
             "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
             "multi_symbol": getattr(args, "multi_symbol", False),
+            "max_participation_rate": getattr(args, "max_participation_rate", None),
             # The execution warmup of the return series the Monte Carlo
             # resampled, so the artifact records the convention the
             # resampled series was produced under.
@@ -12081,6 +12084,7 @@ def run_out_of_sample_validation(args) -> int:
             "cpcv_purge_size": args.cpcv_purge_size,
             "cpcv_embargo_size": args.cpcv_embargo_size,
             "multi_symbol": getattr(args, "multi_symbol", False),
+            "max_participation_rate": getattr(args, "max_participation_rate", None),
             # The execution warmup this run applied, so the saved artifact
             # records how many leading bars of every window are not tradable.
             **execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency),

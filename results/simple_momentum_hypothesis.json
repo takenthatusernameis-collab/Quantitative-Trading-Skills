@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "kind": "falsifiable_hypothesis_record",
-  "generated_at": "2026-11-21T12:54:20Z",
+  "generated_at": "2026-11-22T00:11:58Z",
   "generator": "simple_momentum_hypothesis.py",
   "generator_path": "/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills/simple_momentum_hypothesis.py",
   "engine": "skills/quantitative-backtesting/scripts/run_backtest.py",
@@ -25,7 +25,173 @@
     "slippage": 0.0001,
     "impact_coefficient": 0.1,
     "initial_capital": 100000.0,
-    "test_n_observations": 101
+    "test_n_observations": 101,
+    "walk_forward_window": {
+      "train_months": 8,
+      "test_months": 2,
+      "step_months": 2
+    }
+  },
+  "walk_forward_robustness": {
+    "kind": "rolling_chronological_out_of_sample",
+    "engine": "skills/quantitative-backtesting/scripts/walk_forward.py",
+    "note": "Robustness layer for the single-split falsification above: re-evaluates the same SMA-crossover strategy on rolling chronological train/test windows. The in-sample grid is re-selected per window, so this is genuinely out-of-sample.",
+    "window": {
+      "train_months": 8,
+      "test_months": 2,
+      "step_months": 2
+    },
+    "param_grid": {
+      "fast_period": [
+        8,
+        10,
+        12
+      ],
+      "slow_period": [
+        24,
+        30,
+        36
+      ]
+    },
+    "n_periods": 7,
+    "periods_with_position": 6,
+    "oos_sharpe": -0.8374431180442871,
+    "total_oos_return": -0.089735003220768,
+    "oos_volatility": 0.12855191942134878,
+    "win_rate_periods": 0.1214574898785425,
+    "sharpe_ci": {
+      "lower": -2.557493942764691,
+      "upper": 0.853048412753704,
+      "confidence": 0.95,
+      "point_estimate": -0.837443118044287,
+      "block_size": 11,
+      "n_observations": 247,
+      "n_bootstrap": 2000,
+      "method": "stationary_bootstrap",
+      "status": "resolvable",
+      "reason": null
+    },
+    "partial_selection_diagnosis": {
+      "cause": "no_position_in_validation_window",
+      "message": "The walk_forward analysis selected a parameter in 6 of its 7 out-of-sample periods; the other 1 produced no selection. Every flat period has the same cause (no_position_in_validation_window): no parameter combination took a position in the window. So the overfitting-risk verdict rests on 6 of the 7 out-of-sample periods, and the thinnest of them held a position for only 3 bars. To give the strategy room to trade, shorten the indicator lookbacks in the parameter grid, use a longer --test-months window, or give the training split more history -- but the flat periods are already as long as the periods in which the strategy traded, so if the signal never triggers on that stretch of the sample, no window length will change the outcome.",
+      "details": {
+        "validation_method": "walk_forward",
+        "n_validation_windows": 7,
+        "n_windows_with_selected_params": 6,
+        "n_flat_windows": 1,
+        "flat_windows": [
+          {
+            "window": 5,
+            "fold": null,
+            "cause": "no_position_in_validation_window",
+            "reason": "signal_never_triggered",
+            "bars": 45,
+            "train_bars": 390,
+            "test_returns_bars": 0,
+            "test_sharpe": null,
+            "max_position_bars": 0,
+            "test_start": "2019-07-01",
+            "test_end": "2019-09-01",
+            "outcome_tally": {
+              "no_position_in_validation_window": 9,
+              "no_estimable_training_sharpe": 0,
+              "all_combinations_failed": 0
+            },
+            "text": "Period 5 (45 bars, 2019-07-01 to 2019-09-01): no parameter combination took a position in the window (0 out-of-sample return bars, 0 bars with a position); the window holds at least as many bars as the shortest window in which the strategy traded (43 bars), so its length does not by itself explain the failure: the signal never triggered on it."
+          }
+        ],
+        "traded_windows": [
+          {
+            "window": 0,
+            "bars": 43,
+            "position_bars": 13,
+            "test_sharpe": -2.2763723889153082,
+            "test_start": "2018-09-01",
+            "test_end": "2018-11-01"
+          },
+          {
+            "window": 1,
+            "bars": 43,
+            "position_bars": 3,
+            "test_sharpe": -3.228806502519397,
+            "test_start": "2018-11-01",
+            "test_end": "2019-01-01"
+          },
+          {
+            "window": 2,
+            "bars": 43,
+            "position_bars": 10,
+            "test_sharpe": -1.5077290828439156,
+            "test_start": "2019-01-01",
+            "test_end": "2019-03-01"
+          },
+          {
+            "window": 3,
+            "bars": 43,
+            "position_bars": 14,
+            "test_sharpe": -1.7388893553820248,
+            "test_start": "2019-03-01",
+            "test_end": "2019-05-01"
+          },
+          {
+            "window": 4,
+            "bars": 43,
+            "position_bars": 20,
+            "test_sharpe": 0.6756368859199285,
+            "test_start": "2019-05-01",
+            "test_end": "2019-07-01"
+          },
+          {
+            "window": 6,
+            "bars": 44,
+            "position_bars": 8,
+            "test_sharpe": 0.9671249641062256,
+            "test_start": "2019-09-01",
+            "test_end": "2019-11-01"
+          }
+        ],
+        "flat_window_causes": {
+          "no_position_in_validation_window": 1
+        },
+        "dominant_cause": "no_position_in_validation_window",
+        "min_traded_window_bars": 43,
+        "min_traded_position_bars": 3,
+        "traded_window_bars": [
+          43,
+          43,
+          43,
+          43,
+          43,
+          44
+        ],
+        "train_split_bars": 504,
+        "param_grid": {
+          "fast_period": [
+            8,
+            10,
+            12
+          ],
+          "slow_period": [
+            24,
+            30,
+            36
+          ]
+        },
+        "analysis_path": "walk_forward",
+        "window_noun": "period",
+        "selection_basis": "overfitting_risk_verdict",
+        "train_months": 8,
+        "test_months": 2,
+        "step_months": 2,
+        "cli_flags": {
+          "train_months": "--train-months",
+          "test_months": "--test-months",
+          "step_months": "--step-months"
+        }
+      }
+    },
+    "criterion": "walk_forward_oos_sharpe_gt_zero",
+    "passed": false
   },
   "hypothesis": "An SMA-crossover trend-following strategy produces positive out-of-sample risk-adjusted returns (Sharpe > 0) net of 3 bps round-trip trading costs on the held-out test set.",
   "verdict": "NOT SUPPORTED",
@@ -50,13 +216,19 @@
       "name": "capacity_gt_initial_capital",
       "description": "strategy capacity (notional) > initial capital at advertised impact level",
       "passed": true
+    },
+    {
+      "name": "walk_forward_oos_sharpe_gt_zero",
+      "description": "walk-forward rolling OOS Sharpe > 0 (net of costs)",
+      "passed": false,
+      "observed": -0.8374431180442871
     }
   ],
   "metrics": {
     "sharpe_ratio": -0.904976225884366,
     "total_return": -0.050644487913191094,
-    "benchmark_total_return": -0.028715918907532778,
-    "alpha": -0.10072694540064961,
+    "benchmark_total_return": null,
+    "alpha": null,
     "deflated_alpha": {
       "deflated_alpha_ratio": 0.3313627670065071,
       "p_value": 0.6686372329934929,
@@ -98,8 +270,8 @@
         "slippage": 0.0,
         "sharpe_ratio": -0.8890397215754917,
         "total_return": -0.049801042647221405,
-        "benchmark_total_return": -0.028424446241405277,
-        "alpha": -0.09845994349256723
+        "benchmark_total_return": null,
+        "alpha": null
       },
       {
         "label": "advertised (2bp comm + 1bp slip)",
@@ -107,8 +279,8 @@
         "slippage": 0.0001,
         "sharpe_ratio": -0.904976225884366,
         "total_return": -0.050644487913191094,
-        "benchmark_total_return": -0.028715918907532778,
-        "alpha": -0.10072694540064961
+        "benchmark_total_return": null,
+        "alpha": null
       }
     ],
     "cost_sensitivity_sweep": [
@@ -205,6 +377,7 @@
     "NOT SUPPORTED: at least one falsification criterion failed; the hypothesis is falsified on this fixture.",
     "This is a falsification exercise, not a claim of profitability. Do not describe the result as profitable, robust, or production-ready.",
     "The fixture is synthetic (bundled sample data), not market evidence; it says nothing about any real security.",
-    "All internal regression guards (cost sweep, cost-sensitivity sweep, capacity sweep, capacity-sensitivity sweep) passed; the script exited 0."
+    "All internal regression guards (cost sweep, cost-sensitivity sweep, capacity sweep, capacity-sensitivity sweep) passed; the script exited 0.",
+    "The walk-forward robustness layer re-evaluates the strategy on rolling chronological train/test windows; it is an out-of-sample robustness reading, not an additional fitted parameter search."
   ]
 }
