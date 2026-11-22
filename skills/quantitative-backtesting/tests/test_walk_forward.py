@@ -7670,6 +7670,54 @@ def test_walk_forward_analysis_surfaces_capacity_per_period():
         assert p["capacity"]["cost_adjusted_capacity"] > 0
 
 
+def test_walk_forward_analysis_surfaces_cost_drag_and_holding_period_per_period():
+    """Each per-period capacity in walk-forward carries cost_drag and
+    holding_period_years; with borrow/funding costs the per-period
+    cost_adjusted_capacity is reduced vs. the impact-only number."""
+    data = _make_ohlcv_data(periods=500, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
+    base = dict(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        impact_coefficient=0.5,
+    )
+
+    uncapped = walk_forward_analysis(**base)
+    assert len(uncapped["periods"]) > 0
+    for p in uncapped["periods"]:
+        cap = p["capacity"]
+        assert cap is not None
+        assert "cost_drag" in cap and "holding_period_years" in cap
+        assert cap["cost_drag"] == 0.0
+        assert cap["holding_period_years"] > 0
+        assert cap["cost_adjusted_capacity"] == cap["impact_capacity"]
+
+    leveraged = walk_forward_analysis(
+        **base, borrow_cost=0.03, funding_cost=0.02, leverage=1.5, short_exposure=0.2
+    )
+    assert len(leveraged["periods"]) > 0
+    for p in leveraged["periods"]:
+        cap = p["capacity"]
+        assert cap is not None
+        assert "cost_drag" in cap and "holding_period_years" in cap
+        assert cap["cost_drag"] > 0
+        assert cap["holding_period_years"] > 0
+        assert cap["cost_adjusted_capacity"] < cap["impact_capacity"]
+        assert abs(
+            cap["cost_adjusted_capacity"]
+            - cap["impact_capacity"]
+            / (1.0 + cap["cost_drag"] * cap["holding_period_years"])
+        ) < 1e-9
+
+
 def test_walk_forward_summary_capacity_surfaces_cost_drag_and_holding_period():
     """The walk-forward summary capacity carries a cost-aware breakdown with
     cost_drag and holding_period_years, and borrow/funding costs reduce the
@@ -7721,6 +7769,9 @@ TEST_REGISTRY.append(
 )
 TEST_REGISTRY.append(
     ("test_walk_forward_analysis_surfaces_capacity_per_period", test_walk_forward_analysis_surfaces_capacity_per_period)
+)
+TEST_REGISTRY.append(
+    ("test_walk_forward_analysis_surfaces_cost_drag_and_holding_period_per_period", test_walk_forward_analysis_surfaces_cost_drag_and_holding_period_per_period)
 )
 TEST_REGISTRY.append(
     ("test_walk_forward_summary_capacity_surfaces_cost_drag_and_holding_period", test_walk_forward_summary_capacity_surfaces_cost_drag_and_holding_period)
