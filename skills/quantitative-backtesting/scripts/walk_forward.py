@@ -626,6 +626,8 @@ def walk_forward_analysis(
     regime_cost_multipliers: Optional[Dict[str, float]] = None,
     max_impact: Optional[float] = None,
     max_participation_rate: Optional[float] = None,
+    max_borrow_cost: Optional[float] = None,
+    max_funding_cost: Optional[float] = None,
     leverage: float = 1.0,
     short_exposure: float = 0.0,
     family_returns: Optional[pd.DataFrame] = None,
@@ -740,6 +742,18 @@ def walk_forward_analysis(
             (default 0.0). Drives the borrow-cost leg of the capacity cost drag
             via ``short_exposure * borrow_cost``. A value above 0.0 lowers the
             cost-aware capacity a short strategy can support.
+        max_borrow_cost: Optional maximum annual borrow cost drag (as decimal,
+            e.g., 0.05 = 5% per year). When provided, if the annual borrow cost
+            drag (``short_exposure * borrow_cost``) exceeds this limit, the
+            reported capacity is further reduced proportionally to bring the
+            effective borrow cost drag down to the limit. Opt-in; when None
+            (default), the standard cost-drag adjustment applies without a cap.
+        max_funding_cost: Optional maximum annual funding cost drag (as decimal,
+            e.g., 0.03 = 3% per year). When provided, if the annual funding cost
+            drag (``(leverage - 1) * funding_cost``) exceeds this limit, the
+            reported capacity is further reduced proportionally to bring the
+            effective funding cost drag down to the limit. Opt-in; when None
+            (default), the standard cost-drag adjustment applies without a cap.
         family_returns: Optional per-period return matrix for a *family* of
             strategies, shape ``(T, K)`` with one column per strategy, aligned
             to the same dates as the walk-forward out-of-sample record. When
@@ -1127,6 +1141,7 @@ def walk_forward_analysis(
             max_participation_rate=max_participation_rate,
             borrow_cost=borrow_cost, funding_cost=funding_cost,
             leverage=leverage, short_exposure=short_exposure,
+            max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost,
         )
         _period_cap = _period_capacity.get("cost_adjusted_capacity")
         period["capacity"] = (
@@ -1348,7 +1363,8 @@ def walk_forward_analysis(
     _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window,
                                   max_participation_rate=max_participation_rate,
                                   borrow_cost=borrow_cost, funding_cost=funding_cost,
-                                  leverage=leverage, short_exposure=short_exposure)
+                                  leverage=leverage, short_exposure=short_exposure,
+                                  max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost)
     _summary_cap = _capacity.get("cost_adjusted_capacity")
     summary["capacity"] = (
         {
@@ -1581,6 +1597,10 @@ def parameter_optimization(
     regime_cost_multipliers: Optional[Dict[str, float]] = None,
     max_impact: Optional[float] = None,
     max_participation_rate: Optional[float] = None,
+    max_borrow_cost: Optional[float] = None,
+    max_funding_cost: Optional[float] = None,
+    leverage: float = 1.0,
+    short_exposure: float = 0.0,
     inert_grid_report: Optional[Dict[str, Any]] = None,
     regime_report: Optional[Dict[str, Any]] = None,
     **kwargs,
@@ -1670,6 +1690,18 @@ def parameter_optimization(
             of the impact-based capacity and max_participation_rate * ADV_notional
             (scaled by n_assets for panels). Opt-in; when None (default), the
             impact-based capacity only is reported.
+        max_borrow_cost: Optional maximum annual borrow cost drag (as decimal,
+            e.g., 0.05 = 5% per year). When provided, if the annual borrow cost
+            drag (``short_exposure * borrow_cost``) exceeds this limit, the
+            reported capacity is further reduced proportionally to bring the
+            effective borrow cost drag down to the limit. Opt-in; when None
+            (default), the standard cost-drag adjustment applies without a cap.
+        max_funding_cost: Optional maximum annual funding cost drag (as decimal,
+            e.g., 0.03 = 3% per year). When provided, if the annual funding cost
+            drag (``(leverage - 1) * funding_cost``) exceeds this limit, the
+            reported capacity is further reduced proportionally to bring the
+            effective funding cost drag down to the limit. Opt-in; when None
+            (default), the standard cost-drag adjustment applies without a cap.
         inert_grid_report: Optional dict that receives the inert-grid
             measurement (``inert_grid_params``, ``strategy_parameters`` and
             ``message``) for the grid that was priced. A grid key whose
@@ -1807,6 +1839,7 @@ def parameter_optimization(
                         max_participation_rate=max_participation_rate,
                         borrow_cost=borrow_cost, funding_cost=funding_cost,
                         leverage=leverage, short_exposure=short_exposure,
+                        max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost,
                     )
                     result["capacity"] = _combo_cap.get("estimated_capacity")
                     result["capacity_trend"] = _combo_cap.get("capacity_trend")
@@ -3696,10 +3729,12 @@ def estimate_capacity(
     funding_cost: float = 0.0,
     leverage: float = 1.0,
     short_exposure: float = 0.0,
+    max_borrow_cost: Optional[float] = None,
+    max_funding_cost: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Estimate strategy capacity from the market-impact cost model with an
-    optional participation-rate limit.
+    optional participation-rate limit and optional cost-drag limits.
 
     Market impact of trading notional ``N`` is:
         Linear (default):  impact = (N / ADV_notional) * impact_coefficient
@@ -3736,6 +3771,13 @@ def estimate_capacity(
     participation-rate-based capacity. For panels, the limit applies per
     constituent and the binding (least liquid) asset determines the portfolio
     limit (scaled by ``n_assets`` as with the impact-based calculation).
+
+    Cost-drag limits (optional): if ``max_borrow_cost`` is set (e.g., 0.05 for
+    5% per year), the annual borrow cost drag (``short_exposure * borrow_cost``)
+    is capped at this value by proportionally reducing capacity. Similarly,
+    ``max_funding_cost`` caps the annual funding cost drag
+    (``(leverage - 1) * funding_cost``). These are opt-in constraints; when
+    unset, the standard cost-drag adjustment applies without an additional cap.
 
     The point-in-time estimate above reads the ADV of the *last* bar of the
     window, so a liquidity squeeze that happened earlier in the window is
@@ -3776,11 +3818,20 @@ def estimate_capacity(
         short_exposure: Short notional as a fraction of portfolio notional
             (default 0.0). Drives the borrow-cost leg of the capacity drag via
             ``short_exposure * borrow_cost``.
+        max_borrow_cost: Optional maximum annual borrow cost drag (as decimal,
+            e.g., 0.05 = 5% per year). When set, if ``short_exposure *
+            borrow_cost`` exceeds this limit, capacity is further reduced
+            proportionally. Default ``None`` (no borrow-cost-drag cap).
+        max_funding_cost: Optional maximum annual funding cost drag (as decimal,
+            e.g., 0.03 = 3% per year). When set, if ``(leverage - 1) *
+            funding_cost`` exceeds this limit, capacity is further reduced
+            proportionally. Default ``None`` (no funding-cost-drag cap).
 
     Returns:
         Dictionary with keys: impact_coefficient, max_impact, adv_window,
         impact_model, max_participation_rate, borrow_cost, funding_cost,
-        leverage, short_exposure, cost_drag, holding_period_years,
+        leverage, short_exposure, max_borrow_cost, max_funding_cost,
+        cost_drag, holding_period_years,
         impact_capacity, participation_capacity, cost_adjusted_capacity,
         price, adv_shares, adv_notional, periods_per_year,
         max_notional_per_trade, estimated_capacity, unconstrained, estimable,
@@ -3799,7 +3850,7 @@ def estimate_capacity(
         the participation-rate-based capacity (None when no limit is set);
         ``cost_adjusted_capacity`` (== ``estimated_capacity`` ==
         ``max_notional_per_trade``) is the final capacity after both the
-        participation limit and the cost drag.
+        participation limit, the cost drag, and any cost-drag caps.
     """
     result = {
         "impact_coefficient": float(impact_coefficient),
@@ -3811,6 +3862,8 @@ def estimate_capacity(
         "funding_cost": float(funding_cost),
         "leverage": float(leverage),
         "short_exposure": float(short_exposure),
+        "max_borrow_cost": float(max_borrow_cost) if max_borrow_cost is not None else None,
+        "max_funding_cost": float(max_funding_cost) if max_funding_cost is not None else None,
         "cost_drag": None,
         "holding_period_years": None,
         "impact_capacity": None,
@@ -3839,6 +3892,13 @@ def estimate_capacity(
     if max_participation_rate is not None:
         if not np.isfinite(max_participation_rate) or max_participation_rate <= 0:
             raise ValueError(f"max_participation_rate must be positive and finite, got {max_participation_rate}")
+
+    if max_borrow_cost is not None:
+        if not np.isfinite(max_borrow_cost) or max_borrow_cost <= 0:
+            raise ValueError(f"max_borrow_cost must be positive and finite, got {max_borrow_cost}")
+    if max_funding_cost is not None:
+        if not np.isfinite(max_funding_cost) or max_funding_cost <= 0:
+            raise ValueError(f"max_funding_cost must be positive and finite, got {max_funding_cost}")
 
     if not np.isfinite(borrow_cost) or borrow_cost < 0:
         raise ValueError(f"borrow_cost must be non-negative and finite, got {borrow_cost}")
@@ -3878,7 +3938,35 @@ def estimate_capacity(
     ann_factor = _annualization_factor(data.index)
     holding_period_years = 1.0 / float(ann_factor)
     result["holding_period_years"] = float(holding_period_years)
-    _drag_denominator = 1.0 + cost_drag * holding_period_years
+
+    # Split cost drag into borrow and funding components for per-component caps
+    borrow_cost_drag = float(short_exposure) * float(borrow_cost)
+    funding_cost_drag = (float(leverage) - 1.0) * float(funding_cost)
+    cost_drag = borrow_cost_drag + funding_cost_drag
+    result["cost_drag"] = float(cost_drag)
+
+    # Apply max-borrow-cost cap: if borrow cost drag exceeds the limit,
+    # reduce capacity proportionally so effective borrow drag == max_borrow_cost
+    if max_borrow_cost is not None and borrow_cost_drag > 0:
+        if borrow_cost_drag > float(max_borrow_cost):
+            # Additional denominator factor to bring borrow drag down to the limit
+            borrow_cap_factor = borrow_cost_drag / float(max_borrow_cost)
+            cost_drag = funding_cost_drag + float(max_borrow_cost)
+            _drag_denominator = 1.0 + cost_drag * holding_period_years
+        else:
+            _drag_denominator = 1.0 + cost_drag * holding_period_years
+    # Apply max-funding-cost cap: if funding cost drag exceeds the limit,
+    # reduce capacity proportionally so effective funding drag == max_funding_cost
+    elif max_funding_cost is not None and funding_cost_drag > 0:
+        if funding_cost_drag > float(max_funding_cost):
+            funding_cap_factor = funding_cost_drag / float(max_funding_cost)
+            cost_drag = borrow_cost_drag + float(max_funding_cost)
+            _drag_denominator = 1.0 + cost_drag * holding_period_years
+        else:
+            _drag_denominator = 1.0 + cost_drag * holding_period_years
+    else:
+        _drag_denominator = 1.0 + cost_drag * holding_period_years
+
     adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
     adv_notional = adv_shares * close
 
@@ -4301,6 +4389,8 @@ def cpcv_analysis(
     regime_cost_multipliers: Optional[Dict[str, float]] = None,
     max_impact: Optional[float] = None,
     max_participation_rate: Optional[float] = None,
+    max_borrow_cost: Optional[float] = None,
+    max_funding_cost: Optional[float] = None,
     leverage: float = 1.0,
     short_exposure: float = 0.0,
     **kwargs,
@@ -4399,6 +4489,18 @@ def cpcv_analysis(
             panels). This is a reporting-only constraint; it does not scale
             positions during the backtest. Opt-in; when None (default), the
             impact-based capacity is reported without a participation-rate cap.
+        max_borrow_cost: Optional maximum annual borrow cost drag (as decimal,
+            e.g., 0.05 = 5% per year). When provided, if the annual borrow cost
+            drag (``short_exposure * borrow_cost``) exceeds this limit, the
+            reported capacity is further reduced proportionally to bring the
+            effective borrow cost drag down to the limit. Opt-in; when None
+            (default), the standard cost-drag adjustment applies without a cap.
+        max_funding_cost: Optional maximum annual funding cost drag (as decimal,
+            e.g., 0.03 = 3% per year). When provided, if the annual funding cost
+            drag (``(leverage - 1) * funding_cost``) exceeds this limit, the
+            reported capacity is further reduced proportionally to bring the
+            effective funding cost drag down to the limit. Opt-in; when None
+            (default), the standard cost-drag adjustment applies without a cap.
 
     Returns:
         Dictionary with CPCV results including:
@@ -4421,6 +4523,12 @@ def cpcv_analysis(
     if max_participation_rate is not None:
         if not np.isfinite(max_participation_rate) or max_participation_rate <= 0:
             raise ValueError(f"max_participation_rate must be positive and finite, got {max_participation_rate}")
+    if max_borrow_cost is not None:
+        if not np.isfinite(max_borrow_cost) or max_borrow_cost <= 0:
+            raise ValueError(f"max_borrow_cost must be positive and finite, got {max_borrow_cost}")
+    if max_funding_cost is not None:
+        if not np.isfinite(max_funding_cost) or max_funding_cost <= 0:
+            raise ValueError(f"max_funding_cost must be positive and finite, got {max_funding_cost}")
     panel_pricing = resolve_panel_pricing(panel_pricing)
 
     if isinstance(data, dict):
@@ -4823,6 +4931,7 @@ def cpcv_analysis(
             max_participation_rate=max_participation_rate,
             borrow_cost=borrow_cost, funding_cost=funding_cost,
             leverage=leverage, short_exposure=short_exposure,
+            max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost,
         )
         fold["capacity"] = _fold_capacity.get("estimated_capacity")
         # Capacity trend for the fold's test window (mirrors the per-period
@@ -12426,6 +12535,8 @@ def main():
     common_parser.add_argument("--min-position-fraction", type=float, default=None, help="Reject a run whose verdict rests on windows the strategy held a position for less than this fraction of each window's executable bars (after warmup). Opt-in: unset means the run is never rejected on this basis.")
     common_parser.add_argument("--max-impact", type=float, default=None, help="Maximum acceptable market impact per trade (as decimal, e.g., 0.0005 = 5 bps). When set, positions are scaled so the estimated market impact of each trade stays below this threshold. Opt-in: unset means no capacity-aware scaling.")
     common_parser.add_argument("--max-participation-rate", type=float, default=None, help="Maximum participation rate per trade as a fraction of ADV (e.g., 0.10 = 10%%). When set and --impact-coefficient > 0, the reported strategy capacity is the minimum of the impact-based capacity and max_participation_rate * ADV_notional. Opt-in; unset reports the impact-based capacity only.")
+    common_parser.add_argument("--max-borrow-cost", type=float, default=None, help="Maximum acceptable annual borrow cost drag (as decimal, e.g., 0.05 = 5%% per year). When set, if short_exposure * borrow_cost exceeds this limit, capacity is further reduced proportionally. Opt-in; unset means no borrow-cost-drag cap.")
+    common_parser.add_argument("--max-funding-cost", type=float, default=None, help="Maximum acceptable annual funding cost drag (as decimal, e.g., 0.03 = 3%% per year). When set, if (leverage - 1) * funding_cost exceeds this limit, capacity is further reduced proportionally. Opt-in; unset means no funding-cost-drag cap.")
     common_parser.add_argument(
         "--panel-pricing",
         type=str,
@@ -12454,6 +12565,8 @@ def main():
     wf_parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="Sweep over multiple market impact coefficients for capacity/impact sensitivity; overrides --impact-coefficient when given (e.g. --impact-coefficients 0 1 2 5).")
     wf_parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual borrow costs for short positions; overrides --borrow-cost when given (e.g. --borrow-costs 0 0.01 0.03).")
     wf_parser.add_argument("--funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual funding costs for leveraged positions; overrides --funding-cost when given (e.g. --funding-costs 0 0.01 0.02).")
+    wf_parser.add_argument("--max-borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple max borrow cost drag limits; overrides --max-borrow-cost when given (e.g. --max-borrow-costs 0.02 0.05 0.10).")
+    wf_parser.add_argument("--max-funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple max funding cost drag limits; overrides --max-funding-cost when given (e.g. --max-funding-costs 0.01 0.03 0.05).")
     wf_parser.add_argument("--family-returns", type=str, default=None, help="Path to a CSV of per-period family returns for the multiple-testing diagnostics (first column = date index, remaining columns = strategies). Opt-in: unset adds no family keys to the summary.")
     wf_parser.add_argument("--family-stepdown", action="store_true", help="Also run the Romano-Wolf stepdown on the family returns (requires --family-returns); identifies which strategies drive a Reality Check rejection.")
     wf_parser.add_argument("--family-seed", type=int, default=None, help="RNG seed for the family bootstrap (Reality Check / stepdown). Unset uses a fresh seed.")
@@ -12469,6 +12582,8 @@ def main():
     opt_parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="Sweep over multiple market impact coefficients for capacity/impact sensitivity; overrides --impact-coefficient when given (e.g. --impact-coefficients 0 1 2 5).")
     opt_parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual borrow costs for short positions; overrides --borrow-cost when given (e.g. --borrow-costs 0 0.01 0.03).")
     opt_parser.add_argument("--funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual funding costs for leveraged positions; overrides --funding-cost when given (e.g. --funding-costs 0 0.01 0.02).")
+    opt_parser.add_argument("--max-borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple max borrow cost drag limits; overrides --max-borrow-cost when given (e.g. --max-borrow-costs 0.02 0.05 0.10).")
+    opt_parser.add_argument("--max-funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple max funding cost drag limits; overrides --max-funding-cost when given (e.g. --max-funding-costs 0.01 0.03 0.05).")
     opt_parser.set_defaults(func=run_parameter_optimization)
 
     # Monte Carlo simulation
@@ -12481,6 +12596,8 @@ def main():
     mc_parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="Sweep over multiple market impact coefficients for capacity/impact sensitivity; overrides --impact-coefficient when given (e.g. --impact-coefficients 0 1 2 5).")
     mc_parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual borrow costs for short positions; overrides --borrow-cost when given (e.g. --borrow-costs 0 0.01 0.03).")
     mc_parser.add_argument("--funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual funding costs for leveraged positions; overrides --funding-cost when given (e.g. --funding-costs 0 0.01 0.02).")
+    mc_parser.add_argument("--max-borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple max borrow cost drag limits; overrides --max-borrow-cost when given (e.g. --max-borrow-costs 0.02 0.05 0.10).")
+    mc_parser.add_argument("--max-funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple max funding cost drag limits; overrides --max-funding-cost when given (e.g. --max-funding-costs 0.01 0.03 0.05).")
     mc_parser.set_defaults(func=run_monte_carlo)
 
     # CPCV analysis
@@ -12494,6 +12611,8 @@ def main():
     cpcv_parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="Sweep over multiple market impact coefficients for capacity/impact sensitivity; overrides --impact-coefficient when given (e.g. --impact-coefficients 0 1 2 5).")
     cpcv_parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual borrow costs for short positions; overrides --borrow-cost when given (e.g. --borrow-costs 0 0.01 0.03).")
     cpcv_parser.add_argument("--funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual funding costs for leveraged positions; overrides --funding-cost when given (e.g. --funding-costs 0 0.01 0.02).")
+    cpcv_parser.add_argument("--max-borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple max borrow cost drag limits; overrides --max-borrow-cost when given (e.g. --max-borrow-costs 0.02 0.05 0.10).")
+    cpcv_parser.add_argument("--max-funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple max funding cost drag limits; overrides --max-funding-cost when given (e.g. --max-funding-costs 0.01 0.03 0.05).")
     cpcv_parser.set_defaults(func=run_cpcv)
 
     # Out-of-sample validation
@@ -12508,6 +12627,8 @@ def main():
     oos_parser.add_argument("--impact-coefficients", type=float, nargs="+", default=None, help="Sweep over multiple market impact coefficients for capacity/impact sensitivity; overrides --impact-coefficient when given (e.g. --impact-coefficients 0 1 2 5).")
     oos_parser.add_argument("--borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual borrow costs for short positions; overrides --borrow-cost when given (e.g. --borrow-costs 0 0.01 0.03).")
     oos_parser.add_argument("--funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple annual funding costs for leveraged positions; overrides --funding-cost when given (e.g. --funding-costs 0 0.01 0.02).")
+    oos_parser.add_argument("--max-borrow-costs", type=float, nargs="+", default=None, help="Sweep over multiple max borrow cost drag limits; overrides --max-borrow-cost when given (e.g. --max-borrow-costs 0.02 0.05 0.10).")
+    oos_parser.add_argument("--max-funding-costs", type=float, nargs="+", default=None, help="Sweep over multiple max funding cost drag limits; overrides --max-funding-cost when given (e.g. --max-funding-costs 0.01 0.03 0.05).")
     # Walk-forward specific args for validation phase
     oos_parser.add_argument("--wf-train-months", type=int, default=12, help="Training window size in months for walk-forward validation")
     oos_parser.add_argument("--wf-test-months", type=int, default=3, help="Testing window size in months for walk-forward validation")
