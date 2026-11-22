@@ -908,6 +908,44 @@ produce an in-sample-optimistic result that is indistinguishable from a
 genuine out-of-sample one, so the check is a correctness guard, not a
 cosmetic one.
 
+### Evaluation-Protocol Sensitivity (Window-Length Degrees of Freedom)
+
+The train/test/step window lengths are an **analyst degree of freedom**, not a
+property of the strategy. Picking among them after seeing results is protocol-
+selection bias: a protocol that happens to flatter a strategy can always be
+found, so a single-protocol OOS verdict is *conditional* on that protocol.
+
+`tests/test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple.py`
+quantifies this for standalone time-series momentum on the committed
+AAPL/MSFT/GOOGL fixtures. It pre-registers a fixed lookback grid
+(`{126, 189, 252}` days), fixed costs (2 bps commission + 1 bps slippage), the
+three falsification criteria (OOS Sharpe > 0, OOS total return > 0, Deflated
+Sharpe p < 0.10), and four equally-valid 12-month-test protocols
+(`(24,12,12)`, `(36,12,12)`, `(18,12,12)`, `(30,12,12)`; the framework rejects
+`step_months < test_months`). What it records:
+
+- **Sign flips.** Every symbol's OOS Sharpe changes sign across the four
+  protocols (AAPL -0.39 -> +1.06, MSFT -0.41 -> +1.22, GOOGL -0.21 -> +0.10).
+  The widely-quoted 24/12/12 `NOT SUPPORTED` verdict is therefore
+  protocol-conditional, not a property of the signal alone.
+- **One nominal pass out of twelve.** Exactly 1 of the 12 informative
+  (symbol x protocol) cells passes all three criteria (MSFT at 30/12/12). The
+  other 11 fail, and the 24/12/12 baseline fails for every symbol.
+- **The lone pass is noise-consistent.** The within-protocol Deflated Sharpe
+  corrects for the 3 lookback values only; a Bonferroni correction for the four
+  protocols tried on MSFT pushes its p-value from 0.0696 to 0.278 (> 0.10), and
+  the other MSFT protocols fail. It is isolated, not a robust edge.
+- **Short windows are uninformative.** 6-month test windows are shorter than the
+  189/252-day lookbacks, so the strategy is flat for almost the whole window
+  (`periods_with_position <= 1`). Such cells must not be read as a
+  `NOT SUPPORTED` verdict.
+
+**Implication.** Neither a `SUPPORTED` nor a `NOT SUPPORTED` claim is warranted
+from any single protocol on these fixtures. Any future claim must pre-register
+its protocol(s) on data not used to select them, and report the full protocol
+matrix rather than the most favourable cell. This study is a regression guard
+against silently dropping that caveat.
+
 ### Per-Period / Per-Fold `test_sharpe` (Out-of-Sample Test Sharpe)
 
 Every walk-forward period and CPCV fold whose grid search selected a combo now
