@@ -801,6 +801,13 @@ def run_capacity_sensitivity_sweep(grid=CAPACITY_SENSITIVITY_LEVELS):
         )
         summary = result.get("summary", {})
         capacity = summary.get("capacity")
+        # `summary["capacity"]` is now a cost-aware breakdown dict
+        # (impact/participation/cost-adjusted/drag/holding period). The
+        # headline notional capacity the sweep reports is the cost-adjusted
+        # figure; keep everything else scalar-shaped so callers and tests can
+        # compare and format it directly.
+        if isinstance(capacity, dict):
+            capacity = capacity.get("cost_adjusted_capacity")
         capacity_book = summary.get("capacity_book")
         capacity_nw = summary.get("capacity_notional_weighted")
         oos_min_capacity = summary.get("oos_min_capacity")
