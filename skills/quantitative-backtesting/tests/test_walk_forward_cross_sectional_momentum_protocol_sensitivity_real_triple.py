@@ -78,6 +78,7 @@ sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
 from walk_forward import walk_forward_analysis  # noqa: E402
 from strategy_builder import build_strategy  # noqa: E402
+from utils import bonferroni_correction  # noqa: E402
 
 SRC = SKILLS_DIR / "assets" / "example_data" / "real_market_data"
 
@@ -265,18 +266,28 @@ def test_no_cell_survives_protocol_multiplicity():
     fails the Deflated Sharpe p-value (0.5896). A Bonferroni correction across
     the four 12-month protocols only inflates that p-value further.
     """
-    summary = _run_cell((30, 12, 12))
-    dsr = summary.get("deflated_sharpe") or {}
-    p = dsr.get("p_value")
-    assert p is not None, "best-nominal cell has no Deflated Sharpe p-value"
-    assert float(p) >= DSR_PVALUE_THRESHOLD, (
-        f"best-nominal cell DSR p={p} should be >= {DSR_PVALUE_THRESHOLD}"
+    # Collect DSR p-values for all informative protocols
+    dsr_p_values = []
+    best_idx = None
+    for i, protocol in enumerate(INFORMATIVE_PROTOCOLS):
+        summary = _run_cell(protocol)
+        dsr = summary.get("deflated_sharpe") or {}
+        p = dsr.get("p_value")
+        assert p is not None, f"{protocol}: missing Deflated Sharpe p-value"
+        dsr_p_values.append(float(p))
+        if protocol == (30, 12, 12):
+            best_idx = i
+            best_p = float(p)
+
+    assert best_p >= DSR_PVALUE_THRESHOLD, (
+        f"best-nominal cell DSR p={best_p} should be >= {DSR_PVALUE_THRESHOLD}"
     )
 
-    n_protocols = len(INFORMATIVE_PROTOCOLS)
-    corrected = float(p) * n_protocols
-    assert corrected > DSR_PVALUE_THRESHOLD, (
-        f"best-nominal DSR p={p} x {n_protocols} protocols = {corrected} should "
+    # Use the shared Bonferroni helper (FWER control across the protocol family)
+    res = bonferroni_correction(dsr_p_values, alpha=DSR_PVALUE_THRESHOLD)
+    best_adjusted = res["adjusted_p_values"][best_idx]
+    assert best_adjusted > DSR_PVALUE_THRESHOLD, (
+        f"best-nominal DSR p={best_p} Bonferroni-adjusted = {best_adjusted} should "
         f"exceed {DSR_PVALUE_THRESHOLD} (not robust to protocol multiplicity)"
     )
 

@@ -2269,6 +2269,79 @@ def benjamini_hochberg(p_values, alpha: float = 0.05):
     }
 
 
+def bonferroni_correction(p_values, alpha: float = 0.05):
+    """Bonferroni FWER-adjusted p-values for a family of p-values.
+
+    Controls the family-wise error rate (probability of any false rejection)
+    under arbitrary dependence. This is the classic single-step Bonferroni
+    correction: each p-value is multiplied by the number of tests, capped at
+    1.0. Reject a hypothesis iff its adjusted p-value <= alpha.
+
+    Args:
+        p_values: Sequence of p-values in [0, 1]. NaN/None entries are
+            treated as non-informative (adjusted p-value 1.0, not rejected).
+        alpha: Significance threshold used for the rejection decision
+            (default 0.05).
+
+    Returns:
+        Dict with:
+            - ``adjusted_p_values``: list of Bonferroni-adjusted p-values
+              aligned to the input order (float in [0, 1]).
+            - ``rejected``: list of booleans, True where adjusted_p <= alpha.
+            - ``alpha``: the threshold used.
+            - ``n_tests``: number of valid (finite) p-values in the family.
+            - ``n_rejected``: number of hypotheses rejected at ``alpha``.
+
+    Notes:
+        - With 0 or 1 valid test, adjusted p-values equal the p-values and
+          the procedure is equivalent to a single test.
+        - The adjustment is monotone: if p_a <= p_b then adjusted_a <= adjusted_b.
+        - Unlike Benjamini-Hochberg (FDR), this controls the probability of
+          *any* false positive, which is appropriate for "did ANY protocol
+          produce a real effect" questions.
+    """
+    vals = list(p_values)
+    n_total = len(vals)
+    valid = []
+    for i, p in enumerate(vals):
+        try:
+            pv = float(p)
+        except Exception:
+            pv = float("nan")
+        if pv == pv and 0.0 <= pv <= 1.0:
+            valid.append((i, pv))
+        elif pv == pv and pv > 1.0:
+            valid.append((i, 1.0))
+        elif pv == pv and pv < 0.0:
+            valid.append((i, 0.0))
+    m = len(valid)
+    adjusted = [1.0] * n_total
+    rejected = [False] * n_total
+    if m == 0:
+        return {
+            "adjusted_p_values": adjusted,
+            "rejected": rejected,
+            "alpha": float(alpha),
+            "n_tests": 0,
+            "n_rejected": 0,
+        }
+    for idx, pv in valid:
+        adj = pv * m
+        if adj > 1.0:
+            adj = 1.0
+        adjusted[idx] = float(adj)
+    for i in range(n_total):
+        rejected[i] = bool(adjusted[i] <= float(alpha))
+    n_rejected = sum(1 for r in rejected if r)
+    return {
+        "adjusted_p_values": adjusted,
+        "rejected": rejected,
+        "alpha": float(alpha),
+        "n_tests": m,
+        "n_rejected": int(n_rejected),
+    }
+
+
 def _newey_west_long_run_variance(x: np.ndarray, bandwidth: Optional[int] = None) -> float:
     """Newey-West HAC long-run variance of a mean-zero series.
 
