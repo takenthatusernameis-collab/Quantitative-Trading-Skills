@@ -240,5 +240,77 @@ def main(argv=None) -> int:
     return 0
 
 
+def run_regime_robustness_triple_panel(
+    data_dir: str | Path,
+    fast_period: int = DEFAULT_FAST_PERIOD,
+    slow_period: int = DEFAULT_SLOW_PERIOD,
+    commission: float = DEFAULT_COMMISSION,
+    slippage: float = DEFAULT_SLIPPAGE,
+    ma_short: int = DEFAULT_MA_SHORT,
+    ma_long: int = DEFAULT_MA_LONG,
+    threshold: float = DEFAULT_MA_THRESHOLD,
+    min_regime_periods: int = DEFAULT_MIN_REGIME_PERIODS,
+    min_regimes_won: int = DEFAULT_MIN_REGIMES_WON,
+) -> dict:
+    """
+    Run regime-stratified robustness analysis on the triple panel (AAPL+MSFT+GOOGL).
+
+    Returns a dict with per-asset results and an aggregate summary showing
+    total regimes won across all assets.
+    """
+    data_dir = Path(data_dir)
+    assert data_dir.exists(), f"data directory not found: {data_dir}"
+
+    assets = ["AAPL", "MSFT", "GOOGL"]
+    per_asset = {}
+    total_won = 0
+    total_evaluated = 0
+
+    for label in assets:
+        data_path = data_dir / f"{label}.csv"
+        assert data_path.exists(), f"fixture not found: {data_path}"
+
+        result = run_regime_robustness_analysis(
+            data_path=data_path,
+            label=label,
+            fast_period=fast_period,
+            slow_period=slow_period,
+            commission=commission,
+            slippage=slippage,
+            ma_short=ma_short,
+            ma_long=ma_long,
+            threshold=threshold,
+            min_regime_periods=min_regime_periods,
+            min_regimes_won=min_regimes_won,
+        )
+        per_asset[label] = result
+        total_won += result["n_regimes_won"]
+        total_evaluated += result["n_regimes_evaluated"]
+
+    # Aggregate verdict: NOT SUPPORTED if any single asset is NOT SUPPORTED
+    # (all three must be SUPPORTED for the panel to be SUPPORTED)
+    panel_verdict = "SUPPORTED" if all(r["verdict"] == "SUPPORTED" for r in per_asset.values()) else "NOT SUPPORTED"
+
+    return {
+        "signal": "sma_crossover",
+        "regime_labels": "200-day moving-average trend (bull/bear/sideways)",
+        "panel_verdict": panel_verdict,
+        "total_regimes_won": int(total_won),
+        "total_regimes_evaluated": int(total_evaluated),
+        "min_regimes_won_per_asset": int(min_regimes_won),
+        "assets": per_asset,
+        "config": {
+            "fast_period": fast_period,
+            "slow_period": slow_period,
+            "commission": commission,
+            "slippage": slippage,
+            "ma_short": ma_short,
+            "ma_long": ma_long,
+            "threshold": threshold,
+            "min_regime_periods": min_regime_periods,
+        },
+    }
+
+
 if __name__ == "__main__":
     sys.exit(main())
