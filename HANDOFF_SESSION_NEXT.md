@@ -1,33 +1,27 @@
-# Handoff — Next Task: Extend protocol-sensitivity coverage to SMA crossover
+# Handoff — Next Task: Regression-guard the walk-forward protocol-sensitivity family
 
 ## Status (entering this task)
-- HEAD `6d2367a0fa82d2b1dc624c608f4b0557dca4507e`; working tree has two untracked additive files:
-  - `skills/quantitative-backtesting/tests/test_walk_forward_dual_momentum_protocol_sensitivity_real_triple_aapl_msft_googl.py` (4/4 passing, NOT SUPPORTED)
-  - `skills/quantitative-backtesting/tests/test_walk_forward_zscore_multi_pair_protocol_sensitivity_real_triple.py` (5/5 passing, NOT SUPPORTED)
-- Protocol-sensitivity + multiplicity control is now in place for **five** signal families on the committed triple panel: cross-sectional momentum, time-series momentum, dual momentum, multi-pair z-score mean reversion — all NOT SUPPORTED. SMA crossover has walk-forward coverage (`test_walk_forward_sma_crossover_real_triple_aapl_msft_googl.py`) but lacks a protocol-sensitivity study.
+- HEAD `b899ae0e06b4bb590f60512b812f338a90ffa3d4`; working tree has one untracked additive file:
+  - `skills/quantitative-backtesting/tests/test_walk_forward_sma_crossover_protocol_sensitivity_real_triple_aapl_msft_googl.py` (4/4 passing via `python3`; NOT SUPPORTED).
+- Protocol-sensitivity + multiplicity control is now in place for **all five** signal families on the committed triple panel — SMA crossover, cross-sectional momentum, time-series momentum, dual momentum, multi-pair z-score mean reversion — all consistently NOT SUPPORTED.
+- `pytest` is NOT available (`python3 -m pytest` → "No module named pytest"); run test files directly with `python3`.
 
 ## One precise next task (one bounded item)
-Extend protocol-sensitivity study coverage (Bonferroni across train/test protocols) to **SMA crossover**. The next agent must FIRST verify the signal family is missing one by scanning `skills/quantitative-backtesting/tests/` for `*protocol_sensitivity*` files and matching against `*walk_forward*`/`*hypothesis*` coverage; do not assume.
+Run the walk-forward protocol-sensitivity family directly with `python3` as a regression guard and confirm all pass with NOT SUPPORTED verdicts:
 
-Concrete scope (template to mirror):
-- `skills/quantitative-backtesting/tests/test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple.py`
-- `skills/quantitative-backtesting/tests/test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py`
-- `skills/quantitative-backtesting/tests/test_walk_forward_dual_momentum_protocol_sensitivity_real_triple_aapl_msft_googl.py`
-- `skills/quantitative-backtesting/tests/test_walk_forward_zscore_multi_pair_protocol_sensitivity_real_triple.py`
+1. `skills/quantitative-backtesting/tests/test_walk_forward_sma_crossover_protocol_sensitivity_real_triple_aapl_msft_googl.py` (4 tests)
+2. `skills/quantitative-backtesting/tests/test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py`
+3. `skills/quantitative-backtesting/tests/test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple.py`
+4. `skills/quantitative-backtesting/tests/test_walk_forward_dual_momentum_protocol_sensitivity_real_triple_aapl_msft_googl.py` (4 tests)
+5. `skills/quantitative-backtesting/tests/test_walk_forward_zscore_multi_pair_protocol_sensitivity_real_triple.py` (5 tests)
 
-### Concrete requirements
-- Pick SMA crossover (existing committed-fixture walk-forward test but no `*protocol_sensitivity*` sibling).
-- Use a PRE-REGISTERED small protocol family (equally-valid chronological protocols), reuse an EXISTING parameter grid (fast=20, slow=50 from the walk-forward test), costs 2bp commission + 1bp slippage, `apply_deflation=True, validate_pit=True`.
-- Discovery run first, then pin values (rounded, tolerance comparison, never exact equality). New test file with `__main__` runner printing PASS and exiting 0; run directly with `python3`.
-- Per-cell criteria: OOS Sharpe > 0 AND OOS total return > 0 AND Deflated Sharpe p-value < 0.10; Bonferroni across the protocol family on the best nominal cell; verdict-agnostic (NOT SUPPORTED acceptable).
-- New test file `skills/quantitative-backtesting/tests/test_walk_forward_sma_crossover_protocol_sensitivity_real_*.py`; TEST_REGISTRY + main() conventions; `test_main_registers_every_module_level_test`.
-- Offline, committed fixtures only. Additive only — do NOT modify existing tests/fixtures/engine. Do NOT commit unless explicitly asked.
-- Note: SMA crossover is a per-asset long-only trend strategy. The existing walk-forward test computes per-asset returns and equal-weights them. For protocol-sensitivity, adapt the approach to work with `walk_forward_analysis` (which expects panel-aware strategies) or implement a per-asset protocol-sensitivity loop. Use the same protocol family as other studies: 12-month-test family `(24,12,12)`, `(36,12,12)`, `(18,12,12)`, `(30,12,12)`.
+Each file has a `main()` returning 0 on success and prints PASS per test. Expected totals: at least 21 tests, 0 failures. Every file's recorded verdict is NOT SUPPORTED — confirm none flip to SUPPORTED (that would signal a data/method change and require re-examination).
 
 ## Constraints / environment reminders
-- `pytest` not installed on PATH — run each test file with `python3`; several tests are slow (>90s), use a generous timeout.
-- Do not commit unless explicitly asked.
-- No profitability/capacity claim; committed verdicts remain NOT SUPPORTED.
+- Offline, committed fixtures only; no live network. Additive only — do NOT modify existing tests/fixtures/engine. Do NOT commit unless explicitly asked.
+- Run each file with `python3 <file>` from the repo root; use generous timeouts (>90s per file known).
+- Several tests print PIT progress to stdout while running; redirect to a log if needed, but the PASS/FAIL summary is the signal.
+- No profitability/capacity claim; NOT SUPPORTED is the honest outcome.
 
 ## Approaches already tried / failed
 - None for this task.
