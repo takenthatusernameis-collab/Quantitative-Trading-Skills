@@ -1,40 +1,44 @@
-# Handoff — Next Task: Protocol-sensitivity + multiplicity control for volatility targeting on single-asset MSFT and GOOGL (cross-asset robustness)
+# Handoff — Next Task: Protocol-sensitivity + multiplicity control for volatility targeting on the committed triple panel (cross-asset summary), or a new methodological study
 
 ## Status (entering this task)
-- HEAD `f9adfae`; working tree has one untracked additive file:
-  - `skills/quantitative-backtesting/tests/test_walk_forward_volatility_targeting_protocol_sensitivity_real_aapl.py` (4/4 passing via `python3`; overall verdict NOT SUPPORTED after Bonferroni across 5 protocols; NOT committed).
-- Protocol-sensitivity + multiplicity control now covers **eleven** signal families, all overall NOT SUPPORTED after protocol-multiplicity correction: SMA crossover, cross-sectional momentum, time-series momentum, dual momentum, multi-pair z-score mean reversion, RSI mean reversion (triple panel), Donchian breakout (AAPL), MACD (AAPL), Bollinger Bands (AAPL), EMA crossover (AAPL), Kelly criterion (AAPL), volatility targeting (AAPL).
-- Volatility targeting (AAPL): zero cells pass the three nominal criteria; two cells have negative Sharpe/return; best nominal DSR p=0.4792 at (30,12,12) → Bonferroni-adjusted = 1.0, n_rejected = 0. Verdict NOT SUPPORTED. Baseline (12,12,12) p=0.8606 matches base test.
-- All single-asset families with base `*_real_aapl.py` tests now have protocol-sensitivity coverage.
+- HEAD `d6215b2`; working tree has two untracked additive files:
+  - `skills/quantitative-backtesting/tests/test_walk_forward_volatility_targeting_protocol_sensitivity_real_msft.py` (4/4 PASS via `python3`)
+  - `skills/quantitative-backtesting/tests/test_walk_forward_volatility_targeting_protocol_sensitivity_real_googl.py` (4/4 PASS via `python3`)
+  - Neither committed (per instructions).
+- Volatility targeting protocol-sensitivity + multiplicity control now covers AAPL, MSFT, GOOGL single-asset — all overall NOT SUPPORTED after Bonferroni across 5 protocols.
+  - AAPL best nominal p=0.4792 @ (30,12,12) → Bonferroni 1.0.
+  - MSFT best nominal p=0.3918 @ (30,12,12) → Bonferroni 1.0.
+  - GOOGL best nominal p=0.2782 @ (36,12,12) → Bonferroni 1.0.
+- Protocol-sensitivity + multiplicity control covers thirteen signal-family/asset cells, all NOT SUPPORTED after protocol correction.
 - `pytest` is NOT available (`python3 -m pytest` → "No module named pytest"); run test files directly with `python3`.
 
 ## One precise next task (one bounded item)
-Extend protocol-sensitivity + multiplicity control to **volatility targeting on single-asset MSFT and GOOGL**, mirroring `test_walk_forward_volatility_targeting_protocol_sensitivity_real_aapl.py`, to check cross-asset robustness (same signal, same grid, same protocols, different assets).
+Write a **cross-asset protocol-sensitivity summary** for volatility targeting across the committed triple panel (AAPL, MSFT, GOOGL), mirroring the existing per-asset test files' methodology but aggregating the three assets into one reproducible summary artifact.
+
+Why: three parallel per-asset studies now exist; a single summary that re-derives the three best-nominal DSR p-values and applies a **two-level multiplicity correction** (per-asset 5-protocol Bonferroni, plus a cross-asset correction across the 3 assets) would honestly report whether volatility targeting survives multiplicity anywhere on the committed panel. This is the natural next methodological step and closes the loop on the cross-asset robustness question the last two sessions opened.
 
 Steps:
-1. Confirm base volatility-targeting tests exist for MSFT/GOOGL or adapt the AAPL base test convention:
-   - `ls skills/quantitative-backtesting/tests | grep -i volatility` → read `test_walk_forward_volatility_targeting_real_aapl.py` for the exact convention (PARAM_GRID `{"target_vol": [0.15], "lookback": [63]}`, costs 2bp + 1bp, `apply_deflation=True, validate_pit=True`).
-   - Confirm `MSFT.csv` and `GOOGL.csv` exist in `skills/quantitative-backtesting/assets/example_data/real_market_data/`.
-2. Create two files:
-   - `test_walk_forward_volatility_targeting_protocol_sensitivity_real_msft.py`
-   - `test_walk_forward_volatility_targeting_protocol_sensitivity_real_googl.py`
-   Each mirroring the AAPL test:
-   - Signal: `volatility_targeting` (single-asset), PARAM_GRID `{"target_vol": [0.15], "lookback": [63]}` (1 config), costs 2bp commission + 1bp slippage, `apply_deflation=True, validate_pit=True`.
-   - Protocols (12-month test, step == test): `(12,12,12)`, `(18,12,12)`, `(24,12,12)`, `(30,12,12)`, `(36,12,12)` — confirm each is informative (periods_with_position >= 2); drop any that are not and document the drop.
-   - Pre-registered per-cell falsification criteria: OOS Sharpe > 0 AND OOS total return > 0 AND Deflated Sharpe p-value < 0.10.
-   - Four `test_*` functions + `TEST_REGISTRY` + `main()` returning 0 on success, mirroring the AAPL test.
-   - SYMBOL = "MSFT" / "GOOGL" respectively.
-3. Run each file once with `python3` to capture real numbers (probe), then pin them in EXPECTED; do NOT hard-code guessed values. Record the honest verdict per asset — whether zero, one, or more cells pass nominally, and whether any survive Bonferroni across the protocol family.
-4. Run the base volatility-targeting AAPL test too and confirm no regression.
+1. Read the three existing files for the exact convention:
+   - `skills/quantitative-backtesting/tests/test_walk_forward_volatility_targeting_protocol_sensitivity_real_{aapl,msft,googl}.py`
+   - Reuse `walk_forward_analysis`, `strategy_builder.build_strategy("volatility_targeting", ...)`, `utils.bonferroni_correction`.
+2. Create one new additive file, e.g. `test_walk_forward_volatility_targeting_protocol_sensitivity_real_triple_summary.py`:
+   - SYMBOLS = ["AAPL", "MSFT", "GOOGL"]; same PARAM_GRID, same 5 protocols, same costs, `apply_deflation=True, validate_pit=True`.
+   - For each asset, run all 5 protocols, apply per-asset Bonferroni across the 5 protocols (FWER within asset).
+   - Then apply a **second** Bonferroni across the 3 assets on the per-asset best nominal p-value (family-wise across assets).
+   - Report per-asset best nominal p, per-asset Bonferroni-adjusted p, cross-asset Bonferroni-adjusted p, and total n_rejected at alpha=0.10.
+   - Pin the observed numbers in EXPECTED after a probe run; do NOT hard-code guessed values.
+   - Four `test_*` functions + `TEST_REGISTRY` + `main()` returning 0, mirroring the per-asset tests.
+3. Run with `python3` to capture real numbers (probe), pin them, re-run to confirm PASS. Record the honest overall verdict (expected NOT SUPPORTED).
+4. Run one existing per-asset file (e.g. AAPL) as a regression guard.
 
 ## Constraints / environment reminders
 - Offline, committed fixtures only; no live network. Additive only — do NOT modify existing tests/fixtures/engine. Do NOT commit unless explicitly asked.
-- Run each file with `python3 <file>` from the repo root; use generous timeouts (>90s per file known).
-- Several tests print PIT progress to stdout while running; redirect to a log if needed, but the PASS/FAIL summary is the signal.
-- Do NOT force a predetermined verdict. If a cell passes nominally but not Bonferroni, report that honestly rather than asserting zero nominal passers.
-- No profitability/capacity claim; the honest overall verdict is expected to be NOT SUPPORTED after multiplicity correction.
+- Run each file with `python3 <file>` from repo root; use generous timeouts (>90s per file; the triple summary runs 15 cells so budget several minutes).
+- `pytest` unavailable; direct `python3` execution is the verified convention.
+- Do NOT force a predetermined verdict. If any asset/cell passes nominally but not after correction, report that honestly.
 
 ## Approaches already tried / failed
 - None for this task.
+- Note: a previous handoff claimed the AAPL protocol file was untracked; it is in fact committed in `d6215b2`. Verify git state with `git status` before assuming untracked files.
 
 (End of file)
