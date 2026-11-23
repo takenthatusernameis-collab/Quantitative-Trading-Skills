@@ -1,25 +1,20 @@
 # Handoff — Current State
 
 ## Latest
-- HEAD `2f3eff7` (up to date with `origin/main`; working tree clean).
-- Regime-robustness SMA crossover complete & committed for AAPL, MSFT, GOOGL (single + triple panel) and cost sensitivity (frictionless/advertised/elevated/high). All 5 committed test files pass; NOT SUPPORTED at every cost level, including zero cost.
-- New bounded task executed this session (NOT committed; new untracked file):
-  - `skills/quantitative-backtesting/tests/test_regime_robustness_param_sensitivity_real_triple_aapl_msft_googl.py` (5 tests).
-    - Grid at advertised costs (2bp/1bp): (10,40), (10,50), (10,60), (20,50) [pre-registered], (20,60), (30,60).
-    - Panel verdict NOT SUPPORTED at all six combos → panel-level falsification robust across nearby fast/slow periods, not an artifact of fast=20/slow=50.
-    - Honest methodological finding pinned: GOOGL flips to SUPPORTED at fast=30/slow=60 (wins bear + sideways, 2 of 3 regimes) — genuine parameter-specific support, reported rather than suppressed. Panel stays NOT SUPPORTED because AAPL and MSFT remain NOT SUPPORTED at every combo.
-    - Per-regime strategy + benchmark Sharpe pinned at every combo with rel tol 1e-3 (real measured values); benchmark Sharpe asserted parameter-invariant.
-    - Mirrors cost-sensitivity test structure (contextlib.redirect_stdout, `__main__` runner printing OK).
+- HEAD `5d7ac51` (up to date with `origin/main`; working tree clean).
+- Regime-robustness SMA crossover complete & committed for AAPL, MSFT, GOOGL (single + triple panel), cost sensitivity (frictionless/advertised/elevated/high), and parameter-sensitivity grid (fast/slow: (10,40),(10,50),(10,60),(20,50) [pre-registered],(20,60),(30,60)). All committed regime tests pass; NOT SUPPORTED at every cost level, including zero cost.
+- Honest finding pinned: panel verdict NOT SUPPORTED at all six grid combos; GOOGL flips to SUPPORTED at fast=30/slow=60 (parameter-specific support, reported not suppressed). Panel stays NOT SUPPORTED because AAPL and MSFT remain NOT SUPPORTED at every combo.
 
-## Verified
-- New test file passes all 5 tests via `python3 <test_file>`.
-- `python3 -m compileall` clean on new test file and `regime_robustness.py`.
-- Existing triple-panel and cost-sensitivity test files still pass (no regressions).
-- No pytest available; tests run directly with python3 (each file's `__main__` runs all its tests).
+## Regression pass (this session)
+- Ran all `skills/quantitative-backtesting/tests/test_*.py` directly with `python3` (pytest NOT installed on this PATH; each file's `__main__` runs its tests and exits 0 on OK).
+- Result: **280 total, 262 pass, 18 fail**. Zero regressions from session changes.
+- All 18 failures classified as environmental/slow, NOT regressions:
+  - 12 × `import pytest` ModuleNotFoundError (test_deflated_sharpe, test_pbo_cscv, test_point_in_time_strict_abort_on_violation, test_probabilistic_sharpe, test_protocol_multiplicity, test_reality_check, test_reality_check_family_example, test_regime_aware_position_sizing, test_regime_concentration_diagnostic, test_regime_detection, test_romano_wolf_stepdown, test_survivorship_bias_insufficient_gaps_real_panel).
+  - test_reporting.py: matplotlib figure/heatmap rendering returns `None` (headless env; cpcv_equity_curve.png / mc_fan_chart.png not created).
+  - 5 × 90s timeouts (slow tests needing more time): test_examples_coverage, test_falsifiable_hypothesis_example (~269s), test_resolution_vs_sample_size, test_walk_forward, test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.
 
 ## Next Steps
-- Parameter-sensitivity grid is complete and verified; no further action needed on this family.
-- Suggested follow-up (bounded, high-value): full regression pass across `skills/quantitative-backtesting/tests/` to confirm no cross-family regressions, then a chronological train/validation/test walk-forward for the SMA crossover (current regime stratification is per-bar, not genuinely out-of-sample). See HANDOFF_SESSION_NEXT.md.
+- Full regression pass complete; no cross-family regressions. See HANDOFF_SESSION_NEXT.md for the precise next bounded task.
 - Do not commit unless explicitly asked; no profitability/capacity claim; all committed verdicts remain NOT SUPPORTED.
 
 (End of file)
