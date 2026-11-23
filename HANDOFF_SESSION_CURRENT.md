@@ -1,24 +1,29 @@
 # Handoff — Current State
 
 ## Latest
-- HEAD `7128866` (up to date with `origin/main`; working tree clean).
-- Chronological train/validation/test walk-forward for SMA crossover on triple panel (AAPL+MSFT+GOOGL) implemented and committed.
-- Test file: `skills/quantitative-backtesting/tests/test_walk_forward_sma_crossover_real_triple_aapl_msft_googl.py`
-- Honest finding: panel verdict NOT SUPPORTED (0/2 regimes won on pooled test data, 1/3 folds won).
-- Regime-robustness SMA crossover complete & committed for AAPL, MSFT, GOOGL (single + triple panel), cost sensitivity (frictionless/advertised/elevated/high), and parameter-sensitivity grid (fast/slow: (10,40),(10,50),(10,60),(20,50) [pre-registered],(20,60),(30,60)). All committed regime tests pass; NOT SUPPORTED at every cost level, including zero cost.
-- Honest finding pinned: panel verdict NOT SUPPORTED at all six grid combos; GOOGL flips to SUPPORTED at fast=30/slow=60 (parameter-specific support, reported not suppressed). Panel stays NOT SUPPORTED because AAPL and MSFT remain NOT SUPPORTED at every combo.
+- HEAD `c897209`; working tree carries one **untracked additive file** (not committed, per instructions):
+  - `skills/quantitative-backtesting/tests/test_walk_forward_cross_sectional_momentum_multiplicity_control_real_triple_aapl_msft_googl.py`
+- This session executed the handoff's "next task": applied Benjamini-Hochberg FDR + Romano-Wolf stepdown multiplicity control to **cross-sectional momentum** across a walk-forward **fold × lookback** family on the committed triple panel (AAPL+MSFT+GOOGL).
 
-## Regression pass (this session)
-- Ran all `skills/quantitative-backtesting/tests/test_*.py` directly with `python3` (pytest NOT installed on this PATH; each file's `__main__` runs its tests and exits 0 on OK).
-- Result: **280 total, 262 pass, 18 fail**. Zero regressions from session changes.
-- All 18 failures classified as environmental/slow, NOT regressions:
-  - 12 × `import pytest` ModuleNotFoundError (test_deflated_sharpe, test_pbo_cscv, test_point_in_time_strict_abort_on_violation, test_probabilistic_sharpe, test_protocol_multiplicity, test_reality_check, test_reality_check_family_example, test_regime_aware_position_sizing, test_regime_concentration_diagnostic, test_regime_detection, test_romano_wolf_stepdown, test_survivorship_bias_insufficient_gaps_real_panel).
-  - test_reporting.py: matplotlib figure/heatmap rendering returns `None` (headless env; cpcv_equity_curve.png / mc_fan_chart.png not created).
-  - 5 × 90s timeouts (slow tests needing more time): test_examples_coverage, test_falsifiable_hypothesis_example (~269s), test_resolution_vs_sample_size, test_walk_forward, test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.
+## What changed (this session)
+- Added one new test file (additive only; no existing test/fixture/engine modified).
+- Design: `cross_sectional_momentum` (lookback grid `[20, 60, 126]`, quantiles `0.4/0.2`, book pricing) over train12/test12/step12 → 4 chronological folds × 3 lookbacks = 12 cells.
+- Per-cell statistic: paired stationary-bootstrap one-sided p-value for `Sharpe(strategy) − Sharpe(equal-weight panel benchmark)`, net of 2bp commission + 1bp slippage.
+- Controls: BH FDR across all 12 cells (+ Bonferroni reference) and Romano-Wolf stepdown FWER within each fold across the 3 lookbacks.
+- Honest finding: **0/12 cells survive BH FDR; 0/4 folds survive RW FWER** (best nominal cell = fold 1 / lookback 126, Sharpe diff +0.813, raw p=0.16, RW adj p=0.119). **Multiplicity-controlled verdict: NOT SUPPORTED.**
 
-## Next Steps
-- Full regression pass complete; no cross-family regressions.
-- Next bounded task: Multiple-testing / data-mining control (Benjamini-Hochberg FDR or Romano-Wolf stepdown across walk-forward folds/parameters).
-- Do not commit unless explicitly asked; no profitability/capacity claim; all committed verdicts remain NOT SUPPORTED.
+## What was verified (with evidence)
+- New test run directly with `python3`: **2/2 passed**, reproducible across two runs (fixed seeds → identical adjusted p-values).
+- No regression in sibling tests:
+  - `test_walk_forward_cross_sectional_momentum_real_triple_aapl_msft_googl.py` → `OK`.
+  - `test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py` → `5/5 passed` (needed a longer timeout; it is a known slow test).
+- `git status`: only the one new untracked file; no existing file touched.
 
-(End of file)
+## Constraints honored
+- Offline, committed fixtures only; no live network.
+- No profitability/capacity claim; NOT SUPPORTED is the honest outcome.
+- Not committed (no explicit request).
+
+## Notes for next agent
+- The sibling SMA multiplicity study (`test_walk_forward_sma_crossover_multiplicity_control_real_triple_aapl_msft_googl.py`, commit c897209) is the methodological template; this new file mirrors it for a book-priced portfolio strategy.
+- `pytest` is NOT installed on this PATH; run test files directly with `python3`. Several tests need >90s (known slow set).

@@ -1,37 +1,30 @@
-# Handoff — Next Task: Multiple-testing / data-mining control across walk-forward folds
+# Handoff — Next Task: Multiplicity control for time-series momentum (or dual momentum) across folds × parameter grid
 
-## Status
-- Full regression pass across `skills/quantitative-backtesting/tests/` complete: 280 test files run directly with `python3`, **262 pass, 18 fail**, zero regressions.
-- All 18 failures classified as environmental/slow, NOT regressions:
-  - 12 × `import pytest` ModuleNotFoundError (pytest not installed on this PATH).
-  - test_reporting.py: matplotlib headless rendering returns `None`.
-  - 5 × 90s timeouts (slow tests need more time; e.g. `test_falsifiable_hypothesis_example.py` ~269s).
-- Chronological train/val/test walk-forward for SMA crossover on triple panel (AAPL+MSFT+GOOGL) implemented and committed in `test_walk_forward_sma_crossover_real_triple_aapl_msft_googl.py`.
-- Panel verdict: NOT SUPPORTED (0/2 regimes won on pooled test data, 1/3 folds won).
-- Working tree clean; HEAD `7128866`.
+## Status (entering this task)
+- HEAD `c897209`; working tree has one untracked additive file from the prior session:
+  `skills/quantitative-backtesting/tests/test_walk_forward_cross_sectional_momentum_multiplicity_control_real_triple_aapl_msft_googl.py` (2/2 passing, NOT SUPPORTED).
+- Cross-sectional momentum now has BOTH protocol-sensitivity (Bonferroni on DSR) AND fold×lookback BH-FDR + Romano-Wolf FWER multiplicity control.
+- SMA crossover has fold×parameter BH-FDR + Romano-Wolf FWER multiplicity control (commit c897209).
 
 ## One precise next task (one bounded item)
-Apply multiple-testing / data-mining control across the walk-forward folds and parameter grid for the SMA crossover triple panel, using existing framework components.
+Apply the **same** paired-bootstrap Sharpe-difference + BH-FDR + Romano-Wolf stepdown methodology to **time-series momentum** (or **dual momentum**) across a walk-forward **fold × parameter** family on the committed triple panel, mirroring:
+`skills/quantitative-backtesting/tests/test_walk_forward_sma_crossover_multiplicity_control_real_triple_aapl_msft_googl.py`
+and
+`skills/quantitative-backtesting/tests/test_walk_forward_cross_sectional_momentum_multiplicity_control_real_triple_aapl_msft_googl.py`.
 
-Requirements:
-- Use the committed walk-forward results (3 folds × 6 parameter combos from the pre-registered grid: (10,40),(10,50),(10,60),(20,50),(20,60),(30,60)) as the hypothesis family.
-- Apply Benjamini-Hochberg FDR control (existing `test_benjamini_hochberg_fdr.py`) and/or Romano-Wolf stepdown (existing `test_romano_wolf_stepdown.py`) to the fold-level test statistics.
-- Test statistic: per-fold Sharpe difference (strategy - benchmark) net of advertised costs (2bp commission + 1bp slippage).
-- Null hypothesis: strategy does not beat benchmark on a given fold/parameter combination.
-- Report: adjusted p-values / rejection decisions per fold/parameter; family-wise error rate (FWER) and false discovery rate (FDR) controlled verdict.
-- New test file `skills/quantitative-backtesting/tests/test_walk_forward_sma_crossover_multiplicity_control_real_triple_aapl_msft_googl.py` with `__main__` runner printing OK; run directly with `python3`.
-- Offline, committed fixtures only; no live network.
-- Do not modify existing committed tests/fixtures/framework. Additive only.
-- Record: raw p-values, adjusted p-values, rejection decisions, final multiplicity-controlled verdict. No profitability claim; NOT SUPPORTED is an acceptable and likely honest outcome.
-- Do not commit unless explicitly asked.
-
-## Suggested task after that (not this session)
-Cross-sectional momentum walk-forward with same multiplicity control, extending the protocol sensitivity work already in `test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py`.
+Suggested concrete scope for time-series momentum:
+- Signal: `time_series_momentum` (per-symbol trend signal, `panel_pricing` as in the existing `test_walk_forward_time_series_momentum_real_triple_aapl_msft_googl.py`).
+- Parameter family: a small pre-registered lookback/threshold grid (e.g. lookbacks `[20, 60, 126]` or the grid already used by `test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple.py`). Reuse an EXISTING grid — do not invent a new one.
+- Walk-forward: train12/test12/step12 → 4 folds; per (fold, symbol or fold, param) compute paired-bootstrap Sharpe-diff p-values vs. equal-weight panel benchmark, net of 2bp+1bp.
+- Apply `utils.benjamini_hochberg` (FDR across all cells) + `utils.romano_wolf_stepdown` (FWER within each fold across params).
+- New test file `skills/quantitative-backtesting/tests/test_walk_forward_time_series_momentum_multiplicity_control_real_triple_aapl_msft_googl.py` with a `__main__` runner printing PASS and exiting 0; run directly with `python3`.
+- Offline, committed fixtures only. Additive only — do NOT modify existing tests/fixtures/engine. Do NOT commit unless explicitly asked.
+- Record raw p, BH q, Bonferroni p, RW adjusted p, rejection decisions, final multiplicity-controlled verdict. No profitability claim; NOT SUPPORTED is acceptable and likely honest.
 
 ## Approaches already tried / failed
-- None for this task.
+- None for this task (the two prior multiplicity studies succeeded).
 
-## Constraints
-- Offline/committed fixtures only; default JSON/stdout structure unchanged; no profitability or capacity claims; do not commit unless asked.
-
-(End of file)
+## Constraints / environment reminders
+- Offline/committed fixtures only; default JSON backtest output unchanged; no profitability or capacity claims.
+- `pytest` not installed on PATH — run each test file with `python3`; several tests are slow (>90s), use a generous timeout.
+- Do not commit unless explicitly asked.
