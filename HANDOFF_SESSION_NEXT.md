@@ -1,21 +1,26 @@
-# Handoff — Next Task: Regression-guard the walk-forward protocol-sensitivity family
+# Handoff — Next Task: Protocol-sensitivity + multiplicity control for MACD on single-asset AAPL
 
 ## Status (entering this task)
-- HEAD `b899ae0e06b4bb590f60512b812f338a90ffa3d4`; working tree has one untracked additive file:
-  - `skills/quantitative-backtesting/tests/test_walk_forward_sma_crossover_protocol_sensitivity_real_triple_aapl_msft_googl.py` (4/4 passing via `python3`; NOT SUPPORTED).
-- Protocol-sensitivity + multiplicity control is now in place for **all five** signal families on the committed triple panel — SMA crossover, cross-sectional momentum, time-series momentum, dual momentum, multi-pair z-score mean reversion — all consistently NOT SUPPORTED.
+- HEAD `4c20e8b`; working tree has one untracked additive file:
+  - `skills/quantitative-backtesting/tests/test_walk_forward_donchian_protocol_sensitivity_real_aapl.py` (4/4 passing via `python3`; NOT SUPPORTED).
+- Protocol-sensitivity + multiplicity control now covers **seven** signal families — all consistently NOT SUPPORTED: SMA crossover, cross-sectional momentum, time-series momentum, dual momentum, multi-pair z-score mean reversion, RSI mean reversion (triple panel), Donchian breakout (single-asset AAPL).
+- Remaining single-asset families with base `*_real_aapl.py` tests but NO protocol-sensitivity coverage: MACD, Bollinger, EMA crossover, Kelly criterion, volatility targeting.
 - `pytest` is NOT available (`python3 -m pytest` → "No module named pytest"); run test files directly with `python3`.
 
 ## One precise next task (one bounded item)
-Run the walk-forward protocol-sensitivity family directly with `python3` as a regression guard and confirm all pass with NOT SUPPORTED verdicts:
+Extend protocol-sensitivity + multiplicity control to **MACD on single-asset AAPL**, mirroring the Donchian test just added and the existing base test `test_walk_forward_macd_real_aapl.py`:
 
-1. `skills/quantitative-backtesting/tests/test_walk_forward_sma_crossover_protocol_sensitivity_real_triple_aapl_msft_googl.py` (4 tests)
-2. `skills/quantitative-backtesting/tests/test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py`
-3. `skills/quantitative-backtesting/tests/test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple.py`
-4. `skills/quantitative-backtesting/tests/test_walk_forward_dual_momentum_protocol_sensitivity_real_triple_aapl_msft_googl.py` (4 tests)
-5. `skills/quantitative-backtesting/tests/test_walk_forward_zscore_multi_pair_protocol_sensitivity_real_triple.py` (5 tests)
-
-Each file has a `main()` returning 0 on success and prints PASS per test. Expected totals: at least 21 tests, 0 failures. Every file's recorded verdict is NOT SUPPORTED — confirm none flip to SUPPORTED (that would signal a data/method change and require re-examination).
+Create `skills/quantitative-backtesting/tests/test_walk_forward_macd_protocol_sensitivity_real_aapl.py` with:
+- Signal: `macd` (single-asset), parameter grid `{"fast": [12], "slow": [26], "signal": [9]}` (1 configuration, advertised defaults from `test_walk_forward_macd_real_aapl.py`), costs 2bp commission + 1bp slippage, `apply_deflation=True, validate_pit=True`.
+- Protocols (12-month test, step == test): `(12,12,12)`, `(18,12,12)`, `(24,12,12)`, `(30,12,12)`, `(36,12,12)` — confirm each is informative (periods_with_position >= 2); drop any that are not.
+- Pre-registered per-cell falsification criteria: OOS Sharpe > 0 AND OOS total return > 0 AND Deflated Sharpe p-value < 0.10.
+- Four `test_*` functions + `TEST_REGISTRY` + `main()` returning 0 on success, mirroring `test_walk_forward_donchian_protocol_sensitivity_real_aapl.py`:
+  1. `test_protocol_sensitivity_matrix_pinned` — pinned cell matrix (n_periods, periods_with_position, oos_sharpe, total_oos_return, dsr_p, n_trials) rounded to 4 decimals, ABS_TOL 1e-3.
+  2. `test_verdict_is_consistently_not_supported` — no cell passes all three criteria; DSR p-value >= 0.10 in every cell.
+  3. `test_no_cell_survives_protocol_multiplicity` — Bonferroni across the protocol family; best-adjusted p > 0.10; n_rejected == 0.
+  4. `test_main_registers_every_module_level_test`.
+- Run directly: `python3 skills/quantitative-backtesting/tests/test_walk_forward_macd_protocol_sensitivity_real_aapl.py` → expect 4/4 PASS, exit 0, verdict NOT SUPPORTED.
+- First run the file once to capture real numbers (probe), then pin them in EXPECTED; do not hard-code guessed values.
 
 ## Constraints / environment reminders
 - Offline, committed fixtures only; no live network. Additive only — do NOT modify existing tests/fixtures/engine. Do NOT commit unless explicitly asked.
