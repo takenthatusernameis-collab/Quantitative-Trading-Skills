@@ -1,7 +1,10 @@
 # Handoff — Current State
 
 ## Latest
-- HEAD `5d7ac51` (up to date with `origin/main`; working tree clean).
+- HEAD `7128866` (up to date with `origin/main`; working tree clean).
+- Chronological train/validation/test walk-forward for SMA crossover on triple panel (AAPL+MSFT+GOOGL) implemented and committed.
+- Test file: `skills/quantitative-backtesting/tests/test_walk_forward_sma_crossover_real_triple_aapl_msft_googl.py`
+- Honest finding: panel verdict NOT SUPPORTED (0/2 regimes won on pooled test data, 1/3 folds won).
 - Regime-robustness SMA crossover complete & committed for AAPL, MSFT, GOOGL (single + triple panel), cost sensitivity (frictionless/advertised/elevated/high), and parameter-sensitivity grid (fast/slow: (10,40),(10,50),(10,60),(20,50) [pre-registered],(20,60),(30,60)). All committed regime tests pass; NOT SUPPORTED at every cost level, including zero cost.
 - Honest finding pinned: panel verdict NOT SUPPORTED at all six grid combos; GOOGL flips to SUPPORTED at fast=30/slow=60 (parameter-specific support, reported not suppressed). Panel stays NOT SUPPORTED because AAPL and MSFT remain NOT SUPPORTED at every combo.
 
@@ -14,7 +17,8 @@
   - 5 × 90s timeouts (slow tests needing more time): test_examples_coverage, test_falsifiable_hypothesis_example (~269s), test_resolution_vs_sample_size, test_walk_forward, test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.
 
 ## Next Steps
-- Full regression pass complete; no cross-family regressions. See HANDOFF_SESSION_NEXT.md for the precise next bounded task.
+- Full regression pass complete; no cross-family regressions.
+- Next bounded task: Multiple-testing / data-mining control (Benjamini-Hochberg FDR or Romano-Wolf stepdown across walk-forward folds/parameters).
 - Do not commit unless explicitly asked; no profitability/capacity claim; all committed verdicts remain NOT SUPPORTED.
 
 (End of file)
