@@ -1,4 +1,4 @@
-# Handoff — Session (current): Cross-family protocol-sensitivity meta-analysis (4 families, all NOT SUPPORTED)
+# Handoff — Session (current): Cross-family Reality Check / Romano-Wolf stepdown meta-analysis complete
 
 ## Status entering this session
 - HEAD `ab2a0e6`; working tree clean.
@@ -8,36 +8,46 @@
   - `test_walk_forward_rsi_mean_reversion_protocol_sensitivity_real_triple_summary.py` (5/5)
   - `test_walk_forward_sma_crossover_protocol_sensitivity_real_triple_summary.py` (5/5)
 - All four families conclude per-family NOT SUPPORTED (two-level Bonferroni: per-asset across protocols, then cross-asset across 3 assets; total n_rejected = 0 everywhere).
+- Cross-family Bonferroni meta-analysis complete: one Bonferroni across the 12 per-asset best-nominal DSR p-values (4 families x 3 assets) -> best cell SMA/AAPL raw p=0.0415, adjusted x12 = 0.4981, n_rejected = 0. Overall NOT SUPPORTED.
 - `pytest` unavailable; run test files directly with `python3` from repo root. Use >90s timeouts.
 
 ## What changed this session (additive only)
 - **One new untracked test file** (no existing test/fixture/engine modified):
-  `skills/quantitative-backtesting/tests/test_walk_forward_cross_family_meta_analysis_real_triple.py`
-- Cross-family meta-analysis answering "does ANY signal family survive when ALL four families are tested together?":
-  - Re-runs each family's pinned best-nominal per-asset cell (12 cells = 4 families x 3 assets) via `walk_forward_analysis` (apply_deflation=True, validate_pit=True).
-  - Families + configs: time_series_momentum (lookback [126,189,252]), volatility_targeting (target_vol [0.15], lookback [63]), rsi_mean_reversion (period/oversold/overbought/neutral), sma_crossover (fast/slow 20/50). Costs 2 bps + 1 bps.
-  - Collects the 12 per-asset best-nominal DSR p-values and applies ONE `bonferroni_correction` across all 12 (FWER across every asset-family hypothesis).
-  - Plus a family-level Bonferroni across the 4 family-best p-values.
-  - 5 registered tests + `main()` + `TEST_REGISTRY`, mirroring the summary-file conventions.
+  `skills/quantitative-backtesting/tests/test_walk_forward_cross_family_reality_check_real_triple.py`
+- Cross-family meta-analysis sharpened using the repo's implemented family-wise procedures on **aligned per-period OOS returns**:
+  - `utils.reality_check_test` (scripts/utils.py:2389) — White 2000 / Hansen 2005 stationary block bootstrap, tests whether best of K strategies beats benchmark.
+  - `utils.romano_wolf_stepdown` (scripts/utils.py:2555) — Romano-Wolf 2005 stepdown, FWER-controlled identification of strategies driving a rejection.
+  - Resolved date-alignment blocker: constructed common daily calendar from intersection of the four families' best-cell date ranges, reindexed each OOS series to that calendar, applied listwise deletion (368 observations, 4 strategies).
+  - Families + pinned best-nominal cells (from cross-asset summaries):
+    - time_series_momentum: MSFT @ (30,12,12), param_grid lookback [126,189,252]
+    - volatility_targeting: GOOGL @ (36,12,12), param_grid target_vol[0.15],lookback[63]
+    - rsi_mean_reversion: GOOGL @ (36,12,12), param_grid period/oversold/overbought/neutral
+    - sma_crossover: AAPL @ (36,12,12), param_grid fast/slow 20/50
+  - Costs 2 bps + 1 bps; apply_deflation=True; validate_pit=True.
+  - Benchmark: daily risk-free rate = 0.02/252. n_bootstrap=1000, seed=42, studentize=True, alpha=0.10.
+  - 6 registered tests + `main()` + `TEST_REGISTRY`, pins with ABS_TOL=1e-3, `validate_pit=True` assertions.
 
 ## What was verified (with evidence)
-- `python3 test_walk_forward_cross_family_meta_analysis_real_triple.py` -> **5/5 PASS**, exit 0, runtime ~60s.
-  - Best nominal cell overall: SMA crossover on AAPL @ (36,12,12), raw DSR p = 0.0415.
-  - Bonferroni across 12 asset-family hypotheses: adjusted p = 0.4981, n_rejected = 0.
-  - Family-level Bonferroni across 4 families: best family SMA (p=0.0415) adjusted = 0.1660, n_rejected = 0.
-  - Overall verdict: NOT SUPPORTED — no family survives when all twelve asset-family hypotheses are tested together. Honest report (raw best passes p<0.10 but not correction).
-- Regression guards: all 4 existing summary tests re-run -> exit 0 each (vol targeting, TSMOM, RSI, SMA).
+- `python3 test_walk_forward_cross_family_reality_check_real_triple.py` -> **6/6 PASS**, exit 0, runtime ~120s.
+  - Aligned sample: T = 368, K = 4 (time_series_momentum, volatility_targeting, rsi_mean_reversion, sma_crossover).
+  - **Reality Check Test**: test statistic = 1.7695, p-value = 0.1310, best = sma_crossover (mean excess = 0.000882/day). **NOT SUPPORTED** (p > 0.10).
+  - **Romano-Wolf Stepdown**: ordered stats [1.7695, 1.5803, 1.4718, 0.5804], adjusted p-values [0.1310, 0.1620, 0.1620, 0.2680], n_rejected = 0. **NOT SUPPORTED**.
+  - Simultaneous 90% max-t CIs for mean excess all contain zero; small-sample warning (T=368 < 504) recorded.
+  - Overall verdict: NOT SUPPORTED — no family survives family-wise control on aligned returns. Sharper than 12-way Bonferroni (0.4981) because it uses joint return distribution.
+- Regression guards: all 5 existing summary tests re-run -> exit 0 each (vol targeting, TSMOM, RSI, SMA, cross-family Bonferroni meta-analysis).
 - `python3 -m py_compile` on the new file -> COMPILE_OK.
 - `git status`: only the one new untracked file; `git diff --stat` empty. Not committed (no explicit request).
 
 ## Honest finding / limitation
-- Each per-asset best p-value is itself a minimum over that asset's protocols (within-family selection), so the 12-way Bonferroni corrects the across-family/across-asset look count but does NOT further correct within-asset protocol selection. It is a transparent, not fully exhaustive, correction; the conclusion is robust either way (raw best 0.0415 x 12 = 0.498 >> 0.10).
-- A sharper cross-family test using `utils.reality_check_test` (scripts/utils.py:2389) / `utils.romano_wolf_stepdown` (scripts/utils.py:2555) on aligned per-period OOS return series is a larger follow-up: the four families' best cells use different protocol dates, so they do not share a common time index and cannot form one (T, K) performance matrix without re-aligning on a common calendar.
-
-## Remaining candidates to extend the framework (no cross-asset summaries yet)
-- zscore_mean_reversion, cross_sectional_momentum, dual_momentum each have a `*_protocol_sensitivity_real_triple.py` test but no `*_summary.py` cross-asset two-level-Bonferroni version.
+- Reality Check p-value (0.1310) exceeds the pre-registered threshold (0.10) — the best nominal cell (SMA crossover on AAPL) does not beat the risk-free benchmark at family-wise level when cross-family dependence is preserved via stationary block bootstrap.
+- Romano-Wolf stepdown rejects zero strategies; all simultaneous FWER-adjusted 90% CIs for mean excess contain zero.
+- The aligned sample (T=368) is below the 504-observation threshold where Romano-Wolf simultaneous max-t bands are empirically well-covered; the result carries a small-sample warning. The Reality Check p-value itself is valid at this sample size. The conclusion is robust either way.
+- This sharpens the cross-family Bonferroni result (adjusted p = 0.4981) by using the joint return distribution rather than a conservative p-value correction.
 
 ## Next precise task (bounded)
-Sharpen the cross-family meta-analysis with `utils.reality_check_test` / `utils.romano_wolf_stepdown` on per-period OOS returns: resolve the date-alignment blocker (align each family's best-cell returns to a common calendar or test per-family then correct across families), run the family-wise test, and report whether any family/strategy survives. Evidence: `scripts/utils.py:2389` and `:2555`; the new meta-analysis file pins all four families' best cells. If that is too large for one session, the fallback bounded task is the zscore cross-asset summary (first create its per-asset protocol-sensitivity triple tests, then the summary).
+The zscore_mean_reversion family has a `*_protocol_sensitivity_real_triple.py` test but no `*_summary.py` cross-asset two-level-Bonferroni version. Create the zscore cross-asset summary:
+1. First verify the existing `test_walk_forward_zscore_multi_pair_protocol_sensitivity_real_triple.py` pins (5/5 PASS confirmed in prior session).
+2. Create `test_walk_forward_zscore_mean_reversion_protocol_sensitivity_real_triple_summary.py` mirroring the four existing summary files: per-asset protocol-sensitivity matrix pinned, nominal criteria reported honestly, Bonferroni across per-asset protocol multiplicity, Bonferroni cross-asset across 3 assets, all verdicts NOT SUPPORTED.
+3. Run the new summary file -> 5/5 PASS; run the existing zscore protocol-sensitivity test as regression guard. Additive only; do NOT modify existing files.
 
 (End of file)
