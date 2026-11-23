@@ -1,52 +1,97 @@
-# Handoff — Current State
+# Handoff — Session (current): TSMOM cross-asset two-level multiplicity summary
 
-## Latest
-- HEAD `d6215b2`; working tree carries **one untracked additive file**:
-  - `skills/quantitative-backtesting/tests/test_walk_forward_volatility_targeting_protocol_sensitivity_real_triple_summary.py`
-- This session executed the assigned task: write a **cross-asset protocol-sensitivity summary** for volatility targeting across the committed triple panel (AAPL, MSFT, GOOGL), with a **two-level multiplicity correction** (per-asset 5-protocol Bonferroni, plus cross-asset 3-asset Bonferroni on per-asset best nominal p-values).
+## Task executed (from HANDOFF_SESSION_NEXT.md)
+Extended the **two-level (per-asset + cross-asset) protocol-sensitivity +
+multiplicity framework** — established for volatility targeting in
+`test_walk_forward_volatility_targeting_protocol_sensitivity_real_triple_summary.py`
+— to **standalone time-series momentum (TSMOM)**, the foundational momentum
+family. This closes TSMOM's cross-asset loop the same way the volatility-targeting
+summary closes volatility targeting's.
 
-## What changed (this session)
-- Added one new test file (additive only; no existing test/fixture/engine modified).
-- Reuses `walk_forward_analysis`, `strategy_builder.build_strategy("volatility_targeting", ...)`, `utils.bonferroni_correction` with identical PARAM_GRID, costs, protocols, and PIT/bias controls as the per-asset tests.
-- Five test functions + TEST_REGISTRY + main():
-  1. `test_protocol_sensitivity_matrix_pinned` — regression guard on all 15 cells (3 assets × 5 protocols)
-  2. `test_verdict_is_consistently_not_supported` — nominal per-cell criteria per asset
-  3. `test_no_cell_survives_protocol_multiplicity` — per-asset Bonferroni across 5 protocols
-  4. `test_no_asset_survives_cross_asset_multiplicity` — cross-asset Bonferroni across 3 assets on per-asset best nominal p-values
-  5. `test_main_registers_every_module_level_test` — registry completeness
+## What changed (additive only)
+- **One new untracked test file** (no existing test/fixture/engine modified):
+  `skills/quantitative-backtesting/tests/test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple_summary.py`
+- Mirrors the volatility-targeting triple-summary exactly:
+  - Signal `time_series_momentum` (long/flat), single asset, on AAPL/MSFT/GOOGL.
+  - `LOOKBACK_GRID={"lookback":[126,189,252]}`, costs 2 bps comm + 1 bps slip,
+    within-protocol Deflated Sharpe (3 lookbacks x n_periods), 4 informative
+    12-month-test protocols `(24,12,12),(36,12,12),(18,12,12),(30,12,12)`.
+  - Two-level Bonferroni: per-asset (4 protocols) then cross-asset (3 assets).
+  - 5 registered tests + `main()` + `TEST_REGISTRY`:
+    1. `protocol_sensitivity_matrix_pinned` — 12-cell (symbol x protocol) pin
+    2. `nominal_criteria_report_honestly` — honest nominal pass reporting
+    3. `no_cell_survives_protocol_multiplicity` — per-asset Bonferroni
+    4. `no_asset_survives_cross_asset_multiplicity` — cross-asset Bonferroni
+    5. `main_registers_every_module_level_test` — registry completeness
 
-## Honest findings (real numbers, probe-captured then pinned)
-- **Per-asset nominal**: zero passing cells on all three assets (all 15 cells have DSR p ≥ 0.10).
-- **Per-asset Bonferroni (5 protocols)**:
-  - AAPL: best nominal p = 0.4792 @ (30,12,12) → adjusted = 1.0, n_rejected = 0
-  - MSFT: best nominal p = 0.3918 @ (30,12,12) → adjusted = 1.0, n_rejected = 0
-  - GOOGL: best nominal p = 0.2782 @ (36,12,12) → adjusted = 1.0, n_rejected = 0
-- **Cross-asset Bonferroni (3 assets)**:
-  - Best nominal p = 0.2782 (GOOGL) → adjusted = 0.8347, n_rejected = 0
-- **Total n_rejected** across both levels = 0
-- **Overall verdict: NOT SUPPORTED** — volatility targeting does not survive multiplicity correction anywhere on the committed triple panel.
+## Honest findings (real numbers, verified by run — not a profitability claim)
+- **Nominal**: exactly 1 of 12 informative cells passes all three criteria —
+  MSFT @ (30,12,12) (DSR p = 0.0696). The (24,12,12) baseline fails for all assets.
+- **Per-asset Bonferroni (4 protocols)**:
+  - AAPL: best p = 0.1021 @ (36,12,12) -> adj 0.4084, n_rejected = 0
+  - MSFT: best p = 0.0696 @ (30,12,12) -> adj 0.2782, n_rejected = 0
+  - GOOGL: best p = 0.5814 @ (30,12,12) -> adj 1.0, n_rejected = 0
+- **Cross-asset Bonferroni (3 assets)**: best p = 0.0696 (MSFT) -> adj 0.2087, n_rejected = 0
+- **Total n_rejected = 0. Overall verdict: NOT SUPPORTED.** TSMOM does not
+  survive multiplicity anywhere on the committed triple panel; no
+  protocol-selection or asset-selection bias can rescue the lone MSFT nominal pass.
 
 ## What was verified (with evidence)
-- `test_walk_forward_volatility_targeting_protocol_sensitivity_real_triple_summary.py` → **5/5 PASS**, exit 0 (matrix pinned, per-asset Bonferroni n_rejected=0, cross-asset Bonferroni n_rejected=0, registry complete).
-- `python3 -m py_compile` on new file → COMPILE_OK.
-- Regression guards all PASS:
-  - `test_walk_forward_volatility_targeting_protocol_sensitivity_real_aapl.py` → 4/4 PASS, exit 0
-  - `test_walk_forward_volatility_targeting_protocol_sensitivity_real_msft.py` → 4/4 PASS, exit 0
-  - `test_walk_forward_volatility_targeting_protocol_sensitivity_real_googl.py` → 4/4 PASS, exit 0
-  - `test_walk_forward_volatility_targeting_real_aapl.py` → OK, exit 0 (base volatility test unaffected)
-- `git status`: only the new untracked file; no existing file touched. Not committed (no explicit request).
+- `python3 .../test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple_summary.py`
+  -> **5/5 PASS**, exit 0, real 0m40s (matrix pinned exactly; per-asset + cross-asset
+  n_rejected = 0; registry complete). Pinned EXPECTED sourced from the committed
+  TSMOM triple test and re-verified by this run.
+- `python3 -m py_compile` on the new file -> COMPILE_OK (before and after docstring fix).
+- Regression guard: existing
+  `test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple.py`
+  -> **5/5 PASS** (baseline intact; the per-asset pins reproduce).
+- `git status`: only the one new untracked file; `git diff --stat` empty. Not committed
+  (no explicit request).
 
 ## Notes for next agent
-- Protocol-sensitivity + multiplicity control now covers **thirteen** signal-family/asset cells (prior eleven families plus volatility targeting on AAPL, MSFT, GOOGL), all overall **NOT SUPPORTED** after protocol-multiplicity correction.
-- The cross-asset summary closes the loop on the cross-asset robustness question for volatility targeting on the committed panel.
-- `pytest` is NOT available on this PATH; run test files directly with `python3`. Several tests need >90s (known slow set).
+- The two-level cross-asset multiplicity framework now covers **two** signal
+  families on the committed triple panel: volatility targeting and TSMOM. Both
+  overall **NOT SUPPORTED** after correction.
+- Protocol-sensitivity + multiplicity coverage total is now fourteen
+  signal-family/asset groupings (prior thirteen + TSMOM cross-asset summary).
+- `pytest` is NOT available on this PATH; run test files directly with `python3`
+  from repo root. The summary runs ~12 cells x 3 test bodies (~40s). Use >90s timeouts.
+- TSMOM's 6-month short-window protocols are excluded from this summary (degenerate:
+  periods_with_position <= 1; documented in the per-asset TSMOM study). Do not add them.
 
-## One precise next task
-Extend the **cross-asset protocol-sensitivity + multiplicity framework** to another signal family that has per-asset coverage on the committed panel (e.g., `time_series_momentum`, `cross_sectional_momentum`, `dual_momentum`, `rsi_mean_reversion`, `zscore_mean_reversion`, `sma_crossover`). Choose one that:
-1. Has per-asset protocol-sensitivity tests already committed for AAPL, MSFT, GOOGL
-2. Uses the same 5-protocol family and falsification criteria
-3. Would benefit from the same two-level Bonferroni aggregation
+## Approaches already tried / failed
+- None for this task. The volatility-targeting triple-summary pattern worked on
+  the first attempt for TSMOM (mirroring the established template).
 
-Candidate: `test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple_aapl_msft_googl.py` exists (check if it has per-asset protocol-sensitivity or just triple walk-forward). If not, the next task is to create per-asset protocol-sensitivity tests for another signal family, then their cross-asset summary.
+## One precise next task (bounded)
+Extend the **two-level cross-asset multiplicity summary** to a third family that
+has (or can cheaply get) per-asset protocol-sensitivity cells on the committed
+panel. Best candidates, in order of low compute / high additivity:
+
+1. **`dual_momentum`** or **`cross_sectional_momentum`** are *panel* strategies
+   (one cell per protocol, not per asset) — a cross-asset summary is NOT natural
+   for them; skip.
+2. **`rsi_mean_reversion`** and **`sma_crossover`** already have per-asset-then-
+   equal-weight *triple* protocol-sensitivity tests (per-asset cells pooled into
+   one portfolio) but NO two-level cross-asset summary. Creating a cross-asset
+   summary for one of these (mirroring this file, but building per-asset cells
+   and pooling) would add the asset-selection multiplicity layer that is
+   currently missing for them. Verify the existing triple test's per-asset
+   construction first (RSI/SMA per-asset long/short or long/flat + equal weight).
+   Candidate file name:
+   `test_walk_forward_rsi_mean_reversion_protocol_sensitivity_real_triple_summary.py`
+   (or sma_crossover).
+
+If cross-asset summaries are judged redundant (two families already NOT
+SUPPORTED after two-level correction), the higher-value alternative is a
+**cross-family meta-analysis**: pool the per-family best nominal p-values from
+all protocol-sensitivity studies (TSMOM, cross-sectional mom, dual mom, RSI,
+SMA, zscore, volatility targeting) and apply the repo's family-wise
+`utils.reality_check_test` / `utils.romano_wolfe_stepdown` (both already
+implemented) to ask "does ANY family survive when ALL are tested together?"
+This needs per-period return series per family; check whether the walk-forward
+summary exposes `oos_returns` in a form that can be assembled (it does — each
+`_run_cell` summary carries `oos_returns`). This would be the most decision-
+relevant artifact but is a larger, multi-step task.
 
 (End of file)
