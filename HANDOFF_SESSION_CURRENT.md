@@ -1,22 +1,26 @@
 # Handoff — Current State
 
 ## Latest
-- HEAD `6d2367a0fa82d2b1dc624c608f4b0557dca4507e`; working tree carries one **untracked additive file** (not committed, per instructions):
+- HEAD `6d2367a0fa82d2b1dc624c608f4b0557dca4507e`; working tree carries **two untracked additive files** (not committed, per instructions):
   - `skills/quantitative-backtesting/tests/test_walk_forward_dual_momentum_protocol_sensitivity_real_triple_aapl_msft_googl.py`
-- This session executed the prior handoff's next task: added a dual momentum protocol-sensitivity study (Bonferroni across train/test protocols).
+  - `skills/quantitative-backtesting/tests/test_walk_forward_zscore_multi_pair_protocol_sensitivity_real_triple.py`
+- This session executed the prior handoff's next task: added a multi-pair z-score mean reversion protocol-sensitivity study (Bonferroni across train/test protocols).
 
 ## What changed (this session)
 - Added one new test file (additive only; no existing test/fixture/engine modified).
-- Design: `dual_momentum` (absolute-momentum filter + relative-momentum top-quantile selection, equal-weight long-only book, `panel_pricing="book"`), grid `{"lookback": [189, 252], "top_quantile": [0.5], "risk_free_rate": [0.0]}` reused from `test_dual_momentum_walk_forward_real_triple_aapl_msft_googl.py`, costs 2bp commission + 1bp slippage, `apply_deflation=True, validate_pit=True`.
-- Protocols (informative 12-month-test family): `(12,12,12)`, `(24,12,12)`, `(36,12,12)`, `(30,12,12)` on the committed triple panel (AAPL/MSFT/GOOGL).
+- Design: `multi_pair_zscore_mean_reversion` (every pair in the 3-asset panel as independent z-score spread, aggregated into per-asset book, `panel_pricing="book"`), grid `{"period": [20], "entry_z": [2.0], "exit_z": [0.5]}` reused from `test_walk_forward_zscore_triple_real_aapl_msft_googl.py`, costs 2bp commission + 1bp slippage, `apply_deflation=True, validate_pit=True`.
+- Protocols: Informative 12-month-test family `(24,12,12)`, `(36,12,12)`, `(18,12,12)`, `(30,12,12)` + short-window family `(36,6,6)`, `(24,6,6)` on the committed triple panel (AAPL/MSFT/GOOGL).
 - Per-cell statistic: walk-forward OOS Sharpe, OOS total return, Deflated Sharpe p-value/n_trials, periods_with_position, bias_controls_engaged.
-- Controls: Bonferroni FWER across the 4-protocol family applied to the best nominal DSR p-value (protocol-selection bias control).
-- Honest finding: raw OOS Sharpe > 0 and total return > 0 in ALL four cells (0.9481/0.9844/0.9844/0.9890), but Deflated Sharpe p-value > 0.10 in ALL cells (0.1002/0.1130/0.1130/0.1186), so 0/4 cells pass all three pre-registered criteria. Best nominal cell (12,12,12), p=0.1002, Bonferroni-adjusted ~0.40 > 0.10; n_rejected=0. Verdict: consistently **NOT SUPPORTED** — dual momentum's positive raw Sharpe does not survive multiple-testing correction under any of the four equally-valid protocols.
+- Controls: Bonferroni FWER across the 4-protocol informative family applied to the best nominal DSR p-value (protocol-selection bias control).
+- Honest finding: raw OOS Sharpe > 0 and total return > 0 in ALL four informative cells (0.33/0.45/0.63/0.80), but Deflated Sharpe p-value > 0.10 in ALL cells (0.67/0.55/0.43/0.22), so 0/4 informative cells pass all three pre-registered criteria. Best nominal cell (30,12,12), p=0.2238, Bonferroni-adjusted ~0.895 > 0.10; n_rejected=0. Short-window cells are informative (periods_with_position >= 2) but also fail DSR p < 0.10. Verdict: consistently **NOT SUPPORTED** — multi-pair z-score's positive raw Sharpe does not survive multiple-testing correction under any of the four equally-valid 12-month protocols.
 
 ## What was verified (with evidence)
-- New test run directly with `python3`: **4/4 passed** (pinned regression guards + verdict + multiplicity + registry checks).
-- Prior session's multiplicity-control test re-confirmed: **2/2 passed** (NOT SUPPORTED).
-- `git status`: only the one new untracked file; no existing file touched.
+- New test run directly with `python3`: **5/5 passed** (pinned regression guards + verdict + multiplicity + short-window + registry checks).
+- Prior session's dual momentum protocol-sensitivity test re-confirmed: **4/4 passed** (NOT SUPPORTED).
+- Time-series momentum protocol-sensitivity test: **5/5 passed** (NOT SUPPORTED).
+- Cross-sectional momentum protocol-sensitivity test: **5/5 passed** (NOT SUPPORTED).
+- Original ZScore walk-forward test: **OK** (unchanged).
+- `git status`: only the two new untracked files; no existing file touched.
 
 ## Constraints honored
 - Offline, committed fixtures only; no live network.
@@ -25,7 +29,7 @@
 - `pytest` is NOT installed on this PATH; run test files directly with `python3`. Several tests need >90s (known slow set).
 
 ## Notes for next agent
-- Protocol-sensitivity + multiplicity control is now in place for all four momentum-family signals: SMA crossover, cross-sectional momentum, time-series momentum, and dual momentum — all NOT SUPPORTED on the committed triple panel.
-- Next bounded methodological gap candidates: extend the same protocol-sensitivity treatment to another signal family that has walk-forward coverage but lacks a protocol-sensitivity study (verify which via the existing test files before starting), using the same discovery-then-pin workflow and `walk_forward_analysis` interface with `apply_deflation=True, validate_pit=True`. Keep it additive, offline, one test file, do not commit unless explicitly asked.
+- Protocol-sensitivity + multiplicity control is now in place for **five** signal families on the committed triple panel: SMA crossover (single-protocol only, no protocol-sensitivity yet), cross-sectional momentum, time-series momentum, dual momentum, and multi-pair z-score mean reversion — all NOT SUPPORTED on the committed triple panel.
+- Next bounded methodological gap candidate: extend the same protocol-sensitivity treatment to **SMA crossover** (which has `test_walk_forward_sma_crossover_real_triple_aapl_msft_googl.py` but lacks a `*protocol_sensitivity*` sibling), using the same discovery-then-pin workflow and `walk_forward_analysis` interface with `apply_deflation=True, validate_pit=True`. Note: SMA crossover is a per-asset long-only trend strategy; the walk-forward study computes per-asset returns and equal-weights them. For protocol-sensitivity, either adapt the panel-aware `walk_forward_analysis` with a per-asset approach or follow the existing per-asset pattern. Keep it additive, offline, one test file, do not commit unless explicitly asked.
 
 (End of file)
