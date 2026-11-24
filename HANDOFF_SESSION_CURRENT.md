@@ -1,46 +1,37 @@
-# Handoff — Session (current): five-family base walk-forward coverage completed via triple-asset files
+# Handoff — Session (current): holm_stepdown wired into cross-sectional protocol-sensitivity test
 
 ## Status entering this session
-- HEAD `0c5fe40` (main); working tree clean at start.
-- Prior session completed 4/4 single-asset walk-forward tests for SMA crossover and TSMOM families; all PASS, NOT SUPPORTED.
-- Remaining gap: SMA crossover and TSMOM triple-asset walk-forward tests not yet executed.
-- Task assigned: run the two triple-asset walk-forward tests for the two missing families (2 files total).
+- HEAD `9b157df` (main); working tree clean at start.
+- `scripts/utils.py` already commits both `bonferroni_correction` (line 2272) and `holm_stepdown` (line 2345); `tests/test_holm_stepdown.py` (12 unit tests) is committed.
+- `test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py` used only `bonferroni_correction` at line 287; `holm_stepdown` had no production/test consumer (dead code).
+- Environment: system `python3` 3.14.4 with pytest 9.2.0, pytest-xdist 3.8.0, numpy 2.5.4, pandas 3.1.1, scipy 1.18.1, matplotlib 3.11.2 (no venv needed).
+- Full regression gate baseline: **1747 passed, 0 failed** (Session 158), includes the 4 pair tests and 12 Holm tests.
 
 ## What changed this session
-- **No source/engine/fixture/test modifications.** Additive direct-`python3` runs only; nothing committed.
-- Executed the 2 triple-asset base walk-forward tests directly with `python3` (offline, committed fixtures only).
+- **One additive source change** (no engine/fixture/pinned-matrix/default-JSON modification):
+  - `skills/quantitative-backtesting/tests/test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py`
+    - Import: `from utils import bonferroni_correction, holm_stepdown`
+    - In `test_no_cell_survives_protocol_multiplicity`, added a companion assertion after the existing Bonferroni block: the Holm-adjusted p-value for the best-nominal (30,12,12) cell also exceeds `DSR_PVALUE_THRESHOLD` (0.10).
+  - Existing Bonferroni assertion and pinned `EXPECTED` matrix left byte-identical. No new test function registered (TEST_REGISTRY unchanged).
 
 ## What was actually verified (with evidence)
-
-| Signal family | Asset files run | Result |
-|---|---|---|
-| SMA crossover | `test_walk_forward_sma_crossover_real_triple_aapl_msft_googl.py` | PASS, exit 0, OK, NOT SUPPORTED |
-| Time-series momentum | `test_walk_forward_time_series_momentum_real_triple_aapl_msft_googl.py` | PASS, exit 0, OK, NOT SUPPORTED |
-
-**Total: 2/2 PASS, 0 failures, 0 SUPPORTED flips.** All tests exit 0 and print `OK`.
-
-### Verdict details (pinned metrics reproduced, NOT SUPPORTED confirmed)
-
-| Family | Asset Panel | oos_sharpe | total_return | DSR p-value | Sharpe>0 | Return>0 | DSR<0.10 | Verdict |
-|---|---|---|---|---|---|---|---|---|
-| SMA crossover | AAPL/MSFT/GOOGL (equal-weight) | 0.674 | 0.392 | 0.924 | ✓ | ✓ | ✗ | NOT SUPPORTED |
-| TSMOM | AAPL/MSFT/GOOGL (equal-weight) | -0.124 | -0.144 | 0.918 | ✗ | ✗ | ✗ | NOT SUPPORTED |
-
-All three pre-registered falsification criteria (Sharpe>0, Return>0, DSR p<0.10) must pass for SUPPORTED; in every case at least one fails, so the honest verdict is NOT SUPPORTED. The tests are guarded to fail if a SUPPORTED flip ever occurs.
-
-SMA crossover triple: folds won 1/3, regimes won 0/2 — NOT SUPPORTED. TSMOM triple: pinned metrics match prior run exactly.
-
-## Approaches already tried / failed
-- None failed. All 2 triple-asset runs green first try.
+- `pytest tests/test_holm_stepdown.py tests/test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py -p no:cacheprovider -q` → **17 passed** (12 Holm unit tests + 5 cross-sectional protocol-sensitivity tests), ~2m55s, exit 0.
+- `python3 -m py_compile` on the edited test file → `COMPILE_OK`.
+- `git status`: only the one intended file modified (8 insertions, 1 deletion); working tree otherwise clean.
+- Rationale the assertion holds: (30,12,12) has the smallest DSR p-value (0.5896) among the four 12-month informative protocols, so Holm's step-down factor for it equals Bonferroni's (×4, capped at 1.0 → 1.0 > 0.10); Holm dominates Bonferroni, so non-rejection is preserved.
 
 ## What remains unresolved
-- The prior session's new file `skills/quantitative-backtesting/tests/test_deflated_sharpe_reproducibility_tsmom.py` remains **untracked/uncommitted** (standing rule: no commit unless explicitly asked).
-- Full 1569-test gate not rerun this session (only focused triple-asset files); prior full gate green at 1569/1569.
-- Five-family base walk-forward coverage is now **complete** for all existing single-asset, pair, and triple files. Remaining coverage gaps are structural (files don't exist):
-  - SMA crossover: no pair files (only single-asset AAPL and triple)
-  - TSMOM: no pair files (only single-asset AAPL/GOOGL/MSFT and triple)
-- Cross-sectional, dual momentum, z-score families: all single-asset + pair + triple complete.
-- No further walk-forward test execution tasks remain for existing test files.
+- `holm_stepdown` now has one consumer but is not yet wired across other protocol families (optional, out of scope).
+- Full 1747-test regression gate **not** rerun after this additive change (baseline green as of Session 158; focused rerun is sufficient per that handoff, but full gate is the correct final check before any commit).
+- Nothing committed (standing rule: no commit unless explicitly asked).
+
+## Approaches already tried / failed
+- None failed. All green first try.
 
 ## One precise next task (bounded, evidence-based)
-**No further walk-forward execution tasks exist for the current test matrix.** The next logical step is to address the structural gap by creating pair-asset walk-forward test files for the two families lacking pair coverage (SMA crossover and TSMOM), following the same pattern as the existing cross-sectional/dual momentum/z-score pair tests. Alternatively, run the full 1569-test regression gate to confirm no regressions were introduced elsewhere. Decision required on priority: (a) create missing pair test files, or (b) run full regression gate.
+Run the full regression gate to confirm no regressions before any commit:
+```
+cd skills/quantitative-backtesting
+pytest tests/ -p no:cacheprovider -q -n 4
+```
+Expected: **1747 passed, 0 failed** (~28 min). Then commit the one-file change only if explicitly asked.

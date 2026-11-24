@@ -78,7 +78,7 @@ sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
 from walk_forward import walk_forward_analysis  # noqa: E402
 from strategy_builder import build_strategy  # noqa: E402
-from utils import bonferroni_correction  # noqa: E402
+from utils import bonferroni_correction, holm_stepdown  # noqa: E402
 
 SRC = SKILLS_DIR / "assets" / "example_data" / "real_market_data"
 
@@ -288,6 +288,13 @@ def test_no_cell_survives_protocol_multiplicity():
     best_adjusted = res["adjusted_p_values"][best_idx]
     assert best_adjusted > DSR_PVALUE_THRESHOLD, (
         f"best-nominal DSR p={best_p} Bonferroni-adjusted = {best_adjusted} should "
+        f"exceed {DSR_PVALUE_THRESHOLD} (not robust to protocol multiplicity)"
+    )
+
+    holm_res = holm_stepdown(dsr_p_values, alpha=DSR_PVALUE_THRESHOLD)
+    holm_best_adjusted = holm_res["adjusted_p_values"][best_idx]
+    assert holm_best_adjusted > DSR_PVALUE_THRESHOLD, (
+        f"best-nominal DSR p={best_p} Holm-adjusted = {holm_best_adjusted} should "
         f"exceed {DSR_PVALUE_THRESHOLD} (not robust to protocol multiplicity)"
     )
 
