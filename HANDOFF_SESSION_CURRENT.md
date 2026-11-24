@@ -1,39 +1,65 @@
-# Handoff — Session (current): holm_stepdown wired into cross-sectional protocol-sensitivity test
+# Handoff — Session (current): holm_stepdown wired into time-series momentum protocol-sensitivity test
 
 ## Status entering this session
-- HEAD `9b157df` (main); working tree clean at start.
-- `scripts/utils.py` already commits both `bonferroni_correction` (line 2272) and `holm_stepdown` (line 2345); `tests/test_holm_stepdown.py` (12 unit tests) is committed.
-- `test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py` used only `bonferroni_correction` at line 287; `holm_stepdown` had no production/test consumer (dead code).
-- Environment: system `python3` 3.14.4 with pytest 9.2.0, pytest-xdist 3.8.0, numpy 2.5.4, pandas 3.1.1, scipy 1.18.1, matplotlib 3.11.2 (no venv needed).
-- Full regression gate baseline: **1747 passed, 0 failed** (Session 158), includes the 4 pair tests and 12 Holm tests.
+- HEAD `f6046c0` (main); working tree clean at start.
+- Prior session (committed in `5bb8a7f`) wired `holm_stepdown` into the
+  cross-sectional momentum protocol-sensitivity test; `utils.holm_stepdown`
+  (`scripts/utils.py:2345`) and `tests/test_holm_stepdown.py` (12 tests) are committed.
+- Environment: system `python3` 3.14.4 with pinned requirements; no venv needed.
+- Full regression gate baseline: **1759 passed, 0 failed** (Session CURRENT).
+
+## Assigned task (from prior handoff)
+"Wire `holm_stepdown` into the time-series momentum protocol-sensitivity test
+(`test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple.py`)
+for consistency" — i.e. give `holm_stepdown` a second production consumer without
+disturbing pinned matrices.
 
 ## What changed this session
-- **One additive source change** (no engine/fixture/pinned-matrix/default-JSON modification):
-  - `skills/quantitative-backtesting/tests/test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py`
-    - Import: `from utils import bonferroni_correction, holm_stepdown`
-    - In `test_no_cell_survives_protocol_multiplicity`, added a companion assertion after the existing Bonferroni block: the Holm-adjusted p-value for the best-nominal (30,12,12) cell also exceeds `DSR_PVALUE_THRESHOLD` (0.10).
-  - Existing Bonferroni assertion and pinned `EXPECTED` matrix left byte-identical. No new test function registered (TEST_REGISTRY unchanged).
+- **One additive source change** (no engine/fixture/pinned-matrix/default-JSON change):
+  - `skills/quantitative-backtesting/tests/test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple.py`
+    - Import: `from utils import bonferroni_correction, holm_stepdown`.
+    - In `test_sole_pass_does_not_survive_protocol_multiplicity`, after the existing
+      Bonferroni `n_rejected == 0` block, added a companion Holm block: the
+      Holm-adjusted p-value for the sole-pass (30,12,12) MSFT cell must exceed
+      `DSR_PVALUE_THRESHOLD` (0.10) and Holm `n_rejected` must be 0.
+  - Existing Bonferroni assertions and the pinned `EXPECTED` matrix left byte-identical.
+    No new test function registered (TEST_REGISTRY unchanged). Diff: +15/-1, one file.
 
-## What was actually verified (with evidence)
-- `pytest tests/test_holm_stepdown.py tests/test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py -p no:cacheprovider -q` → **17 passed** (12 Holm unit tests + 5 cross-sectional protocol-sensitivity tests), ~2m55s, exit 0.
-- `python3 -m py_compile` on the edited test file → `COMPILE_OK`.
-- **Full regression gate**: `python3 -m pytest tests/ -p no:cacheprovider -q -n 4` → **1759 passed, 0 failed** in 1698s (~28 min). Baseline was 1747; +12 from Holm unit tests and this protocol-sensitivity test.
-- `git status`: only the one intended file modified (8 insertions, 1 deletion); working tree otherwise clean.
-- Rationale the assertion holds: (30,12,12) has the smallest DSR p-value (0.5896) among the four 12-month informative protocols, so Holm's step-down factor for it equals Bonferroni's (×4, capped at 1.0 → 1.0 > 0.10); Holm dominates Bonferroni, so non-rejection is preserved.
+## What was actually verified (evidence)
+- `python3 -m py_compile` on the edited file → `COMPILE_OK`.
+- `pytest tests/test_holm_stepdown.py tests/test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple.py -p no:cacheprovider -q`
+  → **17 passed** (12 Holm unit + 5 time-series protocol-sensitivity), 17.60s, exit 0.
+- `git status --short`: only the one intended file modified; `git diff --stat` = 1 file, +15/-1.
+- `git diff` confirms no `EXPECTED`/matrix line changed.
+- Rationale the assertion holds: Holm dominates Bonferroni under arbitrary dependence,
+  so if the Bonferroni-adjusted sole-pass p already exceeds 0.10 (existing assertion),
+  the Holm-adjusted value must too; and Holm rejection set ⊆ Bonferroni rejection set,
+  so `n_rejected == 0` is preserved.
 
 ## What remains unresolved
-- `holm_stepdown` now has one consumer but is not yet wired across other protocol families (optional, out of scope).
+- `holm_stepdown` now has two consumers (cross-sectional + time-series triple tests) but
+  is still not applied uniformly across all protocol-sensitivity families.
 - Nothing committed (standing rule: no commit unless explicitly asked).
 
 ## Approaches already tried / failed
-- None failed. All green first try.
+- None failed. Green first try.
 
 ## One precise next task (bounded, evidence-based)
-If explicitly asked to commit, commit the one-file change only:
-```
-git add skills/quantitative-backtesting/tests/test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py
-git commit -m "test: wire holm_stepdown into cross-sectional protocol-sensitivity test"
-```
-Otherwise, the next quant research task could be: wire `holm_stepdown` into the time-series momentum protocol-sensitivity test (`test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple.py`) for consistency, or advance the Romano-Wolf step-down integration across the 5-family reality-check suite.
-
-(End of file - total 44 lines)
+Extend the same non-breaking Holm companion assertion to the remaining **triple**
+protocol-sensitivity tests that currently use only `bonferroni_correction`
+(verified via grep, 0 `holm_stepdown` occurrences):
+- `tests/test_walk_forward_dual_momentum_protocol_sensitivity_real_triple_aapl_msft_googl.py`
+- `tests/test_walk_forward_sma_crossover_protocol_sensitivity_real_triple_aapl_msft_googl.py`
+- `tests/test_walk_forward_rsi_mean_reversion_protocol_sensitivity_real_triple_aapl_msft_googl.py`
+For each: add `holm_stepdown` to the `from utils import ...` line and, immediately
+after the existing Bonferroni multiplicity assertion, add a companion Holm assertion
+(best/sole-pass adjusted p > threshold and `n_rejected == 0`). Keep every existing
+assertion and pinned `EXPECTED`/summary matrix byte-identical; only ADD assertions.
+- **Constraints**: offline/committed fixtures only; do not renumber metrics, change
+  default JSON, or modify the engine; do not commit unless explicitly asked.
+- **Verify**: run the three edited files plus `tests/test_holm_stepdown.py` focused
+  (~a few minutes) and report exact pass/fail counts. A full 1759-gate rerun is the
+  correct final check before any commit, not required for the additive change itself.
+- Alternative higher-value task if consistency wiring is deprioritized: build a shared
+  aggregate-reporting layer that applies FWER/FDR once across a protocol family
+  (currently each test file corrects ad hoc) — larger scope, needs its own design.

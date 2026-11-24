@@ -76,7 +76,7 @@ sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
 from walk_forward import walk_forward_analysis  # noqa: E402
 from strategy_builder import build_strategy  # noqa: E402
-from utils import bonferroni_correction  # noqa: E402
+from utils import bonferroni_correction, holm_stepdown  # noqa: E402
 
 SRC = SKILLS_DIR / "assets" / "example_data" / "real_market_data"
 
@@ -307,6 +307,20 @@ def test_sole_pass_does_not_survive_protocol_multiplicity():
     # No protocol should be rejected at the FWER threshold
     assert res["n_rejected"] == 0, (
         f"expected 0 rejections at alpha={DSR_PVALUE_THRESHOLD}, got {res['n_rejected']}"
+    )
+
+    # Companion Holm step-down check (uniformly more powerful than Bonferroni,
+    # so non-rejection must be preserved). Uses the shared helper.
+    holm_res = holm_stepdown(dsr_p_values, alpha=DSR_PVALUE_THRESHOLD)
+    holm_best_adjusted = holm_res["adjusted_p_values"][sole_pass_idx]
+    assert holm_best_adjusted > DSR_PVALUE_THRESHOLD, (
+        f"sole-pass DSR p={dsr_p_values[sole_pass_idx]} Holm-adjusted = "
+        f"{holm_best_adjusted} should exceed {DSR_PVALUE_THRESHOLD} "
+        f"(not robust to protocol multiplicity)"
+    )
+    assert holm_res["n_rejected"] == 0, (
+        f"expected 0 Holm rejections at alpha={DSR_PVALUE_THRESHOLD}, "
+        f"got {holm_res['n_rejected']}"
     )
 
     # Isolation: the other MSFT informative protocols must not all pass.
