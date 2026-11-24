@@ -1,78 +1,32 @@
-# Handoff — Session (current): completed the assigned capacity-aware sizing opt-in guard; fixed a broken test left by the prior agent
+# Handoff — Session (current): added Fama-MacBeth factor-attribution worked example on committed real data
 
 ## Status entering this session
-- HEAD `e05a150` (main); working tree clean.
-- Assigned task (per HANDOFF_SESSION_NEXT.md): **capacity-aware sizing opt-in guard**.
-- The prior agent had implemented it across several commits (`74d9a60`, `9ff3d5e`, then a corrected
-  `test_run_backtest_max_impact_optin_guard.py` at `e05a150`, plus a pytest→manual-runner refactor of 10
-  test files at `748c40b`), but left a **broken** first test in the tree.
+- HEAD `3c438f6` (main); working tree clean.
+- The assigned next task from the prior handoff was a Fama-MacBeth cross-sectional regression module + ground-truth tests. That task was **already complete and committed**: `skills/quantitative-backtesting/scripts/factor_models.py` (fama_macbeth, fama_macbeth_single_factor, generate_fama_macbeth_test_data, factor_contribution_decomposition) and `skills/quantitative-backtesting/tests/test_fama_macbeth_regression.py` both exist and pass (`python3 <file>` -> ALL TESTS PASSED). `test_factor_contribution_decomposition.py` also passes.
+- `factor_models.py` is standalone: not wired into run_backtest.py/walk_forward.py, not documented in SKILL.md, and not demonstrated on committed real data.
 
-## What changed this session (one file, additive correction)
-- **Fixed `skills/quantitative-backtesting/tests/test_run_backtest_capacity_optin_guard.py`** — it was failing.
-  - Root cause (two bugs in the prior revision):
-    1. Final assertion `capped_capacity < uncapped_capacity` is impossible by construction: `--max-impact`
-       scales *realized positions* but never feeds `estimate_capacity` (`run_backtest.py:945-965`), so the
-       reported `capacity` metric is independent of `--max-impact`.
-    2. The "binding cap" call used `max_impact=1e-4` at `--impact-coefficient 1.0`, which **does not bind**
-       (empirically identical output to unset: return 1.089946, trades 17, capacity 5,807,370).
-  - Correction (empirically grounded, offline, committed AAPL.csv fixture):
-    - Opt-in (a): loose cap `1.0` == unset on `total_return` and `sharpe_ratio` (unchanged).
-    - Binding cap (b): use `max_impact=1e-5` at `ic=1.0` (this binds: return 1.089946 -> 1.030948, trades 17 -> 32);
-      assert realized `total_return` differs AND `capacity` is **unchanged** (documents that `--max-impact` is a
-      position-sizing cap, not a capacity modifier).
-    - Added a runnable `__main__` block (prior version had none; pytest is not installed in this environment).
-  - No existing production code, fixtures, or other tests modified.
+## What changed this session (two additive files, no existing files modified)
+- **Added `skills/quantitative-backtesting/examples/factor_attribution_example.py`** — worked example that loads the committed real-market triple panel (AAPL/MSFT/GOOGL, 1507 aligned bars 2020-01-02 -> 2025-12-30), runs Fama-MacBeth of next-period return on lagged one-day return (point-in-time correct: exposure at t uses info up to t-1), reports lambda_hat with Newey-West t-stat, n_periods, and a factor-vs-idiosyncratic decomposition (explained variance ratio). Writes `factor_attribution.json` to --output (defaults to a temp dir; never writes to tracked `examples/example_output/`). Prints an honest caveat: three-asset cross-section is thin and underpowered, illustrative only, no profitability claim.
+- **Added `skills/quantitative-backtesting/tests/test_factor_attribution_example.py`** — runs the example end-to-end on committed data and asserts: exit 0, artifact written, lambda_hat/t-stat/SE finite, n_periods > 0, explained variance ratio in [0,1]. Offline, deterministic, direct `python3 <file>` (pytest unavailable on PATH).
 
 ## What was actually verified (with evidence)
-- `python3 skills/quantitative-backtesting/tests/test_run_backtest_capacity_optin_guard.py` -> **OK, exit 0** (~10s).
-- Sibling test `test_run_backtest_max_impact_optin_guard.py` -> **OK, exit 0** (~10s; opt-in + binding cap).
-- Full capacity domain green:
-  - `test_walk_forward_time_series_momentum_capacity_sensitivity_real_triple_aapl_msft_googl.py` -> OK.
-  - `test_simple_momentum_capacity_sensitivity_real_aapl_msft.py` -> OK.
-  - `test_walk_forward_time_series_momentum_oos_min_capacity_vs_deployed_capital_real_triple_aapl_msft_googl.py` -> OK.
-- Regression-checked the 10 test files the prior agent refactored in `748c40b` (pytest→manual runner loops):
-  `test_deflated_sharpe`, `test_regime_detection`, `test_romano_wolf_stepdown`, `test_reality_check`,
-  `test_regime_aware_position_sizing`, `test_probabilistic_sharpe`, `test_protocol_multiplicity`,
-  `test_reality_check_family_example`, `test_regime_concentration_diagnostic`,
-  `test_survivorship_bias_insufficient_gaps_real_panel` -> all **ALL TESTS PASSED, exit 0**. The refactor is sound.
-- `py_compile` of the fixed test -> COMPILE_OK. Trailing newline added.
-- `git status`: only the one modified test file (no stray artifacts).
-
-## Honest finding / limitation
-- This was a **test-correctness fix, not a new strategy result**. It removes a false assertion that would have
-  failed the full gate (the prior "1196 passed, 1 failed" gate predates these commits and was never re-run).
-- pytest is not installed here, so the ~311-test full gate cannot be run in one shot; tests are verified
-  individually via `python3 <file>`. A full-gate re-run (with pytest + a 2h budget) is the honest way to confirm
-  no other regression from `74d9a60`/`9ff3d5e`/`748c40b`/`e05a150`, but that is out of scope for this session.
+- `python3 examples/factor_attribution_example.py` -> EXIT 0. lambda_hat = -0.058275, t = -52.422, SE = 0.043126, n_periods = 1505, explained var = 0.0091. Artifact written to temp dir.
+- `python3 tests/test_factor_attribution_example.py` -> ALL TESTS PASSED, exit 0 (both test_example_runs_and_writes_artifact and test_example_main_returns_zero).
+- `py_compile` of both new files -> COMPILE_OK.
+- Regression: existing `test_fama_macbeth_regression.py` and `test_factor_contribution_decomposition.py` still pass; `git status` shows only the two new untracked files (no existing production/test/fixture modified).
+- One defect found and fixed during this session: both test functions initially asserted artifact existence *after* the `tempfile.TemporaryDirectory()` `with` block exited, so the temp dir (and artifact) was already deleted. Fixed by moving artifact access inside the block (evidenced by the initial AssertionError then the green re-run).
 
 ## Approaches already tried / failed
-- `python3 -c "import ...; test_capacity_optin_guard()"` on the prior file -> AssertionError (reproduced the defect).
-- Confirmed via direct probe that `ic=1.0, max_impact=1e-4` is non-binding and `capacity` never responds to
-  `--max-impact`; only `1e-5` (ic=1.0) or `1e-4` (ic=10.0) bind. This evidence drove the corrected assertions.
+- None for this task (additive example + test, green on first corrected run). The prior Fama-MacBeth "gap" task was verified already-complete, so no new engine code was added (avoids risk to the green 58-file walk-forward regression guard).
+
+## What remains unresolved
+- None for this session.
 
 ## One precise next task (bounded, evidence-based)
-**Add a Fama-MacBeth cross-sectional regression utility (factor-model capability) with ground-truth tests.**
-- Evidence it is a genuine gap: repository-wide search found **zero** factor-model / Fama-Macbeth /
-  factor-mimicking / cross-sectional-regression code or files (`grep -rilE "fama.?macbeth|factor model|
-  factor-mimicking|factor return|cross.sectional regression" scripts/ examples/ references/ tests/` -> empty).
-  Factor models are central to quant methodology (risk attribution, alpha/beta separation, factor-mimicking
-  portfolios) and are on-mission ("portfolio construction", "reusable quant research methodology").
-- Scope: new self-contained module (e.g. `skills/quantitative-backtesting/scripts/factor_models.py`) exposing
-  `fama_macbeth(asset_returns, factor_exposures, ...)` -> per-period cross-sectional OLS factor returns, plus
-  time-series mean and t-stat (Newey-West optional). New test file
-  `skills/quantitative-backtesting/tests/test_fama_macbeth_regression.py` with **synthetic ground-truth** tests:
-  (1) data generated as `returns = exposures @ true_lambda + noise` recovers `true_lambda`;
-  (2) single-factor reduces to the closed-form beta = cov/var, lambda = cov/var;
-  (3) NaN/constant-column handling; (4) seeded reproducibility.
-- Constraints: additive files only; offline; committed/synthetic fixtures only; direct `python3 <file>` execution
-  (pytest unavailable); do not modify existing tests/fixtures/engine. Follow the statistical-engine conventions in
-  `scripts/utils.py` (seeded `default_rng`, pure functions).
-
-## Secondary (optional) cleanup — only if the next agent wants a fully-green full gate
-- `test_examples_coverage.py::test_scripts_results_untouched_after_examples` fails in a full run because example
-  scripts write timestamped artifacts into the *tracked* `skills/quantitative-backtesting/scripts/results/`
-  (and `examples/example_output/`), so `git status --porcelain scripts/` changes mid-run. Fix by directing example
-  output to temp dirs when invoked from tests (or normalizing the comparison). Test-hygiene only; do not change
-  production code for it. This is the last known gate failure and is documented in `HANDOFF_FULL_GATE_RESULT.md`.
+**Extend the factor-attribution worked example to a two-factor model (equal market exposure + lagged-return momentum) on the committed real triple panel, and add a first-principles reproducibility test.**
+- Evidence: the current example uses a single factor (lagged return) on N=3 assets, which is honestly thin/underpowered (noted in output). A second factor (market = unit exposure for all assets) makes the cross-sectional regression a genuine multi-factor attribution and the example more illustrative of the methodology.
+- Scope: modify `examples/factor_attribution_example.py` to use K=2 factors (exposure 1 = constant 1.0, exposure 2 = lagged return) and recompute/report both lambdas with t-stats; add `test_factor_attribution_reproducibility.py` that independently recomputes per-period cross-sectional OLS + time-series mean + Newey-West t-stat from the same committed data and asserts agreement with the example artifact within tolerance.
+- Constraints: additive/edited only within the two example/test files (do not modify factor_models.py, run_backtest.py, or any existing test/fixture); offline; committed data only; all output to temp dirs (never tracked `example_output/`); direct `python3 <file>`; no profitability/robustness claims; keep the N=3 thin-sample caveat.
+- Estimated: one session.
 
 (End of file)
