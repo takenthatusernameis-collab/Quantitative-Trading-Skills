@@ -13,13 +13,13 @@ SCRIPT = SKILLS_DIR / "scripts" / "run_backtest.py"
 DATA = SKILLS_DIR / "assets" / "example_data" / "real_market_data" / "AAPL.csv"
 
 
-def _run(out: Path, max_impact=None):
+def _run(out: Path, max_impact=None, impact_coefficient=1.0):
     cmd = [
         sys.executable, str(SCRIPT),
         "--data", str(DATA),
         "--strategy", "sma_crossover",
         "--symbol", "AAPL",
-        "--impact-coefficient", "0.001",
+        "--impact-coefficient", str(impact_coefficient),
         "--commission", "0.0002",
         "--slippage", "0.0001",
         "--output", str(out),
@@ -31,15 +31,17 @@ def _run(out: Path, max_impact=None):
 
 def test_capacity_optin_guard():
     assert DATA.exists()
-    with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2:
-        r1 = _run(Path(d1))
-        r2 = _run(Path(d2), max_impact=1e-6)
-        assert r1.returncode == 0, r1.stderr
-        assert r2.returncode == 0, r2.stderr
-        s1 = json.loads((Path(d1) / "tear_sheet_summary.json").read_text())
-        s2 = json.loads((Path(d2) / "tear_sheet_summary.json").read_text())
-        # opt-in: unset max-impact must not move published numbers relative to a
-        # no-cap run with identical other args. Compare total_return & sharpe.
-        assert s1.get("total_return") == s2.get("total_return") or True
-        # binding cap run must still produce a summary
-        assert isinstance(s2, dict) and len(s2) > 0
+    with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2, tempfile.TemporaryDirectory() as d3:
+        r_loose = _run(Path(d1), max_impact=1.0)
+        r_unset = _run(Path(d2))
+        assert r_loose.returncode == 0, r_loose.stderr
+        assert r_unset.returncode == 0, r_unset.stderr
+        s_loose = json.loads((Path(d1) / "tear_sheet_summary.json").read_text())
+        s_unset = json.loads((Path(d2) / "tear_sheet_summary.json").read_text())
+        assert s_loose["metrics"]["total_return"] == s_unset["metrics"]["total_return"]
+        assert s_loose["metrics"]["sharpe_ratio"] == s_unset["metrics"]["sharpe_ratio"]
+
+        r_cap = _run(Path(d3), max_impact=1e-4, impact_coefficient=1.0)
+        assert r_cap.returncode == 0, r_cap.stderr
+        s_cap = json.loads((Path(d3) / "tear_sheet_summary.json").read_text())
+        assert s_cap["metrics"]["capacity"] < s_unset["metrics"]["capacity"]
