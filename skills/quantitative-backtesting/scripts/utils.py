@@ -2342,6 +2342,89 @@ def bonferroni_correction(p_values, alpha: float = 0.05):
     }
 
 
+def holm_stepdown(p_values, alpha: float = 0.05):
+    """Holm (1979) step-down FWER-adjusted p-values for a family of p-values.
+
+    Controls the family-wise error rate (probability of any false rejection)
+    under arbitrary dependence, like the single-step Bonferroni correction, but
+    is uniformly more powerful: it orders the p-values ascending and compares
+    the k-th smallest to ``alpha / (m - k + 1)``, stopping at the first
+    non-rejection. The reported adjusted p-values are the monotone (cumulative
+    maximum) version of ``(m - k + 1) * p_(k)`` capped at 1.0, so rejecting
+    ``adjusted_p <= alpha`` reproduces the step-down decision exactly.
+
+    Args:
+        p_values: Sequence of p-values in [0, 1]. NaN/None entries are
+            treated as non-informative (adjusted p-value 1.0, not rejected).
+        alpha: Significance threshold used for the rejection decision
+            (default 0.05).
+
+    Returns:
+        Dict with:
+            - ``adjusted_p_values``: list of Holm-adjusted p-values aligned to
+              the input order (float in [0, 1]).
+            - ``rejected``: list of booleans, True where adjusted_p <= alpha.
+            - ``alpha``: the threshold used.
+            - ``n_tests``: number of valid (finite) p-values in the family.
+            - ``n_rejected``: number of hypotheses rejected at ``alpha``.
+
+    Notes:
+        - With 0 or 1 valid test, adjusted p-values equal the p-values and the
+          procedure is equivalent to a single test.
+        - The adjustment is monotone: if p_a <= p_b then adjusted_a <= adjusted_b.
+        - ``holm_stepdown`` dominates ``bonferroni_correction``: for every input
+          its adjusted p-values are <= the Bonferroni ones, so it rejects at
+          least as many hypotheses at the same ``alpha``.
+    """
+    vals = list(p_values)
+    n_total = len(vals)
+    valid = []
+    for i, p in enumerate(vals):
+        try:
+            pv = float(p)
+        except Exception:
+            pv = float("nan")
+        if pv == pv and 0.0 <= pv <= 1.0:
+            valid.append((i, pv))
+        elif pv == pv and pv > 1.0:
+            valid.append((i, 1.0))
+        elif pv == pv and pv < 0.0:
+            valid.append((i, 0.0))
+    m = len(valid)
+    adjusted = [1.0] * n_total
+    rejected = [False] * n_total
+    if m == 0:
+        return {
+            "adjusted_p_values": adjusted,
+            "rejected": rejected,
+            "alpha": float(alpha),
+            "n_tests": 0,
+            "n_rejected": 0,
+        }
+    # Ascending p-value order; rank k (1-based) gets factor (m - k + 1).
+    valid_sorted = sorted(valid, key=lambda x: x[1])
+    running_max = 0.0
+    for k, (idx, pv) in enumerate(valid_sorted):
+        factor = m - k  # (m - (k+1) + 1) with 0-based k
+        adj = pv * factor
+        if adj > 1.0:
+            adj = 1.0
+        if adj < running_max:
+            adj = running_max  # enforce monotone non-decreasing adjusted p
+        running_max = adj
+        adjusted[idx] = float(adj)
+    for i in range(n_total):
+        rejected[i] = bool(adjusted[i] <= float(alpha))
+    n_rejected = sum(1 for r in rejected if r)
+    return {
+        "adjusted_p_values": adjusted,
+        "rejected": rejected,
+        "alpha": float(alpha),
+        "n_tests": m,
+        "n_rejected": int(n_rejected),
+    }
+
+
 def _newey_west_long_run_variance(x: np.ndarray, bandwidth: Optional[int] = None) -> float:
     """Newey-West HAC long-run variance of a mean-zero series.
 
