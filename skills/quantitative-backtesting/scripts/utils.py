@@ -2425,7 +2425,7 @@ def holm_stepdown(p_values, alpha: float = 0.05):
     }
 
 
-def protocol_family_correction(p_value_matrix, alpha: float = 0.05):
+def protocol_family_correction(p_value_matrix, alpha: float = 0.05, method: str = "bonferroni"):
     """Two-level protocol-family FWER correction for an (assets x protocols) matrix.
 
     This implements the nested multiplicity correction used in the cross-asset
@@ -2535,16 +2535,23 @@ def protocol_family_correction(p_value_matrix, alpha: float = 0.05):
         rejected = [False] * len(row)
 
         if n_protocols > 0:
-            # Bonferroni: p * n_protocols, capped at 1.0
-            for proto_idx, pv in valid:
-                adj = pv * n_protocols
-                if adj > 1.0:
-                    adj = 1.0
-                adjusted[proto_idx] = float(adj)
+            if method == "holm":
+                _res = holm_stepdown(row, alpha=alpha)
+                for i in range(len(row)):
+                    adjusted[i] = float(_res["adjusted_p_values"][i])
+                for i in range(len(row)):
+                    rejected[i] = bool(_res["rejected"][i])
+            else:
+                # Bonferroni: p * n_protocols, capped at 1.0
+                for proto_idx, pv in valid:
+                    adj = pv * n_protocols
+                    if adj > 1.0:
+                        adj = 1.0
+                    adjusted[proto_idx] = float(adj)
 
-            # Rejections
-            for i in range(len(row)):
-                rejected[i] = bool(adjusted[i] <= float(alpha))
+                # Rejections
+                for i in range(len(row)):
+                    rejected[i] = bool(adjusted[i] <= float(alpha))
 
             # Best nominal p-value and its index
             best_proto_idx, best_nominal_p = min(valid, key=lambda x: x[1])
