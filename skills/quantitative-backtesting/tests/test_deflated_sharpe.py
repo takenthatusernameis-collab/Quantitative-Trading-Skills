@@ -110,6 +110,14 @@ def test_dsr_rejects_invalid_inputs():
 
 
 if __name__ == "__main__":
-    import pytest
-
-    raise SystemExit(pytest.main([__file__, "-q"]))
+    _fns = [
+        test_dsr_returns_required_keys_and_bounds,
+        test_dsr_higher_sharpe_gives_higher_confidence,
+        test_dsr_more_trials_deflates_confidence,
+        test_dsr_constant_returns_are_degenerate,
+        test_dsr_trial_sharpes_path_uses_trial_dispersion,
+        test_dsr_rejects_invalid_inputs,
+    ]
+    for _fn in _fns:
+        _fn()
+    print("ALL TESTS PASSED")

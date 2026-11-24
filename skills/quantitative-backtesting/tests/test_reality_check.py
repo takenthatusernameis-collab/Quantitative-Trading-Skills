@@ -143,6 +143,15 @@ def test_reality_check_input_validation():
 
 
 if __name__ == "__main__":
-    import pytest
-
-    raise SystemExit(pytest.main([__file__, "-q"]))
+    _fns = [
+        test_reality_check_no_skill_high_pvalue,
+        test_reality_check_dominant_strategy_rejects,
+        test_reality_check_benchmark_subtraction,
+        test_reality_check_unstudentized_and_1d_equivalence,
+        test_reality_check_seeded_reproducible,
+        test_reality_check_drops_non_finite_rows,
+        test_reality_check_input_validation,
+    ]
+    for _fn in _fns:
+        _fn()
+    print("ALL TESTS PASSED")

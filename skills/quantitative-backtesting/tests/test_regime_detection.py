@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
-import pytest
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
@@ -825,4 +824,60 @@ class TestAddHMMRegimeAnalysisToResults:
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    _cases = [
+        (TestTrendRegimeDetection, [
+            "test_bull_regime_detected", "test_bear_regime_detected",
+            "test_sideways_regime_detected", "test_short_series_returns_unknown",
+            "test_output_index_matches_input",
+        ]),
+        (TestVolatilityRegimeDetection, [
+            "test_high_vol_detected", "test_low_vol_detected",
+            "test_short_series_returns_unknown",
+            "test_annualized_vol_uses_frequency_aware_factor",
+        ]),
+        (TestCombinedRegimeDetection, [
+            "test_combined_regime_labels", "test_output_index_matches_input",
+        ]),
+        (TestRegimePeriods, ["test_identify_periods", "test_single_period"]),
+        (TestRegimePerformance, [
+            "test_compute_performance_per_regime",
+            "test_regime_too_short_excluded",
+            "test_unknown_regime_excluded",
+            "test_annualization_uses_frequency_aware_factor",
+        ]),
+        (TestRegimePerformanceSummary, [
+            "test_summary_structure", "test_summary_with_config",
+        ]),
+        (TestAddRegimeAnalysisToResults, [
+            "test_adds_regime_analysis_key", "test_handles_panel_data",
+            "test_returns_none_if_no_returns_key",
+            "test_returns_none_if_no_close_data",
+        ]),
+        (TestRegimeConfig, ["test_default_config", "test_custom_config"]),
+        (TestHMMConfig, ["test_default_config", "test_custom_config"]),
+        (TestBuildHMMFeatures, [
+            "test_returns_only", "test_returns_and_volatility",
+            "test_all_features", "test_no_features_raises",
+            "test_volatility_feature_uses_frequency_aware_factor",
+        ]),
+        (TestGaussianHMM, [
+            "test_fit_and_predict", "test_filter_point_in_time", "test_score",
+            "test_deterministic_with_seed",
+        ]),
+        (TestHMMRegimeDetection, [
+            "test_detect_hmm_regime_basic", "test_detect_hmm_regime_with_probs",
+            "test_fit_hmm_walkforward_single_fit",
+            "test_fit_hmm_walkforward_refit",
+            "test_hmm_output_index_matches_input",
+        ]),
+        (TestAddHMMRegimeAnalysisToResults, [
+            "test_adds_hmm_regime_analysis_key", "test_handles_panel_data",
+            "test_returns_original_if_no_returns_key",
+            "test_returns_original_if_no_close_data",
+        ]),
+    ]
+    for _cls, _names in _cases:
+        _inst = _cls()
+        for _name in _names:
+            getattr(_inst, _name)()
+    print("ALL TESTS PASSED")

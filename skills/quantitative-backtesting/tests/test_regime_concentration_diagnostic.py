@@ -10,8 +10,6 @@ regime change. Offline, committed fixtures only; no live network.
 import sys
 from pathlib import Path
 
-import pytest
-
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
@@ -132,4 +130,17 @@ def test_sharpe_spread_and_extremes_recorded():
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    _fns = [
+        test_robust_when_multiple_positive_regimes_narrow_spread,
+        test_fragile_when_edge_in_single_regime,
+        test_fragile_when_no_positive_regime,
+        test_moderate_when_multiple_positive_regimes_wide_spread,
+        test_insufficient_data_when_fewer_than_two_traded_regimes,
+        test_unknown_regime_excluded,
+        test_short_regime_excluded_by_min_length,
+        test_handles_none_and_empty_input,
+        test_sharpe_spread_and_extremes_recorded,
+    ]
+    for _fn in _fns:
+        _fn()
+    print("ALL TESTS PASSED")

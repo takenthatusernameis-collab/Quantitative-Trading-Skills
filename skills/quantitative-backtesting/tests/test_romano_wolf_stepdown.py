@@ -321,12 +321,6 @@ def test_romano_wolf_simultaneous_ci_fwer_coverage():
     )
 
 
-if __name__ == "__main__":
-    import pytest
-
-    raise SystemExit(pytest.main([__file__, "-q"]))
-
-
 def test_romano_wolf_simultaneous_ci_small_sample_warning():
     """Short samples emit a small-sample warning; T>=504 does not."""
     short = romano_wolf_stepdown(_family(T=252, K=3, seed=71), n_bootstrap=100, seed=5)
@@ -336,3 +330,30 @@ def test_romano_wolf_simultaneous_ci_small_sample_warning():
 
     long = romano_wolf_stepdown(_family(T=504, K=3, seed=71), n_bootstrap=100, seed=5)
     assert long["simultaneous_ci_small_sample_warning"] is None
+
+
+if __name__ == "__main__":
+    _fns = [
+        test_romano_wolf_single_strategy_matches_reality_check,
+        test_romano_wolf_identifies_dominant_strategy,
+        test_romano_wolf_no_skill_rejects_nothing,
+        test_romano_wolf_adjusted_p_values_monotone_and_rejections_prefix,
+        test_romano_wolf_benchmark_subtraction,
+        test_romano_wolf_unstudentized_and_reproducible,
+        test_romano_wolf_drops_non_finite_rows,
+        test_romano_wolf_input_validation,
+        test_romano_wolf_confidence_interval_contract,
+        test_romano_wolf_confidence_interval_reproducible_and_seed_sensitive,
+        test_romano_wolf_confidence_interval_widens_with_level,
+        test_romano_wolf_confidence_interval_benchmark_subtraction,
+        test_romano_wolf_confidence_interval_validation,
+        test_romano_wolf_simultaneous_ci_contract,
+        test_romano_wolf_simultaneous_ci_wider_than_marginal,
+        test_romano_wolf_simultaneous_ci_reproducible_and_seed_sensitive,
+        test_romano_wolf_simultaneous_ci_benchmark_subtraction,
+        test_romano_wolf_simultaneous_ci_fwer_coverage,
+        test_romano_wolf_simultaneous_ci_small_sample_warning,
+    ]
+    for _fn in _fns:
+        _fn()
+    print("ALL TESTS PASSED")

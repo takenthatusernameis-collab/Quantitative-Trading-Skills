@@ -13,12 +13,43 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pytest
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
 from regime_detection import regime_aware_position_size  # noqa: E402
+
+
+def _raises(exc_type, match=None):
+    """Minimal stand-in for pytest.raises so this file runs under plain
+    ``python3`` (pytest is not installed on this PATH). Mirrors the subset of
+    the pytest.raises contract the tests exercise: the callable must raise
+    ``exc_type`` whose ``str`` contains ``match`` (if given)."""
+
+    class _Ctx:
+        def __init__(self, exc_type, match):
+            self.exc_type = exc_type
+            self.match = match
+            self.value = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            if exc_type is None:
+                raise AssertionError(
+                    f"expected {self.exc_type.__name__}, no exception raised"
+                )
+            if not issubclass(exc_type, self.exc_type):
+                return False
+            self.value = exc_val
+            if self.match is not None and self.match not in str(exc_val):
+                raise AssertionError(
+                    f"expected {self.match!r} in {exc_val!r}"
+                )
+            return True
+
+    return _Ctx(exc_type, match)
 
 
 def _series(values, name=None):
@@ -141,7 +172,7 @@ def test_unknown_regime_raises_without_default():
     close = _series([100.0, 101.0, 99.0, 102.0, 100.0, 103.0])
     base = _series(np.ones(6))
     regimes = _series(["calm", "calm", "storm", "calm", "calm", "calm"])
-    with pytest.raises(ValueError, match="no volatility target"):
+    with _raises(ValueError, match="no volatility target"):
         regime_aware_position_size(
             base, close, regimes, {"calm": 0.20}, lookback=3
         )
@@ -263,19 +294,19 @@ def test_invalid_arguments_raise():
     regimes = _series(["calm"] * 4)
     targets = {"calm": 0.20}
 
-    with pytest.raises(ValueError, match="lookback"):
+    with _raises(ValueError, match="lookback"):
         regime_aware_position_size(base, close, regimes, targets, lookback=0)
-    with pytest.raises(ValueError, match="min_leverage"):
+    with _raises(ValueError, match="min_leverage"):
         regime_aware_position_size(
             base, close, regimes, targets, lookback=2, min_leverage=1.0, max_leverage=0.5
         )
-    with pytest.raises(ValueError, match="must not be empty"):
+    with _raises(ValueError, match="must not be empty"):
         regime_aware_position_size(base, close, regimes, {}, lookback=2)
-    with pytest.raises(ValueError, match="non-negative"):
+    with _raises(ValueError, match="non-negative"):
         regime_aware_position_size(
             base, close, regimes, {"calm": -0.10}, lookback=2
         )
-    with pytest.raises(ValueError, match="share no common index"):
+    with _raises(ValueError, match="share no common index"):
         regime_aware_position_size(
             base,
             close,
@@ -286,4 +317,21 @@ def test_invalid_arguments_raise():
 
 
 if __name__ == "__main__":
-    sys.exit(pytest.main([__file__, "-q"]))
+    _fns = [
+        test_closed_form_matches_documented_formula,
+        test_higher_target_vol_scales_position_up,
+        test_leverage_is_clipped_to_max,
+        test_leverage_is_clipped_to_min,
+        test_zero_realized_vol_uses_max_leverage,
+        test_zero_target_with_zero_vol_is_flat_not_nan,
+        test_early_bars_are_nan_until_lookback_is_available,
+        test_unknown_regime_raises_without_default,
+        test_unknown_regime_falls_back_to_default_target,
+        test_point_in_time_future_prices_do_not_change_past_sizes,
+        test_preserves_base_direction_when_target_positive,
+        test_periods_per_year_default_infers_frequency_from_close,
+        test_invalid_arguments_raise,
+    ]
+    for _fn in _fns:
+        _fn()
+    print("ALL TESTS PASSED")

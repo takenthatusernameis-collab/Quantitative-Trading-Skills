@@ -124,5 +124,19 @@ def test_bonferroni_matches_inline_calculation():
 
 
 if __name__ == "__main__":
-    import pytest
-    raise SystemExit(pytest.main([__file__, "-q"]))
+    _fns = [
+        test_bonferroni_single_test_no_penalty,
+        test_bonferroni_zero_tests,
+        test_bonferroni_multiple_tests_adjusted_and_monotone,
+        test_bonferroni_capped_at_one,
+        test_bonferroni_nan_none_handled,
+        test_bonferroni_out_of_range_clamped,
+        test_bonferroni_rejection_threshold,
+        test_bonferroni_n_equals_one_noop,
+        test_bonferroni_alpha_parameter_respected,
+        test_bonferroni_return_keys_match_contract,
+        test_bonferroni_matches_inline_calculation,
+    ]
+    for _fn in _fns:
+        _fn()
+    print("ALL TESTS PASSED")

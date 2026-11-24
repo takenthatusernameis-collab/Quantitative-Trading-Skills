@@ -83,5 +83,5 @@ def test_survivorship_bias_insufficient_and_gaps_on_real_data_derived_panel():
 
 
 if __name__ == "__main__":
-    import pytest
-    raise SystemExit(pytest.main([__file__, "-v"]))
+    test_survivorship_bias_insufficient_and_gaps_on_real_data_derived_panel()
+    print("ALL TESTS PASSED")

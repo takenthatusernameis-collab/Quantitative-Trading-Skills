@@ -95,6 +95,10 @@ def test_calculate_metrics_surfaces_both_psr_and_dsr_when_trials_reported():
 
 
 def test_generate_report_includes_probabilistic_sharpe_section(tmp_path):
+    import tempfile
+
+    if tmp_path is None:
+        tmp_path = Path(tempfile.mkdtemp())
     rets = _returns()
     metrics = calculate_metrics({"returns": rets})
     # generate_report writes report.txt (and metrics.json) into output_path dir.
@@ -105,6 +109,18 @@ def test_generate_report_includes_probabilistic_sharpe_section(tmp_path):
 
 
 if __name__ == "__main__":
-    import pytest
+    import tempfile
 
-    raise SystemExit(pytest.main([__file__, "-q"]))
+    _tmp = Path(tempfile.mkdtemp())
+    _fns = [
+        test_psr_returns_required_keys_and_bounds,
+        test_psr_higher_sharpe_gives_higher_confidence,
+        test_psr_higher_benchmark_lowers_confidence,
+        test_psr_constant_returns_are_degenerate,
+        test_calculate_metrics_surfaces_probabilistic_sharpe,
+        test_calculate_metrics_surfaces_both_psr_and_dsr_when_trials_reported,
+        lambda: test_generate_report_includes_probabilistic_sharpe_section(_tmp),
+    ]
+    for _fn in _fns:
+        _fn()
+    print("ALL TESTS PASSED")

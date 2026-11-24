@@ -74,12 +74,6 @@ def test_reality_check_family_example_runs_and_returns_valid_result():
     assert isinstance(rc["significant"], bool)
 
 
-if __name__ == "__main__":
-    import pytest
-
-    raise SystemExit(pytest.main([__file__, "-q"]))
-
-
 def test_reality_check_family_example_benchmark_subtracted():
     """Benchmark-subtracted Reality Check: H0 no strategy beats buy-and-hold MSFT."""
     module = _import_module("reality_check_family_example_bench", EXAMPLE_PATH)
@@ -208,6 +202,14 @@ def test_reality_check_family_example_romano_wolf_benchmark_subtracted():
 
 
 if __name__ == "__main__":
-    import pytest
-
-    raise SystemExit(pytest.main([__file__, "-q"]))
+    _fns = [
+        test_reality_check_family_example_imports,
+        test_reality_check_family_example_runs_and_returns_valid_result,
+        test_reality_check_family_example_benchmark_subtracted,
+        test_reality_check_family_example_romano_wolf_stepdown,
+        test_reality_check_family_example_main_surfaces_small_sample_warning,
+        test_reality_check_family_example_romano_wolf_benchmark_subtracted,
+    ]
+    for _fn in _fns:
+        _fn()
+    print("ALL TESTS PASSED")
