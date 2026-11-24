@@ -57,7 +57,13 @@ def load_panel(symbols, data_dir):
 
 
 def build_exposures(returns):
-    """Point-in-time factor exposures: each asset's lagged one-day return.
+    """Point-in-time factor exposures: K=2 factors.
+
+    Factor 0 = market (constant 1.0 for every asset) -- captures the
+    cross-sectional level / market premium.
+    Factor 1 = each asset's lagged one-day return -- a naive momentum/
+    reversal exposure known one bar in advance, so the test is point-in-time
+    correct.
 
     The exposure used to explain return[t] is return[t-1], so no future
     information leaks into the cross-sectional regression at time t.
@@ -69,8 +75,10 @@ def build_exposures(returns):
         keys=["returns", "exposure"],
     ).dropna()
     rets = aligned.xs("returns", axis=1, level=0).sort_index()
-    exps = aligned.xs("exposure", axis=1, level=0).sort_index()
-    return rets.values, exps.values
+    lag = aligned.xs("exposure", axis=1, level=0).sort_index()
+    market = pd.DataFrame(1.0, index=lag.index, columns=lag.columns)
+    exps = np.stack([market.values, lag.values], axis=2)
+    return rets.values, exps
 
 
 def run_factor_attribution(symbols=SYMBOLS, data_dir=DATA_DIR, output=None):
@@ -79,14 +87,17 @@ def run_factor_attribution(symbols=SYMBOLS, data_dir=DATA_DIR, output=None):
     returns = close.pct_change()
 
     asset_returns, exposures = build_exposures(returns)
-    exposures_3d = exposures[:, :, None]
+    exposures_3d = exposures
 
     # Cross-sectional OLS per period, then time-series mean + Newey-West t-stat.
     result = fama_macbeth(asset_returns, exposures_3d, newey_west=True)
 
     # Decompose returns into factor contribution vs idiosyncratic residual.
+    # For decomposition, treat non-identified (NaN) premia as zero so the
+    # residual variance reflects only the identified factors.
+    lambda_for_decomp = np.where(np.isfinite(result["lambda_hat"]), result["lambda_hat"], 0.0)
     decomposition = factor_contribution_decomposition(
-        asset_returns, exposures_3d, result["lambda_hat"]
+        asset_returns, exposures_3d, lambda_for_decomp
     )
 
     summary = {

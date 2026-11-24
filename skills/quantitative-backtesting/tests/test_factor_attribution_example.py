@@ -34,12 +34,12 @@ def test_example_runs_and_writes_artifact():
 
         assert data["symbols"] == ["AAPL", "MSFT", "GOOGL"]
         assert data["n_assets"] == 3
-        assert data["n_factors"] == 1
+        assert data["n_factors"] == 2
         assert data["n_periods"] > 0, "no valid cross-sectional periods"
 
-        lam = data["lambda_hat"][0]
-        t = data["t_stats"][0]
-        se = data["se"][0]
+        lam = data["lambda_hat"][1]
+        t = data["t_stats"][1]
+        se = data["se"][1]
         assert np_is_finite(lam), f"lambda_hat not finite: {lam}"
         assert t is not None and np_is_finite(t), f"t-stat not finite: {t}"
         assert se is not None and np_is_finite(se) and se > 0, f"SE not finite/positive: {se}"
