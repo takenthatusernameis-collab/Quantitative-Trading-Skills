@@ -377,7 +377,12 @@ def test_no_asset_survives_cross_asset_multiplicity():
     per-asset best nominal DSR p-values (after the per-asset protocol
     Bonferroni has already been applied and failed).
     """
-    per_asset_results = getattr(test_no_cell_survives_protocol_multiplicity, "per_asset_results", None)
+    # Recompute the per-asset results in-process instead of reading a function
+    # attribute left by the per-asset test: pytest-xdist distributes tests
+    # across workers and a standalone run skips it entirely, so the attribute
+    # handoff is order/worker dependent (it failed under the -n 4 gate).
+    test_no_cell_survives_protocol_multiplicity()
+    per_asset_results = test_no_cell_survives_protocol_multiplicity.per_asset_results
     assert per_asset_results is not None, "per-asset results not available"
 
     per_asset_best_nominal = [per_asset_results[s]["best_nominal_p"] for s in SYMBOLS]
