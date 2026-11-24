@@ -11,7 +11,11 @@ from pathlib import Path
 SKILLS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
-from utils import bonferroni_correction, protocol_family_correction  # noqa: E402
+from utils import (  # noqa: E402
+    bonferroni_correction,
+    holm_stepdown,
+    protocol_family_correction,
+)
 
 
 def test_protocol_family_single_asset_single_protocol():
@@ -265,6 +269,121 @@ def test_protocol_family_consistent_with_bonferroni_correction():
     assert res["cross_asset"]["n_rejected"] == bonf_cross["n_rejected"]
 
 
+def test_protocol_family_holm_single_asset_multiple_protocols():
+    """method='holm', 1 asset x 4 protocols: per-asset Holm, cross-asset identity."""
+    matrix = [[0.01, 0.02, 0.03, 0.04]]
+    res = protocol_family_correction(matrix, alpha=0.05, method="holm")
+    # Per-asset Holm on [0.01, 0.02, 0.03, 0.04]:
+    # ascending factors 4,3,2,1 -> [0.04, 0.06, 0.06, 0.04] then monotone
+    # cumulative max -> [0.04, 0.06, 0.06, 0.06]
+    assert res["per_asset"][0]["n_protocols"] == 4
+    expected = [0.04, 0.06, 0.06, 0.06]
+    for got, exp in zip(res["per_asset"][0]["adjusted_p_values"], expected):
+        assert abs(got - exp) < 1e-12
+    assert res["per_asset"][0]["best_nominal_p"] == 0.01
+    assert abs(res["per_asset"][0]["best_adjusted_p"] - 0.04) < 1e-12
+    # Cross-asset: 1 asset -> identity (Holm with m=1 is the raw p-value)
+    assert res["cross_asset"]["n_assets"] == 1
+    assert abs(res["cross_asset"]["adjusted_p_values"][0] - 0.01) < 1e-12
+    assert res["cross_asset"]["n_rejected"] == 1
+
+
+def test_protocol_family_holm_multiple_assets_single_protocol():
+    """method='holm', 3 assets x 1 protocol: per-asset identity, cross-asset Holm."""
+    matrix = [[0.01], [0.02], [0.03]]
+    res = protocol_family_correction(matrix, alpha=0.05, method="holm")
+    # Per-asset: each has 1 test -> identity
+    for i in range(3):
+        assert res["per_asset"][i]["adjusted_p_values"] == [matrix[i][0]]
+    # Cross-asset Holm on [0.01, 0.02, 0.03]:
+    # ascending factors 3,2,1 -> [0.03, 0.04, 0.03] then monotone -> [0.03, 0.04, 0.04]
+    ca = res["cross_asset"]
+    assert ca["n_assets"] == 3
+    expected = [0.03, 0.04, 0.04]
+    for got, exp in zip(ca["adjusted_p_values"], expected):
+        assert abs(got - exp) < 1e-12
+    assert ca["n_rejected"] == 3  # Holm adjusted [0.03, 0.04, 0.04] all <= 0.05
+
+
+def test_protocol_family_holm_dominates_bonferroni():
+    """method='holm' adjusted p-values are <= Bonferroni at both levels."""
+    matrix = [
+        [0.01, 0.02, 0.03, 0.04],
+        [0.02, 0.03, 0.04, 0.05],
+        [0.03, 0.04, 0.05, 0.06],
+    ]
+    bonf = protocol_family_correction(matrix, alpha=0.05, method="bonferroni")
+    holm = protocol_family_correction(matrix, alpha=0.05, method="holm")
+    # Per-asset: Holm <= Bonferroni elementwise
+    for a_bonf, a_holm in zip(bonf["per_asset"], holm["per_asset"]):
+        for pb, ph in zip(a_bonf["adjusted_p_values"], a_holm["adjusted_p_values"]):
+            assert ph <= pb + 1e-12
+        # Holm rejects at least as many as Bonferroni within each asset
+        assert a_holm["n_rejected"] >= a_bonf["n_rejected"]
+    # Cross-asset: Holm <= Bonferroni elementwise
+    for pb, ph in zip(bonf["cross_asset"]["adjusted_p_values"],
+                      holm["cross_asset"]["adjusted_p_values"]):
+        assert ph <= pb + 1e-12
+    assert holm["cross_asset"]["n_rejected"] >= bonf["cross_asset"]["n_rejected"]
+
+
+def test_protocol_family_holm_matches_holm_stepdown_per_asset():
+    """Per-asset Holm results equal holm_stepdown applied to each row."""
+    matrix = [[0.01, 0.04, 0.02], [0.10, 0.20, 0.30]]
+    res = protocol_family_correction(matrix, alpha=0.05, method="holm")
+    for asset_idx, row in enumerate(matrix):
+        hs = holm_stepdown(row, alpha=0.05)
+        assert res["per_asset"][asset_idx]["adjusted_p_values"] == hs["adjusted_p_values"]
+        assert res["per_asset"][asset_idx]["rejected"] == hs["rejected"]
+        assert res["per_asset"][asset_idx]["n_protocols"] == hs["n_tests"]
+        assert res["per_asset"][asset_idx]["n_rejected"] == hs["n_rejected"]
+
+
+def test_protocol_family_holm_matches_holm_stepdown_cross_asset():
+    """Cross-asset Holm results equal holm_stepdown on per-asset best nominals."""
+    matrix = [[0.01, 0.5], [0.04, 0.2], [0.03, 0.1]]
+    res = protocol_family_correction(matrix, alpha=0.05, method="holm")
+    best_nominal = [res["per_asset"][i]["best_nominal_p"] for i in range(3)]
+    hs = holm_stepdown(best_nominal, alpha=0.05)
+    assert res["cross_asset"]["adjusted_p_values"] == hs["adjusted_p_values"]
+    assert res["cross_asset"]["rejected"] == hs["rejected"]
+    assert res["cross_asset"]["n_assets"] == hs["n_tests"]
+    assert res["cross_asset"]["n_rejected"] == hs["n_rejected"]
+
+
+def test_protocol_family_holm_nan_none_and_ragged():
+    """method='holm' handles NaN/None and ragged rows like Bonferroni."""
+    matrix = [[0.01, float("nan"), None, 0.04], [0.02, 0.03]]
+    res = protocol_family_correction(matrix, alpha=0.05, method="holm")
+    # Asset 0: valid p-values 0.01, 0.04 -> Holm n=2 -> [0.02, 1.0, 1.0, 0.04]
+    pa0 = res["per_asset"][0]
+    assert pa0["n_protocols"] == 2
+    assert abs(pa0["adjusted_p_values"][0] - 0.02) < 1e-12
+    assert pa0["adjusted_p_values"][1] == 1.0
+    assert pa0["adjusted_p_values"][2] == 1.0
+    assert abs(pa0["adjusted_p_values"][3] - 0.04) < 1e-12
+    assert pa0["rejected"] == [True, False, False, True]
+    # Asset 1: valid 0.02, 0.03 -> Holm n=2 -> [0.04, 0.04]
+    pa1 = res["per_asset"][1]
+    assert pa1["n_protocols"] == 2
+    assert abs(pa1["adjusted_p_values"][0] - 0.04) < 1e-12
+    assert abs(pa1["adjusted_p_values"][1] - 0.04) < 1e-12
+    # Cross-asset: best nominals 0.01, 0.02 -> Holm n=2 -> [0.02, 0.02]
+    ca = res["cross_asset"]
+    assert ca["n_assets"] == 2
+    assert abs(ca["adjusted_p_values"][0] - 0.02) < 1e-12
+    assert abs(ca["adjusted_p_values"][1] - 0.02) < 1e-12
+
+
+def test_protocol_family_holm_unknown_method_defaults_to_bonferroni():
+    """An unrecognized method value falls back to Bonferroni (backward compat)."""
+    matrix = [[0.01, 0.02, 0.03]]
+    bonf = protocol_family_correction(matrix, alpha=0.05, method="bonferroni")
+    other = protocol_family_correction(matrix, alpha=0.05, method="does-not-exist")
+    assert other["per_asset"][0]["adjusted_p_values"] == bonf["per_asset"][0]["adjusted_p_values"]
+    assert other["cross_asset"]["adjusted_p_values"] == bonf["cross_asset"]["adjusted_p_values"]
+
+
 if __name__ == "__main__":
     _fns = [
         test_protocol_family_single_asset_single_protocol,
@@ -281,6 +400,13 @@ if __name__ == "__main__":
         test_protocol_family_alpha_parameter_respected,
         test_protocol_family_return_keys_match_contract,
         test_protocol_family_consistent_with_bonferroni_correction,
+        test_protocol_family_holm_single_asset_multiple_protocols,
+        test_protocol_family_holm_multiple_assets_single_protocol,
+        test_protocol_family_holm_dominates_bonferroni,
+        test_protocol_family_holm_matches_holm_stepdown_per_asset,
+        test_protocol_family_holm_matches_holm_stepdown_cross_asset,
+        test_protocol_family_holm_nan_none_and_ragged,
+        test_protocol_family_holm_unknown_method_defaults_to_bonferroni,
     ]
     for _fn in _fns:
         _fn()

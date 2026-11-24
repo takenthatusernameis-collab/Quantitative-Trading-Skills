@@ -2431,14 +2431,22 @@ def protocol_family_correction(p_value_matrix, alpha: float = 0.05, method: str 
     This implements the nested multiplicity correction used in the cross-asset
     protocol-sensitivity summaries:
 
-    1. Per-asset level: For each asset (row), apply Bonferroni correction across
+    1. Per-asset level: For each asset (row), apply the chosen correction across
        the protocols (columns). This controls FWER within each asset.
 
     2. Cross-asset level: Take the best *nominal* p-value from each asset
-       (before per-asset correction) and apply Bonferroni correction across
+       (before per-asset correction) and apply the chosen correction across
        the assets. This controls FWER for the "best of N assets" claim.
 
-    Both levels use the single-step Bonferroni procedure (p * m, capped at 1.0).
+    The correction applied at both levels is selected by ``method``:
+
+    - ``"bonferroni"`` (default): single-step Bonferroni (``p * m``, capped at
+      1.0) at both levels.
+    - ``"holm"``: Holm (1979) step-down FWER correction at both levels. Holm is
+      uniformly at least as powerful as Bonferroni under arbitrary dependence,
+      so ``method="holm"`` adjusted p-values are ``<=`` the Bonferroni ones at
+      both levels and it rejects at least as many hypotheses.
+
     The function returns an auditable structure containing all intermediate
     results so the nested logic can be verified.
 
@@ -2449,12 +2457,15 @@ def protocol_family_correction(p_value_matrix, alpha: float = 0.05, method: str 
             (rows of different lengths).
         alpha: Significance threshold used for the rejection decision
             (default 0.05).
+        method: Correction procedure applied at both levels, ``"bonferroni"``
+            (default) or ``"holm"``. Any value other than ``"holm"`` selects
+            Bonferroni, preserving backward compatibility.
 
     Returns:
         Dict with:
             - ``per_asset``: list of dicts, one per asset (row), each containing:
                 * ``nominal_p_values``: the input p-values for that asset
-                * ``adjusted_p_values``: Bonferroni-adjusted p-values for that asset
+                * ``adjusted_p_values``: adjusted p-values for that asset (``method``)
                 * ``rejected``: list of booleans per protocol
                 * ``n_protocols``: number of valid protocols for that asset
                 * ``n_rejected``: number of rejected protocols for that asset
@@ -2463,7 +2474,7 @@ def protocol_family_correction(p_value_matrix, alpha: float = 0.05, method: str 
                 * ``best_adjusted_p``: the adjusted p-value at the best protocol
             - ``cross_asset``: dict containing:
                 * ``nominal_p_values``: the per-asset best nominal p-values
-                * ``adjusted_p_values``: Bonferroni-adjusted p-values across assets
+                * ``adjusted_p_values``: adjusted p-values across assets (``method``)
                 * ``rejected``: list of booleans per asset
                 * ``n_assets``: number of assets with at least one valid protocol
                 * ``n_rejected``: number of rejected assets
@@ -2584,13 +2595,19 @@ def protocol_family_correction(p_value_matrix, alpha: float = 0.05, method: str 
     cross_asset_rejected = [False] * n_assets_valid
 
     if n_assets_valid > 0:
-        for i, pv in enumerate(cross_asset_nominal):
-            adj = pv * n_assets_valid
-            if adj > 1.0:
-                adj = 1.0
-            cross_asset_adjusted[i] = float(adj)
-        for i in range(n_assets_valid):
-            cross_asset_rejected[i] = bool(cross_asset_adjusted[i] <= float(alpha))
+        if method == "holm":
+            _res = holm_stepdown(cross_asset_nominal, alpha=alpha)
+            cross_asset_adjusted = [float(v) for v in _res["adjusted_p_values"]]
+            cross_asset_rejected = [bool(v) for v in _res["rejected"]]
+        else:
+            # Bonferroni: p * n_assets_valid, capped at 1.0
+            for i, pv in enumerate(cross_asset_nominal):
+                adj = pv * n_assets_valid
+                if adj > 1.0:
+                    adj = 1.0
+                cross_asset_adjusted[i] = float(adj)
+            for i in range(n_assets_valid):
+                cross_asset_rejected[i] = bool(cross_asset_adjusted[i] <= float(alpha))
 
         best_cross_idx = cross_asset_nominal.index(min(cross_asset_nominal))
         best_asset_idx = asset_indices[best_cross_idx]

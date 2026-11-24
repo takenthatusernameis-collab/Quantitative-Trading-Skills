@@ -470,6 +470,55 @@ def test_protocol_family_correction_aggregated():
           "match inline Bonferroni assertions.")
 
 
+def test_protocol_family_holm_aggregated():
+    """Non-breaking companion: method='holm' is uniformly at least as powerful
+    as Bonferroni at both levels and changes no pinned value.
+
+    This test is ADDITIVE: it does not replace any existing assertion and
+    leaves the pinned EXPECTED matrix byte-identical. Holm dominates
+    Bonferroni, so the best-asset adjusted p-value must be <= the Bonferroni
+    one (0.1245 cross-asset) and the per-asset best adjusted p-values must be
+    <= the Bonferroni ones (0.1660 / 0.2296 / 0.5196). Because Bonferroni
+    already exceeds DSR_PVALUE_THRESHOLD at alpha=0.10 everywhere, Holm must
+    also yield zero rejections.
+    """
+    p_matrix = []
+    for symbol in SYMBOLS:
+        row = [EXPECTED[symbol][protocol]["dsr_p"] for protocol in INFORMATIVE_PROTOCOLS]
+        p_matrix.append(row)
+
+    bonf = protocol_family_correction(p_matrix, alpha=DSR_PVALUE_THRESHOLD, method="bonferroni")
+    holm = protocol_family_correction(p_matrix, alpha=DSR_PVALUE_THRESHOLD, method="holm")
+
+    # Per-asset: Holm best adjusted <= Bonferroni best adjusted (dominance).
+    bonf_best = [0.1660, 0.2296, 0.5196]
+    for asset_idx, symbol in enumerate(SYMBOLS):
+        pa_h = holm["per_asset"][asset_idx]
+        pa_b = bonf["per_asset"][asset_idx]
+        assert pa_h["best_nominal_p"] == pa_b["best_nominal_p"]
+        assert pa_h["best_adjusted_p"] <= pa_b["best_adjusted_p"] + 1e-12
+        assert pa_h["best_adjusted_p"] <= bonf_best[asset_idx] + 1e-3
+        assert pa_h["n_rejected"] >= pa_b["n_rejected"]
+        # Dominance holds elementwise across protocols too.
+        for ph, pb in zip(pa_h["adjusted_p_values"], pa_b["adjusted_p_values"]):
+            assert ph <= pb + 1e-12
+
+    # Cross-asset: Holm best adjusted <= Bonferroni best adjusted (0.1245).
+    ca_h = holm["cross_asset"]
+    ca_b = bonf["cross_asset"]
+    assert ca_h["n_assets"] == ca_b["n_assets"] == 3
+    assert ca_h["best_nominal_p"] == ca_b["best_nominal_p"]
+    assert ca_h["best_adjusted_p"] <= ca_b["best_adjusted_p"] + 1e-12
+    assert ca_h["best_adjusted_p"] <= 0.1245 + 1e-3
+    # Both already exceed the threshold, so Holm also rejects nothing.
+    assert ca_h["best_adjusted_p"] > DSR_PVALUE_THRESHOLD
+    assert ca_h["n_rejected"] == 0
+    assert holm["total_n_rejected"] == 0
+
+    print("protocol_family_correction(method='holm'): dominates Bonferroni at "
+          "both levels; zero rejections; pinned EXPECTED unchanged.")
+
+
 def test_main_registers_every_module_level_test():
     """main() must register every module-level ``test_*`` function."""
     import inspect
@@ -506,6 +555,7 @@ TEST_REGISTRY = [
     ("no_cell_survives_protocol_multiplicity", test_no_cell_survives_protocol_multiplicity),
     ("no_asset_survives_cross_asset_multiplicity", test_no_asset_survives_cross_asset_multiplicity),
     ("protocol_family_correction_aggregated", test_protocol_family_correction_aggregated),
+    ("protocol_family_holm_aggregated", test_protocol_family_holm_aggregated),
     ("main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 

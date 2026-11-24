@@ -1,66 +1,81 @@
-# Handoff — Session (current): consolidated ad-hoc two-level multiplicity correction into shared, tested helper
+# Handoff — Session (current): complete Option A — `protocol_family_correction` Holm at BOTH levels + tests + companion
 
 ## Status entering this session
-- HEAD `e8c7f47` (main); working tree clean at start.
-- Prior session fixed a deterministic xdist test-isolation defect in 5 protocol-sensitivity summary files (verified green: 1759 passed).
-- Next task per handoff: consolidate the ad-hoc two-level Bonferroni into one shared, tested helper and adopt it as a non-breaking companion in one summary file.
+- HEAD `1a138ea` (main); working tree clean at start.
+- Prior session (commit `1a138ea`) added per-asset `method="holm"` support to
+  `protocol_family_correction` but left it **untested**, the **cross-asset level
+  Bonferroni-only**, the docstring undocumented, and no consumer wired.
+- The prior handoff's "Option A" (extend to Holm) was therefore half-done.
 
 ## What changed this session (one bounded methodological improvement)
-Implemented the exact task specified in the prior handoff:
+Completed Option A coherently and symmetrically:
 
-1. **Added `protocol_family_correction(p_value_matrix, alpha=0.05)`** to `skills/quantitative-backtesting/scripts/utils.py` (+190 lines):
-   - Takes an (assets × protocols) matrix of DSR p-values
-   - Returns the two-level (within-protocol per-asset, then cross-asset) FWER summary in one auditable structure
-   - Same return-contract/NaN/clamping conventions as `bonferroni_correction`
-   - Per-asset level: Bonferroni across protocols per asset (FWER within each asset)
-   - Cross-asset level: Bonferroni across assets on per-asset best *nominal* p-values (nested design)
-   - Returns `per_asset[]`, `cross_asset{}`, `total_n_rejected`, `alpha`
+1. **`skills/quantitative-backtesting/scripts/utils.py`** — `protocol_family_correction`:
+   - Cross-asset level now honors `method` too (was Bonferroni-only). With
+     `method="holm"` it calls `holm_stepdown` on the per-asset best *nominal*
+     p-values, mirroring the per-asset level. Any value other than `"holm"`
+     still selects Bonferroni (backward compatible).
+   - Docstring updated: documents the `method` parameter, the two-level
+     symmetric behavior, and Holm-dominates-Bonferroni note. Return-key
+     descriptions de-coupled from "Bonferroni-only".
+   - No change to default behavior (`method="bonferroni"`): all prior pinned
+     results byte-identical.
 
-2. **Added `tests/test_protocol_family_correction.py`** (+287 lines, 14 unit tests):
-   - Single asset, single protocol (identity at both levels)
-   - Single asset, multiple protocols (per-asset Bonferroni, cross-asset identity)
-   - Multiple assets, single protocol (per-asset identity, cross-asset Bonferroni)
-   - Full 3×4 matrix (both levels apply)
-   - Capped at 1.0, NaN/None handled, out-of-range clamped
-   - Empty matrix, asset with no valid protocols, ragged matrix
-   - Matches nested Bonferroni (pinned values from SMA crossover study)
-   - Alpha parameter respected, return keys match contract
-   - Consistent with `bonferroni_correction` (same underlying logic)
+2. **`tests/test_protocol_family_correction.py`** (+7 unit tests, now 21 total):
+   - `holm_single_asset_multiple_protocols`, `holm_multiple_assets_single_protocol`
+   - `holm_dominates_bonferroni` (elementwise <= at both levels; n_rejected >=)
+   - `holm_matches_holm_stepdown_per_asset`, `holm_matches_holm_stepdown_cross_asset`
+   - `holm_nan_none_and_ragged`, `holm_unknown_method_defaults_to_bonferroni`
+   - All registered in the module `__main__` runner.
 
-3. **Adopted in SMA crossover summary** as non-breaking companion (`test_protocol_family_correction_aggregated`):
-   - Builds per-asset nominal p-value matrix from pinned `EXPECTED`
-   - Verifies per-asset level matches inline Bonferroni (AAPL 0.0415→0.1660, MSFT 0.0574→0.2296, GOOGL 0.1299→0.5196)
-   - Verifies cross-asset level matches inline Bonferroni (best 0.0415→0.1245)
-   - Only ADDS; every existing assertion and pinned `EXPECTED` matrix byte-identical
+3. **`tests/test_walk_forward_sma_crossover_protocol_sensitivity_real_triple_summary.py`**
+   (+1 non-breaking companion `test_protocol_family_holm_aggregated`, registered
+   in `TEST_REGISTRY`):
+   - Builds the same pinned `EXPECTED` p-value matrix, runs both methods, asserts
+   - Holm best adjusted <= Bonferroni (per-asset 0.1660/0.2296/0.5196 and
+     cross-asset 0.1245) and Holm rejects nothing (dominance + Bonferroni already
+     exceeds threshold). Pinned `EXPECTED` matrix untouched; purely additive.
 
 ## What was actually verified (evidence)
-- New unit test file: **14/14 passed** (0.35s)
-- SMA crossover summary (incl. new companion): **6/6 passed** (29.16s)
-- `test_holm_stepdown.py`: **12/12 passed** (0.34s)
-- **Full regression gate** `pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q -n 4`: **1774 passed, 0 failed** in 1816.57s (30m16s)
-  - Up from 1759 due to the 14 new unit tests + 1 new companion test
-  - No test added/removed elsewhere (TEST_REGISTRY unchanged in other files)
+- `tests/test_protocol_family_correction.py`: **21 passed** (0.37s); standalone
+  `__main__` prints `ALL TESTS PASSED`.
+- `tests/test_walk_forward_sma_crossover_protocol_sensitivity_real_triple_summary.py`:
+  **7 passed** (32.73s) — was 6, +1 Holm companion; registry check green.
+- Combined multiplicity suite (`test_protocol_family_correction` +
+  `test_holm_stepdown` + `test_protocol_multiplicity` + `test_romano_wolf_stepdown`):
+  **63 passed** (8.23s).
+- `git status`: only the 3 intended files modified; no result-JSON regeneration.
 
-## Current diff (committed in `e5d339a`)
-- `A skills/quantitative-backtesting/scripts/utils.py` (protocol_family_correction function added)
-- `A skills/quantitative-backtesting/tests/test_protocol_family_correction.py` (14 unit tests)
-- `M skills/quantitative-backtesting/tests/test_walk_forward_sma_crossover_protocol_sensitivity_real_triple_summary.py` (+59/-1, companion test added)
+## Current diff (uncommitted, per standing "no commit unless asked" rule)
+- `M skills/quantitative-backtesting/scripts/utils.py` (+41/-13 net; cross-asset Holm + docstring)
+- `M skills/quantitative-backtesting/tests/test_protocol_family_correction.py` (+128; 7 Holm tests)
+- `M .../test_walk_forward_sma_crossover_protocol_sensitivity_real_triple_summary.py` (+50; companion + registry)
 
 ## What remains unresolved
-- The other 4 protocol-sensitivity summary files (rsi_mean_reversion, time_series_momentum, zscore_mean_reversion, volatility_targeting) still use inline two-level Bonferroni; they could adopt the shared helper as companions for consistency (low-value, defer unless needed).
-- Multiplicity correction is now available as a single shared, tested helper (`protocol_family_correction`); the inline Bonferroni calls remain as the primary assertions (correct, auditable, pinned).
-- The Holm companion assertions added in the prior session exist in 3 of the 5 summary files; the remaining 2 (dual_momentum was already done, so 2 of the 4 remaining) have not been wired — low-value now, do not continue for its own sake.
+- The other 4 protocol-sensitivity summary files (rsi_mean_reversion,
+  time_series_momentum, zscore_mean_reversion, volatility_targeting) still use
+  inline Bonferroni and have not adopted either companion — low value, defer.
+- `method="holm"` now has a real consumer (SMA crossover summary) so it is no
+  longer dead code; no aggregate multi-family report layer exists yet.
+- No profitability/capacity claim; committed-fixture verdicts remain NOT SUPPORTED.
 
 ## Approaches already tried / failed
-- None — the specified approach (add helper + unit tests + adopt in one summary) was green first try at all verification levels.
+- Two self-caught hand-computation errors in my new Holm unit tests (miscounted
+  Holm adjusted values for [0.01,0.02,0.03] -> [0.03,0.04,0.04], 3 rejections;
+  and for best-nominals [0.01,0.02] -> [0.02,0.02]); fixed before final run. No
+  approach failed at the design level.
 
 ## One precise next task (bounded, evidence-based)
-**Option A (methodological, higher-value):** Extend the protocol-family correction to support Holm step-down at the per-asset level (currently Bonferroni-only at both levels), add corresponding unit tests, and adopt as a companion in one summary file. This would mirror how `holm_stepdown` was introduced as a non-breaking companion to `bonferroni_correction`.
-
-**Option B (reliability, cheaper):** Run the full gate once more under `-n 8` with `--dist loadfile` to further confirm no residual order dependence, then consider the 1774-green baseline stable.
-
-**Option C (scope expansion):** Adopt the `protocol_family_correction` helper as a companion in the remaining 4 summary files for consistency (purely additive, no pinned matrix changes).
-
-**Recommendation:** Option A if the goal is methodological completeness (Holm dominates Bonferroni); Option B if the goal is confidence in the current baseline; Option C is low-value cosmetic.
+**Run the full regression gate once and commit the three-file change.**
+- Command: `cd skills/quantitative-backtesting && python3 -m pytest tests/ -p no:cacheprovider -q -n 4`
+  (expected ~1781 passed = prior 1774 + 7 new Holm unit tests; the +1 companion
+  is inside the already-counted SMA summary file, so net +7).
+- If green, `git checkout --` any timestamp-only regenerations of
+  `results/simple_momentum_hypothesis.json` / `examples/example_reproducible_output/*`,
+  then commit the 3 files with a message describing the symmetric Holm support.
+- Constraints: offline/committed fixtures only; do not renumber metrics, change
+  default JSON, or modify the engine. Do NOT commit unless the gate is green.
+- Alternative if a full gate is undesirable: the focused 63-test + 7-test runs
+  above already cover the change; commit is then safe on that evidence.
 
 (End of file)
