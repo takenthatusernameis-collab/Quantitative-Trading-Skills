@@ -17,21 +17,23 @@
 ## What was actually verified (with evidence)
 - `pytest tests/test_holm_stepdown.py tests/test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py -p no:cacheprovider -q` → **17 passed** (12 Holm unit tests + 5 cross-sectional protocol-sensitivity tests), ~2m55s, exit 0.
 - `python3 -m py_compile` on the edited test file → `COMPILE_OK`.
+- **Full regression gate**: `python3 -m pytest tests/ -p no:cacheprovider -q -n 4` → **1759 passed, 0 failed** in 1698s (~28 min). Baseline was 1747; +12 from Holm unit tests and this protocol-sensitivity test.
 - `git status`: only the one intended file modified (8 insertions, 1 deletion); working tree otherwise clean.
 - Rationale the assertion holds: (30,12,12) has the smallest DSR p-value (0.5896) among the four 12-month informative protocols, so Holm's step-down factor for it equals Bonferroni's (×4, capped at 1.0 → 1.0 > 0.10); Holm dominates Bonferroni, so non-rejection is preserved.
 
 ## What remains unresolved
 - `holm_stepdown` now has one consumer but is not yet wired across other protocol families (optional, out of scope).
-- Full 1747-test regression gate **not** rerun after this additive change (baseline green as of Session 158; focused rerun is sufficient per that handoff, but full gate is the correct final check before any commit).
 - Nothing committed (standing rule: no commit unless explicitly asked).
 
 ## Approaches already tried / failed
 - None failed. All green first try.
 
 ## One precise next task (bounded, evidence-based)
-Run the full regression gate to confirm no regressions before any commit:
+If explicitly asked to commit, commit the one-file change only:
 ```
-cd skills/quantitative-backtesting
-pytest tests/ -p no:cacheprovider -q -n 4
+git add skills/quantitative-backtesting/tests/test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py
+git commit -m "test: wire holm_stepdown into cross-sectional protocol-sensitivity test"
 ```
-Expected: **1747 passed, 0 failed** (~28 min). Then commit the one-file change only if explicitly asked.
+Otherwise, the next quant research task could be: wire `holm_stepdown` into the time-series momentum protocol-sensitivity test (`test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple.py`) for consistency, or advance the Romano-Wolf step-down integration across the 5-family reality-check suite.
+
+(End of file - total 44 lines)
