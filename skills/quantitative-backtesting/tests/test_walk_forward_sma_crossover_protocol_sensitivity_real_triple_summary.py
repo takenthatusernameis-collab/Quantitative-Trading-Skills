@@ -91,7 +91,7 @@ sys.path.insert(0, str(SKILLS_DIR / "scripts"))
 
 from walk_forward import walk_forward_analysis  # noqa: E402
 from strategy_builder import build_strategy  # noqa: E402
-from utils import bonferroni_correction  # noqa: E402
+from utils import bonferroni_correction, protocol_family_correction  # noqa: E402
 
 SRC = SKILLS_DIR / "assets" / "example_data" / "real_market_data"
 
@@ -414,6 +414,62 @@ def test_no_asset_survives_cross_asset_multiplicity():
     print(f"Total n_rejected across per-asset protocol multiplicity + cross-asset: {total_rejected}")
 
 
+def test_protocol_family_correction_aggregated():
+    """Non-breaking companion: the protocol_family_correction helper reproduces
+    the two-level Bonferroni results in one auditable structure.
+
+    This test is ADDITIVE: it does not replace any existing assertion and
+    leaves the pinned EXPECTED matrix byte-identical. It only verifies that
+    the shared helper produces the same per-asset and cross-asset adjusted
+    p-values as the inline Bonferroni calls above.
+    """
+    # Build the per-asset nominal p-value matrix from the pinned EXPECTED.
+    p_matrix = []
+    for symbol in SYMBOLS:
+        row = [EXPECTED[symbol][protocol]["dsr_p"] for protocol in INFORMATIVE_PROTOCOLS]
+        p_matrix.append(row)
+
+    res = protocol_family_correction(p_matrix, alpha=DSR_PVALUE_THRESHOLD)
+
+    # Verify per-asset level matches inline Bonferroni from
+    # test_no_cell_survives_protocol_multiplicity.
+    for asset_idx, symbol in enumerate(SYMBOLS):
+        pa = res["per_asset"][asset_idx]
+        assert pa["n_protocols"] == len(INFORMATIVE_PROTOCOLS)
+        # Best nominal and adjusted p-values should match the pinned values
+        # from the docstring: AAPL 0.0415->0.1660, MSFT 0.0574->0.2296, GOOGL 0.1299->0.5196
+        if symbol == "AAPL":
+            assert abs(pa["best_nominal_p"] - 0.0415) < 1e-4
+            assert abs(pa["best_adjusted_p"] - 0.1660) < 1e-3
+            assert pa["best_protocol_idx"] == 1  # (36, 12, 12)
+        elif symbol == "MSFT":
+            assert abs(pa["best_nominal_p"] - 0.0574) < 1e-4
+            assert abs(pa["best_adjusted_p"] - 0.2296) < 1e-3
+            assert pa["best_protocol_idx"] == 3  # (30, 12, 12)
+        elif symbol == "GOOGL":
+            assert abs(pa["best_nominal_p"] - 0.1299) < 1e-4
+            assert abs(pa["best_adjusted_p"] - 0.5196) < 1e-3
+            assert pa["best_protocol_idx"] == 1  # (36, 12, 12)
+        # No rejections at alpha=0.10 per asset
+        assert pa["n_rejected"] == 0
+
+    # Verify cross-asset level matches inline Bonferroni from
+    # test_no_asset_survives_cross_asset_multiplicity.
+    ca = res["cross_asset"]
+    assert ca["n_assets"] == 3
+    # Best nominal is AAPL's 0.0415; cross-asset Bonferroni: 0.0415 * 3 = 0.1245
+    assert abs(ca["best_nominal_p"] - 0.0415) < 1e-4
+    assert abs(ca["best_adjusted_p"] - 0.1245) < 1e-3
+    assert ca["best_asset_idx"] == 0  # AAPL
+    assert ca["n_rejected"] == 0
+
+    # Total n_rejected matches the sum reported by the inline tests (0).
+    assert res["total_n_rejected"] == 0
+
+    print("protocol_family_correction: per-asset and cross-asset results "
+          "match inline Bonferroni assertions.")
+
+
 def test_main_registers_every_module_level_test():
     """main() must register every module-level ``test_*`` function."""
     import inspect
@@ -449,6 +505,7 @@ TEST_REGISTRY = [
     ("nominal_criteria_report_honestly", test_nominal_criteria_report_honestly),
     ("no_cell_survives_protocol_multiplicity", test_no_cell_survives_protocol_multiplicity),
     ("no_asset_survives_cross_asset_multiplicity", test_no_asset_survives_cross_asset_multiplicity),
+    ("protocol_family_correction_aggregated", test_protocol_family_correction_aggregated),
     ("main_registers_every_module_level_test", test_main_registers_every_module_level_test),
 ]
 

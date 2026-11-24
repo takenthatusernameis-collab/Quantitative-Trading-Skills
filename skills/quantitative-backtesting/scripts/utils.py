@@ -2425,6 +2425,196 @@ def holm_stepdown(p_values, alpha: float = 0.05):
     }
 
 
+def protocol_family_correction(p_value_matrix, alpha: float = 0.05):
+    """Two-level protocol-family FWER correction for an (assets x protocols) matrix.
+
+    This implements the nested multiplicity correction used in the cross-asset
+    protocol-sensitivity summaries:
+
+    1. Per-asset level: For each asset (row), apply Bonferroni correction across
+       the protocols (columns). This controls FWER within each asset.
+
+    2. Cross-asset level: Take the best *nominal* p-value from each asset
+       (before per-asset correction) and apply Bonferroni correction across
+       the assets. This controls FWER for the "best of N assets" claim.
+
+    Both levels use the single-step Bonferroni procedure (p * m, capped at 1.0).
+    The function returns an auditable structure containing all intermediate
+    results so the nested logic can be verified.
+
+    Args:
+        p_value_matrix: 2D sequence of p-values in [0, 1]. Rows = assets,
+            columns = protocols. NaN/None entries are treated as non-informative
+            (adjusted p-value 1.0, not rejected). The matrix can be ragged
+            (rows of different lengths).
+        alpha: Significance threshold used for the rejection decision
+            (default 0.05).
+
+    Returns:
+        Dict with:
+            - ``per_asset``: list of dicts, one per asset (row), each containing:
+                * ``nominal_p_values``: the input p-values for that asset
+                * ``adjusted_p_values``: Bonferroni-adjusted p-values for that asset
+                * ``rejected``: list of booleans per protocol
+                * ``n_protocols``: number of valid protocols for that asset
+                * ``n_rejected``: number of rejected protocols for that asset
+                * ``best_nominal_p``: the minimum nominal p-value for that asset
+                * ``best_protocol_idx``: column index of the best nominal p-value
+                * ``best_adjusted_p``: the adjusted p-value at the best protocol
+            - ``cross_asset``: dict containing:
+                * ``nominal_p_values``: the per-asset best nominal p-values
+                * ``adjusted_p_values``: Bonferroni-adjusted p-values across assets
+                * ``rejected``: list of booleans per asset
+                * ``n_assets``: number of assets with at least one valid protocol
+                * ``n_rejected``: number of rejected assets
+                * ``best_nominal_p``: the minimum cross-asset nominal p-value
+                * ``best_asset_idx``: row index of the best asset
+                * ``best_adjusted_p``: the cross-asset adjusted p-value at the best asset
+            - ``total_n_rejected``: sum of per-asset n_rejected + cross_asset n_rejected
+            - ``alpha``: the threshold used.
+
+    Notes:
+        - The per-asset correction uses the number of *valid* protocols in that row.
+        - The cross-asset correction uses the number of assets that have at least
+          one valid protocol.
+        - Empty rows are skipped at the cross-asset level (they contribute no
+          best nominal p-value).
+        - The cross-asset correction is applied to the *nominal* (uncorrected)
+          best p-value per asset, not the per-asset adjusted p-values. This
+          mirrors the nested design: an asset must clear the within-asset
+          correction before its evidence is eligible for the cross-asset test,
+          but the cross-asset test's p-value is the raw best nominal p-value.
+    """
+    import math
+
+    # Normalize input to list of lists
+    matrix = []
+    for row in p_value_matrix:
+        matrix.append(list(row))
+
+    n_assets = len(matrix)
+    if n_assets == 0:
+        return {
+            "per_asset": [],
+            "cross_asset": {
+                "nominal_p_values": [],
+                "adjusted_p_values": [],
+                "rejected": [],
+                "n_assets": 0,
+                "n_rejected": 0,
+                "best_nominal_p": None,
+                "best_asset_idx": None,
+                "best_adjusted_p": None,
+            },
+            "total_n_rejected": 0,
+            "alpha": float(alpha),
+        }
+
+    # Process each asset (row)
+    per_asset_results = []
+    cross_asset_nominal = []  # best nominal p per asset
+    asset_indices = []  # row index for each asset with valid data
+
+    for asset_idx, row in enumerate(matrix):
+        # Collect valid p-values for this asset
+        valid = []
+        for proto_idx, p in enumerate(row):
+            try:
+                pv = float(p)
+            except Exception:
+                pv = float("nan")
+            if pv == pv and 0.0 <= pv <= 1.0:
+                valid.append((proto_idx, pv))
+            elif pv == pv and pv > 1.0:
+                valid.append((proto_idx, 1.0))
+            elif pv == pv and pv < 0.0:
+                valid.append((proto_idx, 0.0))
+
+        n_protocols = len(valid)
+        adjusted = [1.0] * len(row)
+        rejected = [False] * len(row)
+
+        if n_protocols > 0:
+            # Bonferroni: p * n_protocols, capped at 1.0
+            for proto_idx, pv in valid:
+                adj = pv * n_protocols
+                if adj > 1.0:
+                    adj = 1.0
+                adjusted[proto_idx] = float(adj)
+
+            # Rejections
+            for i in range(len(row)):
+                rejected[i] = bool(adjusted[i] <= float(alpha))
+
+            # Best nominal p-value and its index
+            best_proto_idx, best_nominal_p = min(valid, key=lambda x: x[1])
+            best_adjusted_p = adjusted[best_proto_idx]
+            n_rejected = sum(1 for r in rejected if r)
+        else:
+            best_nominal_p = None
+            best_proto_idx = None
+            best_adjusted_p = None
+            n_rejected = 0
+
+        per_asset_results.append({
+            "nominal_p_values": [float(p) if isinstance(p, (int, float)) and p == p else None for p in row],
+            "adjusted_p_values": adjusted,
+            "rejected": rejected,
+            "n_protocols": n_protocols,
+            "n_rejected": n_rejected,
+            "best_nominal_p": best_nominal_p,
+            "best_protocol_idx": best_proto_idx,
+            "best_adjusted_p": best_adjusted_p,
+        })
+
+        if best_nominal_p is not None:
+            cross_asset_nominal.append(best_nominal_p)
+            asset_indices.append(asset_idx)
+
+    # Cross-asset Bonferroni on per-asset best nominal p-values
+    n_assets_valid = len(cross_asset_nominal)
+    cross_asset_adjusted = [1.0] * n_assets_valid
+    cross_asset_rejected = [False] * n_assets_valid
+
+    if n_assets_valid > 0:
+        for i, pv in enumerate(cross_asset_nominal):
+            adj = pv * n_assets_valid
+            if adj > 1.0:
+                adj = 1.0
+            cross_asset_adjusted[i] = float(adj)
+        for i in range(n_assets_valid):
+            cross_asset_rejected[i] = bool(cross_asset_adjusted[i] <= float(alpha))
+
+        best_cross_idx = cross_asset_nominal.index(min(cross_asset_nominal))
+        best_asset_idx = asset_indices[best_cross_idx]
+        best_nominal_p_cross = cross_asset_nominal[best_cross_idx]
+        best_adjusted_p_cross = cross_asset_adjusted[best_cross_idx]
+        cross_n_rejected = sum(1 for r in cross_asset_rejected if r)
+    else:
+        best_asset_idx = None
+        best_nominal_p_cross = None
+        best_adjusted_p_cross = None
+        cross_n_rejected = 0
+
+    total_n_rejected = sum(r["n_rejected"] for r in per_asset_results) + cross_n_rejected
+
+    return {
+        "per_asset": per_asset_results,
+        "cross_asset": {
+            "nominal_p_values": cross_asset_nominal,
+            "adjusted_p_values": cross_asset_adjusted,
+            "rejected": cross_asset_rejected,
+            "n_assets": n_assets_valid,
+            "n_rejected": cross_n_rejected,
+            "best_nominal_p": best_nominal_p_cross,
+            "best_asset_idx": best_asset_idx,
+            "best_adjusted_p": best_adjusted_p_cross,
+        },
+        "total_n_rejected": total_n_rejected,
+        "alpha": float(alpha),
+    }
+
+
 def _newey_west_long_run_variance(x: np.ndarray, bandwidth: Optional[int] = None) -> float:
     """Newey-West HAC long-run variance of a mean-zero series.
 
