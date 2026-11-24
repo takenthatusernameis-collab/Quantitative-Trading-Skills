@@ -290,6 +290,53 @@ def generate_fama_macbeth_test_data(
     return asset_returns, factor_exposures
 
 
+def factor_contribution_decomposition(
+    asset_returns: np.ndarray,
+    factor_exposures: np.ndarray,
+    lambda_hat: np.ndarray,
+) -> Dict[str, Any]:
+    """
+    Decompose asset returns into factor contributions and idiosyncratic residuals.
+
+    r_{i,t} = sum_k X_{i,t,k} * lambda_k + eps_{i,t}
+
+    Descriptive risk attribution only -- estimates how much of each asset's
+    return is explained by the estimated factor premia versus idiosyncratic
+    noise. No profitability claim is made.
+
+    Args:
+        asset_returns: (T, N) array of asset returns.
+        factor_exposures: (T, N, K) array of factor exposures.
+        lambda_hat: (K,) estimated factor risk premia (e.g. from fama_macbeth).
+
+    Returns:
+        Dict containing:
+            - factor_contrib: (T, N) per-asset-per-period factor contribution
+            - residual: (T, N) idiosyncratic residual
+            - factor_contrib_mean: (K,) mean factor contribution per factor
+            - residual_std: float standard deviation of the residual
+            - explained_variance_ratio: float fraction of return variance
+              explained by the factor contributions
+    """
+    T, N = asset_returns.shape
+    _, _, K = factor_exposures.shape
+    lambda_hat = np.asarray(lambda_hat, dtype=float)
+    factor_contrib = np.einsum("tnk,k->tn", factor_exposures, lambda_hat)
+    residual = asset_returns - factor_contrib
+    # Mean contribution per factor = mean exposure per factor × estimated premia.
+    factor_contrib_mean = factor_exposures.mean(axis=(0, 1)) * lambda_hat
+    total_var = float(np.var(asset_returns))
+    residual_var = float(np.var(residual))
+    explained = 1.0 - residual_var / total_var if total_var > 0 else np.nan
+    return {
+        "factor_contrib": factor_contrib,
+        "residual": residual,
+        "factor_contrib_mean": factor_contrib_mean,
+        "residual_std": float(np.std(residual)),
+        "explained_variance_ratio": float(explained),
+    }
+
+
 if __name__ == "__main__":
     # Quick sanity check
     T, N, K = 100, 50, 3
