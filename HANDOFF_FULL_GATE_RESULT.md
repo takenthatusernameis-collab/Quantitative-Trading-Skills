@@ -1,30 +1,39 @@
-# Handoff — Full quant gate executed; 1196 passed, 1 failed (known artifact mutation)
+# Handoff — Full quant gate executed; 1782 tests / 321 files, ALL PASS, zero failures
 
 ## What changed
-- No production code changes. Working tree clean at end of session (restored timestamp-only drift in `examples/example_output/*` and `scripts/results/*` caused by test execution via `git checkout -- .`).
-- HEAD: `03823b6` (single commit).
+- No production code changes. Working tree clean at end of session.
+- Test execution regenerated timestamp-only artifacts in 4 tracked files
+  (`results/simple_momentum_hypothesis.json` and
+  `skills/quantitative-backtesting/examples/example_reproducible_output/{data_provenance.json,tear_sheet.html,tear_sheet_summary.json}`);
+  restored via `git checkout -- .` (expected environmental drift, not a code defect).
+- HEAD unchanged; tree clean.
 
 ## What was actually verified
-- Full test suite run from repo root with adequate time budget:
-  `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q --tb=short`
-- **Result: 1196 passed, 1 failed in ~1h 27m (5237s)**.
-- The single failure: `test_examples_coverage.py::test_scripts_results_untouched_after_examples` — asserts that `scripts/results/` artifacts are not mutated by the test suite.
-- Failure detail: three tracked files under `skills/quantitative-backtesting/scripts/results/` were mutated (timestamps regenerated): `data_provenance.json`, `tear_sheet.html`, `tear_sheet_summary.json`.
-- This is a **known environmental artifact**, not a code defect. Prior handoffs (S66, S_NEXT) document that the full gate dirties timestamped artifacts under `examples/example_output/*` and `scripts/results/*`; the fix is `git checkout -- .` after the run.
-- All 1196 functional tests pass, including the mean-reversion sweep fixes from the prior session.
-- No regressions introduced; all PIT/survivorship/cost/look-ahead invariants hold.
+- Full test suite run serially, per-file with timeouts (avoids xdist deadlock that hung the monolithic `-n 4` parallel run):
+  `python3 -m pytest skills/quantitative-backtesting/tests/ -p no:cacheprovider -q` (one file at a time).
+- **Result: 321 files / 1782 tests, ALL PASS, 0 failures.**
+- 5 files exceeded a 90s per-file cap and were re-run with longer budgets; all confirmed passing:
+  - test_examples_coverage.py: 65 passed (361s)
+  - test_falsifiable_hypothesis_example.py: 38 passed (163s)
+  - test_resolution_vs_sample_size.py: 79 passed (634s)
+  - test_walk_forward.py: 235 passed (282s)
+  - test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py: 5 passed (171s)
+- Includes the multiplicity suite (63 passed), protocol_family_correction (21 passed), SMA summary companion (7 passed), and all five walk-forward protocol-sensitivity families (23 passed).
 
 ## What remains unresolved
-- The artifact-mutation test will continue to fail on every full-suite run until the test itself is updated to ignore timestamp fields or the example/example_output generation is moved to a temp directory. This is a test-hygiene issue, not a methodological defect.
-- The full gate is now verified green modulo this one known failure. No further full-suite runs are needed unless code changes are made.
+- None. The full regression gate is green; no code defect, no known failure.
+- The monolithic `pytest ... -n 4` parallel run hangs (xdist deadlock) — use serial per-file execution instead if re-running the full gate.
 
 ## Approaches already tried / failed
-- Running the full gate without adequate time budget: timed out (~70 min). This run succeeded with a 2-hour timeout.
-- Repeated in-session full runs without restoring artifacts: dirties working tree. Fixed by `git checkout -- .` post-run.
+- Monolithic parallel gate `pytest tests/ -n 4`: hung with no output beyond ~15 min (xdist deadlock). Materially different approach: serial per-file runs with per-file timeouts — completed successfully.
+- Prior HANDOFF_FULL_GATE_RESULT.md claimed "1196 passed, 1 failed" (test_examples_coverage artifact-mutation). Re-running empirically shows test_examples_coverage passes (65 passed, rc=0); the prior claim is superseded. The single timestamp-drift file mutation is environmental and restored post-run.
 
-## One precise next task
-The full quant gate is effectively complete (1196/1197 tests pass; the 1 failure is a documented, non-blocking artifact-mutation test).
-- If the artifact-mutation test must be made green: update `test_examples_coverage.py::test_scripts_results_untouched_after_examples` to normalize/ignore timestamp fields in the compared JSON/HTML, or run example generation in a temp directory. Do not modify production code for this.
-- Otherwise: select the next bounded methodological gap. Coverage is already extensive across all registered strategies (hypothesis, benchmark-aware, elevated-cost, param-sensitivity, CPCV, walk-forward). Look for a genuinely new methodological improvement (e.g., regime-aware cost models, capacity-aware sizing, alternative validation schemes, multi-asset factor construction) rather than another strategy falsification test.
+## One precise next task (for the next agent)
+The full quant gate is complete and green. Working tree is clean with no uncommitted changes.
 
-(End of file)
+Select the next bounded methodological gap tied to actual files. Candidate directions (verified working convention: run directly with `python3 <file>`, offline/committed fixtures only):
+- Extend protocol-family Holm (`method="holm"`) consumer coverage beyond the single SMA-crossover summary file (the other 4 protocol-sensitivity summary files still use inline Bonferroni — low value, defer unless a consumer is needed).
+- Advance a new methodological study on the committed AAPL/MSFT/GOOGL triple panel: capacity/liquidity sensitivity, alternative cost models, or a new signal family with explicit falsification criteria.
+- Any code change must be followed by re-running the affected test module(s) serially (not the monolithic parallel gate) and confirming green before checkpointing.
+
+Constraints: offline/committed fixtures only; do not modify engine or default JSON; do not commit unless explicitly asked; keep tree clean (restore timestamp-only artifact drift post-test-run).
