@@ -1,26 +1,20 @@
-# Handoff — Next Session: Walk-forward multiplicity-control triple-panel regression coverage
+# Handoff — Regression guard: single-symbol walk-forward family verified green
 
-## Context
-- HEAD `d0725cb` (main); working tree clean. Quant gate baseline green.
-- This session verified (direct python3, exit 0, printed OK):
-  - test_walk_forward_time_series_momentum_real_triple_aapl_msft_googl.py
-  - test_walk_forward_zscore_triple_real_aapl_msft_googl.py
-  - test_dual_momentum_walk_forward_real_triple_aapl_msft_googl.py
-- Prior sessions also green: cross_sectional_momentum and sma_crossover base triple panels.
+## What was executed
+Ran seven single-symbol walk-forward test files directly with `python3` from repo root (offline, committed fixtures only):
+1. `test_walk_forward_ema_crossover_real_aapl.py` — OK
+2. `test_walk_forward_macd_real_aapl.py` — OK
+3. `test_walk_forward_donchian_real_aapl.py` — OK
+4. `test_walk_forward_bollinger_real_aapl.py` — OK
+5. `test_walk_forward_kelly_criterion_real_aapl.py` — OK
+6. `test_walk_forward_volatility_targeting_real_aapl.py` — OK
+7. `test_walk_forward_rsi_real_aapl.py` — OK
 
-## Task
-Run regression coverage of the remaining multiplicity-control walk-forward triple-panel test files directly with python3, confirming no regressions from accumulated additive tests.
+All exit code 0.
 
-### Target files (offline committed fixtures, direct python3, no commits)
-- skills/quantitative-backtesting/tests/test_walk_forward_cross_sectional_momentum_multiplicity_control_real_triple_aapl_msft_googl.py
-- skills/quantitative-backtesting/tests/test_walk_forward_time_series_momentum_multiplicity_control_real_triple_aapl_msft_googl.py
-- skills/quantitative-backtesting/tests/test_walk_forward_dual_momentum_multiplicity_control_real_triple_aapl_msft_googl.py
-- skills/quantitative-backtesting/tests/test_walk_forward_sma_crossover_multiplicity_control_real_triple_aapl_msft_googl.py
-- Any other test_walk_forward_*_multiplicity_control_* files present.
+## What remains unresolved
+- `pytest` not on PATH; direct `python3` convention used.
+- Remaining walk-forward family (multi-pair / triple / protocol-sensitivity variants for EMA, MACD, Donchian, Bollinger, Kelly, RSI, volatility targeting) not yet re-run this cycle.
 
-### Acceptance criteria
-- Each target file runs to completion with python3 <file> and exit code 0.
-- Contained tests print OK.
-- Committed verdicts remain NOT SUPPORTED where applicable.
-- Working tree remains clean (no engine/fixture/default-JSON changes).
-- Do not commit unless explicitly asked.
+## One precise next task
+Run the protocol-sensitivity and multiplicity-control variants for the single-symbol families not yet covered this cycle (EMA, MACD, Donchian, Bollinger, Kelly, RSI, volatility targeting) directly with `python3`, confirming exit code 0 and contained tests print OK/PASS. Keep working tree clean.
