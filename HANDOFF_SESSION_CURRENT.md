@@ -1,4 +1,4 @@
-# Handoff — Session (current): Regression coverage of protocol-sensitivity walk-forward family complete, green
+# Handoff — Session (current): Regression coverage of data-mining bias walk-forward family complete, green
 
 ## Status entering this session
 - HEAD `8002b6a` (main); working tree clean. Quant gate baseline green at
@@ -7,36 +7,30 @@
   capacity, EMA crossover net-exposure capacity), each individually verified
   green with 0 failures (9 pre-existing `test_reporting.py` environment
   failures, not regressions). No code/engine/default-JSON changes since baseline.
-- Previous session verified cost-sensitivity walk-forward family (1 test with
-  `walk_forward_` prefix, plus 20+ related cost-sensitivity tests) via direct `python3`.
+- Previous session verified protocol-sensitivity walk-forward family (19 tests)
+  via direct `python3`.
 
 ## What changed this session
 - **No code changes** — regression verification only.
-- Ran all 19 protocol-sensitivity walk-forward tests directly with `python3`
+- Ran all 4 data-mining bias walk-forward test files directly with `python3`
   to confirm no regressions from accumulated additive tests.
 
 ## What was actually verified (evidence)
-All 19 protocol-sensitivity walk-forward test files in `skills/quantitative-backtesting/tests/` exit code 0 via direct `python3` execution; each prints PASS for all contained tests:
+All 4 data-mining bias walk-forward test files in `skills/quantitative-backtesting/tests/` exit code 0 via direct `python3` execution; each prints PASS for all contained tests:
 
-1. `test_walk_forward_sma_crossover_protocol_sensitivity_real_triple_aapl_msft_googl.py` — 4/4 tests passed
-2. `test_walk_forward_sma_crossover_protocol_sensitivity_real_triple_summary.py` — 7/7 tests passed
-3. `test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py` — 5/5 tests passed
-4. `test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple.py` — 5/5 tests passed
-4. `test_walk_forward_time_series_momentum_protocol_sensitivity_real_triple_summary.py` — 5/5 tests passed
-5. `test_walk_forward_dual_momentum_protocol_sensitivity_real_triple_aapl_msft_googl.py` — 4/4 tests passed
-6. `test_walk_forward_rsi_mean_reversion_protocol_sensitivity_real_triple_aapl_msft_googl.py` — 4/4 tests passed
-7. `test_walk_forward_rsi_mean_reversion_protocol_sensitivity_real_triple_summary.py` — 5/5 tests passed
-8. `test_walk_forward_ema_crossover_protocol_sensitivity_real_aapl.py` — 4/4 tests passed
-9. `test_walk_forward_bollinger_bands_protocol_sensitivity_real_aapl.py` — 4/4 tests passed
-10. `test_walk_forward_donchian_protocol_sensitivity_real_aapl.py` — 4/4 tests passed
-11. `test_walk_forward_macd_protocol_sensitivity_real_aapl.py` — 4/4 tests passed
-12. `test_walk_forward_kelly_criterion_protocol_sensitivity_real_aapl.py` — 4/4 tests passed
-13. `test_walk_forward_volatility_targeting_protocol_sensitivity_real_aapl.py` — 4/4 tests passed
-14. `test_walk_forward_volatility_targeting_protocol_sensitivity_real_googl.py` — 4/4 tests passed
-15. `test_walk_forward_volatility_targeting_protocol_sensitivity_real_msft.py` — 4/4 tests passed
-16. `test_walk_forward_volatility_targeting_protocol_sensitivity_real_triple_summary.py` — 5/5 tests passed
-17. `test_walk_forward_zscore_mean_reversion_protocol_sensitivity_real_triple_summary.py` — 5/5 tests passed (with expected UserWarning for single-asset z-score usage)
-18. `test_walk_forward_zscore_multi_pair_protocol_sensitivity_real_triple.py` — 5/5 tests passed
+1. `test_walk_forward_parameter_selection_data_mining_bias_real_triple_aapl_msft_googl.py` — 2/2 tests passed
+   - Quantifies selection bias: fixed lookback=189 OOS Sharpe +1.057 vs grid {126,189,252} OOS Sharpe -0.124 (bias = -1.181)
+   - Grid deflated Sharpe p-value = 0.918 >= 0.10 threshold → NOT SUPPORTED (honest reporting confirmed)
+2. `test_deflated_sharpe.py` — 6/6 unit tests passed
+   - DSR returns required keys and bounds; higher Sharpe → higher confidence
+   - More trials deflates confidence; constant returns degenerate; trial-dispersion path valid
+   - Invalid inputs rejected
+3. `test_deflated_sharpe_reproducibility.py` — 2/2 tests passed
+   - Independent first-principles recompute (scipy.stats.norm.cdf) matches engine (math.erf) to 1e-9 rel tol
+   - Multiplicity guard *binds*: trial-dispersion SR* > i.i.d. null; observed Sharpe < SR*; z < 0; DSR < 0.10; p = 0.953 >> 0.10
+4. `test_deflated_sharpe_reproducibility_tsmom.py` — 2/2 tests passed
+   - Same independent recompute match for time-series momentum family (p = 0.918)
+   - Guard binds: trial-dispersion used; observed Sharpe < SR*; z < 0; DSR < 0.10; p >> 0.10
 
 - All committed verdicts remain NOT SUPPORTED (no cell flips to SUPPORTED).
 - PIT validation passes; no flat-signal warnings.
@@ -45,18 +39,19 @@ All 19 protocol-sensitivity walk-forward test files in `skills/quantitative-back
 ## What remains unresolved
 - `pytest` unavailable on this PATH; verification via direct `python3` only
   (established convention). pytest collectability not checked.
-- Broader test families (data-mining bias, capacity-sensitivity) not re-run this session (targeted scope per handoff).
+- Broader test families (capacity-sensitivity, cross-family reality checks) not re-run this session (targeted scope per handoff).
 
 ## Approaches already tried / failed
 - None.
 
 ## One precise next task (bounded, evidence-based)
-**Run regression coverage of the data-mining bias walk-forward family
+**Run regression coverage of the capacity-sensitivity walk-forward family
 directly with `python3`, confirming no regressions from accumulated additive tests.**
-- Target files (data-mining bias only, triple panel / summary, offline
+- Target files (capacity-sensitivity only, triple panel / summary / participation-rate / book-mode, offline
   committed fixtures, direct `python3`, no commits):
-  - Search for `test_walk_forward_*data_mining*` or `test_walk_forward_*deflated*`
-    or similar pattern in `skills/quantitative-backtesting/tests/`
+  - Search for `test_walk_forward_*capacity*` or `test_walk_forward_*participation*`
+    or `test_walk_forward_*net_exposure*` or `test_walk_forward_*book_mode*`
+    in `skills/quantitative-backtesting/tests/`
 - Each must run to completion with `python3 <file>` and exit code 0.
 - No cell flips to SUPPORTED (all committed verdicts remain NOT SUPPORTED).
 - PIT validation passes; no flat-signal warnings.
