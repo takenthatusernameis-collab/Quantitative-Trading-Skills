@@ -154,6 +154,75 @@ def test_participation_rate_cap_sweeps_on_real_triple_panel():
     assert any(binds) and not all(binds), "expected a binding/slack crossover across levels"
 
 
+def test_participation_rate_cap_sqrt_impact_model_real_triple_panel():
+    """Square-root impact model companion to the linear sweep.
+
+    Under the square-root model,
+    ``impact_capacity = n_assets * (max_impact / impact_coefficient)**2 *
+    binding_adv_notional``, which with the fixed params
+    (coefficient=0.5, max_impact=0.0005) is far below the participation-rate
+    limit at every swept level. Impact therefore binds at all rates under the
+    square-root model (unlike linear, which shows a binding/slack crossover),
+    so ``estimated_capacity == impact_capacity`` everywhere and participation
+    is never the binding constraint. The key model-independent claim is that
+    ``participation_capacity`` is unchanged by the impact model.
+    """
+    panel = _build_real_triple_panel()
+    binding_asset, binding_adv_notional, n_assets = _last_bar_binding(panel)
+
+    sqrt_impact_capacity = (
+        n_assets * (MAX_IMPACT / IMPACT_COEFFICIENT) ** 2 * binding_adv_notional
+    )
+
+    rows = []
+    for rate in PARTICIPATION_LEVELS:
+        r = estimate_capacity(
+            panel,
+            IMPACT_COEFFICIENT,
+            impact_model="sqrt",
+            max_impact=MAX_IMPACT,
+            adv_window=ADV_WINDOW,
+            max_participation_rate=rate,
+        )
+        assert r["estimable"] is True
+        assert r["impact_model"] == "sqrt"
+        assert r["estimated_capacity"] is not None and r["estimated_capacity"] > 0
+        assert r["impact_capacity"] is not None
+        assert r["participation_capacity"] is not None
+        assert r["binding_asset"] == binding_asset
+        assert r["n_assets"] == n_assets
+
+        # participation_capacity is impact-model independent (matches linear).
+        expected_part = n_assets * rate * binding_adv_notional
+        assert abs(r["participation_capacity"] - expected_part) < 1e-6 * max(
+            1.0, expected_part
+        )
+
+        # impact_capacity follows the square-root formula.
+        assert abs(r["impact_capacity"] - sqrt_impact_capacity) < 1e-6 * max(
+            1.0, sqrt_impact_capacity
+        )
+
+        # Under the square-root model impact binds at every level (impact below
+        # participation), so estimated_capacity == impact_capacity and the cap
+        # is slack at all rates; no crossover is expected for these params.
+        assert r["impact_capacity"] < r["participation_capacity"]
+        expected_cap = min(r["impact_capacity"], r["participation_capacity"])
+        assert abs(r["estimated_capacity"] - expected_cap) < 1e-6 * max(
+            1.0, expected_cap
+        )
+        assert r["estimated_capacity"] == r["impact_capacity"]
+
+        rows.append(r)
+
+    # Capacity is non-decreasing in the participation rate (constant here since
+    # impact binds at every level under the square-root model).
+    for prev, curr in zip(rows, rows[1:]):
+        assert curr["estimated_capacity"] >= prev["estimated_capacity"] - 1e-6, (
+            "capacity decreased as the participation cap loosened under sqrt"
+        )
+
+
 def test_participation_rate_cap_ignored_when_impact_disabled():
     panel = _build_real_triple_panel()
     r = estimate_capacity(
@@ -167,4 +236,5 @@ def test_participation_rate_cap_ignored_when_impact_disabled():
 if __name__ == "__main__":
     test_participation_rate_cap_sweeps_on_real_triple_panel()
     test_participation_rate_cap_ignored_when_impact_disabled()
+    test_participation_rate_cap_sqrt_impact_model_real_triple_panel()
     print("OK")
