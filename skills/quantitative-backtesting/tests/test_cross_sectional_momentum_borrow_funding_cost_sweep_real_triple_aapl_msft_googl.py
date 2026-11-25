@@ -83,19 +83,28 @@ def test_borrow_funding_cost_sensitivity_runs_on_triple_real_panel_cross_section
             "oos_sharpe_gt_zero",
             "oos_total_return_positive",
         }
+    # Non-vacuity guard: every level must report real (non-NaN) OOS metrics.
+    # A missing metric would otherwise make the directional assertions below
+    # pass vacuously (the prior TSMOM short-capable borrow-cost defect).
+    for r in rows:
+        assert r["sharpe_ratio"] is not None, (
+            f"vacuous NaN Sharpe at borrow_cost={r['borrow_cost']}: the "
+            "backtest produced no tradable positions"
+        )
+        assert r["total_return"] is not None, (
+            f"vacuous NaN total_return at borrow_cost={r['borrow_cost']}"
+        )
     # Directional claim: net out-of-sample performance must not improve as
     # borrow/funding cost rises (Sharpe and total return are non-increasing).
     for prev, curr in zip(rows, rows[1:]):
-        if prev["sharpe_ratio"] is not None and curr["sharpe_ratio"] is not None:
-            assert curr["sharpe_ratio"] <= prev["sharpe_ratio"] + 1e-12, (
-                "Sharpe improves with borrow/funding cost: "
-                f"{prev['sharpe_ratio']} -> {curr['sharpe_ratio']}"
-            )
-        if prev["total_return"] is not None and curr["total_return"] is not None:
-            assert curr["total_return"] <= prev["total_return"] + 1e-12, (
-                "total return improves with borrow/funding cost: "
-                f"{prev['total_return']} -> {curr['total_return']}"
-            )
+        assert curr["sharpe_ratio"] <= prev["sharpe_ratio"] + 1e-12, (
+            "Sharpe improves with borrow/funding cost on cross-sectional "
+            f"momentum: {prev['sharpe_ratio']} -> {curr['sharpe_ratio']}"
+        )
+        assert curr["total_return"] <= prev["total_return"] + 1e-12, (
+            "total return improves with borrow/funding cost on cross-sectional "
+            f"momentum: {prev['total_return']} -> {curr['total_return']}"
+        )
 
     out = buffer.getvalue()
     assert "BORROW / FUNDING COST SENSITIVITY SWEEP" in out

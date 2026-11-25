@@ -29,11 +29,15 @@
 - Prior HANDOFF_FULL_GATE_RESULT.md claimed "1196 passed, 1 failed" (test_examples_coverage artifact-mutation). Re-running empirically shows test_examples_coverage passes (65 passed, rc=0); the prior claim is superseded. The single timestamp-drift file mutation is environmental and restored post-run.
 
 ## One precise next task (for the next agent)
-The full quant gate is complete and green. Working tree is clean with no uncommitted changes.
+The full quant gate is complete and green (1782 tests, 0 failures) and this session additionally verified + hardened the borrow-cost realism family:
+
+- `skills/quantitative-backtesting/tests/test_cross_sectional_momentum_borrow_funding_cost_sweep_real_triple_aapl_msft_googl.py`: added non-vacuity guards (assert `sharpe_ratio`/`total_return` not None at every borrow/funding level; made directional assertions unconditional), mirroring the already-verified TSMOM short-capable test. Sweep produces real numbers — Sharpe −0.0609→−0.2128, Return 0.0103→−0.0083, monotonic, all NOT SUPPORTED — and the hardened test passes (6.89s). Working tree has this ONE uncommitted file; do not commit unless asked.
+- The TSMOM short-capable borrow/regime cost audit (`AUDIT_BORROW_COST_REALISM.md`) is fully closed: fix committed, committed `examples/short_capable_sweeps_corrected_results.json` matches verified reality exactly (borrow Sharpe 1.4026→1.3390; regime Sharpe 1.3645→1.3026; all DSR p > 0.44, all NOT SUPPORTED).
+
+Working tree otherwise clean; full gate green; no code defect, no known failure. The monolithic `pytest ... -n 4` parallel run hangs (xdist deadlock) — use serial per-file execution if re-running the full gate.
 
 Select the next bounded methodological gap tied to actual files. Candidate directions (verified working convention: run directly with `python3 <file>`, offline/committed fixtures only):
-- Extend protocol-family Holm (`method="holm"`) consumer coverage beyond the single SMA-crossover summary file (the other 4 protocol-sensitivity summary files still use inline Bonferroni — low value, defer unless a consumer is needed).
-- Advance a new methodological study on the committed AAPL/MSFT/GOOGL triple panel: capacity/liquidity sensitivity, alternative cost models, or a new signal family with explicit falsification criteria.
-- Any code change must be followed by re-running the affected test module(s) serially (not the monolithic parallel gate) and confirming green before checkpointing.
+- Extend protocol-family Holm (`method="holm"`) consumer coverage beyond the single SMA-crossover summary file (low value, defer unless a consumer is needed).
+- Advance a new methodological study on the committed AAPL/MSFT/GOOGL triple panel: capacity/liquidity sensitivity (participation-rate leg is covered at unit level but not swept on the triple panel), alternative cost models, or a new signal family with explicit falsification criteria.
 
-Constraints: offline/committed fixtures only; do not modify engine or default JSON; do not commit unless explicitly asked; keep tree clean (restore timestamp-only artifact drift post-test-run).
+Constraints: offline/committed fixtures only; do not modify engine or default JSON; do not commit unless explicitly asked; keep tree clean (restore timestamp-only artifact drift post-test-run); any code change must be followed by re-running the affected test module(s) serially and confirming green before checkpointing.
