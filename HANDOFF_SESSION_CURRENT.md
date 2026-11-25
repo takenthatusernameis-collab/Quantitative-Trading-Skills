@@ -1,20 +1,20 @@
-# Handoff — Session (current): EMA crossover capacity-sensitivity triple-panel regression coverage complete, green
+# Handoff — Session (current): EMA crossover protocol-sensitivity regression coverage complete, green
 
 ## Status entering this session
-- HEAD `acb695d` (main); working tree clean. Quant gate baseline green at SESSION_159 (1782 tests) plus additive test files since.
-- Prior session verified all 4 cross-family reality-check walk-forward test files directly with `python3` — all green, exit code 0, no cell flips to SUPPORTED.
+- HEAD `bfe5283` (main); working tree clean. Quant gate baseline green.
+- Prior session verified both EMA crossover capacity-sensitivity triple-panel test files directly with `python3` — all green, exit code 0, no cell flips to SUPPORTED.
 
 ## What changed this session
 - No code changes — regression verification only.
-- Ran both EMA crossover capacity-sensitivity triple-panel test files directly with `python3` from repo root (offline, committed fixtures only).
+- Ran `test_walk_forward_ema_crossover_protocol_sensitivity_real_aapl.py` directly with `python3` from repo root (offline, committed fixtures only).
 
 ## What was actually verified (evidence)
-Both files exit code 0 via direct `python3` execution; each prints `OK` (all assertions pass):
+Exit code 0 via direct `python3` execution; all 4 contained tests print PASS:
 
-1. `test_ema_crossover_capacity_sensitivity_real_triple_aapl_msft_googl.py` — **PASS**, exit 0
-   - Capacity falls with market impact across levels [0.0, 0.05, 0.1, 0.2]; zero-impact row capacity is None; finite capacities > 0 and strictly decreasing. No flat-signal warnings (`flat_warnings == []`).
-2. `test_ema_crossover_capacity_sensitivity_net_exposure_real_triple_aapl_msft_googl.py` — **PASS**, exit 0
-   - Net-exposure capacity sensitivity sweep runs to completion; all assertions pass.
+1. `protocol_sensitivity_matrix_pinned` — PASS
+2. `verdict_is_consistently_not_supported` — PASS (only (36,12,12) passes nominal criteria; does not survive protocol multiplicity)
+3. `no_cell_survives_protocol_multiplicity` — PASS (Bonferroni-adjusted best p = 0.3155 > 0.10, n_rejected = 0; verdict NOT SUPPORTED)
+4. `main_registers_every_module_level_test` — PASS
 
 - No cell flips to SUPPORTED (committed verdicts remain NOT SUPPORTED).
 - PIT validation engaged / passed; no flat-signal warnings blocking.
@@ -28,12 +28,13 @@ Both files exit code 0 via direct `python3` execution; each prints `OK` (all ass
 - None.
 
 ## One precise next task (bounded, evidence-based)
-Run regression coverage of the EMA crossover protocol-sensitivity test directly with `python3`, confirming no regressions from accumulated additive tests.
+Run regression coverage of the base EMA crossover real walk-forward test directly with `python3`, confirming no regressions from accumulated additive tests.
 - Target file in `skills/quantitative-backtesting/tests/`:
-  - `test_walk_forward_ema_crossover_protocol_sensitivity_real_aapl.py`
-- Must run to completion with `python3 <file>` and exit code 0; all contained tests print PASS / OK.
-- No cell flips to SUPPORTED (all committed verdicts remain NOT SUPPORTED).
+  - `test_walk_forward_ema_crossover_real_aapl.py`
+- Must run to completion with `python3 <file>` and exit code 0; contained tests print OK.
+- Committed verdict remains NOT SUPPORTED (Deflated Sharpe p-value >= 0.10 fails; `assert all(passes.values()) is False`).
 - Working tree remains clean (no engine/fixture/default-JSON changes).
+- `pytest` unavailable on PATH; direct `python3` is established convention. If slow, bound the run per-file; leave passing direct-`python3` evidence.
 - Do not commit unless explicitly asked.
 
 (End of file)
