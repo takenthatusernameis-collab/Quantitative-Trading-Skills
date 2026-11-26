@@ -386,6 +386,51 @@ class TestTearSheet(unittest.TestCase):
             for fname in os.listdir(tmpdir):
                 self.assertFalse(fname.endswith(".png"), f"Plot file {fname} should not exist when matplotlib unavailable")
 
+    def test_generate_tear_sheet_param_grid_degrades_when_matplotlib_unavailable(self):
+        """When save_plots=True, a two-varying-parameter optimization grid is
+        present, and matplotlib is unavailable, the tear sheet still produces
+        valid HTML/JSON with empty plot_files and no heatmap (or any plot) on disk.
+
+        Scope note: with matplotlib absent, ``generate_tear_sheet`` fails at the
+        ``import matplotlib`` guard (reporting.py:1448) and is handled by the
+        outer ``except ImportError`` (reporting.py:1599); the inner heatmap branch
+        (reporting.py:1453-1478) is pre-empted and therefore not reached here.
+        This test pins that a populated ``parameter_optimization`` grid does not
+        break the matplotlib-absent degradation path. The ``if fig is not None``
+        guard at reporting.py:1476 is covered separately by
+        ``test_generate_tear_sheet_omits_heatmap_when_heatmap_returns_none``.
+        """
+        import sys
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            results["parameter_optimization"] = [
+                {"params": {"period": 10, "exit_period": 5}, "sharpe_ratio": 1.2, "total_return": 0.15, "n_periods": 100},
+                {"params": {"period": 10, "exit_period": 10}, "sharpe_ratio": 0.8, "total_return": 0.10, "n_periods": 100},
+                {"params": {"period": 20, "exit_period": 5}, "sharpe_ratio": 1.5, "total_return": 0.20, "n_periods": 100},
+                {"params": {"period": 20, "exit_period": 10}, "sharpe_ratio": 0.5, "total_return": 0.05, "n_periods": 100},
+            ]
+            metrics = {"total_return": 0.1, "total_trades": 5, "win_rate": 0.6}
+
+            with patch.dict(sys.modules, {"matplotlib": None, "matplotlib.pyplot": None}):
+                html_path = generate_tear_sheet(
+                    results, metrics, tmpdir, symbol="SPY", strategy_name="Donchian", save_plots=True
+                )
+
+            self.assertTrue(os.path.exists(html_path))
+            summary_path = os.path.join(tmpdir, "tear_sheet_summary.json")
+            self.assertTrue(os.path.exists(summary_path))
+            with open(summary_path) as f:
+                summary = json.load(f)
+            self.assertEqual(summary["plot_files"], [],
+                             "plot_files should be empty when matplotlib unavailable")
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, "parameter_heatmap.png")),
+                             "no heatmap should be written when matplotlib unavailable")
+            for fname in os.listdir(tmpdir):
+                self.assertFalse(fname.endswith(".png"),
+                                 f"Plot file {fname} should not exist when matplotlib unavailable")
+
     def test_generate_tear_sheet_surfaces_end_of_sample_closes(self):
         """The tear sheet renders the end-of-sample close rows in the Trade
         Analytics table and surfaces them in the JSON summary.
@@ -1192,6 +1237,52 @@ class TestTearSheet(unittest.TestCase):
                 html = f.read()
             self.assertNotIn("parameter_heatmap.png", html,
                            "HTML should not reference heatmap when grid is invalid")
+
+    def test_generate_tear_sheet_omits_heatmap_when_heatmap_returns_none(self):
+        """When save_plots=True and a two-varying-parameter grid is present but
+        ``generate_parameter_heatmap`` returns None, the tear sheet must not
+        crash, must not reference or list a heatmap, and must still write valid
+        HTML/JSON (other plots such as the equity curve may still be produced).
+
+        This exercises the ``if fig is not None`` guard at reporting.py:1476,
+        which is otherwise unreachable through the public API: the only way
+        ``generate_parameter_heatmap`` returns None is when matplotlib is
+        unavailable, but that case is pre-empted by the tear sheet's own
+        ``import matplotlib`` guard (reporting.py:1448) before the heatmap branch
+        is reached. Patching the function to return None simulates an internal
+        heatmap failure so the defensive guard is actually covered.
+        """
+        import reporting
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            results["parameter_optimization"] = [
+                {"params": {"period": 10, "exit_period": 5}, "sharpe_ratio": 1.2, "total_return": 0.15, "n_periods": 100},
+                {"params": {"period": 10, "exit_period": 10}, "sharpe_ratio": 0.8, "total_return": 0.10, "n_periods": 100},
+                {"params": {"period": 20, "exit_period": 5}, "sharpe_ratio": 1.5, "total_return": 0.20, "n_periods": 100},
+                {"params": {"period": 20, "exit_period": 10}, "sharpe_ratio": 0.5, "total_return": 0.05, "n_periods": 100},
+            ]
+            metrics = {"total_return": 0.1, "total_trades": 5, "win_rate": 0.6}
+
+            with patch.object(reporting, "generate_parameter_heatmap", return_value=None) as mock_heatmap:
+                html_path = generate_tear_sheet(
+                    results, metrics, tmpdir, symbol="SPY", strategy_name="Donchian", save_plots=True
+                )
+
+            # The heatmap branch must actually be entered (2 varying params detected)
+            # so this test cannot pass vacuously if that detection later changes.
+            mock_heatmap.assert_called_once()
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, "parameter_heatmap.png")),
+                             "no heatmap should be written when generate_parameter_heatmap returns None")
+            with open(html_path) as f:
+                html = f.read()
+            self.assertNotIn("parameter_heatmap.png", html,
+                             "HTML should not reference a heatmap that was not generated")
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertFalse(any("parameter_heatmap.png" in p for p in summary["plot_files"]),
+                             "plot_files must not list a heatmap that was not generated")
 
     def test_tear_sheet_includes_panel_book_diagnostic_section(self):
         """The panel book diagnostic is rendered as its own HTML section."""
