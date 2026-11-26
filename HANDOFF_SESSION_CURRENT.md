@@ -20,13 +20,15 @@ Ran `pytest tests/test_walk_forward.py::test_walk_forward_book_pricing_backtests
 
 ## What remains unresolved
 - None for this task. The warning investigation is closed; no code change required.
+- `verify_end_to_end.py` passed (output recorded): benchmark_cost_is_periodic False/True cases both validated, benchmark returns differ 0.001563.
 
 ## Failed approaches
 - None. No speculative changes made.
 
 ## Next task (one precise task)
-Run the repo-root end-to-end verification script and confirm it passes:
-```
-python3 verify_end_to_end.py
-```
-from `/home/runner/work/Quantitative-Trading-Skills/Quantitative-Trading-Skills`. It exercises `strategy_builder.build_strategy` + `walk_forward.out_of_sample_validation` for `benchmark_cost_is_periodic`. If it passes, record the output as evidence and hand off. If it fails, reproduce the smallest failure, inspect `skills/quantitative-backtesting/scripts/strategy_builder.py` and `walk_forward.py` for the root cause, fix with the smallest reversible change, rerun `python3 verify_end_to_end.py`, and do NOT commit unless explicitly asked.
+Run regression coverage of remaining single-asset walk-forward family tests directly with `python3` from repo root, confirming no regressions:
+- `skills/quantitative-backtesting/tests/test_walk_forward_sma_crossover_real_aapl.py`
+- `skills/quantitative-backtesting/tests/test_walk_forward_time_series_momentum_real_aapl.py`
+- `skills/quantitative-backtesting/tests/test_walk_forward_zscore_real_aapl_msft.py`
+- Any other walk-forward test files not yet covered this cycle
+Each must exit 0 and print OK; verdicts remain NOT SUPPORTED where applicable; working tree stays clean. Do not commit unless explicitly asked.
