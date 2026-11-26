@@ -1693,6 +1693,84 @@ class TestTearSheet(unittest.TestCase):
                 "cpcv_equity_curve.png should NOT be created for empty oos_returns",
             )
 
+    def test_generate_tear_sheet_survives_individual_plot_failure(self):
+        """When one plot generation raises an exception (e.g. savefig fails),
+        the tear sheet still completes, writes valid HTML/JSON, omits the
+        failing plot from plot_files/HTML, and continues generating other plots.
+
+        This exercises the per-plot try/except blocks at reporting.py:1554,
+        1575, 1596 which catch Exception and continue.
+        """
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Provide all three analysis results so all three plot branches run
+            mc = self._make_monte_carlo_results()
+            wf = self._make_walk_forward_results()
+            cpcv = self._make_cpcv_results()
+            analysis = {"monte_carlo": mc, "walk_forward": wf, "cpcv": cpcv}
+            results = self._make_results()
+            metrics = {"total_return": 0.1}
+
+            # Patch plt.savefig to raise on 3rd call (Monte Carlo fan chart):
+            # 1st = equity_curve.png, 2nd = returns_distribution.png,
+            # 3rd = monte_carlo_equity_curve.png (inside try/except)
+            original_savefig = None
+            call_count = [0]
+
+            def flaky_savefig(*args, **kwargs):
+                call_count[0] += 1
+                if call_count[0] == 3:
+                    raise RuntimeError("Simulated savefig failure")
+                return original_savefig(*args, **kwargs)
+
+            import matplotlib.pyplot as plt
+            original_savefig = plt.savefig
+
+            with patch.object(plt, "savefig", side_effect=flaky_savefig):
+                html_path = generate_tear_sheet(
+                    results, metrics, tmpdir,
+                    symbol="SPY", strategy_name="SMA",
+                    analysis_results=analysis, save_plots=True,
+                )
+
+            # Tear sheet must complete without raising
+            self.assertTrue(os.path.exists(html_path))
+            summary_path = os.path.join(tmpdir, "tear_sheet_summary.json")
+            self.assertTrue(os.path.exists(summary_path))
+
+            # Verify JSON summary is valid
+            with open(summary_path) as f:
+                summary = json.load(f)
+            self.assertEqual(summary["symbol"], "SPY")
+            self.assertEqual(summary["strategy"], "SMA")
+
+            # Monte Carlo plot should be absent from plot_files and HTML
+            plot_files = summary.get("plot_files", [])
+            mc_plot_present = any("monte_carlo_equity_curve.png" in p for p in plot_files)
+            self.assertFalse(mc_plot_present, "Failed Monte Carlo plot must not be listed in plot_files")
+
+            with open(html_path) as f:
+                html = f.read()
+            self.assertNotIn("monte_carlo_equity_curve.png", html,
+                             "HTML must not reference failed Monte Carlo plot")
+
+            # Walk-forward and CPCV plots should still be generated
+            wf_path = os.path.join(tmpdir, "walk_forward_equity_curve.png")
+            cpcv_path = os.path.join(tmpdir, "cpcv_equity_curve.png")
+            self.assertTrue(os.path.exists(wf_path), "Walk-forward plot should still be created")
+            self.assertTrue(os.path.exists(cpcv_path), "CPCV plot should still be created")
+            self.assertTrue(any("walk_forward_equity_curve.png" in p for p in plot_files),
+                           "Walk-forward plot should be listed in plot_files")
+            self.assertTrue(any("cpcv_equity_curve.png" in p for p in plot_files),
+                           "CPCV plot should be listed in plot_files")
+
+            # Equity curve and returns distribution should also be present
+            eq_path = os.path.join(tmpdir, "equity_curve.png")
+            dist_path = os.path.join(tmpdir, "returns_distribution.png")
+            self.assertTrue(os.path.exists(eq_path), "Equity curve should still be created")
+            self.assertTrue(os.path.exists(dist_path), "Returns distribution should still be created")
+
     def _make_regime_analysis(self) -> dict:
         """Build a regime_analysis dict matching regime_performance_summary output."""
         return {
