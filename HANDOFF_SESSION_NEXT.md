@@ -1,23 +1,20 @@
-# Handoff — Next: non-walk-forward quant-backtesting regression sweep
+# Handoff — Next: root-level quant-backtesting regression sweep
 
 ## What changed (this session)
-- No code changes. All 84 walk-forward family tests confirmed exit 0 (offline, committed fixtures).
-- Working tree clean. Detail in HANDOFF_SESSION_163.md.
+- No code changes. Non-walk-forward sweep completed: 243/243 `python3 <file>` runs exit 0, 0 failures (evidence in /tmp/nwf_results.txt). Working tree clean.
+- Combined with the prior session's walk-forward family (84/84 green), the entire `skills/quantitative-backtesting/tests/` regression suite is now green. Detail in HANDOFF_SESSION_CURRENT.md.
 
 ## What was verified (evidence)
-- 84/84 walk-forward files pass with adequate per-file timeout; zero real failures.
-- Only `124` timeouts from short limits, resolved at 300–560s. No verdict flips to SUPPORTED.
+- 243/243 non-walk-forward files pass; slow files passed at raised limits (300s/560s/1800s), not failures.
+- 84/84 walk-forward family files pass (previous session).
+- `git status` clean; no engine/fixture/default-JSON edits.
 
 ## What remains unresolved
-- Non-walk-forward tests in `skills/quantitative-backtesting/tests/` not yet swept this cycle.
+- Root-level tests not swept this cycle: `test_root_*.py`, `verify_end_to_end.py`, `test_import.py` at the repo root (all offline, committed fixtures only).
 
 ## Approaches already tried / failed
-- `background_process` sweep empty (repo not in its FS namespace) — use foreground batches.
-- Single 84-file foreground loop exceeded 600s tool cap — batch + per-file `timeout` + incremental log.
+- `background_process` cannot see the repo — foreground batches only.
+- Batch loops exceed 600s tool cap — per-file `timeout` + incremental log + resume.
 
 ## One precise next task
-Run all `test_*.py` in `skills/quantitative-backtesting/tests/` NOT matching
-`test_walk_forward*`, `test_dual_momentum_walk_forward*`, `test_point_in_time_strict_cli_walk_forward`
-with `python3` from that dir, foreground timed batches (per-file timeout 60–300s; 300–560s for slow),
-logging to a temp file. Classify non-zero as real failure vs timeout (re-run timeouts larger).
-Do NOT change engine/fixtures/default JSON. Do NOT commit unless explicitly asked. Leave a pass/fail tally.
+Run all `test_*.py` matching `test_root*` plus `verify_end_to_end.py` and `test_import.py` at the repo root with `python3`, foreground timed batches (per-file timeout 60–300s; re-run timeouts with a larger limit), logging to a temp file. Confirm exit 0; classify non-zero as real failure vs timeout. Do NOT change engine/fixtures/default JSON. Do NOT commit unless explicitly asked. Produce a pass/fail tally and a short handoff.
