@@ -175,6 +175,121 @@ def test_participation_rate_cap_propagates_into_capacity_trend_real_triple_panel
     assert any(abs(s - 1.0) < 1e-9 for s in scales), "no slack rate left the trend unchanged"
 
 
+def test_participation_rate_cap_propagates_into_capacity_trend_sqrt_impact_model_real_triple_panel():
+    """Square-root impact model companion to the linear trend test.
+
+    Under the square-root model with these fixed parameters
+    (coefficient=0.5, max_impact=0.0005),
+    ``impact_capacity = n_assets * (max_impact / impact_coefficient)^2 *
+    binding_adv_notional`` is far below the participation-rate limit at every
+    swept level. Impact therefore binds at all rates under the square-root model
+    (unlike linear, which shows a binding/slack crossover), so
+    ``estimated_capacity == impact_capacity`` everywhere and the participation
+    cap is slack at all levels. The key model-independent claims are:
+
+    - ``participation_capacity`` is unchanged by the impact model (matches linear).
+    - ``capacity_trend`` is byte-identical to the baseline sqrt trend at all
+      rates (the cap never binds).
+    - ``last_capacity == estimated_capacity`` at all rates.
+    - ``median_capacity`` is non-decreasing (constant here) as the cap loosens.
+    - No binding/slack crossover exists (all rates are slack).
+    """
+    panel = _build_real_triple_panel()
+
+    baseline = estimate_capacity(
+        panel,
+        IMPACT_COEFFICIENT,
+        impact_model="sqrt",
+        max_impact=MAX_IMPACT,
+        adv_window=ADV_WINDOW,
+    )
+    assert baseline["estimable"] is True
+    assert baseline["impact_model"] == "sqrt"
+    assert baseline["participation_capacity"] is None
+    base_trend = baseline["capacity_trend"]
+    n_periods = base_trend["n_periods"]
+    _assert_trend_invariants(base_trend, baseline["estimated_capacity"], n_periods)
+
+    # Expected impact capacity under sqrt (model-dependent, constant across rates).
+    sqrt_impact_capacity = baseline["impact_capacity"]
+    assert sqrt_impact_capacity is not None and sqrt_impact_capacity > 0
+
+    rows = []
+    for rate in PARTICIPATION_LEVELS:
+        r = estimate_capacity(
+            panel,
+            IMPACT_COEFFICIENT,
+            impact_model="sqrt",
+            max_impact=MAX_IMPACT,
+            adv_window=ADV_WINDOW,
+            max_participation_rate=rate,
+        )
+        assert r["estimable"] is True
+        assert r["impact_model"] == "sqrt"
+        assert r["estimated_capacity"] is not None and r["estimated_capacity"] > 0
+        assert r["impact_capacity"] is not None
+        assert r["participation_capacity"] is not None
+        trend = r["capacity_trend"]
+        assert trend["n_periods"] == n_periods
+        _assert_trend_invariants(trend, r["estimated_capacity"], n_periods)
+        rows.append((rate, r, trend))
+
+    # participation_capacity is impact-model independent (matches linear baseline).
+    linear_baseline = estimate_capacity(
+        panel, IMPACT_COEFFICIENT, max_impact=MAX_IMPACT, adv_window=ADV_WINDOW
+    )
+    # Get binding asset ADV notional from linear baseline (same panel, same last bar).
+    binding_adv_notional = linear_baseline["adv_notional"]
+    n_assets = linear_baseline["n_assets"]
+    for rate, r, _ in rows:
+        expected_part = n_assets * rate * binding_adv_notional
+        assert abs(r["participation_capacity"] - expected_part) < 1e-6 * max(
+            1.0, expected_part
+        ), (
+            f"sqrt participation_capacity {r['participation_capacity']} != "
+            f"linear equivalent {expected_part} at rate {rate}"
+        )
+
+    # Impact capacity follows the square-root formula and is constant across rates.
+    for rate, r, _ in rows:
+        assert abs(r["impact_capacity"] - sqrt_impact_capacity) < 1e-6 * max(
+            1.0, sqrt_impact_capacity
+        ), f"sqrt impact_capacity changed across rates at {rate}"
+
+    # Under sqrt with these params, impact binds at every level (impact_capacity
+    # < participation_capacity), so estimated_capacity == impact_capacity and the
+    # cap is slack everywhere. The trend is byte-identical to the baseline.
+    for rate, r, trend in rows:
+        assert r["impact_capacity"] < r["participation_capacity"], (
+            f"expected impact to bind at rate {rate} under sqrt model"
+        )
+        assert r["estimated_capacity"] == r["impact_capacity"], (
+            f"estimated_capacity should equal impact_capacity at rate {rate}"
+        )
+        for key in TREND_KEYS:
+            assert abs(trend[key] - base_trend[key]) < 1e-6 * max(1.0, abs(base_trend[key])), (
+                f"slack rate {rate}: trend {key} {trend[key]} != baseline {base_trend[key]}"
+            )
+
+    # Median capacity is non-decreasing (constant here) as the cap loosens.
+    for (prev_rate, _, prev_trend), (curr_rate, _, curr_trend) in zip(rows, rows[1:]):
+        assert curr_trend["median_capacity"] >= prev_trend["median_capacity"] - 1e-6, (
+            "trend median decreased as the participation cap loosened under sqrt: "
+            f"{prev_rate} -> {prev_trend['median_capacity']:,.0f}, "
+            f"{curr_rate} -> {curr_trend['median_capacity']:,.0f}"
+        )
+
+    # No binding/slack crossover: all rates are slack (scale == 1.0).
+    scales = [trend["max_capacity"] / base_trend["max_capacity"] for _, _, trend in rows]
+    assert all(abs(s - 1.0) < 1e-9 for s in scales), (
+        "expected all rates to be slack under sqrt model (scale == 1.0)"
+    )
+    assert not any(s < 1.0 - 1e-9 for s in scales), (
+        "unexpected binding rate under sqrt model with these params"
+    )
+
+
 if __name__ == "__main__":
     test_participation_rate_cap_propagates_into_capacity_trend_real_triple_panel()
+    test_participation_rate_cap_propagates_into_capacity_trend_sqrt_impact_model_real_triple_panel()
     print("OK")
