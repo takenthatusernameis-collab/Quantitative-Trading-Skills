@@ -1929,6 +1929,28 @@ class TestParameterHeatmap(unittest.TestCase):
         import matplotlib.pyplot as plt
         plt.close(fig)
 
+    def test_generate_parameter_heatmap_returns_none_when_matplotlib_unavailable(self):
+        """Regression test: when matplotlib is not importable, the function
+        returns None silently (the documented matplotlib-absent contract at
+        reporting.py:50-55). This pins the contract so a future env without
+        matplotlib fails loudly in the test suite rather than only via the
+        optional-dep path.
+        """
+        import sys
+        from unittest.mock import patch
+
+        results = self._make_optimization_results()
+
+        # Simulate matplotlib being unavailable by patching the import
+        with patch.dict(sys.modules, {"matplotlib": None, "matplotlib.pyplot": None}):
+            fig = generate_parameter_heatmap(
+                results, param_x="period", param_y="exit_period", metric="sharpe_ratio"
+            )
+            self.assertIsNone(
+                fig,
+                "generate_parameter_heatmap must return None when matplotlib is unavailable",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
