@@ -1,45 +1,45 @@
 # Task for Next Agent
 
-## Context
-The previous session investigated two test files reported as "hanging":
-- `skills/quantitative-backtesting/tests/test_walk_forward.py`
-- `skills/quantitative-backtesting/tests/test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py`
+## What changed (this session)
+- Executed the prior handoff (`HANDOFF_NEXT_SESSION.md`): add pytest config for
+  long-running integration tests + document them.
+- `pytest-timeout` is **NOT installed** (`ModuleNotFoundError: No module named
+  'pytest_timeout'`; pytest 9.2.0). Per the handoff's fallback (step 3), did NOT
+  add an inert `pytest.ini`/`pyproject.toml` `timeout` (it would do nothing
+  without the plugin).
+- Created `skills/quantitative-backtesting/tests/README.md` documenting:
+  - how to run tests (`python3 <file>`, portable; `pytest` not always on PATH),
+  - the two long-running suites and their runtimes
+    (`test_walk_forward.py` ~8 min/468 s; `..._protocol_sensitivity_real_triple.py`
+    ~6 min/360 s),
+  - `timeout 900 python3 -m pytest ...` wrapper guidance,
+  - explicit note that `pytest-timeout` is absent so a `timeout=` ini setting is inert.
 
-**Finding: NOT a hang — expected long runtime.** Both complete successfully:
-- `test_walk_forward.py`: 235 passed in 468.57s (~7:48)
-- `test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py`: 5/5 passed in ~360s (~6 min)
+## What was verified (evidence)
+- `python3 -m pytest ".../test_walk_forward.py::test_out_of_sample_validation_benchmark_cost_is_periodic" -v`
+  → **1 passed in 1.35s** (handoff step 4 check).
+- `git status --short` → only `?? skills/quantitative-backtesting/tests/README.md`.
+  No test files, engine, fixtures, or default JSON modified.
+- Did NOT re-run the two ~6–8 min suites (already proven all-pass in prior session:
+  235 passed/468 s and 5/5 passed/360 s).
 
-## Your Task
-Add pytest configuration to allow long-running integration tests to complete without
-being killed by the default 120s harness timeout.
+## What remains unresolved
+- The two integration suites still take ~6–8 min; no methodology-weakening speedup
+  attempted (would risk changing results). Runtime is inherent.
+- `pytest` not on PATH in this env; `python3 <file>` convention still required.
+- Not committed (no explicit request).
 
-### Steps
-1. Check if `pytest-timeout` is installed: `pip show pytest-timeout` or `python3 -c "import pytest_timeout"`.
-2. If available, create `pytest.ini` at repo root with:
-   ```ini
-   [pytest]
-   timeout = 600
-   ```
-   Or add to `pyproject.toml`:
-   ```toml
-   [tool.pytest.ini_options]
-   timeout = 600
-   ```
-3. If `pytest-timeout` is NOT available, create `skills/quantitative-backtesting/tests/README.md`
-   documenting that these two files are long-running integration suites (~8 min and ~6 min)
-   and must be run with `python3 <file>` directly (not via pytest with a short timeout),
-   or with `timeout 900 python3 -m pytest ...`.
-4. Verify: run `python3 -m pytest skills/quantitative-backtesting/tests/test_walk_forward.py::test_out_of_sample_validation_benchmark_cost_is_periodic -v`
-   to confirm pytest config doesn't break anything.
-5. Do NOT modify test logic, skip tests, or weaken assertions.
+## Approaches already tried / failed
+- None this session. (Prior sessions proved the "hang" was expected runtime, not a defect.)
 
-## Constraints
-- Do not modify any test files.
-- Do not change walk_forward.py or strategy_builder.py logic.
-- Smallest reversible change only.
-- Evidence-based: the prior session proved both files pass with adequate runtime.
-
-## Evidence references
-- Background process logs: `bgp_2156377c1001IwJNic09vQnqbO` (cross-sectional, 5/5 passed)
-- Background process logs: `bgp_2156958b2001gOFgsNiXqzFjL6` (walk_forward, 235 passed in 468.57s)
-- Profile: single protocol 37.5s, dominated by `strategy_target_weights` (26.6s) and `_inert_grid_report` (14.7s)
+## One precise next task (bounded, evidence-based)
+Run regression coverage of remaining single-asset walk-forward family test files
+directly with `python3`, confirming no regressions from accumulated additive tests.
+Targets in `skills/quantitative-backtesting/tests/` (run each, expect exit 0 / OK):
+- `test_walk_forward_sma_crossover_real_aapl.py`
+- `test_walk_forward_time_series_momentum_real_aapl.py`
+- `test_walk_forward_zscore_real_aapl_msft.py`
+- any other walk-forward single-asset files not yet covered this cycle.
+Constraints: committed fixtures only (offline); verdicts must remain NOT SUPPORTED
+where applicable (`assert all(passes.values()) is False` holds); working tree stays
+clean; do not commit unless explicitly asked.
