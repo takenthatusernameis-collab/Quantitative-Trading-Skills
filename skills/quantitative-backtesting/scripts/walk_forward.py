@@ -12449,6 +12449,22 @@ def run_out_of_sample_validation(args) -> int:
             json.dump(survivorship, f, indent=2, default=str)
         print(f"Survivorship bias report saved to: {surv_path}")
 
+    # Optionally emit a flattened capacity CSV so the cost-aware capacity
+    # breakdown (impact vs participation vs cost drag) is directly consumable
+    # by spreadsheet/analysis tools alongside the JSON artifact.
+    if getattr(args, "output_format", "json") == "csv":
+        cap = (summary_data.get("test_performance") or {}).get("capacity") or {}
+        capacity_row = {
+            "impact_capacity": cap.get("impact_capacity"),
+            "participation_capacity": cap.get("participation_capacity"),
+            "cost_adjusted_capacity": cap.get("cost_adjusted_capacity"),
+            "cost_drag": cap.get("cost_drag"),
+            "holding_period_years": cap.get("holding_period_years"),
+        }
+        csv_path = output_dir / "out_of_sample_summary.csv"
+        pd.DataFrame([capacity_row]).to_csv(csv_path, index=False)
+        print(f"Out-of-sample capacity CSV saved to: {csv_path}")
+
     # Generate full report if test returns available
     if len(results["test_performance"]["test_returns"]) > 0:
         equity = (1 + results["test_performance"]["test_returns"]).cumprod() * args.initial_capital
