@@ -333,6 +333,59 @@ class TestTearSheet(unittest.TestCase):
             self.assertEqual(summary["symbol"], "SPY")
             self.assertEqual(summary["strategy"], "SMA")
 
+    def test_generate_tear_sheet_save_plots_false_omits_plots(self):
+        """When save_plots=False, no plot files are created and plot_files list is empty."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            metrics = {"total_return": 0.1, "total_trades": 5, "win_rate": 0.6}
+            html_path = generate_tear_sheet(
+                results, metrics, tmpdir, symbol="SPY", strategy_name="SMA", save_plots=False
+            )
+            self.assertTrue(os.path.exists(html_path))
+            self.assertTrue(os.path.exists(os.path.join(tmpdir, "tear_sheet_summary.json")))
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+            self.assertIn("plot_files", summary)
+            self.assertEqual(summary["plot_files"], [])
+            # No plot files should exist on disk
+            for fname in os.listdir(tmpdir):
+                self.assertFalse(fname.endswith(".png"), f"Plot file {fname} should not exist when save_plots=False")
+
+    def test_generate_tear_sheet_save_plots_true_when_matplotlib_unavailable(self):
+        """When save_plots=True but matplotlib is unavailable, tear sheet still
+        generates HTML/JSON with empty plot_files and no plot files on disk.
+
+        This pins the optional-dep contract for the broader tear-sheet pipeline:
+        the function must not crash and must return valid output even when the
+        plotting dependency is missing.
+        """
+        import sys
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            results = self._make_results()
+            metrics = {"total_return": 0.1, "total_trades": 5, "win_rate": 0.6}
+
+            # Simulate matplotlib being unavailable
+            with patch.dict(sys.modules, {"matplotlib": None, "matplotlib.pyplot": None}):
+                html_path = generate_tear_sheet(
+                    results, metrics, tmpdir, symbol="SPY", strategy_name="SMA", save_plots=True
+                )
+
+            self.assertTrue(os.path.exists(html_path))
+            self.assertTrue(os.path.exists(os.path.join(tmpdir, "tear_sheet_summary.json")))
+            with open(os.path.join(tmpdir, "tear_sheet_summary.json")) as f:
+                summary = json.load(f)
+
+            self.assertIn("plot_files", summary)
+            self.assertEqual(summary["plot_files"], [], "plot_files should be empty when matplotlib unavailable")
+            self.assertEqual(summary["symbol"], "SPY")
+            self.assertEqual(summary["strategy"], "SMA")
+
+            # No plot files should exist on disk
+            for fname in os.listdir(tmpdir):
+                self.assertFalse(fname.endswith(".png"), f"Plot file {fname} should not exist when matplotlib unavailable")
+
     def test_generate_tear_sheet_surfaces_end_of_sample_closes(self):
         """The tear sheet renders the end-of-sample close rows in the Trade
         Analytics table and surfaces them in the JSON summary.
