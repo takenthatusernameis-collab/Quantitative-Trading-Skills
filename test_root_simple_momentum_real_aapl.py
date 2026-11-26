@@ -108,6 +108,7 @@ def test_root_simple_momentum_metrics_pinned_on_real_aapl_window():
         "oos_total_return_positive": True,
         "deflated_alpha_ratio_gt_threshold": False,
         "capacity_gt_initial_capital": True,
+        "walk_forward_oos_sharpe_gt_zero": False,
     }
     for c in result["criteria"]:
         name = c["name"]
