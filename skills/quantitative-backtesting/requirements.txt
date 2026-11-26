@@ -13,3 +13,7 @@ scipy==1.18.1
 # (1510 passed) under pytest 9.2.0 + pytest-xdist 3.8.0. pytest itself is NOT
 # pinned here; install the latest compatible pytest alongside this pin.
 pytest-xdist==3.8.0
+# pytest-timeout allows long-running integration tests (walk-forward suites) to
+# complete without being killed by a short default timeout. The value is set in
+# pytest.ini (timeout = 600).
+pytest-timeout==2.4.0

@@ -1,39 +1,31 @@
-# Handoff — Session: Walk-forward test runtime investigation
+# Handoff — Session: pytest-timeout configuration for long-running walk-forward tests
 
 ## Status
-- HEAD unchanged (0734f0e); working tree clean.
-- Investigated the two "hanging" test files reported by the previous session.
-- **Finding: NOT a hang — expected long runtime.** Both files complete successfully with adequate timeout.
+- Added `pytest-timeout` plugin (v2.4.0) to `skills/quantitative-backtesting/requirements.txt`
+- Created `skills/quantitative-backtesting/pytest.ini` with `timeout = 600` (10 minutes) and `timeout_method = thread`
+- Updated `skills/quantitative-backtesting/tests/README.md` to document that pytest-timeout is now installed and configured
 
 ## Evidence
-- `test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py`:
-  - Ran to completion in background: **5/5 tests passed** in ~360s (~6 min).
-  - Root cause of slowness: 6 walk-forward protocols × ~17s each = ~102s per test function;
-    5 test functions share the same protocols (no caching across functions).
-  - Profiled single protocol: 37.5s total, of which:
-    - `strategy_target_weights` (cross-sectional book): 26.6s (24 calls)
-    - `_inert_grid_report` (parameter inertness diagnostic): 14.7s
-    - `_cross_sectional_selection` (ranking loop): 16.4s (48 calls)
-- `test_walk_forward.py`:
-  - Ran to completion: **235 passed** in 468.57s (~7:48).
-  - Slowest single test: `test_trading_costs_robustness_example_runs` (~74s, subprocess).
-  - 236 tests total; many CLI end-to-end tests each spawn subprocesses.
+- `pytest-timeout` plugin verified as loaded: `plugins: xdist-3.8.0, timeout-2.4.0, ...`
+- Configuration verified: `timeout: 600.0s`, `timeout method: thread`
+- Quick test suite (`test_adjustment_integrity_guard.py`) passes with the new configuration
 
 ## What was verified
-- Both files exit 0 with no failures when given sufficient runtime.
-- No code changes made (tests are correct; runtime is inherent to the methodology).
+- The pytest.ini is correctly read from the skill root directory
+- The timeout value of 600 seconds (10 minutes) exceeds the documented runtime of the two long-running integration suites:
+  - `test_walk_forward.py`: ~8 min (≈468 s), 235+ tests
+  - `test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py`: ~6 min (≈360 s), 5 tests
+- No test logic was modified or skipped; the runtime is inherent to the walk-forward methodology being validated
 
 ## What remains unresolved
-- The 120s per-command timeout in the harness is too short for these integration tests.
-- No optimization attempted (would risk weakening tests or changing methodology).
+- The long-running integration tests have not been executed in this session (they take 6-8 minutes each)
+- Future CI/CD pipelines should ensure `pytest-timeout` is installed and the pytest.ini is in the working directory when running pytest
 
 ## Next task
-Add a `pytest.ini` or `pyproject.toml` `[tool.pytest.ini_options]` section with a
-`timeout = 600` (or use `pytest-timeout` if available) so the test runner allows
-long-running integration tests to complete, AND document in
-`skills/quantitative-backtesting/tests/README.md` (create if missing) that
-`test_walk_forward.py` (~8 min) and
-`test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py`
-(~6 min) are long-running integration suites requiring extended timeouts.
-Do NOT modify test logic or skip tests. Evidence: this session's background runs
-(468s and 360s respectively, both all-pass).
+Run the two long-running integration suites via pytest to verify they complete within the 600s timeout:
+```bash
+cd skills/quantitative-backtesting
+python3 -m pytest tests/test_walk_forward.py -v
+python3 -m pytest tests/test_walk_forward_cross_sectional_momentum_protocol_sensitivity_real_triple.py -v
+```
+Expected: Both should exit 0 with all tests passing, as previously verified by direct python3 execution (468s and 360s respectively, both all-pass).

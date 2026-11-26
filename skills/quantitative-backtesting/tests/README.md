@@ -47,10 +47,9 @@ simply take several minutes to complete and must be given an adequate timeout.
 
 ### Note on `pytest-timeout`
 
-`pytest-timeout` is **not** installed in this environment. Do not add a
-`timeout = ...` setting to a `pytest.ini` / `pyproject.toml` expecting it to take
-effect — without the plugin it is inert. Use the shell `timeout` wrapper or run
-the file directly with `python3` instead.
+`pytest-timeout` is now installed and configured via `pytest.ini` in the skill
+root with `timeout = 600` (10 minutes). This allows the long-running integration
+suites to complete when run via `pytest`:
 
 Do not skip these tests or weaken their assertions to make them finish faster;
 the runtime is a property of the methodology being validated.
