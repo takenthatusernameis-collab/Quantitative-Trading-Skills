@@ -1,26 +1,21 @@
-# Handoff — Session: root metrics_pinned None bug FIXED (root suite 9/9 green)
+# Handoff — Session: data-provenance resolved; root suite 9/9 green (ground truth re-established)
 
 ## Status
-- Fixed the 3 failing root `*_metrics_pinned_on_real_*` tests. Full root suite now 9/9 pass.
-- One file changed: `simple_momentum_hypothesis.py` `_extract_benchmark_metrics` now prefers
-  `benchmark_0_alpha` / `benchmark_0_benchmark_total_return` (multi-benchmark path) and falls
-  back to aggregate `alpha` / `benchmark_total_return` (single-benchmark path). Aligns the
-  stale root copy with the canonical skill copy at
-  `skills/quantitative-backtesting/examples/simple_momentum_hypothesis.py:605`.
-- Working tree: only that file modified. No commits (not asked).
+- Resolved the data-provenance task assigned in HANDOFF_SESSION_NEXT.md / HANDOFF_SESSION_164.md. **No repo file changed; no commits.** Determined no data replacement or "placeholder" flag is warranted.
+- Environment unblocked: installed pandas + scipy + numpy (pip; no repo change). Previously `run_backtest.py` failed with `ModuleNotFoundError: No module named 'pandas'`, so the prior "9/9 green" did NOT reproduce in this env.
+- Working tree: clean (`git status` clean). Nothing committed.
 
-## Verified
-- `python3 <file>` from repo root, per-file `timeout 300`: 9/9 root tests exit 0
-  (cost_real_msft, cost_real_googl, debug_scripts, scripts_pit_bias_controls,
-  verify_end_to_end, test_import, real_{aapl,googl,msft} each 2/2).
-- Reproduced exact run: benchmark_0_* equals every pinned value exactly for all 3 tickers.
+## What changed
+- Nothing in the repository. The assigned task premise (that MSFT.csv is a placeholder needing replacement) is incorrect — see evidence below.
+
+## What was verified (evidence)
+- Root suite **9/9 pass, 0 fail** (all 9 root test files exit 0, `timeout 300`, `python3 <file>` from repo root): cost_real_msft, cost_real_googl, debug_scripts (2/2), scripts_pit_bias_controls (10/10), verify_end_to_end, test_import, real_{aapl,googl,msft} (each 2/2).
+- Data is GENUINE real-market data (price trajectories match historical, split-adjusted where applicable): MSFT ~$160 (Jan 2020) → ~$487 (Dec 2025); AAPL split-adj ~$75 → ~$273; GOOGL split-adj ~$68 → ~$314. The prior "placeholder / not authentic" claim is NOT supported by evidence — do not fabricate or replace fixtures.
+- PROVENANCE.json sha256 values match actual files exactly (MSFT/AAPL/GOOGL/sample_* all confirmed). Manifest is accurate, not stale.
+- `skills/quantitative-backtesting/tests/test_real_market_data_provenance.py`: **5/5 pass** — manifest valid JSON; honest source note (names Yahoo, fetch date 2026-11-12, declines performance-evidence claim, no "fabricate"); fixtures not stale relative to fetch date; each fixture matches manifest (schema, index, date range, row count, sha256); documented byte-identity holds (AAPL.csv==sample_ohlcv.csv; MSFT.csv==sample_benchmark.csv==AAPL.csv.bak).
 
 ## Unresolved
-- MSFT.csv is a placeholder (byte-identical to sample_benchmark.csv); AAPL.csv==sample_ohlcv.csv;
-  GOOGL.csv==AAPL.csv.bak. Cannot restore genuine data offline without fabricating — documented.
+- None for this task.
 
-## Next task
-See HANDOFF_SESSION_164.md — restore genuine OHLCV fixtures (or add explicit placeholder
-provenance note), regenerate pins, re-run 3 tests. Do NOT commit unless explicitly asked.
-
-(Full detail: HANDOFF_SESSION_164.md)
+## Approaches already tried / failed
+- None this cycle.
