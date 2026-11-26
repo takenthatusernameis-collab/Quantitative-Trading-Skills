@@ -1,34 +1,20 @@
-# Handoff — Session: Broader walk-forward family regression guard execution + symmetric-quantile warning investigation
+# Handoff — Session: Full walk-forward family regression coverage (all 84 files green)
 
 ## Status
-- Executed all five core walk-forward family tests (committed fixtures only, offline) directly with `python3` from repo root — all print `OK`, exit 0, no regressions (carried over from prior session).
-- Investigated the `CrossSectionalMomentum: top_quantile == bottom_quantile` warning throughout `test_walk_forward.py`. Determined intentional test behavior, NOT a latent bug (see prior determination).
-- Completed regression coverage of remaining single-asset walk-forward family tests this session:
-  - `test_walk_forward_sma_crossover_real_aapl.py` — OK, exit 0
-  - `test_walk_forward_time_series_momentum_real_aapl.py` — OK, exit 0
-  - `test_walk_forward_zscore_real_aapl_msft.py` — OK, exit 0
-  - `test_walk_forward_simple_momentum_real_aapl.py` — OK, exit 0
-  - `test_walk_forward_time_series_momentum_real_msft.py` — OK, exit 0
-  - `test_walk_forward_rsi_mean_reversion_real_aapl.py` — OK, exit 0
+- Completed prior agent's next task and closed the entire walk-forward family.
+- All 84/84 walk-forward family test files exit 0 with `python3 <file>` (offline, committed fixtures).
+- No real failures. Non-zero exits were only `124` timeouts from short limits; all pass with 300–560s.
+- Working tree clean; no engine/fixture/default-JSON changes. No cell flips to SUPPORTED.
 
-## Verification
-- Every file above runs to completion with `python3 <file>` from repo root, prints `OK`, exits 0.
-- Working tree clean; no engine/fixture/default-JSON changes.
-- All recorded verdicts remain NOT SUPPORTED where applicable; no cell flips to SUPPORTED.
-- `verify_end_to_end.py` passed (output recorded): benchmark_cost_is_periodic False/True cases both validated, benchmark returns differ 0.001563.
-
-## What remains unresolved
-- None for this task. The warning investigation is closed; no code change required.
-
-## Failed approaches
-- None. No speculative changes made.
+## Key tooling notes
+- `pytest` not on PATH; use direct `python3 <file>` from `skills/quantitative-backtesting/tests`.
+- `background_process` cannot see the repo (separate FS namespace) — use foreground timed batches.
+- Slow files (protocol-sensitivity / cross-sectional / meta-analysis / `test_walk_forward.py`) need
+  300–560s per-file timeouts.
 
 ## Next task (one precise task)
-Run regression coverage of remaining walk-forward family test files not yet covered this cycle directly with `python3`, confirming no regressions:
-- `test_walk_forward_volatility_targeting_real_msft.py`
-- `test_walk_forward_kelly_criterion_protocol_sensitivity_real_aapl.py`
-- `test_walk_forward_zscore_real_msft_googl.py`
-- Any other walk-forward test files not yet covered this cycle
-Each must run to completion with `python3 <file>` and exit code 0; contained tests print OK. Committed verdicts remain NOT SUPPORTED where applicable. Working tree remains clean. Do not commit unless explicitly asked.
+Run the REMAINING non-walk-forward tests in `skills/quantitative-backtesting/tests/` with `python3`
+in foreground timed batches; confirm exit 0 (re-run timeouts with larger limits to distinguish real
+failures). Do not change engine/fixtures/default JSON. Do not commit unless explicitly asked.
 
-(End of file)
+(Full detail: see HANDOFF_SESSION_163.md)
