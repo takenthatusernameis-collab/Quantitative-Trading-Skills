@@ -196,19 +196,24 @@ def _resolve_benchmarks(data_path, benchmark_path=None):
 
 
 def _extract_benchmark_metrics(metrics):
-    """Extract the headline benchmark comparison from a metrics dict.
+    """Pull the primary-benchmark alpha / total return out of a metrics dict.
 
-    ``calculate_metrics`` (performance.py) attaches ``alpha`` (annualized
-    strategy-alpha vs the aligned benchmark) and ``benchmark_total_return``
-    (buy-and-hold benchmark total return) whenever a benchmark is aligned with
-    the strategy returns. Return both so callers can report them without
-    reaching into the metrics dict directly; missing keys yield None rather
-    than raising, matching the "measurement, not a correction" convention used
-    for test_resolution and capacity.
+    With multiple benchmarks the framework keys metrics per benchmark
+    (benchmark_0_alpha, benchmark_1_...) and leaves the aggregate
+    benchmark_total_return / alpha fields as None. Reporting the aggregate
+    there therefore prints "Alpha=N/A" even though the run is fully valid.
+    Prefer benchmark_0 (the strategy's own universe, listed first) and fall
+    back to the aggregate fields for single-benchmark runs.
     """
     if not isinstance(metrics, dict):
         return None, None
-    return metrics.get("alpha"), metrics.get("benchmark_total_return")
+    alpha = metrics.get("benchmark_0_alpha")
+    if alpha is None:
+        alpha = metrics.get("alpha")
+    bench_return = metrics.get("benchmark_0_benchmark_total_return")
+    if bench_return is None:
+        bench_return = metrics.get("benchmark_total_return")
+    return alpha, bench_return
 
 
 def run_hypothesis_test(data_path, benchmark_path=None, impact_coefficient=0.1):
