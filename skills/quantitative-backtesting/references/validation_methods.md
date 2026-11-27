@@ -2863,3 +2863,44 @@ metrics inline or build the criteria dict at runtime from the summary are
 reported as skipped, not checked. The guard is a consistency check, not a
 profitability claim: it never decides whether a strategy is good, only whether
 the pinned verdict is the one the pinned numbers imply.
+
+## Market-Impact and Regime Cost Controls
+
+`walk_forward.py` exposes three cost-modeling flags on every panel-capable
+subcommand (`walk-forward`, `cpcv`, `out-of-sample`, `monte-carlo`,
+`optimize`) through the shared argument parser:
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--impact-aggregation` | `panel` | How per-asset market impacts are aggregated into the portfolio cost: `panel` charges the equal-weighted mean of the per-asset impact rates over the whole panel (a period in which only `k` of `n` names trade is charged `1/n` of its traded names' participation); `notional-weighted` uses the dollar-consistent notional-weighted aggregation. See `cost_models.md`, "Market-impact participation (measurement only)". |
+| `--regime-cost-multipliers` | `None` | JSON mapping of regime names to multipliers applied to the per-trade commission + slippage cost in that regime (e.g. `{"bear_high_vol": 1.5}`). Regimes not in the mapping fall back to `1.0` (no change). Unset leaves every published number unchanged. |
+| `--regime-impact-coefficients` | `None` | JSON mapping of regime names to impact coefficients for regime-aware impact modeling (e.g. `{"bull_high_vol": 0.5, "bear_high_vol": 1.0}`). Regimes not in the mapping fall back to `--impact-coefficient`. Unset leaves every published number unchanged. |
+
+A related function-level parameter, `impact_model` (`"linear"` by default;
+`IMPACT_MODEL_TYPES` is `("linear", "sqrt")`), selects the market-impact model
+used to price each asset's turnover against its ADV. It is **not** exposed as
+a CLI flag; it is set programmatically on the analysis functions. The CLI
+only exposes `--impact-coefficient` (the coefficient magnitude) and
+`--impact-aggregation` (how impacts are summed).
+
+Regimes are resolved per bar from the strategy's regime series. A regime not
+present in a mapping falls back to the neutral value (`1.0` for cost
+multipliers, `--impact-coefficient` for impact coefficients), so an incomplete
+mapping scales only the regimes it names and leaves the rest unchanged.
+
+These flags change reported costs, capacity, and returns; they are not
+measurement-only diagnostics. Default runs (all flags unset) are bit-identical
+to runs without them, so they are opt-in and backward compatible.
+
+Coverage:
+- `--impact-aggregation` default `panel` is pinned by
+  `tests/test_run_backtest.py` (`test_default_impact_aggregation_is_panel`)
+  and `tests/test_panel_reference_pinned.py`.
+- `--regime-cost-multipliers` default `None` is a bit-identical no-op, guarded
+  by `tests/test_regime_cost_multiplier.py`.
+- `--regime-impact-coefficients` parsing is covered by
+  `tests/test_monte_carlo.py` (`test_monte_carlo_regime_impact_coefficients_parsing`)
+  and applied end-to-end by `tests/test_strategy_cost_model.py`.
+
+The CLI renders every flag under `--help` on the `walk-forward` (and
+`cpcv`, `out-of-sample`, `monte-carlo`, `optimize`) subcommands.
