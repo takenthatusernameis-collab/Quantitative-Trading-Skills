@@ -4381,6 +4381,69 @@ def test_run_backtest_book_pricing_max_impact_non_binding_preserves_uncapped():
     np.testing.assert_array_equal(loose["equity_curve"], uncapped["equity_curve"])
 
 
+def test_cli_run_backtest_output_format_csv_writes_capacity_rows():
+    """CLI run_backtest --output-format csv emits backtest_summary.csv with
+    flattened capacity/cost columns alongside the JSON artifacts, while the
+    default json format writes no CSV. Mirrors the walk-forward CLI flag."""
+    import csv as _csv
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=300)
+
+        base_argv = [
+            "run_backtest",
+            "--data", csv_path,
+            "--strategy", "sma_crossover",
+            "--params", '{"fast_period": 5, "slow_period": 20}',
+            "--impact-coefficient", "0.5",
+        ]
+
+        # csv mode: backtest_summary.csv written, JSON tear-sheet still written.
+        csv_out = os.path.join(tmpdir, "csv_out")
+        argv_csv = base_argv + ["--output", csv_out, "--output-format", "csv"]
+        with patch.object(sys, "argv", argv_csv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0, f"CLI run_backtest --output-format csv should exit 0, got {rc}"
+        csv_artifact = os.path.join(csv_out, "backtest_summary.csv")
+        assert os.path.exists(csv_artifact), "backtest_summary.csv not written in csv mode"
+        assert os.path.exists(os.path.join(csv_out, "tear_sheet_summary.json")), (
+            "tear_sheet_summary.json still written when --output-format csv"
+        )
+
+        with open(csv_artifact, newline="") as f:
+            rows = list(_csv.DictReader(f))
+        assert len(rows) == 1, "single backtest emits exactly one capacity row"
+        expected = {
+            "symbol", "strategy", "capacity",
+            "impact_coefficient", "borrow_cost", "funding_cost",
+            "leverage", "short_exposure", "max_participation_rate",
+            "capacity_book", "capacity_notional_weighted",
+            "trend_n_periods", "trend_min_capacity", "trend_median_capacity",
+            "trend_max_capacity", "trend_last_capacity",
+            "trend_min_to_median_ratio", "trend_last_to_median_ratio",
+        }
+        assert set(rows[0].keys()) == expected, (
+            f"unexpected CSV columns: {set(rows[0].keys())}"
+        )
+        # With impact enabled the point-in-time capacity is populated and > 0.
+        assert rows[0]["capacity"] not in ("", None), "capacity column empty with impact on"
+        assert float(rows[0]["capacity"]) > 0
+
+        # Default format (json) must not emit the csv artifact.
+        json_out = os.path.join(tmpdir, "json_out")
+        argv_json = base_argv + ["--output", json_out]
+        with patch.object(sys, "argv", argv_json), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = run_backtest_main()
+        assert rc == 0
+        assert os.path.exists(os.path.join(json_out, "tear_sheet_summary.json"))
+        assert not os.path.exists(os.path.join(json_out, "backtest_summary.csv")), (
+            "default json format must not emit backtest_summary.csv"
+        )
+
+
 TEST_REGISTRY = [
     ("test_signals_active_detects_flat_and_active_series", test_signals_active_detects_flat_and_active_series),
     ("test_run_backtest_flat_strategy_raises", test_run_backtest_flat_strategy_raises),
@@ -4513,6 +4576,7 @@ TEST_REGISTRY = [
     ("test_run_backtest_regime_impact_unmapped_falls_back_to_base", test_run_backtest_regime_impact_unmapped_falls_back_to_base),
     ("test_run_backtest_book_pricing_max_impact_cap_binds_changes_outcome", test_run_backtest_book_pricing_max_impact_cap_binds_changes_outcome),
     ("test_run_backtest_book_pricing_max_impact_non_binding_preserves_uncapped", test_run_backtest_book_pricing_max_impact_non_binding_preserves_uncapped),
+    ("test_cli_run_backtest_output_format_csv_writes_capacity_rows", test_cli_run_backtest_output_format_csv_writes_capacity_rows),
 ]
 
 if __name__ == "__main__":

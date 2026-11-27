@@ -92,6 +92,7 @@ def parse_args():
     parser.add_argument("--short-exposure", type=float, default=0.0, help="Short notional as a fraction of portfolio notional (default 0.0). Drives the borrow-cost leg of the capacity cost drag via short_exposure * borrow_cost; a value above 0.0 lowers cost-aware capacity for short strategies. Only affects the capacity estimate, not backtest returns.")
     parser.add_argument("--initial-capital", type=float, default=100000, help="Initial capital")
     parser.add_argument("--output", type=str, default="results", help="Output directory")
+    parser.add_argument("--output-format", type=str, default="json", choices=["json", "csv"], help="Artifact format. 'json' (default) writes the JSON tear-sheet summary only. 'csv' additionally emits backtest_summary.csv with flattened per-period capacity/cost rows alongside the JSON, mirroring the walk-forward CLI.")
     parser.add_argument("--params", type=str, help="Strategy parameters as JSON string")
     parser.add_argument("--n-trials", type=int, default=None, help="Number of development trials (parameter configurations) tested; when set, report the Deflated Sharpe Ratio (multiple-testing correction) for the final Sharpe")
     parser.add_argument("--risk-free-rate", type=float, default=None, help="Annual risk-free rate (as decimal, e.g., 0.02 for 2%%)")
@@ -1805,6 +1806,41 @@ def main():
         with open(surv_path, "w") as f:
             json.dump(survivorship, f, indent=2, default=str)
         print(f"Survivorship bias report saved to: {surv_path}")
+
+    # Optionally emit a flattened capacity/cost CSV so the cost-aware capacity
+    # breakdown (point-in-time capacity plus the per-window trend distribution)
+    # is directly consumable by spreadsheet/analysis tools alongside the JSON
+    # tear-sheet summary. Mirrors the walk-forward CLI's --output-format csv:
+    # the JSON artifact is always written; csv mode adds backtest_summary.csv.
+    # A single backtest has one capacity reading (the last bar's ADV), so this
+    # is a single flattened row keyed on the run's symbol/strategy rather than
+    # the per-period rows the walk-forward path emits.
+    if getattr(args, "output_format", "json") == "csv":
+        _cap = results.get("capacity")
+        _trend = results.get("capacity_trend") or {}
+        _summary_row = {
+            "symbol": args.symbol,
+            "strategy": args.strategy,
+            "capacity": _cap,
+            "impact_coefficient": args.impact_coefficient,
+            "borrow_cost": args.borrow_cost,
+            "funding_cost": args.funding_cost,
+            "leverage": getattr(args, "leverage", 1.0),
+            "short_exposure": getattr(args, "short_exposure", 0.0),
+            "max_participation_rate": getattr(args, "max_participation_rate", None),
+            "capacity_book": results.get("capacity_book"),
+            "capacity_notional_weighted": results.get("capacity_notional_weighted"),
+            "trend_n_periods": _trend.get("n_periods"),
+            "trend_min_capacity": _trend.get("min_capacity"),
+            "trend_median_capacity": _trend.get("median_capacity"),
+            "trend_max_capacity": _trend.get("max_capacity"),
+            "trend_last_capacity": _trend.get("last_capacity"),
+            "trend_min_to_median_ratio": _trend.get("min_to_median_ratio"),
+            "trend_last_to_median_ratio": _trend.get("last_to_median_ratio"),
+        }
+        csv_path = output_dir / "backtest_summary.csv"
+        pd.DataFrame([_summary_row]).to_csv(csv_path, index=False)
+        print(f"Backtest capacity CSV saved to: {csv_path}")
 
     print(f"Backtest complete! Results saved to {args.output}/")
     return 0
