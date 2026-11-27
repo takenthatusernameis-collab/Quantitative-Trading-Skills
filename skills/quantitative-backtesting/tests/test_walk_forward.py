@@ -4033,6 +4033,67 @@ def test_cli_walk_forward_output_format_csv_writes_capacity_rows():
         assert os.path.exists(os.path.join(out_dir_json, "walk_forward_summary.json"))
 
 
+def test_cli_cpcv_output_format_csv_writes_capacity_rows():
+    """CLI cpcv with --output-format csv emits cpcv_summary.csv with flattened
+    per-fold capacity columns alongside the JSON, while the default json format
+    writes only the JSON artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        base_argv = [
+            "walk_forward", "cpcv",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--n-splits", "4",
+            "--test-size", "0.2",
+            "--impact-coefficient", "0.5",
+        ]
+
+        csv_out = os.path.join(tmpdir, "csv_out")
+        argv_csv = base_argv + ["--output", csv_out, "--output-format", "csv"]
+        with patch.object(sys, "argv", argv_csv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, "CLI cpcv --output-format csv should exit 0"
+        csv_artifact = os.path.join(csv_out, "cpcv_summary.csv")
+        assert os.path.exists(csv_artifact), "cpcv_summary.csv not written"
+        assert os.path.exists(os.path.join(csv_out, "cpcv_summary.json")), (
+            "cpcv_summary.json still written when --output-format csv"
+        )
+
+        frame = pd.read_csv(csv_artifact)
+        expected = [
+            "fold", "test_start", "test_end",
+            "impact_capacity", "participation_capacity",
+            "cost_adjusted_capacity", "cost_drag", "holding_period_years",
+        ]
+        assert list(frame.columns) == expected, (
+            f"unexpected CSV columns: {list(frame.columns)}"
+        )
+        assert len(frame) > 0, "cpcv_summary.csv should contain per-fold rows"
+        assert frame["cost_adjusted_capacity"].notna().all(), (
+            "cost_adjusted_capacity must be present on every fold row"
+        )
+        assert (frame["cost_adjusted_capacity"] > 0).all(), (
+            f"cost_adjusted_capacity must be positive: "
+            f"{frame['cost_adjusted_capacity'].tolist()}"
+        )
+
+        # Default (json) mode must not write a CSV and must write the JSON artifact.
+        json_out = os.path.join(tmpdir, "json_out")
+        argv_json = base_argv + ["--output", json_out]
+        with patch.object(sys, "argv", argv_json), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0
+        assert os.path.exists(os.path.join(json_out, "cpcv_summary.json"))
+        assert not os.path.exists(os.path.join(json_out, "cpcv_summary.csv")), (
+            "default json format must not emit cpcv_summary.csv"
+        )
+
+
 def test_cli_walk_forward_borrow_sweep():
     """CLI walk-forward --borrow-costs writes a sweep artifact whose OOS
     returns degrade as the short-position borrow cost rises (MACD goes short)."""
@@ -7900,6 +7961,7 @@ TEST_REGISTRY.extend([
     ("test_out_of_sample_validation_participation_rate_caps_splits_and_summary", test_out_of_sample_validation_participation_rate_caps_splits_and_summary),
     ("test_cli_walk_forward_participation_rate_cap_written_to_summary", test_cli_walk_forward_participation_rate_cap_written_to_summary),
     ("test_cli_walk_forward_output_format_csv_writes_capacity_rows", test_cli_walk_forward_output_format_csv_writes_capacity_rows),
+    ("test_cli_cpcv_output_format_csv_writes_capacity_rows", test_cli_cpcv_output_format_csv_writes_capacity_rows),
     ("test_cli_rejects_invalid_participation_rate_in_every_subcommand", test_cli_rejects_invalid_participation_rate_in_every_subcommand),
 ])
 TEST_REGISTRY.extend([

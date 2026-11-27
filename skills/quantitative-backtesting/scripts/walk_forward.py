@@ -4934,6 +4934,24 @@ def cpcv_analysis(
             max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost,
         )
         fold["capacity"] = _fold_capacity.get("estimated_capacity")
+        # Full cost breakdown for the fold, mirroring the per-period capacity
+        # dict ``walk_forward_analysis`` records (impact vs participation vs
+        # cost-adjusted capacity, plus the cost drag and holding period). This
+        # is additive to the scalar ``capacity`` above so existing consumers of
+        # that field are unaffected; the CLI csv path reads this dict to emit a
+        # per-fold cost breakdown. None when impact is disabled or ADV is not
+        # estimable.
+        _fold_cap = _fold_capacity.get("cost_adjusted_capacity")
+        fold["capacity_detail"] = (
+            {
+                "impact_capacity": _fold_capacity.get("impact_capacity"),
+                "participation_capacity": _fold_capacity.get("participation_capacity"),
+                "cost_adjusted_capacity": _fold_capacity.get("cost_adjusted_capacity"),
+                "cost_drag": _fold_capacity.get("cost_drag"),
+                "holding_period_years": _fold_capacity.get("holding_period_years"),
+            }
+            if _fold_cap is not None else None
+        )
         # Capacity trend for the fold's test window (mirrors the per-period
         # trend that `walk_forward_analysis` records). None when impact is
         # disabled or ADV is not estimable.
@@ -9042,6 +9060,7 @@ def run_cpcv(args) -> int:
                 "test_start": f.get("test_start"),
                 "test_end": f.get("test_end"),
                 "capacity": f.get("capacity"),
+                "capacity_detail": f.get("capacity_detail"),
                 "capacity_trend": f.get("capacity_trend"),
                 # Book-based capacity for the fold (book pricing mode only):
                 # the capacity implied by the strategy's own trade sizes.
@@ -9109,6 +9128,30 @@ def run_cpcv(args) -> int:
     with open(summary_path, "w") as f:
         json.dump(summary_data, f, indent=2, default=str)
     print(f"CPCV summary saved to: {summary_path}")
+
+    # Optionally emit a flattened per-fold capacity CSV so the cost-aware
+    # capacity breakdown (impact vs participation vs cost drag) is directly
+    # consumable by spreadsheet/analysis tools alongside the JSON artifact.
+    # Mirrors the walk-forward csv block, keyed by fold instead of period.
+    if getattr(args, "output_format", "json") == "csv":
+        capacity_rows = []
+        for entry in summary_data.get("capacity_per_fold", []):
+            cap = entry.get("capacity_detail") or {}
+            capacity_rows.append(
+                {
+                    "fold": entry.get("fold"),
+                    "test_start": entry.get("test_start"),
+                    "test_end": entry.get("test_end"),
+                    "impact_capacity": cap.get("impact_capacity"),
+                    "participation_capacity": cap.get("participation_capacity"),
+                    "cost_adjusted_capacity": cap.get("cost_adjusted_capacity"),
+                    "cost_drag": cap.get("cost_drag"),
+                    "holding_period_years": cap.get("holding_period_years"),
+                }
+            )
+        csv_path = output_dir / "cpcv_summary.csv"
+        pd.DataFrame(capacity_rows).to_csv(csv_path, index=False)
+        print(f"CPCV capacity CSV saved to: {csv_path}")
 
     # Generate full report if OOS returns available
     if len(results["oos_returns"]) > 0:
