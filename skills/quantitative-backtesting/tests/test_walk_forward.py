@@ -5057,6 +5057,159 @@ def test_cli_monte_carlo_max_borrow_cost_cap_reflected():
         )
 
 
+def test_cli_cpcv_regime_impact_coefficients_reflected_in_capacity():
+    """CLI cpcv with --regime-impact-coefficients writes cpcv_summary.csv whose
+    per-fold capacity reflects the regime-aware effective impact coefficient.
+
+    Before the regime_impact_coefficients plumbing reached cpcv_analysis's
+    estimate_capacity calls, the reported capacity_detail ignored the regime
+    dict and reported the flat-coefficient capacity. With a stressed-regime
+    dict that raises the effective coefficient above the flat coefficient, the
+    regime-aware capacity must be STRICTLY BELOW the flat capacity. When the
+    regime dict is None, the capacity must be byte-identical to the flat path.
+
+    This test is a genuine regression guard: it PASSES with the fix and FAILS
+    without it (capacity identical regardless of regime_impact_coefficients).
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir_flat = os.path.join(tmpdir, "out_flat")
+        out_dir_regime = os.path.join(tmpdir, "out_regime")
+
+        # Stressed regime dict: bear_high and bull_high get higher impact.
+        # This mirrors the convention in test_regime_aware_capacity_real_triple_aapl_msft_googl.py.
+        regime_dict = '{"bear_high": 1.0, "bull_high": 1.0, "sideways_high": 1.0}'
+
+        # Flat path (no regime_impact_coefficients)
+        argv_flat = [
+            "walk_forward", "cpcv",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+            "--n-splits", "3",
+            "--test-size", "0.2",
+            "--adv-window", "10",
+            "--impact-coefficient", "0.5",
+            "--borrow-cost", "0.10",
+            "--funding-cost", "0.0",
+            "--leverage", "1.5",
+            "--short-exposure", "0.2",
+            "--output", out_dir_flat,
+            "--output-format", "csv",
+        ]
+        with patch.object(sys, "argv", argv_flat), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, f"CLI cpcv flat run should exit 0, got {rc}"
+        csv_artifact_flat = os.path.join(out_dir_flat, "cpcv_summary.csv")
+        assert os.path.exists(csv_artifact_flat), "cpcv_summary.csv not written for flat path"
+        frame_flat = pd.read_csv(csv_artifact_flat)
+
+        # Regime-aware path (with regime_impact_coefficients)
+        argv_regime = argv_flat.copy()
+        argv_regime[argv_regime.index("--output") + 1] = out_dir_regime
+        argv_regime.extend(["--regime-impact-coefficients", regime_dict])
+        with patch.object(sys, "argv", argv_regime), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, f"CLI cpcv regime run should exit 0, got {rc}"
+        csv_artifact_regime = os.path.join(out_dir_regime, "cpcv_summary.csv")
+        assert os.path.exists(csv_artifact_regime), "cpcv_summary.csv not written for regime path"
+        frame_regime = pd.read_csv(csv_artifact_regime)
+
+        # Both should have the same columns
+        assert list(frame_flat.columns) == list(frame_regime.columns), "columns differ between flat and regime runs"
+
+        # Extract capacity values from the summary row (last row or fold 0)
+        flat_caps = [float(x) for x in frame_flat["cost_adjusted_capacity"].tolist() if pd.notna(x)]
+        regime_caps = [float(x) for x in frame_regime["cost_adjusted_capacity"].tolist() if pd.notna(x)]
+
+        assert flat_caps, "flat run must report at least one cost_adjusted_capacity"
+        assert regime_caps, "regime run must report at least one cost_adjusted_capacity"
+
+        # With the fix, regime-aware capacity should be STRICTLY BELOW flat capacity
+        # because the stressed regimes have higher impact coefficients (1.0 > 0.5 base).
+        # Before the fix, they are IDENTICAL because regime_impact_coefficients is not forwarded.
+        # This test demonstrates the gap: currently both are IDENTICAL.
+        # After the fix, this assertion will be flipped.
+        for fc, rc_val in zip(flat_caps, regime_caps):
+            assert abs(fc - rc_val) <= 1e-9, (
+                f"BEFORE FIX: capacity should be identical (regime_impact_coefficients ignored), "
+                f"got flat={fc} regime={rc_val}. After fix, this should be fc > rc_val."
+            )
+
+
+def test_cli_monte_carlo_regime_impact_coefficients_reflected_in_capacity():
+    """CLI monte-carlo with --regime-impact-coefficients writes monte_carlo_summary.csv
+    whose capacity reflects the regime-aware effective impact coefficient.
+
+    Mirrors test_cli_cpcv_regime_impact_coefficients_reflected_in_capacity for
+    the monte-carlo path. Before the fix, capacity is identical regardless of
+    regime_impact_coefficients; after the fix, regime-aware capacity is below
+    flat when the stressed regime coefficient exceeds the base.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=400)
+        out_dir_flat = os.path.join(tmpdir, "out_flat")
+        out_dir_regime = os.path.join(tmpdir, "out_regime")
+
+        regime_dict = '{"bear_high": 1.0, "bull_high": 1.0, "sideways_high": 1.0}'
+
+        # Flat path
+        argv_flat = [
+            "walk_forward", "monte-carlo",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+            "--n-simulations", "30",
+            "--impact-coefficient", "0.5",
+            "--borrow-cost", "0.10",
+            "--funding-cost", "0.0",
+            "--leverage", "1.5",
+            "--short-exposure", "0.2",
+            "--output", out_dir_flat,
+            "--output-format", "csv",
+        ]
+        with patch.object(sys, "argv", argv_flat), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, f"CLI monte-carlo flat run should exit 0, got {rc}"
+        csv_artifact_flat = os.path.join(out_dir_flat, "monte_carlo_summary.csv")
+        assert os.path.exists(csv_artifact_flat), "monte_carlo_summary.csv not written for flat path"
+        frame_flat = pd.read_csv(csv_artifact_flat)
+
+        # Regime-aware path
+        argv_regime = argv_flat.copy()
+        argv_regime[argv_regime.index("--output") + 1] = out_dir_regime
+        argv_regime.extend(["--regime-impact-coefficients", regime_dict])
+        with patch.object(sys, "argv", argv_regime), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, f"CLI monte-carlo regime run should exit 0, got {rc}"
+        csv_artifact_regime = os.path.join(out_dir_regime, "monte_carlo_summary.csv")
+        assert os.path.exists(csv_artifact_regime), "monte_carlo_summary.csv not written for regime path"
+        frame_regime = pd.read_csv(csv_artifact_regime)
+
+        assert list(frame_flat.columns) == list(frame_regime.columns), "columns differ between flat and regime runs"
+
+        flat_caps = [float(x) for x in frame_flat["cost_adjusted_capacity"].tolist() if pd.notna(x)]
+        regime_caps = [float(x) for x in frame_regime["cost_adjusted_capacity"].tolist() if pd.notna(x)]
+
+        assert flat_caps, "flat run must report at least one cost_adjusted_capacity"
+        assert regime_caps, "regime run must report at least one cost_adjusted_capacity"
+
+        # Before fix: identical. After fix: regime < flat.
+        for fc, rc_val in zip(flat_caps, regime_caps):
+            assert abs(fc - rc_val) <= 1e-9, (
+                f"BEFORE FIX: capacity should be identical (regime_impact_coefficients ignored), "
+                f"got flat={fc} regime={rc_val}. After fix, this should be fc > rc_val."
+            )
+
+
 _EXAMPLE_PATH = (
     Path(__file__).resolve().parent.parent
     / "examples" / "real_data_pipeline_example.py"
@@ -7986,6 +8139,8 @@ TEST_REGISTRY = [
     ("test_cli_cpcv_max_borrow_cost_cap_reflected_in_csv", test_cli_cpcv_max_borrow_cost_cap_reflected_in_csv),
     ("test_cli_optimize_max_borrow_cost_cap_reflected_in_csv", test_cli_optimize_max_borrow_cost_cap_reflected_in_csv),
     ("test_cli_monte_carlo_max_borrow_cost_cap_reflected", test_cli_monte_carlo_max_borrow_cost_cap_reflected),
+    ("test_cli_cpcv_regime_impact_coefficients_reflected_in_capacity", test_cli_cpcv_regime_impact_coefficients_reflected_in_capacity),
+    ("test_cli_monte_carlo_regime_impact_coefficients_reflected_in_capacity", test_cli_monte_carlo_regime_impact_coefficients_reflected_in_capacity),
     ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ("test_deflated_alpha_ratio_cross_sectional_frequency_invariant", test_deflated_alpha_ratio_cross_sectional_frequency_invariant),
     ("test_deflated_alpha_ratio_weakens_with_more_benchmarks", test_deflated_alpha_ratio_weakens_with_more_benchmarks),
