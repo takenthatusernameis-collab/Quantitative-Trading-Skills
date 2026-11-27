@@ -4993,6 +4993,70 @@ def test_cli_optimize_max_borrow_cost_cap_reflected_in_csv():
         )
 
 
+def test_cli_monte_carlo_max_borrow_cost_cap_reflected():
+    """CLI monte-carlo with MACD (short exposure) + --borrow-cost and a binding
+    --max-borrow-cost writes monte_carlo_summary.csv whose cost_drag is capped at
+    the limit, not the uncapped short_exposure * borrow_cost.
+
+    Before the cap plumbing reached run_monte_carlo's single-run
+    estimate_capacity call, the reported capacity_detail ignored
+    --max-borrow-cost and reported the uncapped 0.02. With borrow_cost=0.10 and
+    short_exposure=0.2 the uncapped borrow leg is 0.02; --max-borrow-cost 0.01
+    binds, so cost_drag must equal 0.01 and cost_adjusted_capacity must equal
+    impact_capacity / (1 + cost_drag * holding_period_years).
+
+    cost_drag is a capacity measurement only: it must not change returns.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "monte-carlo",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+            "--n-simulations", "50",
+            "--impact-coefficient", "0.5",
+            "--borrow-cost", "0.10",
+            "--funding-cost", "0.0",
+            "--leverage", "1.5",
+            "--short-exposure", "0.2",
+            "--max-borrow-cost", "0.01",
+            "--output", out_dir,
+            "--output-format", "csv",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, f"CLI monte-carlo max-borrow-cost run should exit 0, got {rc}"
+        csv_artifact = os.path.join(out_dir, "monte_carlo_summary.csv")
+        assert os.path.exists(csv_artifact), "monte_carlo_summary.csv not written"
+        frame = pd.read_csv(csv_artifact)
+        expected = [
+            "sharpe_ratio", "total_return",
+            "impact_capacity", "participation_capacity",
+            "cost_adjusted_capacity", "cost_drag", "holding_period_years",
+        ]
+        assert list(frame.columns) == expected, f"unexpected CSV columns: {list(frame.columns)}"
+        assert len(frame) == 1, "monte_carlo_summary.csv should contain exactly one row"
+        row = frame.iloc[0]
+        cost_drag = float(row["cost_drag"])
+        # The cap binds: 0.01, not the uncapped 0.02.
+        assert abs(cost_drag - 0.01) <= 1e-9, (
+            f"cost_drag must be capped at max_borrow_cost=0.01, got {cost_drag}"
+        )
+        holding_period_years = float(row["holding_period_years"])
+        impact_capacity = float(row["impact_capacity"])
+        assert impact_capacity > 0.0
+        expected_capacity = impact_capacity / (1.0 + cost_drag * holding_period_years)
+        assert abs(float(row["cost_adjusted_capacity"]) - expected_capacity) <= 1e-6 * max(expected_capacity, 1.0), (
+            f"cost_adjusted_capacity must reflect the capped drag: "
+            f"got {row['cost_adjusted_capacity']}, expected {expected_capacity}"
+        )
+
+
 _EXAMPLE_PATH = (
     Path(__file__).resolve().parent.parent
     / "examples" / "real_data_pipeline_example.py"
@@ -7921,6 +7985,7 @@ TEST_REGISTRY = [
     ("test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply", test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply),
     ("test_cli_cpcv_max_borrow_cost_cap_reflected_in_csv", test_cli_cpcv_max_borrow_cost_cap_reflected_in_csv),
     ("test_cli_optimize_max_borrow_cost_cap_reflected_in_csv", test_cli_optimize_max_borrow_cost_cap_reflected_in_csv),
+    ("test_cli_monte_carlo_max_borrow_cost_cap_reflected", test_cli_monte_carlo_max_borrow_cost_cap_reflected),
     ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ("test_deflated_alpha_ratio_cross_sectional_frequency_invariant", test_deflated_alpha_ratio_cross_sectional_frequency_invariant),
     ("test_deflated_alpha_ratio_weakens_with_more_benchmarks", test_deflated_alpha_ratio_weakens_with_more_benchmarks),

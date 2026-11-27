@@ -11886,6 +11886,8 @@ def run_monte_carlo(args) -> int:
             borrow_cost=args.borrow_cost, funding_cost=args.funding_cost,
             leverage=getattr(args, "leverage", 1.0),
             short_exposure=getattr(args, "short_exposure", 0.0),
+            max_borrow_cost=getattr(args, "max_borrow_cost", None),
+            max_funding_cost=getattr(args, "max_funding_cost", None),
         )
         mc_results["summary"]["capacity"] = _capacity.get("estimated_capacity")
         mc_results["summary"]["capacity_trend"] = _capacity.get("capacity_trend")
