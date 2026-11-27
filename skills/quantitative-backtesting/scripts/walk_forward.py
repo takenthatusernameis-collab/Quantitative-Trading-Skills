@@ -12492,6 +12492,8 @@ def run_out_of_sample_validation(args) -> int:
             "test_volatility": results["test_performance"]["test_volatility"],
             "test_n_observations": results["test_performance"]["test_n_observations"],
             "capacity": results["test_performance"].get("capacity"),
+            "capacity_trend": results["test_performance"].get("capacity_trend"),
+            "capacity_detail": results["test_performance"].get("capacity_detail"),
             # Panel book diagnostic for the held-out test window: the
             # per-asset book against the framework's net-exposure pricing
             # (measurement only).

@@ -39,6 +39,6 @@
 - The `leverage`/`short_exposure` CLI args are not passed to `walk_forward_analysis()` / `cpcv_analysis()` — they only reach `estimate_capacity()`. This is a pre-existing limitation.
 
 ## Next precise task
-**Fix the out-of-sample CSV bug** (line 12572 in walk_forward.py) to use `capacity_detail` dict like the other subcommands, then verify with a test. After that, the `--output-format csv` plumbing will be fully consistent across all five CLI subcommands.
+**Verify out-of-sample CSV end-to-end** (run `run_out_of_sample_validation` with `--output-format csv` on committed real fixtures and confirm `out_of_sample_summary.csv` has non-null capacity fields), then exercise `--max-borrow-cost` / `--max-funding-cost` caps with a strategy that has actual borrow/funding exposure. Evidence: capacity_detail now stored in summary_data (line 12494). (line 12572 in walk_forward.py) to use `capacity_detail` dict like the other subcommands, then verify with a test. After that, the `--output-format csv` plumbing will be fully consistent across all five CLI subcommands.
 
 Evidence: `results_oos_aapl/out_of_sample_summary.json` shows `test_performance.capacity` as float `11614740.393886566` but CSV code expects a dict with `.get()`. Constraint: minimal fix, match pattern used in `run_monte_carlo` (line 11906) and `run_parameter_optimization` (line 10969).
