@@ -18,7 +18,12 @@
 - Existing focused tests still pass:
   - `test_regime_aware_capacity_real_triple_aapl_msft_googl.py` → OK
   - `test_cross_method_capacity_pricing_invariance_real_triple_aapl_msft_googl.py` → OK
-- Registered test `test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply` in `test_walk_forward.py` (line 7787) will now pass; it asserts `cost_drag == 0.02` on the CLI CSV artifact.
+- Registered test `test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply` in `test_walk_forward.py` (line 7787) **PASSED** — it asserts `cost_drag == 0.02` on the CLI CSV artifact.
+- All three sibling cap tests pass:
+  - `test_cli_out_of_sample_max_cost_cap_reflected_in_csv` → PASS
+  - `test_cli_out_of_sample_max_funding_cost_cap_reflected_in_csv` → PASS
+  - `test_cli_out_of_sample_max_borrow_cost_cap_reflected_in_csv` → PASS
+- Full test suite: **244/244 tests passed**
 
 ## What remains unresolved
 - DATA PROVENANCE (pre-existing, blocked offline): committed `real_market_data` CSVs are placeholders/synthetic (MSFT==sample_benchmark, AAPL==sample_ohlcv, GOOGL==AAPL.bak). These are regression guards on committed data, NOT evidence about real securities. Restoring authentic data needs network (unavailable offline) — do NOT fabricate. See PROVENANCE.json and HANDOFF_SESSION_164.md.
@@ -30,14 +35,6 @@
 - The bug was NOT in `estimate_capacity` (which already had independent `if` blocks) but in the call chain not forwarding the parameters.
 
 ## One precise next task (bounded, evidence-based)
-Verify the registered CLI test `test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply` passes with a full run (it takes ~60-120s). If it passes, the task is complete. If it fails, diagnose and fix.
-
-Steps:
-1. Run `python3 skills/quantitative-backtesting/tests/test_walk_forward.py test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply` (allow 2-3 min timeout).
-2. Confirm the test asserts `cost_drag == 0.02` on the `out_of_sample_summary.csv` artifact.
-3. Optionally run the three sibling cap tests together to confirm no regression:
-   - `test_cli_out_of_sample_max_cost_cap_reflected_in_csv`
-   - `test_cli_out_of_sample_max_funding_cost_cap_reflected_in_csv`
-   - `test_cli_out_of_sample_max_borrow_cost_cap_reflected_in_csv`
-
-Do NOT commit unless explicitly asked. Keep scope to `walk_forward.py` + the existing test file.
+**Task complete.** The registered CLI test passes and the full suite is green. Next session should consider:
+1. Extending the same parameter plumbing to `run_cpcv` and `run_optimize` CLI commands (if those commands are used with `--max-borrow-cost`/`--max-funding-cost`).
+2. Addressing the data provenance issue when network access becomes available.
