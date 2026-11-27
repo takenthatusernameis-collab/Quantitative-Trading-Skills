@@ -706,6 +706,38 @@ one holding period, but it does not change any backtest return, P&L, or
 Sharpe number (those paths already charge borrow/funding costs dynamically
 from the actual position series).
 
+#### Per-leg drag caps (optional)
+
+The raw `cost_drag` above can be dominated by a single expensive leg (e.g. a
+high borrow rate on a large short book). Two opt-in caps bound each leg's
+contribution to the drag independently, so an implausibly large carry cost
+does not silently collapse the reported capacity:
+
+```
+effective_borrow_drag  = min(short_exposure * borrow_cost,  max_borrow_cost)   if max_borrow_cost  is set and the leg is positive
+effective_funding_drag = min((leverage - 1) * funding_cost, max_funding_cost)  if max_funding_cost is set and the leg is positive
+cost_drag              = effective_borrow_drag + effective_funding_drag
+denominator            = 1 + cost_drag * holding_period_years
+```
+
+The two caps are applied **independently** (each leg is clamped on its own),
+so when both `--max-borrow-cost` and `--max-funding-cost` are set and both
+legs are positive, both bind and `cost_drag` is the sum of the two capped
+legs. Each cap only ever *lowers* its leg: a leg at or below its cap is
+unchanged, and an unset cap leaves that leg untouched. Default (both caps
+unset) leaves `cost_drag` and capacity **bitwise unchanged** from the
+uncapped number.
+
+`walk_forward.py` (all subcommands) exposes
+`--max-borrow-cost` / `--max-funding-cost` for a single limit, plus
+`--max-borrow-costs` / `--max-funding-costs` (one or more values) to sweep the
+cap on the `walk-forward`, `optimize`, `cpcv`, and `monte-carlo` paths; the
+sweep form overrides the single-value form when both are given. Non-positive
+or non-finite cap values raise `ValueError`. As with the uncapped drag, the
+cap is a capacity measurement only and never changes backtest returns. The
+single-backtest `run_backtest.py` path computes capacity without these caps
+(it does not expose them), so its capacity always reflects the uncapped drag.
+
 ### Capacity per regime (fold / period / window)
 
 The aggregate `summary["capacity"]` is computed on the whole sample, so it
