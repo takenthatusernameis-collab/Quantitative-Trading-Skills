@@ -8142,6 +8142,54 @@ def test_estimate_capacity_cost_drag_also_scales_trend():
         assert abs(lev["capacity_trend"][key] - base["capacity_trend"][key] / denominator) < 1e-6
 
 
+def test_estimate_capacity_both_borrow_and_funding_caps_apply_independently():
+    """When both max_borrow_cost and max_funding_cost bind, each leg is capped
+    independently (min per leg), so cost_drag == max_borrow_cost + max_funding_cost
+    and estimated_capacity == impact_capacity / (1 + cost_drag * holding_period_years).
+
+    The former if/elif wiring applied only the borrow cap and silently ignored
+    the funding cap (cost_drag == max_borrow_cost + uncapped funding drag).
+    Independent if blocks apply both caps.
+    """
+    data = _make_ohlcv_data(periods=300, seed=42)
+    # Borrow leg: short_exposure * borrow_cost = 0.2 * 0.10 = 0.02 > max 0.01 -> binds.
+    # Funding leg: (leverage - 1) * funding_cost = 0.5 * 0.10 = 0.05 > max 0.01 -> binds.
+    result = estimate_capacity(
+        data,
+        impact_coefficient=0.5,
+        leverage=1.5,
+        funding_cost=0.10,
+        short_exposure=0.2,
+        borrow_cost=0.10,
+        max_borrow_cost=0.01,
+        max_funding_cost=0.01,
+    )
+    assert result["estimable"] is True
+    # Both caps bind independently: 0.01 + 0.01 == 0.02.
+    assert abs(result["cost_drag"] - 0.02) < 1e-12, (
+        f"both caps must bind independently: cost_drag={result['cost_drag']}"
+    )
+    holding_period_years = result["holding_period_years"]
+    expected = result["impact_capacity"] / (1.0 + 0.02 * holding_period_years)
+    assert abs(result["estimated_capacity"] - expected) < 1e-6 * max(expected, 1.0), (
+        f"estimated_capacity must reflect the capped drag: "
+        f"got {result['estimated_capacity']}, expected {expected}"
+    )
+    # Uncapped: borrow 0.02 + funding 0.05 = 0.07, so capped drag is strictly
+    # lower and capped capacity strictly higher than the uncapped run.
+    uncapped = estimate_capacity(
+        data,
+        impact_coefficient=0.5,
+        leverage=1.5,
+        funding_cost=0.10,
+        short_exposure=0.2,
+        borrow_cost=0.10,
+    )
+    assert uncapped["cost_drag"] == 0.07
+    assert result["cost_drag"] < uncapped["cost_drag"]
+    assert result["estimated_capacity"] > uncapped["estimated_capacity"]
+
+
 TEST_REGISTRY.extend([
     ("test_examples_coverage_deflated_alpha_imports", test_examples_coverage_deflated_alpha_imports),
     ("test_examples_coverage_deflated_alpha_runs", test_examples_coverage_deflated_alpha_runs),
@@ -8169,6 +8217,7 @@ TEST_REGISTRY.extend([
     ("test_estimate_capacity_zero_cost_drag_is_identical", test_estimate_capacity_zero_cost_drag_is_identical),
     ("test_estimate_capacity_cost_drag_rejects_invalid", test_estimate_capacity_cost_drag_rejects_invalid),
     ("test_estimate_capacity_cost_drag_also_scales_trend", test_estimate_capacity_cost_drag_also_scales_trend),
+    ("test_estimate_capacity_both_borrow_and_funding_caps_apply_independently", test_estimate_capacity_both_borrow_and_funding_caps_apply_independently),
     ("test_verify_split_separation_non_chronological_disjoint_raises", test_verify_split_separation_non_chronological_disjoint_raises),
     ("test_walk_forward_analysis_validate_pit_passes_on_clean_data", test_walk_forward_analysis_validate_pit_passes_on_clean_data),
 ])
