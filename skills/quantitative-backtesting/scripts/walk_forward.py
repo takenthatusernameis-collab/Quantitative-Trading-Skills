@@ -3962,35 +3962,16 @@ def estimate_capacity(
     cost_drag = borrow_cost_drag + funding_cost_drag
     result["cost_drag"] = float(cost_drag)
 
-    # Apply max-borrow-cost cap: if borrow cost drag exceeds the limit,
-    # reduce capacity proportionally so effective borrow drag == max_borrow_cost
-    if max_borrow_cost is not None and borrow_cost_drag > 0:
-        if borrow_cost_drag > float(max_borrow_cost):
-            # Additional denominator factor to bring borrow drag down to the limit
-            borrow_cap_factor = borrow_cost_drag / float(max_borrow_cost)
-            cost_drag = funding_cost_drag + float(max_borrow_cost)
-            _drag_denominator = 1.0 + cost_drag * holding_period_years
-        else:
-            _drag_denominator = 1.0 + cost_drag * holding_period_years
-    # Apply max-funding-cost cap: if funding cost drag exceeds the limit,
-    # reduce capacity proportionally so effective funding drag == max_funding_cost
-    elif max_funding_cost is not None and funding_cost_drag > 0:
-        if funding_cost_drag > float(max_funding_cost):
-            funding_cap_factor = funding_cost_drag / float(max_funding_cost)
-            cost_drag = borrow_cost_drag + float(max_funding_cost)
-            _drag_denominator = 1.0 + cost_drag * holding_period_years
-        else:
-            _drag_denominator = 1.0 + cost_drag * holding_period_years
-    else:
-        _drag_denominator = 1.0 + cost_drag * holding_period_years
+    effective_borrow_drag = borrow_cost_drag
+    effective_funding_drag = funding_cost_drag
 
-    # Report the effective (post-cap) cost drag, i.e. the value actually
-    # applied to the capacity denominator above. Without a binding cap this
-    # equals the uncapped drag, so default runs are unchanged; with a binding
-    # --max-borrow-cost / --max-funding-cost it is the capped drag. This keeps
-    # the published fields self-consistent: a reader can reproduce
-    # cost_adjusted_capacity == impact_capacity / (1 + cost_drag * holding_period_years)
-    # from the emitted cost_drag instead of the raw pre-cap exposure.
+    if max_borrow_cost is not None and borrow_cost_drag > 0 and borrow_cost_drag > float(max_borrow_cost):
+        effective_borrow_drag = float(max_borrow_cost)
+    if max_funding_cost is not None and funding_cost_drag > 0 and funding_cost_drag > float(max_funding_cost):
+        effective_funding_drag = float(max_funding_cost)
+
+    cost_drag = effective_borrow_drag + effective_funding_drag
+    _drag_denominator = 1.0 + cost_drag * holding_period_years
     result["cost_drag"] = float(cost_drag)
 
     adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
