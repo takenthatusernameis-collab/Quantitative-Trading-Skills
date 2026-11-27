@@ -1,44 +1,22 @@
-# Handoff — Cross-Method Cost-Aware Capacity Comparison Complete
+# Handoff — Out-of-sample CSV capacity fix complete + regression test added
 
 ## What changed
-- Executed cross-method comparison (Walk-Forward / CPCV / Monte Carlo / Out-of-Sample) on committed real fixtures (AAPL, MSFT, GOOGL) with realistic costs
-- Verified cost-aware capacity numbers are **internally consistent** across all validation methods
-- All four CLI subcommands with `--output-format csv` produce correct capacity CSVs alongside JSON
+- **Underlying fix (already committed, HEAD 99780e6):** `run_out_of_sample_validation()` in `skills/quantitative-backtesting/scripts/walk_forward.py` now populates `test_performance.capacity_detail` (and `capacity_trend`) in `summary_data` so the CSV emission block at walk_forward.py:12575 reads a `capacity_detail` dict instead of a float scalar. The `.get()`-on-a-float crash no longer reproduces; `cap` is a dict.
+- **New regression test:** `test_cli_out_of_sample_output_format_csv_writes_capacity_rows` in `skills/quantitative-backtesting/tests/test_walk_forward.py` (+63 lines), registered in TEST_REGISTRY. Asserts the OOS CLI with `--output-format csv` writes `out_of_sample_summary.csv` with columns `impact_capacity`, `participation_capacity`, `cost_adjusted_capacity`, `cost_drag`, `holding_period_years`, exactly one row, positive `cost_adjusted_capacity`, and that default JSON mode writes no CSV.
+- No engine math modified; no marketplace/catalog/schema changes. Working tree clean except the one test file.
 
 ## What was actually verified
-- **Capacity consistency**: For each symbol, `impact_capacity`, `cost_adjusted_capacity`, and `capacity_trend` are **bitwise identical** across Walk-Forward, CPCV, Monte Carlo, and Out-of-Sample methods
-- **CSV output**: All subcommands (`walk-forward`, `cpcv`, `optimize`, `monte-carlo`) correctly emit capacity CSVs with columns: `impact_capacity`, `participation_capacity`, `cost_adjusted_capacity`, `cost_drag`, `holding_period_years`
-- **Default JSON mode**: No CSV emitted when `--output-format` not specified
-- **`--max-participation-rate`**: Correctly populates `participation_capacity` in CSV when set; `cost_adjusted_capacity` reflects binding constraint (impact-based when participation cap not binding)
-- **Test suite**: All 4 CSV tests + 73 reporting tests pass
-
-## Capacity Comparison Results
-
-| Symbol | Method | impact_capacity | cost_adjusted_capacity | capacity_trend (median) | oos_min_capacity |
-|--------|--------|-----------------|------------------------|------------------------|------------------|
-| AAPL | Walk-Forward | 11,614,740 | 11,614,740 | 11,789,353 | 6,054,445 |
-| AAPL | CPCV | 11,614,740 | 11,614,740 | 11,789,353 | 6,880,601 |
-| AAPL | Monte Carlo | 11,614,740 | 11,614,740 | 11,789,353 | N/A |
-| AAPL | Out-of-Sample | 11,614,740 | 11,614,740 | N/A | N/A |
-| MSFT | Walk-Forward | 11,138,745 | 11,138,745 | 8,183,170 | 4,227,815 |
-| MSFT | CPCV | 11,138,745 | 11,138,745 | 8,183,170 | 3,395,301 |
-| MSFT | Monte Carlo | 11,138,745 | 11,138,745 | 8,183,170 | N/A |
-| GOOGL | Walk-Forward | 9,739,519 | 9,739,519 | 4,015,677 | 1,734,701 |
-| GOOGL | CPCV | 9,739,519 | 9,739,519 | 4,015,677 | 1,725,250 |
-| GOOGL | Monte Carlo | 9,739,519 | 9,739,519 | 4,015,677 | N/A |
-
-**Key finding**: Core capacity fields match exactly across methods. Only `oos_min_capacity` differs (expected — each method uses different validation windows).
+- `test_cli_out_of_sample_output_format_csv_writes_capacity_rows` → PASS
+- `test_main_registers_every_module_level_test` (registry integrity) → PASS
+- Existing CSV tests (walk-forward, CPCV, optimize, monte-carlo) → 5/5 PASS (no regression)
+- Manual end-to-end: OOS CLI on committed real AAPL fixture (`skills/quantitative-backtesting/assets/example_data/real_market_data/AAPL.csv`) with `--impact-coefficient 0.0005 --output-format csv` → exit 0 and `out_of_sample_summary.csv` has non-null capacity fields (`impact_capacity`/`cost_adjusted_capacity` = 11,614,740,393.89, `cost_drag` = 0.0, `holding_period_years` = 0.00397).
 
 ## What remains unresolved
-- **Bug in out-of-sample CSV**: Line 12572 in `walk_forward.py` tries `cap.get("impact_capacity")` but `cap` is a float (scalar capacity), not a dict. Should use `capacity_detail` dict like other subcommands.
-- **`cost_drag = 0.0` for all runs**: The sma_crossover strategy is long-only; `--leverage`/`--short-exposure` CLI flags only affect `estimate_capacity()`, not the strategy's actual positions. A leveraged/short strategy would be needed to exercise cost-drag caps.
-- **`--max-borrow-cost` / `--max-funding-cost` caps**: Not exercised end-to-end since cost_drag=0; would require a strategy with actual borrow/funding exposure.
+- `--max-borrow-cost` / `--max-funding-cost` caps not exercised end-to-end (cost_drag = 0.0 for long-only sma_crossover; would require a short/leveraged strategy).
+- `cost_drag = 0.0` for all runs with long-only strategies.
 
 ## Approaches that already failed (do not repeat)
-- Running full test suite takes >5 min; use targeted test runs for verification
-- The `leverage`/`short_exposure` CLI args are not passed to `walk_forward_analysis()` / `cpcv_analysis()` — they only reach `estimate_capacity()`. This is a pre-existing limitation.
+- None for this change: the `.get()`-on-float crash no longer reproduces (`cap` is now a dict). Prior attempt to read `test_performance.capacity` (float) was superseded by reading the `capacity_detail` dict (already in HEAD).
 
 ## Next precise task
-**Verify out-of-sample CSV end-to-end** (run `run_out_of_sample_validation` with `--output-format csv` on committed real fixtures and confirm `out_of_sample_summary.csv` has non-null capacity fields), then exercise `--max-borrow-cost` / `--max-funding-cost` caps with a strategy that has actual borrow/funding exposure. Evidence: capacity_detail now stored in summary_data (line 12494). (line 12572 in walk_forward.py) to use `capacity_detail` dict like the other subcommands, then verify with a test. After that, the `--output-format csv` plumbing will be fully consistent across all five CLI subcommands.
-
-Evidence: `results_oos_aapl/out_of_sample_summary.json` shows `test_performance.capacity` as float `11614740.393886566` but CSV code expects a dict with `.get()`. Constraint: minimal fix, match pattern used in `run_monte_carlo` (line 11906) and `run_parameter_optimization` (line 10969).
+Exercise the `--max-borrow-cost` / `--max-funding-cost` caps end-to-end on the OOS path with a strategy that has actual borrow/funding exposure (e.g., MACD which goes short, using `--borrow-cost`/`--funding-cost` and `--max-borrow-cost`/`--max-funding-cost`), and confirm `cost_drag` > 0 and `cost_adjusted_capacity` reflects the binding cap in `out_of_sample_summary.csv`. Evidence: existing OOS borrow/funding sweep tests at test_walk_forward.py:4416 / :4450 use MACD with `--borrow-costs`/`--funding-costs`; the CSV block reads `capacity_detail.cost_drag`. Constraints: committed fixtures only, no network, minimal change, do not modify engine math.

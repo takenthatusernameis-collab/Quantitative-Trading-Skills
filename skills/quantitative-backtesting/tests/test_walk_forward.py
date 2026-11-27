@@ -4213,6 +4213,68 @@ def test_cli_monte_carlo_output_format_csv_writes_capacity_rows():
         )
 
 
+def test_cli_out_of_sample_output_format_csv_writes_capacity_rows():
+    """CLI out-of-sample with --output-format csv emits out_of_sample_summary.csv
+    with flattened capacity columns alongside the JSON, while the default json
+    format writes only the JSON artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        base_argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5], "slow_period": [8, 10]}',
+            "--validation-method", "walk_forward",
+            "--train-frac", "0.5",
+            "--val-frac", "0.25",
+            "--test-frac", "0.25",
+            "--impact-coefficient", "0.5",
+        ]
+
+        csv_out = os.path.join(tmpdir, "csv_out")
+        argv_csv = base_argv + ["--output", csv_out, "--output-format", "csv"]
+        with patch.object(sys, "argv", argv_csv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, "CLI out-of-sample --output-format csv should exit 0"
+        csv_artifact = os.path.join(csv_out, "out_of_sample_summary.csv")
+        assert os.path.exists(csv_artifact), "out_of_sample_summary.csv not written"
+        assert os.path.exists(os.path.join(csv_out, "out_of_sample_summary.json")), (
+            "out_of_sample_summary.json still written when --output-format csv"
+        )
+
+        frame = pd.read_csv(csv_artifact)
+        expected = [
+            "impact_capacity", "participation_capacity",
+            "cost_adjusted_capacity", "cost_drag", "holding_period_years",
+        ]
+        assert list(frame.columns) == expected, (
+            f"unexpected CSV columns: {list(frame.columns)}"
+        )
+        assert len(frame) == 1, "out_of_sample_summary.csv should contain exactly one row"
+        assert frame["cost_adjusted_capacity"].notna().all(), (
+            "cost_adjusted_capacity must be present"
+        )
+        assert (frame["cost_adjusted_capacity"] > 0).all(), (
+            f"cost_adjusted_capacity must be positive: "
+            f"{frame['cost_adjusted_capacity'].tolist()}"
+        )
+
+        # Default (json) mode must not write a CSV and must write the JSON artifact.
+        json_out = os.path.join(tmpdir, "json_out")
+        argv_json = base_argv + ["--output", json_out]
+        with patch.object(sys, "argv", argv_json), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0
+        assert os.path.exists(os.path.join(json_out, "out_of_sample_summary.json"))
+        assert not os.path.exists(os.path.join(json_out, "out_of_sample_summary.csv")), (
+            "default json format must not emit out_of_sample_summary.csv"
+        )
+
+
 def test_cli_walk_forward_borrow_sweep():
     """CLI walk-forward --borrow-costs writes a sweep artifact whose OOS
     returns degrade as the short-position borrow cost rises (MACD goes short)."""
@@ -8083,6 +8145,7 @@ TEST_REGISTRY.extend([
     ("test_cli_cpcv_output_format_csv_writes_capacity_rows", test_cli_cpcv_output_format_csv_writes_capacity_rows),
     ("test_cli_optimize_output_format_csv_writes_capacity_rows", test_cli_optimize_output_format_csv_writes_capacity_rows),
     ("test_cli_monte_carlo_output_format_csv_writes_capacity_rows", test_cli_monte_carlo_output_format_csv_writes_capacity_rows),
+    ("test_cli_out_of_sample_output_format_csv_writes_capacity_rows", test_cli_out_of_sample_output_format_csv_writes_capacity_rows),
     ("test_cli_rejects_invalid_participation_rate_in_every_subcommand", test_cli_rejects_invalid_participation_rate_in_every_subcommand),
 ])
 TEST_REGISTRY.extend([
