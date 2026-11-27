@@ -1142,6 +1142,7 @@ def walk_forward_analysis(
             borrow_cost=borrow_cost, funding_cost=funding_cost,
             leverage=leverage, short_exposure=short_exposure,
             max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost,
+            regime_impact_coefficients=regime_impact_coefficients,
         )
         _period_cap = _period_capacity.get("cost_adjusted_capacity")
         period["capacity"] = (
@@ -1364,7 +1365,8 @@ def walk_forward_analysis(
                                   max_participation_rate=max_participation_rate,
                                   borrow_cost=borrow_cost, funding_cost=funding_cost,
                                   leverage=leverage, short_exposure=short_exposure,
-                                  max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost)
+                                  max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost,
+                                  regime_impact_coefficients=regime_impact_coefficients)
     _summary_cap = _capacity.get("cost_adjusted_capacity")
     summary["capacity"] = (
         {
@@ -3748,6 +3750,7 @@ def estimate_capacity(
     short_exposure: float = 0.0,
     max_borrow_cost: Optional[float] = None,
     max_funding_cost: Optional[float] = None,
+    regime_impact_coefficients: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """
     Estimate strategy capacity from the market-impact cost model with an
@@ -3843,11 +3846,28 @@ def estimate_capacity(
             e.g., 0.03 = 3% per year). When set, if ``(leverage - 1) *
             funding_cost`` exceeds this limit, capacity is further reduced
             proportionally. Default ``None`` (no funding-cost-drag cap).
+        regime_impact_coefficients: Optional dict mapping regime name (e.g.,
+            ``'bear_high'``, ``'sideways_low'``) to a market-impact coefficient.
+            When provided, the flat ``impact_coefficient`` is replaced by the
+            ADV-weighted mean of the per-period regime-specific coefficients
+            over the window (each period's coefficient is the mapped regime
+            coefficient, falling back to ``impact_coefficient`` for unmapped
+            regimes; the weights are the per-period binding ADV notional, i.e.
+            the least liquid constituent for a panel). Regimes are detected
+            with the causal ``detect_combined_regime`` on the close series
+            (first asset for a panel), so the capacity reflects the regime mix
+            the strategy traded through: a stressed regime with a higher
+            coefficient lowers the effective coefficient's reciprocal and
+            therefore the reported capacity. Default ``None`` leaves
+            ``impact_coefficient`` unchanged, so every published number is
+            byte-identical. Point-in-time: the detector uses only bars up to
+            and including each bar.
 
     Returns:
         Dictionary with keys: impact_coefficient, max_impact, adv_window,
         impact_model, max_participation_rate, borrow_cost, funding_cost,
         leverage, short_exposure, max_borrow_cost, max_funding_cost,
+        regime_impact_coefficients, effective_impact_coefficient,
         cost_drag, holding_period_years,
         impact_capacity, participation_capacity, cost_adjusted_capacity,
         price, adv_shares, adv_notional, periods_per_year,
@@ -3881,6 +3901,12 @@ def estimate_capacity(
         "short_exposure": float(short_exposure),
         "max_borrow_cost": float(max_borrow_cost) if max_borrow_cost is not None else None,
         "max_funding_cost": float(max_funding_cost) if max_funding_cost is not None else None,
+        "regime_impact_coefficients": (
+            dict(regime_impact_coefficients)
+            if regime_impact_coefficients is not None and len(regime_impact_coefficients) > 0
+            else None
+        ),
+        "effective_impact_coefficient": float(impact_coefficient),
         "cost_drag": None,
         "holding_period_years": None,
         "impact_capacity": None,
@@ -3977,6 +4003,66 @@ def estimate_capacity(
     adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
     adv_notional = adv_shares * close
 
+    # Regime-aware effective impact coefficient (opt-in; default None keeps the
+    # flat coefficient and every published number byte-identical). When
+    # `regime_impact_coefficients` is provided, the flat `impact_coefficient`
+    # is replaced by the ADV-weighted mean of the per-period regime-specific
+    # coefficients over the window: each period's coefficient is the mapped
+    # regime coefficient (base `impact_coefficient` for unmapped regimes), and
+    # the weights are that period's binding ADV notional (the least liquid
+    # constituent for a panel). A stressed regime with a higher coefficient
+    # therefore lowers the effective coefficient and raises capacity's
+    # reciprocal, so the reported capacity reflects the regime mix the
+    # strategy traded through instead of a single flat coefficient.
+    # Point-in-time: the regime labels come from the causal
+    # `detect_combined_regime` detector, which uses only bars up to and
+    # including each bar.
+    effective_impact_coefficient = float(impact_coefficient)
+    if regime_impact_coefficients is not None and len(regime_impact_coefficients) > 0:
+        for _label, _coef in regime_impact_coefficients.items():
+            if not np.isfinite(_coef) or _coef <= 0:
+                raise ValueError(
+                    f"regime impact coefficient for {_label!r} must be positive "
+                    f"and finite, got {_coef}"
+                )
+        if is_panel:
+            _regime_close = (
+                close.iloc[:, 0]
+                if isinstance(close, pd.DataFrame) and close.shape[1] > 0
+                else close
+            )
+        else:
+            _regime_close = close
+        if isinstance(_regime_close, pd.Series) and len(_regime_close) > 0:
+            try:
+                _regimes = detect_combined_regime(_regime_close).reindex(data.index)
+                _period_coeff = _regimes.map(regime_impact_coefficients).fillna(
+                    float(impact_coefficient)
+                )
+                # ADV weights: the binding (least liquid) constituent per period.
+                _valid_adv = adv_notional.where(
+                    np.isfinite(adv_notional) & (adv_notional > 0)
+                )
+                if is_panel:
+                    _adv_weight = _valid_adv.min(axis=1, skipna=True)
+                else:
+                    _adv_weight = _valid_adv
+                _w = _adv_weight.reindex(_period_coeff.index)
+                _mask = (
+                    _w.notna()
+                    & _period_coeff.notna()
+                    & np.isfinite(_period_coeff)
+                    & (_w > 0)
+                )
+                if _mask.any():
+                    effective_impact_coefficient = float(
+                        (_period_coeff[_mask] * _w[_mask]).sum() / _w[_mask].sum()
+                    )
+            except Exception:
+                # If regime detection fails, fall back to the flat coefficient.
+                effective_impact_coefficient = float(impact_coefficient)
+    result["effective_impact_coefficient"] = float(effective_impact_coefficient)
+
     if is_panel:
         # Equal-weighted basket: every asset carries 1/n_assets of the
         # portfolio notional, so the least liquid asset binds the portfolio
@@ -3997,9 +4083,9 @@ def estimate_capacity(
         binding_price = float(close.iloc[-1][binding_asset])
 
         if impact_model == "sqrt":
-            per_asset_capacity = (max_impact / float(impact_coefficient)) ** 2 * binding_adv_notional
+            per_asset_capacity = (max_impact / effective_impact_coefficient) ** 2 * binding_adv_notional
         else:
-            per_asset_capacity = max_impact * binding_adv_notional / float(impact_coefficient)
+            per_asset_capacity = max_impact * binding_adv_notional / effective_impact_coefficient
         # Impact-based capacity before the participation-rate limit and the
         # cost drag. This is the pure liquidity-driven number.
         impact_capacity = n_assets * per_asset_capacity
@@ -4025,9 +4111,9 @@ def estimate_capacity(
         )
         _row_min_adv = _valid_adv_notional.min(axis=1, skipna=True)
         if impact_model == "sqrt":
-            _capacity_series = n_assets * (max_impact / float(impact_coefficient)) ** 2 * _row_min_adv
+            _capacity_series = n_assets * (max_impact / effective_impact_coefficient) ** 2 * _row_min_adv
         else:
-            _capacity_series = n_assets * max_impact * _row_min_adv / float(impact_coefficient)
+            _capacity_series = n_assets * max_impact * _row_min_adv / effective_impact_coefficient
 
         # Apply participation-rate limit to the capacity trend series.
         if max_participation_rate is not None:
@@ -4066,9 +4152,9 @@ def estimate_capacity(
         return result
 
     if impact_model == "sqrt":
-        max_notional_per_trade = (max_impact / float(impact_coefficient)) ** 2 * last_adv_notional
+        max_notional_per_trade = (max_impact / effective_impact_coefficient) ** 2 * last_adv_notional
     else:
-        max_notional_per_trade = max_impact * last_adv_notional / float(impact_coefficient)
+        max_notional_per_trade = max_impact * last_adv_notional / effective_impact_coefficient
     # Impact-based capacity before the participation-rate limit and the cost
     # drag. This is the pure liquidity-driven number.
     impact_capacity = max_notional_per_trade
@@ -4089,9 +4175,9 @@ def estimate_capacity(
         np.isfinite(adv_notional) & (adv_notional > 0)
     )
     if impact_model == "sqrt":
-        _capacity_series = (max_impact / float(impact_coefficient)) ** 2 * _valid_adv
+        _capacity_series = (max_impact / effective_impact_coefficient) ** 2 * _valid_adv
     else:
-        _capacity_series = max_impact * _valid_adv / float(impact_coefficient)
+        _capacity_series = max_impact * _valid_adv / effective_impact_coefficient
 
     # Apply participation-rate limit to the capacity trend series.
     if max_participation_rate is not None:
