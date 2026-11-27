@@ -6928,6 +6928,8 @@ def out_of_sample_validation(
     max_participation_rate: Optional[float] = None,
     leverage: float = 1.0,
     short_exposure: float = 0.0,
+    max_borrow_cost: Optional[float] = None,
+    max_funding_cost: Optional[float] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -7457,6 +7459,7 @@ def out_of_sample_validation(
         max_participation_rate=max_participation_rate,
         borrow_cost=borrow_cost, funding_cost=funding_cost,
         leverage=leverage, short_exposure=short_exposure,
+        max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost,
     )
     test_capacity_point = test_capacity.get("estimated_capacity")
     test_capacity_trend = test_capacity.get("capacity_trend")
@@ -7820,7 +7823,8 @@ def out_of_sample_validation(
     _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window,
                                   max_participation_rate=max_participation_rate,
                                   borrow_cost=borrow_cost, funding_cost=funding_cost,
-                                  leverage=leverage, short_exposure=short_exposure)
+                                  leverage=leverage, short_exposure=short_exposure,
+                                  max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost)
     summary["capacity"] = _capacity.get("estimated_capacity")
     # Capacity trend over the whole sample (the per-period / per-fold
     # records carry the same key for their own window).
@@ -7834,6 +7838,14 @@ def out_of_sample_validation(
     # borrow/funding cost drag applied to the capacity estimate.
     summary["leverage"] = float(leverage)
     summary["short_exposure"] = float(short_exposure)
+    # Record the cost-drag caps for traceability; a capped drag is never
+    # confused with an uncapped one.
+    summary["max_borrow_cost"] = (
+        float(max_borrow_cost) if max_borrow_cost is not None else None
+    )
+    summary["max_funding_cost"] = (
+        float(max_funding_cost) if max_funding_cost is not None else None
+    )
     # Book-based capacity: the capacity implied by the trade sizes the
     # selected strategy actually executes in the held-out test window, next
     # to the basket-based number above. The validation window's own book
@@ -9118,8 +9130,16 @@ def run_cpcv(args) -> int:
             "benchmark_cost_is_periodic": getattr(args, "benchmark_cost_is_periodic", False),
             "multi_symbol": getattr(args, "multi_symbol", False),
             "max_participation_rate": getattr(args, "max_participation_rate", None),
+            "leverage": float(getattr(args, "leverage", 1.0)),
+            "short_exposure": float(getattr(args, "short_exposure", 0.0)),
+            "max_borrow_cost": (
+                float(args.max_borrow_cost) if getattr(args, "max_borrow_cost", None) is not None else None
+            ),
+            "max_funding_cost": (
+                float(args.max_funding_cost) if getattr(args, "max_funding_cost", None) is not None else None
+            ),
             # The execution warmup this run applied, so the saved artifact
-            # records how many leading bars of every fold are not tradable.
+            # records how many leading bars of every window are not tradable.
             **execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency),
         },
     }
@@ -12267,6 +12287,10 @@ def run_out_of_sample_validation(args) -> int:
         pit_strict=getattr(args, "point_in_time_strict", False),
         survivorship=survivorship,
         max_participation_rate=max_participation_rate,
+        leverage=getattr(args, "leverage", 1.0),
+        short_exposure=getattr(args, "short_exposure", 0.0),
+        max_borrow_cost=getattr(args, "max_borrow_cost", None),
+        max_funding_cost=getattr(args, "max_funding_cost", None),
     )
 
     if pit_results is not None:
