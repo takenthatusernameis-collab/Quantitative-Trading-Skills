@@ -4673,6 +4673,72 @@ def test_cli_out_of_sample_max_funding_cost_cap_reflected_in_csv():
         )
 
 
+def test_cli_out_of_sample_max_borrow_cost_cap_reflected_in_csv():
+    """CLI out-of-sample with MACD + short exposure and a binding
+    --max-borrow-cost writes out_of_sample_summary.csv whose cost_drag is
+    capped at the limit and whose cost_adjusted_capacity reflects the capped
+    drag.
+
+    Borrow leg only: funding_cost=0.0 so the funding-cost leg is zero;
+    short_exposure 0.2 with borrow_cost 0.10 gives uncapped drag 0.2*0.10 =
+    0.02; --max-borrow-cost 0.01 binds, so effective cost_drag must equal
+    0.01 and cost_adjusted_capacity must equal impact_capacity /
+    (1 + cost_drag * holding_period_years).
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+            "--validation-method", "walk_forward",
+            "--train-frac", "0.5",
+            "--val-frac", "0.25",
+            "--test-frac", "0.25",
+            "--impact-coefficient", "0.5",
+            "--borrow-cost", "0.10",
+            "--funding-cost", "0.0",
+            "--leverage", "1.0",
+            "--short-exposure", "0.2",
+            "--max-borrow-cost", "0.01",
+            "--output", out_dir,
+            "--output-format", "csv",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, f"CLI out-of-sample max-borrow-cost run should exit 0, got {rc}"
+        csv_artifact = os.path.join(out_dir, "out_of_sample_summary.csv")
+        assert os.path.exists(csv_artifact), "out_of_sample_summary.csv not written"
+        frame = pd.read_csv(csv_artifact)
+        expected = [
+            "impact_capacity", "participation_capacity",
+            "cost_adjusted_capacity", "cost_drag", "holding_period_years",
+        ]
+        assert list(frame.columns) == expected, f"unexpected CSV columns: {list(frame.columns)}"
+        assert len(frame) == 1, "out_of_sample_summary.csv should contain exactly one row"
+        row = frame.iloc[0]
+        cost_drag = float(row["cost_drag"])
+        assert cost_drag > 0.0, f"cost_drag must be positive with borrow exposure, got {cost_drag}"
+        # The max-borrow-cost cap binds (uncapped drag 0.02 > cap 0.01).
+        assert abs(cost_drag - 0.01) <= 1e-9, (
+            f"cost_drag must be capped at max_borrow_cost=0.01, got {cost_drag}"
+        )
+        holding_period_years = float(row["holding_period_years"])
+        assert holding_period_years > 0.0
+        impact_capacity = float(row["impact_capacity"])
+        assert impact_capacity > 0.0
+        expected_capacity = impact_capacity / (1.0 + cost_drag * holding_period_years)
+        assert abs(float(row["cost_adjusted_capacity"]) - expected_capacity) <= 1e-6 * max(expected_capacity, 1.0), (
+            f"cost_adjusted_capacity must reflect the capped drag: "
+            f"got {row['cost_adjusted_capacity']}, expected {expected_capacity}"
+        )
+
+
 def test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply():
     """CLI out-of-sample with MACD + leverage where BOTH --max-borrow-cost and
     --max-funding-cost are set and both legs are positive (leveraged short).
@@ -7666,6 +7732,7 @@ TEST_REGISTRY = [
     ("test_cli_out_of_sample_funding_sweep", test_cli_out_of_sample_funding_sweep),
     ("test_cli_out_of_sample_max_cost_cap_reflected_in_csv", test_cli_out_of_sample_max_cost_cap_reflected_in_csv),
     ("test_cli_out_of_sample_max_funding_cost_cap_reflected_in_csv", test_cli_out_of_sample_max_funding_cost_cap_reflected_in_csv),
+    ("test_cli_out_of_sample_max_borrow_cost_cap_reflected_in_csv", test_cli_out_of_sample_max_borrow_cost_cap_reflected_in_csv),
     ("test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply", test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply),
     ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ("test_deflated_alpha_ratio_cross_sectional_frequency_invariant", test_deflated_alpha_ratio_cross_sectional_frequency_invariant),
