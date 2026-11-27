@@ -4859,6 +4859,140 @@ def test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply():
         )
 
 
+def test_cli_cpcv_max_borrow_cost_cap_reflected_in_csv():
+    """CLI cpcv with MACD (short exposure) + --borrow-cost and a binding
+    --max-borrow-cost writes cpcv_summary.csv whose per-fold cost_drag is capped
+    at the limit, not the uncapped short_exposure * borrow_cost.
+
+    Before the cap plumbing reached run_cpcv -> cpcv_analysis, the per-fold
+    capacity cost_drag ignored --max-borrow-cost and reported the uncapped 0.02.
+    With borrow_cost=0.10 and short_exposure=0.2 the uncapped borrow leg is 0.02;
+    --max-borrow-cost 0.01 binds, so every fold that reports a cost_drag must
+    report 0.01, and cost_adjusted_capacity must equal
+    impact_capacity / (1 + cost_drag * holding_period_years) wherever impact
+    capacity is estimable.
+
+    cost_drag is a capacity measurement only: it must not change returns.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=1200)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "cpcv",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+            "--n-splits", "4",
+            "--test-size", "0.2",
+            "--adv-window", "10",
+            "--impact-coefficient", "0.5",
+            "--borrow-cost", "0.10",
+            "--funding-cost", "0.0",
+            "--leverage", "1.5",
+            "--short-exposure", "0.2",
+            "--max-borrow-cost", "0.01",
+            "--output", out_dir,
+            "--output-format", "csv",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, f"CLI cpcv max-borrow-cost run should exit 0, got {rc}"
+        csv_artifact = os.path.join(out_dir, "cpcv_summary.csv")
+        assert os.path.exists(csv_artifact), "cpcv_summary.csv not written"
+        frame = pd.read_csv(csv_artifact)
+        expected = [
+            "fold", "test_start", "test_end",
+            "impact_capacity", "participation_capacity",
+            "cost_adjusted_capacity", "cost_drag", "holding_period_years",
+        ]
+        assert list(frame.columns) == expected, f"unexpected CSV columns: {list(frame.columns)}"
+        assert len(frame) >= 1, "cpcv_summary.csv should contain at least one fold row"
+        cost_drags = [float(x) for x in frame["cost_drag"].tolist() if pd.notna(x)]
+        assert cost_drags, "at least one fold must report a cost_drag"
+        # The cap binds on every fold: 0.01, never the uncapped 0.02.
+        for cd in cost_drags:
+            assert abs(cd - 0.01) <= 1e-9, (
+                f"per-fold cost_drag must be capped at max_borrow_cost=0.01, got {cd}"
+            )
+        # cost_adjusted_capacity reflects the capped drag where impact capacity
+        # is estimable.
+        for _, row in frame.iterrows():
+            if pd.notna(row["cost_adjusted_capacity"]) and pd.notna(row["impact_capacity"]):
+                hpy = float(row["holding_period_years"])
+                ic = float(row["impact_capacity"])
+                expected_cap = ic / (1.0 + 0.01 * hpy)
+                assert abs(float(row["cost_adjusted_capacity"]) - expected_cap) <= 1e-6 * max(expected_cap, 1.0), (
+                    f"cost_adjusted_capacity must reflect the capped drag: "
+                    f"got {row['cost_adjusted_capacity']}, expected {expected_cap}"
+                )
+
+
+def test_cli_optimize_max_borrow_cost_cap_reflected_in_csv():
+    """CLI optimize with MACD (short exposure) + --borrow-cost and a binding
+    --max-borrow-cost writes optimize_summary.csv whose top-ranked cost_drag is
+    capped at the limit, not the uncapped short_exposure * borrow_cost.
+
+    Before the cap plumbing reached run_parameter_optimization ->
+    parameter_optimization, the top combination's capacity_detail ignored
+    --max-borrow-cost and reported the uncapped 0.02. With borrow_cost=0.10 and
+    short_exposure=0.2 the uncapped borrow leg is 0.02; --max-borrow-cost 0.01
+    binds, so cost_drag must equal 0.01 and cost_adjusted_capacity must equal
+    impact_capacity / (1 + cost_drag * holding_period_years).
+
+    cost_drag is a capacity measurement only: it must not change returns.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir = os.path.join(tmpdir, "out")
+        argv = [
+            "walk_forward", "optimize",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+            "--impact-coefficient", "0.5",
+            "--borrow-cost", "0.10",
+            "--funding-cost", "0.0",
+            "--leverage", "1.5",
+            "--short-exposure", "0.2",
+            "--max-borrow-cost", "0.01",
+            "--output", out_dir,
+            "--output-format", "csv",
+        ]
+        with patch.object(sys, "argv", argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, f"CLI optimize max-borrow-cost run should exit 0, got {rc}"
+        csv_artifact = os.path.join(out_dir, "optimize_summary.csv")
+        assert os.path.exists(csv_artifact), "optimize_summary.csv not written"
+        frame = pd.read_csv(csv_artifact)
+        expected = [
+            "rank", "sharpe_ratio", "total_return",
+            "impact_capacity", "participation_capacity",
+            "cost_adjusted_capacity", "cost_drag", "holding_period_years",
+        ]
+        assert list(frame.columns) == expected, f"unexpected CSV columns: {list(frame.columns)}"
+        assert len(frame) == 1, "optimize_summary.csv should contain exactly one row"
+        row = frame.iloc[0]
+        cost_drag = float(row["cost_drag"])
+        # The cap binds: 0.01, not the uncapped 0.02.
+        assert abs(cost_drag - 0.01) <= 1e-9, (
+            f"cost_drag must be capped at max_borrow_cost=0.01, got {cost_drag}"
+        )
+        holding_period_years = float(row["holding_period_years"])
+        impact_capacity = float(row["impact_capacity"])
+        assert impact_capacity > 0.0
+        expected_capacity = impact_capacity / (1.0 + cost_drag * holding_period_years)
+        assert abs(float(row["cost_adjusted_capacity"]) - expected_capacity) <= 1e-6 * max(expected_capacity, 1.0), (
+            f"cost_adjusted_capacity must reflect the capped drag: "
+            f"got {row['cost_adjusted_capacity']}, expected {expected_capacity}"
+        )
+
+
 _EXAMPLE_PATH = (
     Path(__file__).resolve().parent.parent
     / "examples" / "real_data_pipeline_example.py"
@@ -7785,6 +7919,8 @@ TEST_REGISTRY = [
     ("test_cli_out_of_sample_max_borrow_cost_cap_reflected_in_csv", test_cli_out_of_sample_max_borrow_cost_cap_reflected_in_csv),
     ("test_cli_max_cost_sweep_flags_rejected_not_silent", test_cli_max_cost_sweep_flags_rejected_not_silent),
     ("test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply", test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply),
+    ("test_cli_cpcv_max_borrow_cost_cap_reflected_in_csv", test_cli_cpcv_max_borrow_cost_cap_reflected_in_csv),
+    ("test_cli_optimize_max_borrow_cost_cap_reflected_in_csv", test_cli_optimize_max_borrow_cost_cap_reflected_in_csv),
     ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ("test_deflated_alpha_ratio_cross_sectional_frequency_invariant", test_deflated_alpha_ratio_cross_sectional_frequency_invariant),
     ("test_deflated_alpha_ratio_weakens_with_more_benchmarks", test_deflated_alpha_ratio_weakens_with_more_benchmarks),

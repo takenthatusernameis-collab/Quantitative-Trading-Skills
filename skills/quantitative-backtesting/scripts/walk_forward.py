@@ -5252,7 +5252,8 @@ def cpcv_analysis(
     _capacity = estimate_capacity(data, impact_coefficient, adv_window=adv_window,
                                   max_participation_rate=max_participation_rate,
                                   borrow_cost=borrow_cost, funding_cost=funding_cost,
-                                  leverage=leverage, short_exposure=short_exposure)
+                                  leverage=leverage, short_exposure=short_exposure,
+                                  max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost)
     summary["capacity"] = _capacity.get("estimated_capacity")
     # Capacity trend over the whole sample (see the walk-forward summary for
     # the same key) plus the worst capacity seen in any out-of-sample fold.
@@ -8372,6 +8373,10 @@ def _optimize_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         regime_cost_multipliers=regime_cost_multipliers,
         max_impact=max_impact,
         max_participation_rate=max_participation_rate,
+        max_borrow_cost=getattr(args, "max_borrow_cost", None),
+        max_funding_cost=getattr(args, "max_funding_cost", None),
+        leverage=getattr(args, "leverage", 1.0),
+        short_exposure=getattr(args, "short_exposure", 0.0),
     )
     top = results[0] if results else None
     dsr = top.get("deflated_sharpe") if isinstance(top, dict) else None
@@ -8673,6 +8678,8 @@ def _cpcv_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         regime_impact_coefficients=regime_impact_coefficients,
         regime_cost_multipliers=regime_cost_multipliers,
         max_participation_rate=max_participation_rate,
+        max_borrow_cost=getattr(args, "max_borrow_cost", None),
+        max_funding_cost=getattr(args, "max_funding_cost", None),
     )
     summary = results["summary"]
     dsr = summary.get("deflated_sharpe")
@@ -9041,6 +9048,10 @@ def run_cpcv(args) -> int:
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         max_participation_rate=max_participation_rate,
+        max_borrow_cost=getattr(args, "max_borrow_cost", None),
+        max_funding_cost=getattr(args, "max_funding_cost", None),
+        leverage=getattr(args, "leverage", 1.0),
+        short_exposure=getattr(args, "short_exposure", 0.0),
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
@@ -10912,6 +10923,10 @@ def run_parameter_optimization(args) -> int:
         regime_impact_coefficients=regime_impact_coefficients,
         regime_cost_multipliers=regime_cost_multipliers,
         max_participation_rate=max_participation_rate,
+        max_borrow_cost=getattr(args, "max_borrow_cost", None),
+        max_funding_cost=getattr(args, "max_funding_cost", None),
+        leverage=getattr(args, "leverage", 1.0),
+        short_exposure=getattr(args, "short_exposure", 0.0),
     )
 
     if not results:
@@ -11297,7 +11312,9 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         _capacity = estimate_capacity(data, impact_coefficient, adv_window=args.adv_window,
                                       max_participation_rate=max_participation_rate,
                                       borrow_cost=borrow_cost, funding_cost=funding_cost,
-                                      leverage=leverage, short_exposure=short_exposure)
+                                      leverage=leverage, short_exposure=short_exposure,
+                                      max_borrow_cost=getattr(args, "max_borrow_cost", None),
+                                      max_funding_cost=getattr(args, "max_funding_cost", None))
         _capacity_point = _capacity.get("estimated_capacity")
         _capacity_trend = _capacity.get("capacity_trend")
     except Exception:
