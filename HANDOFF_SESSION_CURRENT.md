@@ -1,28 +1,40 @@
-# Handoff — Session: CPCV `--output-format csv` (verified)
+# Handoff — Session: `--output-format csv` for optimize & monte-carlo (verified)
 
 ## What changed
 - `skills/quantitative-backtesting/scripts/walk_forward.py`:
-  - `cpcv_analysis()` now stores an additive `fold["capacity_detail"]` dict per fold (impact / participation / cost_adjusted capacity, cost_drag, holding_period_years), mirroring the per-period capacity dict `walk_forward_analysis` records. The existing scalar `fold["capacity"]` is untouched, so no consumer breaks and no engine math changed.
-  - The CPCV CLI save path surfaces `capacity_detail` inside each `cpcv_summary.json` `capacity_per_fold` entry.
-  - After writing `cpcv_summary.json`, csv mode (`--output-format csv`) now also writes `cpcv_summary.csv` with flattened per-fold columns: `fold, test_start, test_end, impact_capacity, participation_capacity, cost_adjusted_capacity, cost_drag, holding_period_years`. JSON is always written; csv only *adds* the CSV.
+  - `parameter_optimization()` now stores an additive `result["capacity_detail"]` dict per combination (impact / participation / cost_adjusted capacity, cost_drag, holding_period_years), mirroring the per-period capacity dict `walk_forward_analysis` records. The existing scalar `result["capacity"]` is untouched.
+  - `run_parameter_optimization()` CLI save path surfaces `capacity_detail` on the top-ranked combination and writes `optimize_summary.csv` with flattened columns: `rank, sharpe_ratio, total_return, impact_capacity, participation_capacity, cost_adjusted_capacity, cost_drag, holding_period_years` when `--output-format csv` is set.
+  - `run_monte_carlo()` now stores `mc_results["summary"]["capacity_detail"]` with the same cost breakdown and writes `monte_carlo_summary.csv` with columns: `sharpe_ratio, total_return, impact_capacity, participation_capacity, cost_adjusted_capacity, cost_drag, holding_period_years` when `--output-format csv` is set.
+  - JSON is always written; csv only *adds* the CSV artifact.
+
 - `skills/quantitative-backtesting/tests/test_walk_forward.py`:
-  - Added `test_cli_cpcv_output_format_csv_writes_capacity_rows` (asserts CSV presence + exact columns + positive cost_adjusted per fold in csv mode, and absence of CSV in default json mode) and registered it in `TEST_REGISTRY`.
+  - Added `test_cli_optimize_output_format_csv_writes_capacity_rows` and `test_cli_monte_carlo_output_format_csv_writes_capacity_rows` (assert CSV presence + exact columns + positive cost_adjusted in csv mode, and absence of CSV in default json mode) and registered both in `TEST_REGISTRY`.
 
 ## What was actually verified
-- `python3 skills/quantitative-backtesting/tests/test_walk_forward.py` → **235/235 passed** (was 234; +1 new). New test confirmed PASS by name.
-- `python3 skills/quantitative-backtesting/tests/test_reporting.py` → exit 0.
-- End-to-end CLI on committed real fixture: `walk_forward.py cpcv --data assets/example_data/real_market_data/AAPL.csv --impact-coefficient 0.5 --borrow-cost 0.03 --n-splits 4 --output <tmp> --output-format csv` → exit 0; `cpcv_summary.csv` written with 4 per-fold rows, cost columns populated (`cost_adjusted_capacity` 9.75M–13.56M, `cost_drag=0.0`, `holding_period_years≈0.00397`); `cpcv_summary.json` `capacity_per_fold[0]` carries the new `capacity_detail` dict.
-- Default json mode on MSFT fixture → exit 0, **no** `cpcv_summary.csv` emitted (only json + report/tear-sheet artifacts).
-- `git status`: only the two intended files modified; `git diff --stat` = +105 lines, no unrelated edits.
+- `python3 -m pytest skills/quantitative-backtesting/tests/test_walk_forward.py::test_cli_optimize_output_format_csv_writes_capacity_rows skills/quantitative-backtesting/tests/test_walk_forward.py::test_cli_monte_carlo_output_format_csv_writes_capacity_rows skills/quantitative-backtesting/tests/test_walk_forward.py::test_cli_cpcv_output_format_csv_writes_capacity_rows` → **3/3 passed**.
+- `python3 -m pytest skills/quantitative-backtesting/tests/test_reporting.py` → **73/73 passed**.
+- End-to-end CLI on committed fixture for optimize: `walk_forward.py optimize --data assets/example_data/real_market_data/AAPL.csv --impact-coefficient 0.5 --output <tmp> --output-format csv` → exit 0; `optimize_summary.csv` written with 1 row, cost columns populated.
+- End-to-end CLI on committed fixture for monte-carlo: `walk_forward.py monte-carlo --data assets/example_data/real_market_data/AAPL.csv --impact-coefficient 0.5 --n-simulations 100 --output <tmp> --output-format csv` → exit 0; `monte_carlo_summary.csv` written with 1 row, cost columns populated.
+- Default json mode on both subcommands → exit 0, **no** CSV emitted (only JSON artifacts).
+- `git status`: only the two intended files modified vs the prior handoff baseline; `git diff --stat` = +194 lines, no unrelated edits.
 
 ## What remains unresolved
-- `participation_capacity` is empty in the CSV when `--max-participation-rate` is not set (expected — no cap → None), and `cost_drag=0.0` for long-only sma_crossover with no borrow/funding (expected). A run with a participation cap + borrow/funding would populate those columns; not exercised end-to-end here but covered structurally by the unit test.
-- `optimize` / `monte-carlo` subcommands still have no `--output-format csv` emitter (only `walk-forward`, `out-of-sample`, and now `cpcv` do). The `--output-format` flag is already wired to all subparsers via `common_parser`; only the per-subcommand emit blocks are missing for optimize/monte-carlo.
+- `participation_capacity` is empty in the CSV when `--max-participation-rate` is not set (expected — no cap → None), and `cost_drag=0.0` for long-only sma_crossover with no borrow/funding (expected). A run with a participation cap + borrow/funding would populate those columns; not exercised end-to-end here but covered structurally by the unit tests.
+- `walk-forward` and `out-of-sample` subcommands already have `--output-format csv` (implemented in prior sessions).
+- All five CLI subcommands (`walk-forward`, `optimize`, `monte-carlo`, `cpcv`, `out-of-sample`) now support `--output-format csv` with capacity/cost breakdown.
 - No profitability/capacity claim: this session added reporting plumbing only; committed-fixture verdicts remain NOT SUPPORTED.
 
 ## Approaches that already failed (do not repeat)
-- Making CPCV `capacity_per_fold[i]["capacity"]` a dict (to match walk-forward) would break the existing `test_cli_cpcv_writes_capacity_per_fold` assertion `row["capacity"] > 0` and change the JSON artifact shape for downstream consumers. Chose the additive `capacity_detail` field instead. Do not "fix" the scalar/dict inconsistency by mutating the existing `capacity` field.
-- The full `estimate_capacity` dict is NOT stored on the fold by default (only `estimated_capacity` scalar + `capacity_trend`); the cost breakdown had to be captured explicitly as `capacity_detail`. If extending CSV columns, read from `capacity_detail`, not `capacity`.
+- Making `capacity` a dict (to match walk-forward) would break existing assertions on the scalar field. Chose the additive `capacity_detail` field instead.
+- The full `estimate_capacity` dict is NOT stored by default (only `estimated_capacity` scalar + `capacity_trend`); the cost breakdown had to be captured explicitly as `capacity_detail`. If extending CSV columns, read from `capacity_detail`, not `capacity`.
 
 ## Next precise task
-Add `--output-format {json,csv}` emit blocks to the **optimize** and **monte-carlo** subcommands of `walk_forward.py` (the flag is already parsed via `common_parser`), writing `optimize_summary.csv` / `monte_carlo_summary.csv` with flattened capacity/cost rows, plus a CLI test per subcommand asserting file presence in csv mode and absence in default json mode. Evidence: the cpcv emit block to mirror is at the `print(f"CPCV summary saved to: {summary_path}")` site in `walk_forward.py`; the template test is `test_cli_cpcv_output_format_csv_writes_capacity_rows` in `tests/test_walk_forward.py`. Constraint: committed fixtures only, no network, do not modify engine math, keep changes additive.
+The `--output-format csv` reporting plumbing is now complete across all five CLI subcommands. The next high-value quant research task should target **methodological validation**, e.g.:
+- Run a walk-forward / CPCV / monte-carlo comparison on a committed real fixture (AAPL/MSFT/GOOGL) with realistic costs (impact, borrow, funding, commission, slippage) and verify the cost-aware capacity numbers are internally consistent across the three validation methods.
+- Exercise `--max-participation-rate`, `--max-borrow-cost`, `--max-funding-cost` caps end-to-end and assert the capacity CSV reflects the active cap.
+- Add a regime-aware impact coefficient sweep (`--regime-impact-coefficients`) and verify the CSV capacity breakdown reflects regime-specific impact.
+- Extend the CSV to include per-fold/per-combination regime diagnostics (regime label, regime-specific impact, regime cost multiplier) when regime analysis is engaged.
+
+Evidence: The three CSV test fixtures pass; the capacity_detail dict is populated on optimize/monte-carlo/cpcv summaries; the CLI flag is wired to all subparsers. Constraint: committed fixtures only, no network, do not modify engine math, keep changes additive.
+
+(End of file - total 28 lines)
