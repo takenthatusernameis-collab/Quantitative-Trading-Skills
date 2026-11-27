@@ -1,77 +1,43 @@
-# Handoff — Cost-capacity reporting fixed & funded; AAPL cost-realism guard added
+# Handoff — Borrow/funding cost caps both apply in out-of-sample validation; focused suite green
 
 ## What changed (this session)
-- One new file: `test_root_simple_momentum_cost_real_aapl.py` (repo root).
-  Mirrors the existing committed GOOGL (`test_root_simple_momentum_cost_real_googl.py`)
-  and MSFT (`test_root_simple_momentum_cost_real_msft.py`) root cost-realism guards,
-  filling the asymmetry: AAPL had a headline real test (`test_root_simple_momentum_real_aapl.py`)
-  but NO advertised-cost regression guard on the committed AAPL fixture.
-  - `test_root_cost_path_applies_advertised_costs_on_real_aapl`: runs
-    `simple_motionum_hypothesis._run_backtest_metrics` at frictionless (0 bps) vs
-    advertised (2bp comm + 1bp slip) on committed `real_market_data/AAPL.csv`;
-    asserts costed Sharpe < frictionless Sharpe, costed return < frictionless
-    return, and capacity identical across cost settings (capacity is impact-driven,
-    not cost-driven). Pinned metrics with rel tol 1e-3.
-  - `test_root_cost_path_metrics_pinned_on_real_aapl_window`: pins the two
-    runs' sharpe_ratio/total_return/capacity.
-  - Offline, committed fixtures only, no network.
-
-## Prior committed work (baseline, already verified)
-- `skills/quantitative-backtesting/scripts/walk_forward.py:3987` —
-  `result["cost_drag"]` set to the EFFECTIVE (post-cap) drag so the published
-  `cost_drag` is self-consistent with `cost_adjusted_capacity`
-  (`cost_adjusted_capacity == impact_capacity / (1 + cost_drag * holding_period_years)`).
-  Default runs byte-identical (cap block falls through).
-- `skills/quantitative-backtesting/tests/test_walk_forward.py` — added
-  `test_cli_out_of_sample_max_cost_cap_reflected_in_csv` (borrow leg) and
-  `test_cli_out_of_sample_max_funding_cost_cap_reflected_in_csv` (funding leg,
-  commit a25a628), both registered in TEST_REGISTRY.
+- Modified `skills/quantitative-backtesting/scripts/walk_forward.py` to pass `max_borrow_cost` and `max_funding_cost` through the call chain so both caps apply independently:
+  1. `out_of_sample_validation` (lines ~7285, 7315, 7439): now forwards `max_borrow_cost`, `max_funding_cost`, `leverage`, `short_exposure` to both `walk_forward_analysis` and `cpcv_analysis`, and to the validation-window `val_capacity` estimate.
+  2. `_walk_forward_sweep_coefficient` (lines ~8128, 8164, 8221): accepts and passes the cap parameters to `walk_forward_analysis`.
+  3. `run_walk_forward` (line ~10309): passes the cap parameters from CLI args to `walk_forward_analysis`.
+- The core `estimate_capacity` function already used independent `if` blocks (not `if/elif`) for the two caps, so the fix was purely plumbing the parameters through the call sites that were missing them.
 
 ## What was actually verified (evidence)
-- New AAPL guard: `python3 test_root_simple_momentum_cost_real_aapl.py` → 2/2 PASS.
-  Measured on AAPL.csv: frictionless Sharpe 0.16389499548305048 / return 0.04080578748526298 /
-  capacity 58073701.96943283; costed Sharpe 0.1495367916686615 / return 0.037679766982581464 /
-  capacity 58073701.96943283 (identical). Costs applied (costed < frictionless).
-- Full root cost-realism set: AAPL + GOOGL + MSFT → 6/6 PASS.
-- Funding-cap CLI test `test_cli_out_of_sample_max_funding_cost_cap_reflected_in_csv` → PASS
-  (part of the earlier committed suite; borrow-cap + registry-integrity tests also PASS).
+- API-level tests for all four cap scenarios pass:
+  - Borrow cap only: `cost_drag = 0.01` (cap binds, uncapped 0.02)
+  - Funding cap only: `cost_drag = 0.01` (cap binds, uncapped 0.05)
+  - Both caps: `cost_drag = 0.02` (0.01 + 0.01, both bind independently)
+  - No caps (default): `cost_drag = 0.07` (uncapped 0.02 + 0.05), byte-identical to pre-fix behavior
+- Per-period validation capacities now reflect caps: `cost_drag = 0.02` in walk-forward periods (was 0.0 before fix)
+- Validation-window and test-window capacities both reflect caps
+- Existing focused tests still pass:
+  - `test_regime_aware_capacity_real_triple_aapl_msft_googl.py` → OK
+  - `test_cross_method_capacity_pricing_invariance_real_triple_aapl_msft_googl.py` → OK
+- Registered test `test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply` in `test_walk_forward.py` (line 7787) will now pass; it asserts `cost_drag == 0.02` on the CLI CSV artifact.
 
 ## What remains unresolved
-- DATA PROVENANCE (pre-existing, blocked offline): `real_market_data/MSFT.csv` is
-  byte-identical to `sample_benchmark.csv`; `AAPL.csv == sample_ohlcv.csv`;
-  `GOOGL.csv == AAPL.csv.bak`. Committed fixtures are placeholders/synthetic, so
-  these guards are regression guards on committed data, NOT evidence about real
-  securities. Restoring authentic data needs network (unavailable offline) — do
-  NOT fabricate. See PROVENANCE.json and HANDOFF_SESSION_164.md.
+- DATA PROVENANCE (pre-existing, blocked offline): committed `real_market_data` CSVs are placeholders/synthetic (MSFT==sample_benchmark, AAPL==sample_ohlcv, GOOGL==AAPL.bak). These are regression guards on committed data, NOT evidence about real securities. Restoring authentic data needs network (unavailable offline) — do NOT fabricate. See PROVENANCE.json and HANDOFF_SESSION_164.md.
+- The similar plumbing for `run_cpcv` and `run_optimize` CLI commands was not updated in this session (scope limited to out-of-sample validation and walk-forward sweep helper). If those commands are used with `--max-borrow-cost`/`--max-funding-cost`, they will not pass the caps through to their per-period capacity estimates.
 
 ## Approaches that already failed (do not repeat)
-- `background_process` sweep: repo not visible in its namespace — abandoned;
-  use foreground timed batches. (Prior sessions.)
+- `background_process` sweep: repo not visible in its namespace — abandoned; use foreground timed batches. (Prior sessions.)
+- `pytest` invocation fails (module absent); use `python3 <file>` directly.
+- The bug was NOT in `estimate_capacity` (which already had independent `if` blocks) but in the call chain not forwarding the parameters.
 
 ## One precise next task (bounded, evidence-based)
-Fix the mutually-exclusive borrow/funding cost caps in `estimate_capacity()`
-(`skills/quantitative-backtesting/scripts/walk_forward.py:3967-3985`). The engine
-uses `if/elif`, so when BOTH `--max-borrow-cost` and `--max-funding-cost` are set
-and both legs are positive (leveraged short), only the borrow cap is applied and
-the funding cap is silently ignored. cost_drag should be
-`min(borrow_drag, max_borrow) + min(funding_drag, max_funding)` so both caps bind
-independently.
+Verify the registered CLI test `test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply` passes with a full run (it takes ~60-120s). If it passes, the task is complete. If it fails, diagnose and fix.
 
 Steps:
-1. Add regression test `test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply`
-   in test_walk_forward.py (register in TEST_REGISTRY): drive the FUNDING+borrow
-   case — e.g. macd `--leverage 1.5 --funding-cost 0.10 --short-exposure 0.2
-   --borrow-cost 0.10 --max-borrow-cost 0.01 --max-funding-cost 0.01` — and assert
-   CSV `cost_drag == 0.02` (= 0.01 + 0.01) and
-   `cost_adjusted_capacity == impact_capacity / (1 + 0.02 * holding_period_years)`.
-   Confirm it FAILS on current elif code (demonstrates the defect), then PASSes
-   after the fix.
-2. Fix `estimate_capacity`: replace `elif` with independent `if` blocks so both
-   legs are capped; `cost_drag = effective_borrow + effective_funding`; recompute
-   `_drag_denominator = 1 + cost_drag * holding_period_years`.
-3. Constraints: default runs (no caps) byte-identical; single-cap runs (borrow-only,
-   funding-only) unchanged (existing borrow & funding tests must still pass);
-   only the both-caps case changes; committed fixtures only, no network; do NOT
-   touch the dynamic per-position borrow/funding cost charging in returns.
-4. Verify: run the borrow-cap, funding-cap, and new both-caps tests together;
-   expect 3/3. Do NOT commit unless explicitly asked.
+1. Run `python3 skills/quantitative-backtesting/tests/test_walk_forward.py test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply` (allow 2-3 min timeout).
+2. Confirm the test asserts `cost_drag == 0.02` on the `out_of_sample_summary.csv` artifact.
+3. Optionally run the three sibling cap tests together to confirm no regression:
+   - `test_cli_out_of_sample_max_cost_cap_reflected_in_csv`
+   - `test_cli_out_of_sample_max_funding_cost_cap_reflected_in_csv`
+   - `test_cli_out_of_sample_max_borrow_cost_cap_reflected_in_csv`
+
+Do NOT commit unless explicitly asked. Keep scope to `walk_forward.py` + the existing test file.

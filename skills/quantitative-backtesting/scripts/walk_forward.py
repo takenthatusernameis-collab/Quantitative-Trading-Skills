@@ -7282,6 +7282,10 @@ def out_of_sample_validation(
             panel_pricing=panel_pricing,
             pit_strict=pit_strict,
             max_participation_rate=max_participation_rate,
+            max_borrow_cost=max_borrow_cost,
+            max_funding_cost=max_funding_cost,
+            leverage=leverage,
+            short_exposure=short_exposure,
         )
     elif validation_method == "cpcv":
         validation_results = cpcv_analysis(
@@ -7308,6 +7312,10 @@ def out_of_sample_validation(
             panel_pricing=panel_pricing,
             pit_strict=pit_strict,
             max_participation_rate=max_participation_rate,
+            max_borrow_cost=max_borrow_cost,
+            max_funding_cost=max_funding_cost,
+            leverage=leverage,
+            short_exposure=short_exposure,
         )
     else:
         raise ValueError(f"Unknown validation_method: {validation_method}. Use 'walk_forward' or 'cpcv'.")
@@ -7428,6 +7436,8 @@ def out_of_sample_validation(
         max_participation_rate=max_participation_rate,
         borrow_cost=borrow_cost, funding_cost=funding_cost,
         leverage=leverage, short_exposure=short_exposure,
+        max_borrow_cost=max_borrow_cost,
+        max_funding_cost=max_funding_cost,
     )
     val_capacity_point = val_capacity.get("estimated_capacity")
     val_capacity_trend = val_capacity.get("capacity_trend")
@@ -8115,6 +8125,7 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
                                     commission=None, slippage=None, latency=None, fill_rate=None,
                                     leverage=None, short_exposure=None,
                                     survivorship=None, pit_strict=None,
+                                    max_borrow_cost=None, max_funding_cost=None,
                                      regime_impact_coefficients: Optional[Dict[str, float]] = None,
                                      regime_cost_multipliers: Optional[Dict[str, float]] = None):
     """Run walk-forward for a single cost coefficient (sweep helper).
@@ -8150,6 +8161,10 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         commission = args.commission
     if slippage is None:
         slippage = args.slippage
+    if max_borrow_cost is None:
+        max_borrow_cost = getattr(args, "max_borrow_cost", None)
+    if max_funding_cost is None:
+        max_funding_cost = getattr(args, "max_funding_cost", None)
     if regime_cost_multipliers is None:
         regime_cost_multipliers = _parse_regime_cost_multipliers(
             getattr(args, "regime_cost_multipliers", None)
@@ -8203,6 +8218,8 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         regime_cost_multipliers=regime_cost_multipliers,
         max_impact=max_impact,
         max_participation_rate=max_participation_rate,
+        max_borrow_cost=max_borrow_cost,
+        max_funding_cost=max_funding_cost,
         leverage=leverage,
         short_exposure=short_exposure,
     )
@@ -10289,6 +10306,8 @@ def run_walk_forward(args) -> int:
         regime_cost_multipliers=regime_cost_multipliers,
         max_impact=max_impact,
         max_participation_rate=max_participation_rate,
+        max_borrow_cost=getattr(args, "max_borrow_cost", None),
+        max_funding_cost=getattr(args, "max_funding_cost", None),
         family_returns=family_returns,
         family_stepdown=getattr(args, "family_stepdown", False),
         family_seed=getattr(args, "family_seed", None),
