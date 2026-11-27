@@ -1,17 +1,26 @@
-# Next Session Task — Methodological validation with cost-aware capacity across validation methods
+# Next Session Task — Fix out-of-sample CSV capacity bug
 
 ## Task
-Run a cross-method comparison (walk-forward / CPCV / monte-carlo) on a committed real fixture (AAPL/MSFT/GOOGL) with realistic costs (impact, borrow, funding, commission, slippage) and verify the cost-aware capacity numbers are internally consistent across the three validation methods. Exercise `--max-participation-rate`, `--max-borrow-cost`, `--max-funding-cost` caps end-to-end and assert the capacity CSV reflects the active cap. Optionally extend the CSV to include per-fold/per-combination regime diagnostics when regime analysis is engaged.
+Fix the bug in `run_out_of_sample_validation()` where `--output-format csv` fails because it tries to call `.get()` on a float capacity value instead of a dict. The fix should use `capacity_detail` dict from the summary (like `run_monte_carlo` and `run_parameter_optimization` do).
 
 ## Evidence / where to look
-- CSV emit blocks for all five subcommands are in `walk_forward.py` (search `capacity_detail` and `output_format`).
-- Template tests: `test_cli_cpcv_output_format_csv_writes_capacity_rows`, `test_cli_optimize_output_format_csv_writes_capacity_rows`, `test_cli_monte_carlo_output_format_csv_writes_capacity_rows` in `tests/test_walk_forward.py`.
-- Real fixtures: `assets/example_data/real_market_data/*.csv` (AAPL, MSFT, GOOGL).
-- Capacity estimation logic: `estimate_capacity` in `utils.py`, `book_capacity_estimate` in `utils.py`.
+- Bug location: `skills/quantitative-backtesting/scripts/walk_forward.py` line 12571-12578
+- The `test_performance.capacity` in the JSON is a float (scalar `estimated_capacity`), but the CSV code treats it as a dict with `.get()`
+- Correct pattern: Use `summary.get("capacity_detail")` which is a dict with keys: `impact_capacity`, `participation_capacity`, `cost_adjusted_capacity`, `cost_drag`, `holding_period_years`
+- Reference implementations:
+  - `run_monte_carlo` line 11905-11915: `cap = mc_results["summary"].get("capacity_detail") or {}`
+  - `run_parameter_optimization` line 10967-10979: `cap = top_result.get("capacity_detail") or {}`
 
 ## Constraints
-- Committed fixtures only (`assets/example_data/real_market_data/*.csv`), no network.
-- Do not modify engine math; keep changes additive and reversible.
-- Verify with `python3 -m pytest skills/quantitative-backtesting/tests/test_walk_forward.py` (currently 235/235) and `tests/test_reporting.py`.
+- Committed fixtures only, no network
+- Minimal fix: change the CSV emission block to read from `capacity_detail` dict
+- Verify with: `python3 -m pytest skills/quantitative-backtesting/tests/test_walk_forward.py::test_cli_walk_forward_output_format_csv_writes_capacity_rows` (add OOS test if needed)
+- Do not modify engine math; keep changes additive and reversible
 
-(End of file - total 14 lines)
+## Expected fix
+```python
+# Current (broken):
+cap = (summary_data.get("test_performance") or {}).get("capacity") or {}
+# Fixed:
+cap = summary_data.get("summary", {}).get("capacity_detail") or {}
+```
