@@ -4739,6 +4739,56 @@ def test_cli_out_of_sample_max_borrow_cost_cap_reflected_in_csv():
         )
 
 
+def test_cli_max_cost_sweep_flags_rejected_not_silent():
+    """The plural cap-sweep flags --max-borrow-costs / --max-funding-costs must
+    fail fast, not run an uncapped backtest while pretending to sweep.
+
+    These flags are declared on every subcommand and were documented as
+    sweeping the cost-drag cap, but no handler consumes them: a run with
+    --max-borrow-costs 0.01 0.02 (short exposure 0.2, borrow_cost 0.10 ->
+    uncapped borrow leg 0.02) previously exited 0, wrote no sweep artifact, and
+    left cost_drag at the uncapped 0.02 -- a silent methodological no-op. The
+    CLI must now reject them with a non-zero exit and an actionable message
+    that points at the working singular / cost-value alternatives, while the
+    singular --max-borrow-cost keeps working (exit 0).
+    """
+    base_argv = [
+        "--strategy", "macd",
+        "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+        "--validation-method", "walk_forward",
+        "--train-frac", "0.5", "--val-frac", "0.25", "--test-frac", "0.25",
+        "--impact-coefficient", "0.5",
+        "--borrow-cost", "0.10", "--funding-cost", "0.0",
+        "--leverage", "1.0", "--short-exposure", "0.2",
+    ]
+
+    def run(extra):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = os.path.join(tmpdir, "data.csv")
+            _write_ohlcv_csv(csv_path, periods=600)
+            out_dir = os.path.join(tmpdir, "out")
+            argv = ["walk_forward", "out-of-sample",
+                    "--data", csv_path, "--symbol", "SPY"] + base_argv + extra + ["--output", out_dir]
+            err = StringIO()
+            with patch.object(sys, "argv", argv), \
+                    redirect_stdout(StringIO()), redirect_stderr(err):
+                rc = walk_forward_main()
+            return rc, err.getvalue()
+
+    for flag, value in (("--max-borrow-costs", "0.01 0.02"),
+                        ("--max-funding-costs", "0.01 0.02")):
+        rc, err = run([flag, *value.split()])
+        assert rc != 0, f"{flag} must be rejected with non-zero exit, got {rc}"
+        assert "not implemented" in err, f"{flag} error must say 'not implemented', got: {err!r}"
+        assert flag not in err or "--max-borrow-cost" in err, (
+            f"{flag} error must point at the singular alternative, got: {err!r}"
+        )
+
+    # The singular cap must still work (guards against the guard catching it).
+    rc, err = run(["--max-borrow-cost", "0.01"])
+    assert rc == 0, f"singular --max-borrow-cost must still exit 0, got {rc}; stderr={err!r}"
+
+
 def test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply():
     """CLI out-of-sample with MACD + leverage where BOTH --max-borrow-cost and
     --max-funding-cost are set and both legs are positive (leveraged short).
@@ -7733,6 +7783,7 @@ TEST_REGISTRY = [
     ("test_cli_out_of_sample_max_cost_cap_reflected_in_csv", test_cli_out_of_sample_max_cost_cap_reflected_in_csv),
     ("test_cli_out_of_sample_max_funding_cost_cap_reflected_in_csv", test_cli_out_of_sample_max_funding_cost_cap_reflected_in_csv),
     ("test_cli_out_of_sample_max_borrow_cost_cap_reflected_in_csv", test_cli_out_of_sample_max_borrow_cost_cap_reflected_in_csv),
+    ("test_cli_max_cost_sweep_flags_rejected_not_silent", test_cli_max_cost_sweep_flags_rejected_not_silent),
     ("test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply", test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply),
     ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ("test_deflated_alpha_ratio_cross_sectional_frequency_invariant", test_deflated_alpha_ratio_cross_sectional_frequency_invariant),

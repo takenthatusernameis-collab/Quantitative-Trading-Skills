@@ -12814,6 +12814,30 @@ def main():
     oos_parser.set_defaults(func=run_out_of_sample_validation)
 
     args = parser.parse_args()
+
+    # Fail fast on the cap-sweep flags. They are declared on every subcommand
+    # and documented as sweeping the cost-drag limits, but no handler consumes
+    # them (args.max_borrow_costs / args.max_funding_costs are read nowhere), so
+    # accepting them would run an UNCAPPED backtest while the researcher believes
+    # a cap-sensitivity sweep executed -- a silent methodological no-op. Reject
+    # them loudly and point at the working alternatives instead.
+    max_borrow_costs = getattr(args, "max_borrow_costs", None)
+    max_funding_costs = getattr(args, "max_funding_costs", None)
+    if max_borrow_costs is not None or max_funding_costs is not None:
+        requested = []
+        if max_borrow_costs is not None:
+            requested.append(f"--max-borrow-costs {list(max_borrow_costs)}")
+        if max_funding_costs is not None:
+            requested.append(f"--max-funding-costs {list(max_funding_costs)}")
+        print(
+            "error: " + " and ".join(requested) + " (the cap-sweep variants) are "
+            "not implemented and would be silently ignored. Use --max-borrow-cost / "
+            "--max-funding-cost for a single cap, or --borrow-costs / --funding-costs "
+            "to sweep the underlying cost instead.",
+            file=sys.stderr,
+        )
+        return 1
+
     return args.func(args)
 
 

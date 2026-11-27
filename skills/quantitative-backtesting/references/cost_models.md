@@ -729,14 +729,17 @@ unset) leaves `cost_drag` and capacity **bitwise unchanged** from the
 uncapped number.
 
 `walk_forward.py` (all subcommands) exposes
-`--max-borrow-cost` / `--max-funding-cost` for a single limit, plus
-`--max-borrow-costs` / `--max-funding-costs` (one or more values) to sweep the
-cap on the `walk-forward`, `optimize`, `cpcv`, and `monte-carlo` paths; the
-sweep form overrides the single-value form when both are given. Non-positive
-or non-finite cap values raise `ValueError`. As with the uncapped drag, the
-cap is a capacity measurement only and never changes backtest returns. The
-single-backtest `run_backtest.py` path computes capacity without these caps
-(it does not expose them), so its capacity always reflects the uncapped drag.
+`--max-borrow-cost` / `--max-funding-cost` for a single limit. The plural
+`--max-borrow-costs` / `--max-funding-costs` flags are declared on every
+subcommand but are **not implemented** (no handler reads them); passing them
+now fails fast with a clear error instead of silently running an uncapped
+backtest, so a cap-sensitivity sweep is never faked. To sweep cost instead,
+use `--borrow-costs` / `--funding-costs` (which vary the underlying cost, not
+the cap). Non-positive or non-finite cap values raise `ValueError`. As with the
+uncapped drag, the cap is a capacity measurement only and never changes backtest
+returns. The single-backtest `run_backtest.py` path computes capacity without
+these caps (it does not expose them), so its capacity always reflects the
+uncapped drag.
 
 ### Capacity per regime (fold / period / window)
 
