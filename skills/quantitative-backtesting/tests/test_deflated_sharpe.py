@@ -69,6 +69,33 @@ def test_dsr_more_trials_deflates_confidence():
     assert many < few
 
 
+def test_dsr_monotonic_degradation_across_trial_sweep():
+    # Stronger than the two-endpoint check above: DSR must degrade
+    # monotonically (non-increasing) as the number of trials grows, across a
+    # geometric sweep, on BOTH the i.i.d.-normal null path and the
+    # trial_sharpes dispersion path. A non-monotone wobble would signal a
+    # defect in the SR* / ln(N) deflation arithmetic that the falsification
+    # criterion depends on.
+    rets = _returns(n=504, mu=0.0005, sigma=0.01, seed=13)
+    trial_sharpes = [0.2, 0.5, 0.8, 1.1, 1.4]
+    sweep = [1, 2, 3, 5, 10, 25, 50, 100, 500, 1000, 5000]
+    for kwargs in ({}, {"trial_sharpes": trial_sharpes}):
+        prev = 2.0
+        values = []
+        for n in sweep:
+            dsr = deflated_sharpe_ratio(1.0, rets, n_trials=n, **kwargs)[
+                "deflated_sharpe_ratio"
+            ]
+            assert dsr <= prev + 1e-15, (
+                f"DSR rose from {prev} to {dsr} at n_trials={n} "
+                f"(kwargs={kwargs})"
+            )
+            values.append(dsr)
+            prev = dsr
+        # The sweep must actually deflate, not just stay flat.
+        assert values[-1] < values[0], (kwargs, values)
+
+
 def test_dsr_constant_returns_are_degenerate():
     dates = pd.date_range("2020-01-01", periods=100, freq="B")
     rets = pd.Series(np.full(100, 0.001), index=dates)
@@ -114,6 +141,7 @@ if __name__ == "__main__":
         test_dsr_returns_required_keys_and_bounds,
         test_dsr_higher_sharpe_gives_higher_confidence,
         test_dsr_more_trials_deflates_confidence,
+        test_dsr_monotonic_degradation_across_trial_sweep,
         test_dsr_constant_returns_are_degenerate,
         test_dsr_trial_sharpes_path_uses_trial_dispersion,
         test_dsr_rejects_invalid_inputs,

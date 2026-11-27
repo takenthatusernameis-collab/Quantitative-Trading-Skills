@@ -1,26 +1,55 @@
-# Handoff — Both-caps regression guard verified; all 245 tests pass
+# Handoff — DSR monotonic-degradation sweep guard added; focused suite green
 
 ## What changed (this session)
-- **No code changes required.** The `estimate_capacity()` function in `skills/quantitative-backtesting/scripts/walk_forward.py:3968-3971` already uses two independent `if` statements (not `if/elif`) for the borrow and funding cost caps. Both caps bind independently as intended.
-- The regression test `test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply` was already present in `skills/quantitative-backtesting/tests/test_walk_forward.py:4792` and registered in `TEST_REGISTRY` at line 7787.
+- Added `test_dsr_monotonic_degradation_across_trial_sweep` to
+  `skills/quantitative-backtesting/tests/test_deflated_sharpe.py` (and registered
+  it in that file's `__main__` runner).
+- The test sweeps `n_trials` over `[1,2,3,5,10,25,50,100,500,1000,5000]` and
+  asserts the Deflated Sharpe Ratio is non-increasing at every step, on BOTH the
+  i.i.d.-normal null path and the `trial_sharpes` dispersion path, and that the
+  sweep actually deflates (`values[-1] < values[0]`).
+- No production code changed. `deflated_sharpe_ratio` in
+  `skills/quantitative-backtesting/scripts/walk_forward.py:2360` already yields a
+  monotone DSR because `sr_star` grows with `ln(n_trials)`, so `z` and
+  `Phi(z)` fall. This test pins that invariant (the prior test only compared the
+  two endpoints 5 vs 5000).
+- Scope: 1 file, +28 lines. `git diff --stat` clean otherwise.
 
 ## What was actually verified (evidence)
-- All three cost-cap CLI tests pass:
-  1. `test_cli_out_of_sample_max_borrow_cost_cap_reflected_in_csv` — borrow-only cap binds
-  2. `test_cli_out_of_sample_max_funding_cost_cap_reflected_in_csv` — funding-only cap binds
-  3. `test_cli_out_of_sample_max_borrow_and_funding_caps_both_apply` — both caps bind independently; `cost_drag == 0.02` (0.01 + 0.01) and `cost_adjusted_capacity == impact_capacity / (1 + 0.02 * holding_period_years)`
-- Full test suite: **245/245 tests pass** (verified in batches of 30).
+- `python3 skills/quantitative-backtesting/tests/test_deflated_sharpe.py` →
+  `ALL TESTS PASSED` (now 7 tests).
+- `python3 .../test_deflated_sharpe_reproducibility.py` → `ALL TESTS PASSED`.
+- `python3 .../test_probabilistic_sharpe.py` → `ALL TESTS PASSED`.
+- Manual pre-check confirmed strict monotone decline on both paths (e.g. i.i.d.
+  DSR 0.920 → 0.003; trial_sharpes 0.920 → 0.089 across the sweep).
+- `pytest` is NOT installed in this env (`No module named pytest`); the repo's
+  portable default `python3 <file>` was used, per `tests/README.md`.
 
 ## What remains unresolved
-- DATA PROVENANCE (pre-existing, blocked offline): `real_market_data/MSFT.csv` is byte-identical to `sample_benchmark.csv`; `AAPL.csv == sample_ohlcv.csv`; `GOOGL.csv == AAPL.csv.bak`. Committed fixtures are placeholders/synthetic, so regression guards test committed data only, NOT real securities. Restoring authentic data needs network (unavailable offline) — do NOT fabricate. See PROVENANCE.json and HANDOFF_SESSION_164.md.
+- DATA PROVENANCE (pre-existing, blocked offline): committed `real_market_data`
+  CSVs are placeholders/synthetic (MSFT==sample_benchmark, AAPL==sample_ohlcv,
+  GOOGL==AAPL.bak). Regression guards test committed data only, NOT real
+  securities. Restoring authentic data needs network (unavailable offline) — do
+  NOT fabricate. See PROVENANCE.json and HANDOFF_SESSION_164.md.
+- Full 245-test `test_walk_forward.py` registry was NOT re-run this session (it is
+  ~8 min and unrelated to this change); the change is isolated to a standalone
+  focused test file.
 
 ## Approaches that already failed (do not repeat)
-- `background_process` sweep: repo not visible in its namespace — abandoned; use foreground timed batches. (Prior sessions.)
+- `background_process` sweep: repo not visible in its namespace — abandoned; use
+  foreground timed batches. (Prior sessions.)
+- `pytest` invocation fails (module absent); use `python3 <file>` directly.
 
 ## One precise next task (bounded, evidence-based)
-The cost-cap reporting is complete and correct. The next high-value quant research task should address one of the open methodological questions:
-1. **Regime-aware impact validation**: Extend the regime-impact coefficient framework (`--regime-impact-coefficients`) with a walk-forward test that verifies the regime-specific impact model produces different capacity estimates than the flat model on real/synthetic regime-labeled data.
-2. **Cross-method capacity comparison**: The `CROSS_METHOD_CAPACITY_COMPARISON.md` document outlines a comparison framework. Implement a test that runs the same strategy under `panel_pricing="net-exposure"` vs `"book"` and quantifies the capacity gap for market-neutral books.
-3. **Deflated multiple testing sensitivity**: The `DEFLATED_MULTIPLE_TESTING_COUNT_SENSITIVITY.md` document describes sensitivity to `n_trials`. Add a test that sweeps `n_trials` and verifies the deflated Sharpe degrades monotonically.
-
-Pick ONE, implement a focused test + minimal code if needed, verify, and handoff.
+Pick ONE of the remaining handoff options and deliver a focused test + minimal
+code if needed:
+1. **Cross-method capacity comparison** — `CROSS_METHOD_CAPACITY_COMPARISON.md`
+   describes comparing `panel_pricing="net-exposure"` vs `"book"`. Implement a
+   test that runs the same market-neutral strategy under both and quantifies the
+   capacity gap. (Note: `test_ema_crossover_capacity_sensitivity_net_exposure_*`
+   already exists as a partial precedent to reuse.)
+2. **Regime-aware impact validation** — extend `--regime-impact-coefficients`
+   with a walk-forward test showing regime-specific impact yields different
+   capacity than the flat model on regime-labeled data.
+Verify with `python3 <test_file>` (pytest unavailable). Keep scope to one file;
+do not touch the inherited marketplace catalog.
