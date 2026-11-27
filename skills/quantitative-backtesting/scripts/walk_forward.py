@@ -3984,6 +3984,15 @@ def estimate_capacity(
     else:
         _drag_denominator = 1.0 + cost_drag * holding_period_years
 
+    # Report the effective (post-cap) cost drag, i.e. the value actually
+    # applied to the capacity denominator above. Without a binding cap this
+    # equals the uncapped drag, so default runs are unchanged; with a binding
+    # --max-borrow-cost / --max-funding-cost it is the capped drag. This keeps
+    # the published fields self-consistent: a reader can reproduce
+    # cost_adjusted_capacity == impact_capacity / (1 + cost_drag * holding_period_years)
+    # from the emitted cost_drag instead of the raw pre-cap exposure.
+    result["cost_drag"] = float(cost_drag)
+
     adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
     adv_notional = adv_shares * close
 

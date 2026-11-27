@@ -1,22 +1,67 @@
-# Handoff — Out-of-sample CSV capacity fix complete + regression test added
+# Handoff — OOS max-cost-cap CSV reporting fixed; cap now binds & is reproducible
 
 ## What changed
-- **Underlying fix (already committed, HEAD 99780e6):** `run_out_of_sample_validation()` in `skills/quantitative-backtesting/scripts/walk_forward.py` now populates `test_performance.capacity_detail` (and `capacity_trend`) in `summary_data` so the CSV emission block at walk_forward.py:12575 reads a `capacity_detail` dict instead of a float scalar. The `.get()`-on-a-float crash no longer reproduces; `cap` is a dict.
-- **New regression test:** `test_cli_out_of_sample_output_format_csv_writes_capacity_rows` in `skills/quantitative-backtesting/tests/test_walk_forward.py` (+63 lines), registered in TEST_REGISTRY. Asserts the OOS CLI with `--output-format csv` writes `out_of_sample_summary.csv` with columns `impact_capacity`, `participation_capacity`, `cost_adjusted_capacity`, `cost_drag`, `holding_period_years`, exactly one row, positive `cost_adjusted_capacity`, and that default JSON mode writes no CSV.
-- No engine math modified; no marketplace/catalog/schema changes. Working tree clean except the one test file.
+- One file, one edit: `skills/quantitative-backtesting/scripts/walk_forward.py`
+  `estimate_capacity()` (~line 3987). Added `result["cost_drag"] = float(cost_drag)`
+  AFTER the max-borrow/max-funding cap logic, so the published `cost_drag` is the
+  EFFECTIVE (post-cap) drag actually applied to the capacity denominator.
+- Why: the prior HEAD (2cfb1e5) wired `--max-borrow-cost`/`--max-funding-cost`
+  through the OOS path and added `test_cli_out_of_sample_max_cost_cap_reflected_in_csv`,
+  but `result["cost_drag"]` was set (line 3963) to the UNCAPPED drag and never
+  updated. Result: CSV reported `cost_drag=0.02` while `cost_adjusted_capacity`
+  was divided by `(1 + 0.01*holding)` — the row was internally inconsistent and
+  the committed test FAILED (`got 0.020000000000000004`, expected 0.01).
+- This is a REPORTING-consistency fix only. It does NOT change any backtest return,
+  signal, or the capacity NUMBER (`cost_adjusted_capacity` was already computed from
+  the capped local `cost_drag`). Default runs (no cap) are byte-identical: the cap
+  block falls through and `cost_drag` is unchanged.
+- No marketplace/catalog/schema/engine-math changes. Working tree: only this file.
 
-## What was actually verified
-- `test_cli_out_of_sample_output_format_csv_writes_capacity_rows` → PASS
-- `test_main_registers_every_module_level_test` (registry integrity) → PASS
-- Existing CSV tests (walk-forward, CPCV, optimize, monte-carlo) → 5/5 PASS (no regression)
-- Manual end-to-end: OOS CLI on committed real AAPL fixture (`skills/quantitative-backtesting/assets/example_data/real_market_data/AAPL.csv`) with `--impact-coefficient 0.0005 --output-format csv` → exit 0 and `out_of_sample_summary.csv` has non-null capacity fields (`impact_capacity`/`cost_adjusted_capacity` = 11,614,740,393.89, `cost_drag` = 0.0, `holding_period_years` = 0.00397).
+## What was actually verified (evidence)
+- Target test `test_cli_out_of_sample_max_cost_cap_reflected_in_csv` → PASS (was FAIL).
+- `test_cli_out_of_sample_output_format_csv_writes_capacity_rows` → PASS.
+- `test_walk_forward_analysis_surfaces_cost_drag_and_holding_period_per_period` → PASS.
+- `test_walk_forward_summary_capacity_surfaces_cost_drag_and_holding_period` → PASS.
+- `test_main_registers_every_module_level_test` (registry integrity) → PASS.
+- FULL suite `python3 skills/quantitative-backtesting/tests/test_walk_forward.py`
+  → **239/239 passed, exit 0** (no regression).
+- Direct end-to-end CLI on committed real AAPL fixture
+  (`assets/example_data/real_market_data/AAPL.csv`), MACD + `--borrow-cost 0.10
+  --leverage 1.5 --short-exposure 0.2 --max-borrow-cost 0.01 --impact-coefficient
+  0.0005 --output-format csv` → exit 0. `out_of_sample_summary.csv`:
+  `impact_capacity=11614740393.886566`, `cost_adjusted_capacity=11614279509.779036`,
+  `cost_drag=0.01`, `holding_period_years=0.003968253968253968`.
+  Check: `impact/(1+0.01*holding) = 11614279509.78` == reported cost_adjusted_capacity.
+  So `cost_drag>0` and `cost_adjusted_capacity < impact_capacity` (cap binds) and the
+  row is now reproducible from its own fields.
 
 ## What remains unresolved
-- `--max-borrow-cost` / `--max-funding-cost` caps not exercised end-to-end (cost_drag = 0.0 for long-only sma_crossover; would require a short/leveraged strategy).
-- `cost_drag = 0.0` for all runs with long-only strategies.
+- `--max-funding-cost` (leverage>1, funding leg) NOT yet exercised end-to-end; only the
+  borrow leg has a committed test. The engine path is symmetric (lines 3977-3983) and
+  the same `result["cost_drag"]` fix covers it, but there is no dedicated regression.
+- Dead code: `borrow_cap_factor` (line ~3970) and `funding_cap_factor` (line ~3979)
+  are computed but never used. Harmless; left untouched (out of scope, no engine-math edit).
+- DATA PROVENANCE (pre-existing, NOT fixed, blocked offline): `real_market_data/MSFT.csv`
+  is byte-identical to `sample_benchmark.csv` (placeholder, not genuine MSFT OHLC);
+  `AAPL.csv == sample_ohlcv.csv`, `GOOGL.csv == AAPL.csv.bak`. See
+  `HANDOFF_SESSION_164.md` and `PROVENANCE.json`. Restoring authentic data needs
+  network access unavailable in this offline session — do NOT fabricate.
 
 ## Approaches that already failed (do not repeat)
-- None for this change: the `.get()`-on-float crash no longer reproduces (`cap` is now a dict). Prior attempt to read `test_performance.capacity` (float) was superseded by reading the `capacity_detail` dict (already in HEAD).
+- (this session) None. The single targeted edit fixed the deterministic failure first try.
+- (prior sessions) `background_process` sweep: repo not visible in its namespace —
+  abandoned; use foreground timed batches. Single foreground loop over many files
+  exceeds the 600s tool cap — solved by per-file `timeout` + incremental logging.
 
-## Next precise task
-Exercise the `--max-borrow-cost` / `--max-funding-cost` caps end-to-end on the OOS path with a strategy that has actual borrow/funding exposure (e.g., MACD which goes short, using `--borrow-cost`/`--funding-cost` and `--max-borrow-cost`/`--max-funding-cost`), and confirm `cost_drag` > 0 and `cost_adjusted_capacity` reflects the binding cap in `out_of_sample_summary.csv`. Evidence: existing OOS borrow/funding sweep tests at test_walk_forward.py:4416 / :4450 use MACD with `--borrow-costs`/`--funding-costs`; the CSV block reads `capacity_detail.cost_drag`. Constraints: committed fixtures only, no network, minimal change, do not modify engine math.
+## One precise next task (bounded, evidence-based)
+Add a symmetric regression test `test_cli_out_of_sample_max_funding_cost_cap_reflected_in_csv`
+in `skills/quantitative-backtesting/tests/test_walk_forward.py` (register it in
+TEST_REGISTRY next to the borrow-cap test at ~line 7533). Mirror the borrow test but
+drive the FUNDING leg: `--leverage 1.5 --funding-cost 0.10 --short-exposure 0.0
+--max-funding-cost 0.01` (uncapped funding drag = (1.5-1)*0.10 = 0.05 > cap 0.01).
+Assert CSV `cost_drag == 0.01` and `cost_adjusted_capacity == impact_capacity /
+(1 + cost_drag * holding_period_years)`. Evidence: engine funding-cap branch at
+walk_forward.py:3977-3983; the `result["cost_drag"]` fix at ~3987 already makes this
+hold. Constraints: committed fixtures only, no network, do not modify engine math.
+Then run `python3 skills/quantitative-backtesting/tests/test_walk_forward.py` (expect
+240/240). Do NOT commit unless explicitly asked.
