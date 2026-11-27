@@ -4094,6 +4094,125 @@ def test_cli_cpcv_output_format_csv_writes_capacity_rows():
         )
 
 
+def test_cli_optimize_output_format_csv_writes_capacity_rows():
+    """CLI optimize with --output-format csv emits optimize_summary.csv with
+    flattened capacity columns alongside the JSON, while the default json format
+    writes only the JSON artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        base_argv = [
+            "walk_forward", "optimize",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}',
+            "--impact-coefficient", "0.5",
+        ]
+
+        csv_out = os.path.join(tmpdir, "csv_out")
+        argv_csv = base_argv + ["--output", csv_out, "--output-format", "csv"]
+        with patch.object(sys, "argv", argv_csv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, "CLI optimize --output-format csv should exit 0"
+        csv_artifact = os.path.join(csv_out, "optimize_summary.csv")
+        assert os.path.exists(csv_artifact), "optimize_summary.csv not written"
+        assert os.path.exists(os.path.join(csv_out, "parameter_optimization.json")), (
+            "parameter_optimization.json still written when --output-format csv"
+        )
+
+        frame = pd.read_csv(csv_artifact)
+        expected = [
+            "rank", "sharpe_ratio", "total_return",
+            "impact_capacity", "participation_capacity",
+            "cost_adjusted_capacity", "cost_drag", "holding_period_years",
+        ]
+        assert list(frame.columns) == expected, (
+            f"unexpected CSV columns: {list(frame.columns)}"
+        )
+        assert len(frame) == 1, "optimize_summary.csv should contain exactly one row"
+        assert frame["cost_adjusted_capacity"].notna().all(), (
+            "cost_adjusted_capacity must be present"
+        )
+        assert (frame["cost_adjusted_capacity"] > 0).all(), (
+            f"cost_adjusted_capacity must be positive: "
+            f"{frame['cost_adjusted_capacity'].tolist()}"
+        )
+
+        # Default (json) mode must not write a CSV and must write the JSON artifact.
+        json_out = os.path.join(tmpdir, "json_out")
+        argv_json = base_argv + ["--output", json_out]
+        with patch.object(sys, "argv", argv_json), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0
+        assert os.path.exists(os.path.join(json_out, "parameter_optimization.json"))
+        assert not os.path.exists(os.path.join(json_out, "optimize_summary.csv")), (
+            "default json format must not emit optimize_summary.csv"
+        )
+
+
+def test_cli_monte_carlo_output_format_csv_writes_capacity_rows():
+    """CLI monte-carlo with --output-format csv emits monte_carlo_summary.csv with
+    flattened capacity columns alongside the JSON, while the default json format
+    writes only the JSON artifact."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        base_argv = [
+            "walk_forward", "monte-carlo",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "sma_crossover",
+            "--param-grid", '{"fast_period": [3, 5], "slow_period": [8, 10]}',
+            "--impact-coefficient", "0.5",
+            "--n-simulations", "100",
+        ]
+
+        csv_out = os.path.join(tmpdir, "csv_out")
+        argv_csv = base_argv + ["--output", csv_out, "--output-format", "csv"]
+        with patch.object(sys, "argv", argv_csv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, "CLI monte-carlo --output-format csv should exit 0"
+        csv_artifact = os.path.join(csv_out, "monte_carlo_summary.csv")
+        assert os.path.exists(csv_artifact), "monte_carlo_summary.csv not written"
+        assert os.path.exists(os.path.join(csv_out, "monte_carlo_results.json")), (
+            "monte_carlo_results.json still written when --output-format csv"
+        )
+
+        frame = pd.read_csv(csv_artifact)
+        expected = [
+            "sharpe_ratio", "total_return",
+            "impact_capacity", "participation_capacity",
+            "cost_adjusted_capacity", "cost_drag", "holding_period_years",
+        ]
+        assert list(frame.columns) == expected, (
+            f"unexpected CSV columns: {list(frame.columns)}"
+        )
+        assert len(frame) == 1, "monte_carlo_summary.csv should contain exactly one row"
+        assert frame["cost_adjusted_capacity"].notna().all(), (
+            "cost_adjusted_capacity must be present"
+        )
+        assert (frame["cost_adjusted_capacity"] > 0).all(), (
+            f"cost_adjusted_capacity must be positive: "
+            f"{frame['cost_adjusted_capacity'].tolist()}"
+        )
+
+        # Default (json) mode must not write a CSV and must write the JSON artifact.
+        json_out = os.path.join(tmpdir, "json_out")
+        argv_json = base_argv + ["--output", json_out]
+        with patch.object(sys, "argv", argv_json), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0
+        assert os.path.exists(os.path.join(json_out, "monte_carlo_results.json"))
+        assert not os.path.exists(os.path.join(json_out, "monte_carlo_summary.csv")), (
+            "default json format must not emit monte_carlo_summary.csv"
+        )
+
+
 def test_cli_walk_forward_borrow_sweep():
     """CLI walk-forward --borrow-costs writes a sweep artifact whose OOS
     returns degrade as the short-position borrow cost rises (MACD goes short)."""
@@ -7962,6 +8081,8 @@ TEST_REGISTRY.extend([
     ("test_cli_walk_forward_participation_rate_cap_written_to_summary", test_cli_walk_forward_participation_rate_cap_written_to_summary),
     ("test_cli_walk_forward_output_format_csv_writes_capacity_rows", test_cli_walk_forward_output_format_csv_writes_capacity_rows),
     ("test_cli_cpcv_output_format_csv_writes_capacity_rows", test_cli_cpcv_output_format_csv_writes_capacity_rows),
+    ("test_cli_optimize_output_format_csv_writes_capacity_rows", test_cli_optimize_output_format_csv_writes_capacity_rows),
+    ("test_cli_monte_carlo_output_format_csv_writes_capacity_rows", test_cli_monte_carlo_output_format_csv_writes_capacity_rows),
     ("test_cli_rejects_invalid_participation_rate_in_every_subcommand", test_cli_rejects_invalid_participation_rate_in_every_subcommand),
 ])
 TEST_REGISTRY.extend([

@@ -1847,6 +1847,22 @@ def parameter_optimization(
                         float(max_participation_rate)
                         if max_participation_rate is not None else None
                     )
+                    # Full cost breakdown for the combination (impact vs participation
+                    # vs cost-adjusted capacity, plus cost drag and holding period).
+                    # Additive to the scalar capacity above so existing consumers are
+                    # unaffected; the CLI csv path reads this dict to emit a
+                    # per-combination cost breakdown.
+                    _combo_cap_adj = _combo_cap.get("cost_adjusted_capacity")
+                    result["capacity_detail"] = (
+                        {
+                            "impact_capacity": _combo_cap.get("impact_capacity"),
+                            "participation_capacity": _combo_cap.get("participation_capacity"),
+                            "cost_adjusted_capacity": _combo_cap.get("cost_adjusted_capacity"),
+                            "cost_drag": _combo_cap.get("cost_drag"),
+                            "holding_period_years": _combo_cap.get("holding_period_years"),
+                        }
+                        if _combo_cap_adj is not None else None
+                    )
                 except Exception:
                     result["capacity"] = None
                     result["capacity_trend"] = None
@@ -1854,6 +1870,7 @@ def parameter_optimization(
                         float(max_participation_rate)
                         if max_participation_rate is not None else None
                     )
+                    result["capacity_detail"] = None
 
                 if regime_report is not None and sharpe > best_sharpe:
                     best_sharpe = sharpe
@@ -10943,6 +10960,27 @@ def run_parameter_optimization(args) -> int:
             json.dump(survivorship, f, indent=2, default=str)
         print(f"Survivorship bias report saved to: {surv_path}")
 
+    # Optionally emit a flattened capacity CSV for the top-ranked combination
+    # so the cost-aware capacity breakdown (impact vs participation vs cost drag)
+    # is directly consumable by spreadsheet/analysis tools alongside the JSON
+    # artifacts. Mirrors the CPCV csv block, keyed by the top result.
+    if getattr(args, "output_format", "json") == "csv" and results:
+        top_result = results[0]
+        cap = top_result.get("capacity_detail") or {}
+        csv_row = {
+            "rank": 1,
+            "sharpe_ratio": top_result.get("sharpe_ratio"),
+            "total_return": top_result.get("total_return"),
+            "impact_capacity": cap.get("impact_capacity"),
+            "participation_capacity": cap.get("participation_capacity"),
+            "cost_adjusted_capacity": cap.get("cost_adjusted_capacity"),
+            "cost_drag": cap.get("cost_drag"),
+            "holding_period_years": cap.get("holding_period_years"),
+        }
+        csv_path = output_dir / "optimize_summary.csv"
+        pd.DataFrame([csv_row]).to_csv(csv_path, index=False)
+        print(f"Optimize capacity CSV saved to: {csv_path}")
+
     return 0
 
 
@@ -11718,9 +11756,25 @@ def run_monte_carlo(args) -> int:
         )
         mc_results["summary"]["capacity"] = _capacity.get("estimated_capacity")
         mc_results["summary"]["capacity_trend"] = _capacity.get("capacity_trend")
+        # Full cost breakdown (impact vs participation vs cost-adjusted capacity,
+        # plus cost drag and holding period). Additive to the scalar capacity
+        # above so existing consumers are unaffected; the CLI csv path reads
+        # this dict to emit a cost breakdown.
+        _cap_adj = _capacity.get("cost_adjusted_capacity")
+        mc_results["summary"]["capacity_detail"] = (
+            {
+                "impact_capacity": _capacity.get("impact_capacity"),
+                "participation_capacity": _capacity.get("participation_capacity"),
+                "cost_adjusted_capacity": _capacity.get("cost_adjusted_capacity"),
+                "cost_drag": _capacity.get("cost_drag"),
+                "holding_period_years": _capacity.get("holding_period_years"),
+            }
+            if _cap_adj is not None else None
+        )
     except Exception:
         mc_results["summary"]["capacity"] = None
         mc_results["summary"]["capacity_trend"] = None
+        mc_results["summary"]["capacity_detail"] = None
     # The opt-in participation-rate cap that produced the reported capacity,
     # so a capped number is never confused with an impact-only one.
     mc_results["summary"]["max_participation_rate"] = (
@@ -11843,6 +11897,25 @@ def run_monte_carlo(args) -> int:
     with open(mc_path, "w") as f:
         json.dump(mc_save, f, indent=2, default=str)
     print(f"\nMonte Carlo results saved to: {mc_path}")
+
+    # Optionally emit a flattened capacity CSV so the cost-aware capacity
+    # breakdown (impact vs participation vs cost drag) is directly consumable
+    # by spreadsheet/analysis tools alongside the JSON artifact. Mirrors the
+    # CPCV csv block, keyed by the Monte Carlo summary's capacity_detail.
+    if getattr(args, "output_format", "json") == "csv":
+        cap = mc_results["summary"].get("capacity_detail") or {}
+        csv_row = {
+            "sharpe_ratio": mc_results["summary"].get("sharpe_ratio", {}).get("mean"),
+            "total_return": mc_results["summary"].get("total_return", {}).get("mean"),
+            "impact_capacity": cap.get("impact_capacity"),
+            "participation_capacity": cap.get("participation_capacity"),
+            "cost_adjusted_capacity": cap.get("cost_adjusted_capacity"),
+            "cost_drag": cap.get("cost_drag"),
+            "holding_period_years": cap.get("holding_period_years"),
+        }
+        csv_path = output_dir / "monte_carlo_summary.csv"
+        pd.DataFrame([csv_row]).to_csv(csv_path, index=False)
+        print(f"Monte Carlo capacity CSV saved to: {csv_path}")
 
     # Generate tear sheet with Monte Carlo analysis rendered as a section
     mc_equity = (1 + returns).cumprod() * args.initial_capital
