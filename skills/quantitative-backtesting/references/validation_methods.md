@@ -459,6 +459,31 @@ Notes and limits:
   under the same `summary` keys, and omitting the flags leaves the summary
   unchanged.
 
+- **The family matrix also carries a CSCV probability of backtest overfitting
+  (`--family-pbo`).** The Reality Check and the Romano-Wolf stepdown ask whether
+  the *best* strategy in the family beats the benchmark by more than luck; the
+  CSCV PBO asks the complementary question -- how often does the configuration
+  that wins in-sample rank at or below the out-of-sample median? Passing
+  `--family-pbo` (together with `--family-returns`) runs `pbo_cscv` on the same
+  OOS-aligned family matrix and records the reading under
+  `summary["family_pbo"]`: `pbo`, `is_overfit`, `mean_oos_rank`, `n_trials`,
+  `n_observations`, `n_splits`, `n_partitions`, `n_partitions_evaluated`,
+  `n_logits` and `strategy_names`. `--family-pbo-splits` sets the even number of
+  contiguous CSCV blocks `S` (>= 4, default 8). It is opt-in: without
+  `--family-pbo` no `family_pbo` key is added, and an unusable matrix (too few
+  rows, non-numeric) is reported under `summary["family_pbo_error"]` with
+  `family_pbo` set to `null` rather than raising, so the diagnostic can never
+  break the run. Like the other family controls it is a measurement: it changes
+  no walk-forward return, cost, impact or capacity number, and a low PBO is a
+  statement about the selection procedure generalizing, not a profitability
+  claim. The `walk-forward` CLI prints it as a "Family CSCV probability of
+  backtest overfitting" block and persists it in `walk_forward_summary.json`.
+  Guarded by `tests/test_walk_forward.py`
+  (`test_walk_forward_analysis_family_pbo_opt_in`,
+  `test_walk_forward_analysis_family_pbo_defaults_off`,
+  `test_walk_forward_analysis_family_pbo_too_short_records_error`,
+  `test_print_family_pbo_surfaces_reading_and_caveat`).
+
 ### Romano-Wolf Stepdown (Romano & Wolf 2005)
 
 `utils.romano_wolf_stepdown` extends the Reality Check to identify *which*
@@ -570,6 +595,41 @@ evaluation:
    portion (confirmation).
 3. **TEST**: Final evaluation on the held-out test set, which has never
    been used in any optimization or selection step.
+
+### The split fractions and the parameter-selection method (`--validation-method`)
+
+The framework carves the sample into three chronological splits and selects the
+final parameters on the training split with one of two methods:
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--train-frac` | 0.6 | Fraction of the sample used as the training split |
+| `--val-frac` | 0.2 | Fraction used as the validation split |
+| `--test-frac` | 0.2 | Fraction held out as the final test split |
+| `--validation-method` | `walk_forward` | Method used to select parameters on the training split: `walk_forward` or `cpcv` |
+
+The three fractions must sum to 1.0 (within `1e-9`; a mismatch raises
+`ValueError`), and the splits are verified pairwise disjoint and chronologically
+ordered before any phase runs (see "Strict Train/Validation/Test Separation"
+below). The held-out test split is never used in any selection or confirmation
+step regardless of the method.
+
+`--validation-method` chooses what runs *inside* the training split:
+
+- `walk_forward` (default) runs `walk_forward_analysis` on the training split
+  with the `--wf-train-months` / `--wf-test-months` / `--wf-step-months` window
+  (resolved against the training split as described below);
+- `cpcv` runs `cpcv_analysis` on the training split with the
+  `--cpcv-n-splits`, `--cpcv-test-size`, `--cpcv-purge-size` and
+  `--cpcv-embargo-size` settings.
+
+The choice is recorded in the artifact under `summary["validation_method"]`, and
+the selection-criterion, no-selection and partial-selection diagnoses all name
+the flags the chosen method's own subcommand accepts. The shipped default
+(`walk_forward`, 0.6/0.2/0.2) is unchanged; the `cpcv` method is exercised by
+`tests/test_out_of_sample_window.py` (including the `--validation-method cpcv`
+CLI path) and
+`tests/test_out_of_sample_cpcv_time_series_momentum_real_triple_aapl_msft_googl.py`.
 
 ### The Walk-Forward Window Inside the Training Split
 
