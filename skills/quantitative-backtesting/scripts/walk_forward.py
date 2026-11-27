@@ -7502,6 +7502,7 @@ def out_of_sample_validation(
             "test_returns": test_returns,
             "capacity": test_capacity_point,
             "capacity_trend": test_capacity_trend,
+            "capacity_detail": test_capacity,
             # Book-based capacity for the held-out test window (see above).
             "capacity_book": test_capacity_book,
             "capacity_book_trend": test_capacity_book_trend,
@@ -12569,7 +12570,7 @@ def run_out_of_sample_validation(args) -> int:
     # breakdown (impact vs participation vs cost drag) is directly consumable
     # by spreadsheet/analysis tools alongside the JSON artifact.
     if getattr(args, "output_format", "json") == "csv":
-        cap = (summary_data.get("test_performance") or {}).get("capacity") or {}
+        cap = (summary_data.get("test_performance") or {}).get("capacity_detail") or {}
         capacity_row = {
             "impact_capacity": cap.get("impact_capacity"),
             "participation_capacity": cap.get("participation_capacity"),
