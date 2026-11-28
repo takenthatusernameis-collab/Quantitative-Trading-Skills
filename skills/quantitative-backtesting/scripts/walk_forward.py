@@ -9058,6 +9058,7 @@ def run_cpcv(args) -> int:
         max_funding_cost=getattr(args, "max_funding_cost", None),
         leverage=getattr(args, "leverage", 1.0),
         short_exposure=getattr(args, "short_exposure", 0.0),
+        regime_impact_coefficients=regime_impact_coefficients,
     )
     if pit_results is not None:
         results["point_in_time_validation"] = pit_results
