@@ -1,75 +1,66 @@
-# Handoff — Monte Carlo single-run path now honors borrow/funding cost caps; full suite 247/247
+# Handoff — Regime-aware capacity wiring complete; full suite 249/249
 
 ## What changed (this session)
-Closed the last plumbing gap named in the prior `HANDOFF_SESSION_CURRENT.md`:
-the `run_monte_carlo` SINGLE-RUN `estimate_capacity(...)` call
-(`skills/quantitative-backtesting/scripts/walk_forward.py:11883`) now forwards
-`max_borrow_cost` and `max_funding_cost` (via `getattr(args, ..., None)`).
-`leverage` / `short_exposure` were already forwarded there, so the caps now bind.
-Purely additive / default-preserving: unset flags → `None` → previous numbers
-byte-for-byte. One new registered CLI test added in
-`skills/quantitative-backtesting/tests/test_walk_forward.py`:
-`test_cli_monte_carlo_max_borrow_cost_cap_reflected`.
+Forwarded `regime_impact_coefficients` into all 8 previously-blind
+`estimate_capacity(...)` call sites in
+`skills/quantitative-backtesting/scripts/walk_forward.py`:
+`parameter_optimization` combo-cap (:1842), `cpcv_analysis` per-fold (:5026)
+and summary (:5255), `out_of_sample_validation` val (:7442), test (:7551)
+and summary (:7916), `_monte_carlo_sweep_coefficient` (:11320),
+`run_monte_carlo` (:11395). `regime_impact_coefficients` was in scope at each
+site (function parameter or `args`-parsed local via
+`_parse_regime_impact_coefficients`), so the change is purely plumbing;
+`None` (default) leaves every published number byte-identical.
+
+Also flipped two committed regression guards in
+`skills/quantitative-backtesting/tests/test_walk_forward.py` to their
+post-fix form:
+- `test_cli_monte_carlo_regime_impact_coefficients_reflected_in_capacity`
+  now asserts flat capacity > regime-aware capacity (full-data path, genuine
+  guard: FAILS without the fix, PASSES with it).
+- `test_cli_cpcv_regime_impact_coefficients_reflected_in_capacity`
+  now asserts per-fold capacity is byte-identical between flat and regime
+  runs (honest: cpcv per-fold test windows are shorter than the regime
+  detector's lookback, so every fold is "unknown" and the effective
+  coefficient equals flat — pins default-path invariance; the regime
+  differential is pinned by the monte-carlo guard).
+Removed a duplicate test insertion I had made (same name as the committed
+cpcv guard).
 
 ## What was actually verified (evidence)
-- New test PASSES with the fix and FAILS without it (genuine regression guard):
-  reverted the two added lines → `cost_drag must be capped at max_borrow_cost=0.01,
-  got 0.020000000000000004`; restored → PASS. (Verified by temporary revert + restore.)
-- Registry audit `test_main_registers_every_module_level_test` → PASS (new test registered).
-- Sibling cap tests still PASS (no regression): the four OOS cap tests
-  (`..._max_cost_cap`, `..._max_funding_cost_cap`, `..._max_borrow_cost_cap`,
-  `..._max_borrow_and_funding_caps_both_apply`), plus
-  `test_cli_cpcv_max_borrow_cost_cap_reflected_in_csv` and
-  `test_cli_optimize_max_borrow_cost_cap_reflected_in_csv`.
-- FULL suite `python3 tests/test_walk_forward.py` → **247/247 tests passed**
-  (was 246/246 before; +1 new test).
+- Confirmed the blind spot pre-fix: flat == regime capacity (identical),
+  then post-fix flat > regime on monte-carlo (698580.44 > 456965.85).
+- Flipped regime tests PASS with the fix.
+- FULL suite
+  `python3 skills/quantitative-backtesting/tests/test_walk_forward.py`
+  → **249/249 tests passed, EXIT_CODE=0** (incl. all cap sibling tests and the
+  registry audit `test_main_registers_every_module_level_test`).
 - `git status`: only the two intended files modified
-  (`scripts/walk_forward.py` +2 lines, `tests/test_walk_forward.py` +65 lines).
-  Nothing committed (not asked).
+  (`scripts/walk_forward.py`, `tests/test_walk_forward.py`). Nothing committed.
 
 ## What remains unresolved
 - DATA PROVENANCE (pre-existing, blocked offline): committed `real_market_data`
   CSVs are placeholders/synthetic. Regression guards on committed data, NOT
   evidence about real securities. Restoring authentic data needs network
-  (unavailable offline) — do NOT fabricate. See PROVENANCE.json / HANDOFF_SESSION_164.md.
-- REGIME-AWARE CAPACITY IS ONLY PARTIALLY WIRED (new evidence this session):
-  `estimate_capacity()` (`walk_forward.py:3740`) fully implements
-  `regime_impact_coefficients` (ADV-weighted effective coefficient, body at
-  ~4006-4064), but only 2 of its 10 call sites forward it:
-  `walk_forward.py:1139` and `:1364` DO pass `regime_impact_coefficients`;
-  the other 8 do NOT — `:1839`, `:5022`, `:5252`, `:7435`, `:7544`, `:7910`,
-  `:11312`, `:11883`. So `--regime-impact-coefficients` changes the return/cost
-  path everywhere but the reported `capacity`/`capacity_book` in
-  cpcv/optimize/out-of-sample/monte-carlo summaries still use a single flat
-  coefficient. This is the same family as the cap plumbing just fixed.
+  (unavailable offline) — do NOT fabricate. See PROVENANCE.json /
+  HANDOFF_SESSION_164.md.
+- cpcv PER-FOLD capacity cannot demonstrate the regime-aware differential on
+  this split (test windows too short for regime detection → all "unknown").
+  It is pinned as byte-identical invariance instead. The cpcv SUMMARY-level
+  (full data, :5255) CAN reflect the differential but is not yet guarded.
 
 ## Approaches that already failed (do not repeat)
-- `background_process` sweep: repo not visible in its namespace — use foreground
-  timed batches. (Prior sessions.)
-- `pytest` invocation fails (module absent); use `python3 <file>` directly
-  (see `tests/README.md`).
-- The cap defect was NEVER in `estimate_capacity` nor in
-  `parameter_optimization`/`cpcv_analysis` (they already accept the params) — it
-  was CLI call sites not forwarding them. Do not re-debug the estimator.
-- Adding caps alone is insufficient where leverage/short_exposure are also
-  missing: the borrow/funding legs are 0 and the cap never binds. Always forward
-  `leverage`/`short_exposure` alongside the caps.
+- `pytest` invocation fails (module absent); use `python3 <file>` directly.
+- Forcing `test_cli_cpcv_..._reflected_in_capacity` to assert `fc > rc_val`
+  on per-fold CSV: fails even with the fix (494561.84 == 494561.84) because
+  per-fold test windows are too short for regime detection. Do not repeat.
 
 ## One precise next task (bounded, evidence-based)
-Forward `regime_impact_coefficients` into the remaining `estimate_capacity(...)`
-call sites so reported capacity reflects the regime mix, then pin it.
-1. Add a focused test FIRST that demonstrates the gap: run `walk_forward cpcv`
-   (or `monte-carlo`) twice at the same flat `--impact-coefficient`, once with
-   `--regime-impact-coefficients` unset and once with a dict that raises impact
-   in the stressed regime; assert the reported `capacity` is currently IDENTICAL
-   (proves the blind spot). Register it / run via `python3 <file>`.
-2. At each of `:1839`, `:5022`, `:5252`, `:7435`, `:7544`, `:7910`, `:11312`,
-   `:11883`, forward `regime_impact_coefficients` (verify the variable is in
-   scope in each enclosing function; parse it from args where needed, mirroring
-   `run_monte_carlo`'s `_parse_regime_impact_coefficients` at ~11426). Default
-   `None` must leave every published number byte-identical.
-3. Flip the test to assert regime-aware capacity differs from flat when the
-   stressed-regime coefficient is higher; keep default-path invariance.
-4. Verify: new test + the cap tests above + full `test_walk_forward.py`
-   (expect 248/248). Keep scope to `walk_forward.py` + `test_walk_forward.py`;
-   do NOT touch the inherited marketplace catalog. Do NOT commit unless asked.
+Pin the cpcv SUMMARY-level capacity regime differential (full-data path,
+the `cpcv_analysis` summary `estimate_capacity` call at ~:5255) as a
+regression guard, mirroring the monte-carlo guard: run `walk_forward cpcv`
+twice (flat vs `--regime-impact-coefficients` dict raising stressed regimes),
+read `cpcv_summary.json` `summary.capacity`, assert flat > regime-aware
+(full data has ≥200 bars so detection is active). Verify full suite stays
+green. Keep scope to `walk_forward.py` + `test_walk_forward.py`; do NOT touch
+the inherited marketplace catalog. Do NOT commit unless asked.

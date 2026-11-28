@@ -1842,6 +1842,7 @@ def parameter_optimization(
                         borrow_cost=borrow_cost, funding_cost=funding_cost,
                         leverage=leverage, short_exposure=short_exposure,
                         max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost,
+                        regime_impact_coefficients=regime_impact_coefficients,
                     )
                     result["capacity"] = _combo_cap.get("estimated_capacity")
                     result["capacity_trend"] = _combo_cap.get("capacity_trend")
@@ -5025,6 +5026,7 @@ def cpcv_analysis(
             borrow_cost=borrow_cost, funding_cost=funding_cost,
             leverage=leverage, short_exposure=short_exposure,
             max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost,
+            regime_impact_coefficients=regime_impact_coefficients,
         )
         fold["capacity"] = _fold_capacity.get("estimated_capacity")
         # Full cost breakdown for the fold, mirroring the per-period capacity
@@ -5253,7 +5255,8 @@ def cpcv_analysis(
                                   max_participation_rate=max_participation_rate,
                                   borrow_cost=borrow_cost, funding_cost=funding_cost,
                                   leverage=leverage, short_exposure=short_exposure,
-                                  max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost)
+                                  max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost,
+                                  regime_impact_coefficients=regime_impact_coefficients)
     summary["capacity"] = _capacity.get("estimated_capacity")
     # Capacity trend over the whole sample (see the walk-forward summary for
     # the same key) plus the worst capacity seen in any out-of-sample fold.
@@ -7439,6 +7442,7 @@ def out_of_sample_validation(
         leverage=leverage, short_exposure=short_exposure,
         max_borrow_cost=max_borrow_cost,
         max_funding_cost=max_funding_cost,
+        regime_impact_coefficients=regime_impact_coefficients,
     )
     val_capacity_point = val_capacity.get("estimated_capacity")
     val_capacity_trend = val_capacity.get("capacity_trend")
@@ -7547,6 +7551,7 @@ def out_of_sample_validation(
         borrow_cost=borrow_cost, funding_cost=funding_cost,
         leverage=leverage, short_exposure=short_exposure,
         max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost,
+        regime_impact_coefficients=regime_impact_coefficients,
     )
     test_capacity_point = test_capacity.get("estimated_capacity")
     test_capacity_trend = test_capacity.get("capacity_trend")
@@ -7911,7 +7916,8 @@ def out_of_sample_validation(
                                   max_participation_rate=max_participation_rate,
                                   borrow_cost=borrow_cost, funding_cost=funding_cost,
                                   leverage=leverage, short_exposure=short_exposure,
-                                  max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost)
+                                  max_borrow_cost=max_borrow_cost, max_funding_cost=max_funding_cost,
+                                  regime_impact_coefficients=regime_impact_coefficients)
     summary["capacity"] = _capacity.get("estimated_capacity")
     # Capacity trend over the whole sample (the per-period / per-fold
     # records carry the same key for their own window).
@@ -11314,7 +11320,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
                                       borrow_cost=borrow_cost, funding_cost=funding_cost,
                                       leverage=leverage, short_exposure=short_exposure,
                                       max_borrow_cost=getattr(args, "max_borrow_cost", None),
-                                      max_funding_cost=getattr(args, "max_funding_cost", None))
+                                      max_funding_cost=getattr(args, "max_funding_cost", None),
+                                      regime_impact_coefficients=regime_impact_coefficients)
         _capacity_point = _capacity.get("estimated_capacity")
         _capacity_trend = _capacity.get("capacity_trend")
     except Exception:
@@ -11888,6 +11895,7 @@ def run_monte_carlo(args) -> int:
             short_exposure=getattr(args, "short_exposure", 0.0),
             max_borrow_cost=getattr(args, "max_borrow_cost", None),
             max_funding_cost=getattr(args, "max_funding_cost", None),
+            regime_impact_coefficients=regime_impact_coefficients,
         )
         mc_results["summary"]["capacity"] = _capacity.get("estimated_capacity")
         mc_results["summary"]["capacity_trend"] = _capacity.get("capacity_trend")
