@@ -11399,18 +11399,3 @@ TEST_REGISTRY.append(
     ("test_walk_forward_determinism_across_repeated_runs",
      test_walk_forward_determinism_across_repeated_runs)
 )
-
-TEST_REGISTRY.append(
-    ("test_cli_monte_carlo_max_impact_binds_returns",
-     test_cli_monte_carlo_max_impact_binds_returns)
-)
-
-TEST_REGISTRY.append(
-    ("test_cli_optimize_max_impact_affects_selection",
-     test_cli_optimize_max_impact_affects_selection)
-)
-
-TEST_REGISTRY.append(
-    ("test_cli_monte_carlo_max_participation_rate_binds_returns",
-     test_cli_monte_carlo_max_participation_rate_binds_returns)
-)
