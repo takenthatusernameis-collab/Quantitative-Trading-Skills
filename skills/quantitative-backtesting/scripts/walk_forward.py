@@ -619,6 +619,7 @@ def walk_forward_analysis(
     benchmark_cost_is_periodic: bool = False,
     validate_pit: bool = True,
     pit_strict: bool = False,
+    lookahead_warning_threshold: Optional[float] = None,
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     impact_model=DEFAULT_IMPACT_MODEL,
@@ -831,7 +832,7 @@ def walk_forward_analysis(
     # _load_and_validate_data (validate_pit=True by default).
     pit_results = None
     if validate_pit:
-        pit_results = validate_point_in_time(data)
+        pit_results = validate_point_in_time(data, lookahead_warning_threshold=lookahead_warning_threshold)
         try:
             if not isinstance(data.columns, pd.MultiIndex):
                 try:
@@ -843,8 +844,8 @@ def walk_forward_analysis(
                     signals = strategy.generate_signals(data)
                     check_df = data.copy()
                     check_df["_pit_signal"] = signals
-                    sig_result = validate_point_in_time(check_df, signal_column="_pit_signal")
-                    sig_result["warnings"] = [w for w in sig_result["warnings"] if "_pit_signal" not in w]
+                    sig_result = validate_point_in_time(check_df, signal_column="_pit_signal", lookahead_warning_threshold=lookahead_warning_threshold)
+                    sig_result["warnings"] = [w for w in sig_result["warnings"] if "identical values" not in w]
                     if sig_result.get("violations"):
                         pit_results["violations"] = list(set(pit_results.get("violations", []) + sig_result["violations"]))
                     if sig_result.get("warnings"):
@@ -4476,6 +4477,7 @@ def cpcv_analysis(
     benchmark_cost_is_periodic: bool = False,
     validate_pit: bool = True,
     pit_strict: bool = False,
+    lookahead_warning_threshold: Optional[float] = None,
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     impact_model: str = DEFAULT_IMPACT_MODEL,
@@ -4649,7 +4651,7 @@ def cpcv_analysis(
     # _load_and_validate_data (validate_pit=True by default).
     pit_results = None
     if validate_pit:
-        pit_results = validate_point_in_time(data)
+        pit_results = validate_point_in_time(data, lookahead_warning_threshold=lookahead_warning_threshold)
         try:
             if not isinstance(data.columns, pd.MultiIndex):
                 try:
@@ -4661,8 +4663,8 @@ def cpcv_analysis(
                     signals = strategy.generate_signals(data)
                     check_df = data.copy()
                     check_df["_pit_signal"] = signals
-                    sig_result = validate_point_in_time(check_df, signal_column="_pit_signal")
-                    sig_result["warnings"] = [w for w in sig_result["warnings"] if "_pit_signal" not in w]
+                    sig_result = validate_point_in_time(check_df, signal_column="_pit_signal", lookahead_warning_threshold=lookahead_warning_threshold)
+                    sig_result["warnings"] = [w for w in sig_result["warnings"] if "identical values" not in w]
                     if sig_result.get("violations"):
                         pit_results["violations"] = list(set(pit_results.get("violations", []) + sig_result["violations"]))
                     if sig_result.get("warnings"):
@@ -7000,6 +7002,7 @@ def out_of_sample_validation(
     benchmark_cost_is_periodic: bool = False,
     validate_pit: bool = True,
     pit_strict: bool = False,
+    lookahead_warning_threshold: Optional[float] = None,
     panel_pricing: str = "net-exposure",
     impact_aggregation=DEFAULT_IMPACT_AGGREGATION,
     impact_model: str = DEFAULT_IMPACT_MODEL,
@@ -7164,7 +7167,7 @@ def out_of_sample_validation(
     # _load_and_validate_data (validate_pit=True by default).
     pit_results = None
     if validate_pit:
-        pit_results = validate_point_in_time(data)
+        pit_results = validate_point_in_time(data, lookahead_warning_threshold=lookahead_warning_threshold)
         try:
             if not isinstance(data.columns, pd.MultiIndex):
                 try:
@@ -7176,8 +7179,8 @@ def out_of_sample_validation(
                     signals = strategy.generate_signals(data)
                     check_df = data.copy()
                     check_df["_pit_signal"] = signals
-                    sig_result = validate_point_in_time(check_df, signal_column="_pit_signal")
-                    sig_result["warnings"] = [w for w in sig_result["warnings"] if "_pit_signal" not in w]
+                    sig_result = validate_point_in_time(check_df, signal_column="_pit_signal", lookahead_warning_threshold=lookahead_warning_threshold)
+                    sig_result["warnings"] = [w for w in sig_result["warnings"] if "identical values" not in w]
                     if sig_result.get("violations"):
                         pit_results["violations"] = list(set(pit_results.get("violations", []) + sig_result["violations"]))
                     if sig_result.get("warnings"):
@@ -7288,6 +7291,7 @@ def out_of_sample_validation(
             benchmark_expense_ratio=benchmark_expense_ratio,
             panel_pricing=panel_pricing,
             pit_strict=pit_strict,
+            lookahead_warning_threshold=lookahead_warning_threshold,
             max_participation_rate=max_participation_rate,
             max_borrow_cost=max_borrow_cost,
             max_funding_cost=max_funding_cost,
@@ -7319,6 +7323,7 @@ def out_of_sample_validation(
             apply_deflation=apply_deflation,
             panel_pricing=panel_pricing,
             pit_strict=pit_strict,
+            lookahead_warning_threshold=lookahead_warning_threshold,
             max_participation_rate=max_participation_rate,
             max_borrow_cost=max_borrow_cost,
             max_funding_cost=max_funding_cost,
@@ -8227,6 +8232,7 @@ def _walk_forward_sweep_coefficient(args, data, benchmark, total_return_benchmar
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         pit_strict=pit_strict,
+        lookahead_warning_threshold=getattr(args, "lookahead_warning_threshold", None),
         regime_impact_coefficients=regime_impact_coefficients,
         regime_cost_multipliers=regime_cost_multipliers,
         max_impact=max_impact,
@@ -8766,6 +8772,7 @@ def run_cpcv(args) -> int:
         args.data, args.symbol, args.start, args.end,
         validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
+        lookahead_warning_threshold=getattr(args, "lookahead_warning_threshold", None),
         multi_symbol=getattr(args, "multi_symbol", False),
     )
 
@@ -9531,6 +9538,7 @@ def _load_and_validate_data(
     end: str,
     validate_pit: bool = True,
     pit_strict: bool = False,
+    lookahead_warning_threshold: Optional[float] = None,
     multi_symbol: bool = False,
 ) -> tuple[Any, Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Load and validate data from file.
@@ -9578,13 +9586,13 @@ def _load_and_validate_data(
             # symbol frame is validated for structural violations instead.
             combined = {"passed": True, "violations": [], "warnings": []}
             for df in data.values():
-                frame_result = validate_point_in_time(df)
+                frame_result = validate_point_in_time(df, lookahead_warning_threshold=lookahead_warning_threshold)
                 combined["passed"] = combined["passed"] and frame_result["passed"]
                 combined["violations"].extend(frame_result["violations"])
                 combined["warnings"].extend(frame_result["warnings"])
             pit = combined
         else:
-            pit = validate_point_in_time(data)
+            pit = validate_point_in_time(data, lookahead_warning_threshold=lookahead_warning_threshold)
         if pit["violations"]:
             print("Point-in-time validation violations:")
             for violation in pit["violations"]:
@@ -10042,6 +10050,7 @@ def run_walk_forward(args) -> int:
         args.data, args.symbol, args.start, args.end,
         validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
+        lookahead_warning_threshold=getattr(args, "lookahead_warning_threshold", None),
         multi_symbol=getattr(args, "multi_symbol", False),
     )
 
@@ -10638,6 +10647,7 @@ def run_parameter_optimization(args) -> int:
         args.data, args.symbol, args.start, args.end,
         validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
+        lookahead_warning_threshold=getattr(args, "lookahead_warning_threshold", None),
         multi_symbol=getattr(args, "multi_symbol", False),
     )
 
@@ -11414,6 +11424,7 @@ def run_monte_carlo(args) -> int:
         args.data, args.symbol, args.start, args.end,
         validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
+        lookahead_warning_threshold=getattr(args, "lookahead_warning_threshold", None),
         multi_symbol=getattr(args, "multi_symbol", False),
     )
 
@@ -12129,6 +12140,7 @@ def run_out_of_sample_validation(args) -> int:
         args.data, args.symbol, args.start, args.end,
         validate_pit=getattr(args, "validate_point_in_time", True),
         pit_strict=getattr(args, "point_in_time_strict", False),
+        lookahead_warning_threshold=getattr(args, "lookahead_warning_threshold", None),
         multi_symbol=getattr(args, "multi_symbol", False),
     )
 
@@ -12856,6 +12868,7 @@ def main():
     common_parser.add_argument("--param-grid", type=str, required=True, help="Parameter grid as JSON string")
     common_parser.add_argument("--validate-point-in-time", action="store_true", default=True, help="Run point-in-time validation on the loaded data (temporal ordering, duplicate timestamps, stale-data warnings); enabled by default, use --no-validate-point-in-time to disable")
     common_parser.add_argument("--no-validate-point-in-time", action="store_false", dest="validate_point_in_time", help="Disable point-in-time validation (enabled by default)")
+    common_parser.add_argument("--lookahead-warning-threshold", type=float, default=None, help="Warn when signal correlation with future returns exceeds this threshold (default: None, disabled)")
     common_parser.add_argument("--point-in-time-strict", action="store_true", help="Abort when point-in-time validation finds violations (default: warn only)")
     common_parser.add_argument("--benchmark", type=str, nargs="+", default=None, help="Path to benchmark OHLCV file(s) (e.g. SPY QQQ) for buy-and-hold baseline comparison (alpha/beta, correlation)")
     common_parser.add_argument("--total-return-benchmark", action="store_true", help="Compute benchmark returns using total return (dividends + price) when dividend/adj_close data is available, instead of price-only returns (applies to all benchmarks)")
