@@ -5352,6 +5352,73 @@ def test_cli_oos_max_impact_binds_test_total_return():
         )
 
 
+def test_cli_oos_max_impact_binds_test_total_return_cpcv():
+    """CLI out-of-sample honors --max-impact under --validation-method cpcv.
+
+    The out-of-sample path forwards ``max_impact`` into ``cpcv_analysis`` (which
+    previously accepted but ignored it), but that wiring was unguarded. This is
+    the CPCV analogue of test_cli_oos_max_impact_binds_test_total_return.
+
+    Under CPCV the held-out ``test_total_return`` is computed by the val/test
+    ``_calculate_strategy_returns`` calls (which forward ``max_impact``
+    independently), so it is NOT a clean discriminator for the cpcv forward.
+    What the cpcv forward uniquely controls is the per-fold returns that drive
+    parameter SELECTION. With a binding ``--max-impact`` the capped folds change
+    which parameter set wins, so ``selected_params`` differs from the uncapped
+    run. If the cpcv_analysis forward is reverted the capped and uncapped runs
+    select the SAME parameters (the flag is dropped inside cpcv); with the
+    forward they differ. The uncapped run is the default-path baseline.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=900)
+        out_dir_uncapped = os.path.join(tmpdir, "out_uncapped")
+        out_dir_capped = os.path.join(tmpdir, "out_capped")
+
+        grid = '{"fast_period": [8, 10, 12, 14], "slow_period": [20, 24, 28, 32], "signal_period": [6, 8, 10]}'
+        base_argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", grid,
+            "--adv-window", "10",
+            "--impact-coefficient", "0.5",
+            "--validation-method", "cpcv",
+            "--output", out_dir_uncapped,
+        ]
+
+        with patch.object(sys, "argv", base_argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, f"CLI out-of-sample cpcv uncapped run should exit 0, got {rc}"
+        json_uncapped = os.path.join(out_dir_uncapped, "out_of_sample_summary.json")
+        assert os.path.exists(json_uncapped), "out_of_sample_summary.json not written for uncapped cpcv path"
+        with open(json_uncapped) as f:
+            summary_uncapped = json.load(f)["summary"]
+        uncapped_params = summary_uncapped.get("selected_params")
+        assert uncapped_params is not None, "uncapped cpcv summary must report selected_params"
+
+        capped_argv = base_argv.copy()
+        capped_argv[capped_argv.index("--output") + 1] = out_dir_capped
+        capped_argv.extend(["--max-impact", "0.00005"])
+        with patch.object(sys, "argv", capped_argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, f"CLI out-of-sample cpcv capped run should exit 0, got {rc}"
+        json_capped = os.path.join(out_dir_capped, "out_of_sample_summary.json")
+        assert os.path.exists(json_capped), "out_of_sample_summary.json not written for capped cpcv path"
+        with open(json_capped) as f:
+            summary_capped = json.load(f)["summary"]
+        capped_params = summary_capped.get("selected_params")
+        assert capped_params is not None, "capped cpcv summary must report selected_params"
+
+        assert capped_params != uncapped_params, (
+            f"--max-impact must change the CPCV-selected parameters when it binds: "
+            f"capped={capped_params} uncapped={uncapped_params}"
+        )
+
+
 def test_cli_monte_carlo_regime_impact_coefficients_reflected_in_capacity():
     """CLI monte-carlo with --regime-impact-coefficients writes monte_carlo_summary.csv
     whose capacity reflects the regime-aware effective impact coefficient.
@@ -8354,6 +8421,7 @@ TEST_REGISTRY = [
     ("test_cli_cpcv_summary_regime_impact_coefficients_reflected_in_capacity", test_cli_cpcv_summary_regime_impact_coefficients_reflected_in_capacity),
     ("test_cli_oos_summary_regime_impact_coefficients_reflected_in_capacity", test_cli_oos_summary_regime_impact_coefficients_reflected_in_capacity),
     ("test_cli_oos_max_impact_binds_test_total_return", test_cli_oos_max_impact_binds_test_total_return),
+    ("test_cli_oos_max_impact_binds_test_total_return_cpcv", test_cli_oos_max_impact_binds_test_total_return_cpcv),
     ("test_cli_monte_carlo_regime_impact_coefficients_reflected_in_capacity", test_cli_monte_carlo_regime_impact_coefficients_reflected_in_capacity),
     ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ("test_deflated_alpha_ratio_cross_sectional_frequency_invariant", test_deflated_alpha_ratio_cross_sectional_frequency_invariant),
