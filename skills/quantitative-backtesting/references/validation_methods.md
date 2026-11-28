@@ -2904,3 +2904,46 @@ Coverage:
 
 The CLI renders every flag under `--help` on the `walk-forward` (and
 `cpcv`, `out-of-sample`, `monte-carlo`, `optimize`) subcommands.
+
+## Point-in-Time Detector: Below-Threshold False-Negative Regime
+
+`validate_point_in_time` (in `scripts/data_loader.py`) correlates signal
+changes with next-period returns and flags a look-ahead violation when
+`|corr| > lookahead_threshold` (default `0.3`). The gate is a hard cut: anything
+at or below 0.3 passes; anything above aborts in strict mode.
+
+This creates a **false-negative regime**: a look-ahead signal whose next-return
+correlation is at or just below the threshold passes the PIT gate yet still
+predicts next-period returns, so it can inflate an out-of-sample record when
+the PIT gate is disengaged (`walk_forward_analysis(..., validate_pit=False)`)
+or when the signal sits below the threshold.
+
+Methodological implication:
+
+- A passing PIT verdict does NOT establish point-in-time correctness. It only
+  rules out look-ahead correlations above the threshold.
+- Below-threshold look-ahead signals (approximately 0.28–0.30 correlation) can
+  still produce materially inflated OOS Sharpe vs. a clean close[t]-based
+  signal.
+- Honest reporting must treat the PIT gate as a necessary but not sufficient
+  control, and verify OOS claims out-of-sample independent of the detector
+  verdict.
+
+Evidence:
+
+- `tests/test_pit_threshold_boundary_synthetic.py` — detector-level
+  demonstration: PIT gate passes below the 0.3 threshold despite nonzero
+  look-ahead correlation (4/4 pass).
+- `tests/test_pit_below_threshold_inflates_oos_synthetic.py` — engine-level
+  demonstration: on the same deterministic synthetic random-walk panel, a
+  look-ahead signal with PIT correlation ≈0.28 (below threshold, gate passes)
+  is run through `walk_forward_analysis(..., validate_pit=False)` alongside a
+  clean close[t]-based signal; the look-ahead signal produces a higher
+  out-of-sample Sharpe (positive inflation; ≈5.82 vs -0.25, ≈6.08 in the
+  verified run). Both tests are deterministic (fixed seed), offline, and
+  touch no engine, fixture, or pinned-hash file.
+
+Falsifiability criterion: any claim that a strategy "passes PIT, therefore no
+look-ahead bias" must report the measured PIT correlation against the threshold;
+a passing verdict at ≤0.3 does not by itself support an out-of-sample
+profitability claim.
