@@ -5057,6 +5057,115 @@ def test_cli_monte_carlo_max_borrow_cost_cap_reflected():
         )
 
 
+def _run_monte_carlo_summary(tmpdir, extra):
+    """Helper: run `walk_forward monte-carlo` on a synthetic frame and return
+    the parsed monte_carlo_results.json summary dict."""
+    csv_path = os.path.join(tmpdir, "data.csv")
+    _write_ohlcv_csv(csv_path, periods=500)
+    out_dir = os.path.join(tmpdir, "out")
+    argv = [
+        "walk_forward", "monte-carlo",
+        "--data", csv_path,
+        "--symbol", "SPY",
+        "--strategy", "sma_crossover",
+        "--param-grid", '{"fast_period": [3, 5], "slow_period": [10, 12]}',
+        "--n-simulations", "20",
+        "--impact-coefficient", "0.5",
+        "--output", out_dir,
+    ] + extra
+    with patch.object(sys, "argv", argv), \
+            redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+        rc = walk_forward_main()
+    assert rc == 0, f"monte-carlo should exit 0, got {rc}"
+    results_path = os.path.join(out_dir, "monte_carlo_results.json")
+    assert os.path.exists(results_path), "monte_carlo_results.json not written"
+    with open(results_path) as f:
+        return json.load(f)["summary"]
+
+
+def test_cli_monte_carlo_max_impact_binds_returns():
+    """The --max-impact capacity-aware position cap must bind under the
+    `monte-carlo` subcommand, not be silently ignored.
+
+    `--max-impact` is declared on the shared common_parser (so every
+    subcommand accepts it), but the Monte Carlo return path
+    (`_monte_carlo_sweep_coefficient` and `run_monte_carlo`'s single-run
+    body) did not forward it into `_calculate_strategy_returns` /
+    `parameter_optimization`. A researcher running
+    `monte-carlo --max-impact 0.00001` therefore got an UNCAPPED backtest
+    while believing the per-trade impact cap was applied -- a silent
+    methodological no-op.
+
+    This test pins the fix: a binding --max-impact changes the simulated
+    return distribution, while a non-binding --max-impact (effectively
+    infinite) leaves it byte-identical to the no-cap run (default-path
+    invariance).
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base = _run_monte_carlo_summary(tmpdir, [])
+        capped = _run_monte_carlo_summary(tmpdir, ["--max-impact", "0.00001"])
+        nonbinding = _run_monte_carlo_summary(tmpdir, ["--max-impact", "1000000"])
+
+    base_mean = base["total_return"]["mean"]
+    capped_mean = capped["total_return"]["mean"]
+    nonbinding_mean = nonbinding["total_return"]["mean"]
+
+    assert abs(capped_mean - base_mean) > 1e-9, (
+        "a binding --max-impact must change the monte-carlo return "
+        f"distribution; base mean {base_mean} == capped mean {capped_mean} "
+        "means the cap was silently ignored"
+    )
+    assert abs(nonbinding_mean - base_mean) <= 1e-12, (
+        "a non-binding --max-impact must leave the monte-carlo returns "
+        f"byte-identical to no cap; base {base_mean} vs nonbinding "
+        f"{nonbinding_mean}"
+    )
+
+
+def test_cli_optimize_max_impact_affects_selection():
+    """The --max-impact cap must reach parameter selection under the
+    `optimize` subcommand.
+
+    `run_parameter_optimization` forwarded every other capacity control
+    (max_participation_rate, max_borrow_cost, max_funding_cost, leverage,
+    short_exposure) into `parameter_optimization` but omitted max_impact, so
+    `optimize --max-impact ...` ranked parameter sets on UNCAPPED returns.
+    A binding cap changes the per-combo returns that drive the ranking, so
+    the top-ranked parameter set must differ from the uncapped ranking.
+    """
+    def top_params(extra):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = os.path.join(tmpdir, "data.csv")
+            _write_ohlcv_csv(csv_path, periods=500)
+            out_dir = os.path.join(tmpdir, "out")
+            argv = [
+                "walk_forward", "optimize",
+                "--data", csv_path,
+                "--symbol", "SPY",
+                "--strategy", "sma_crossover",
+                "--param-grid", '{"fast_period": [3, 5, 8], "slow_period": [10, 14, 20]}',
+                "--impact-coefficient", "0.5",
+                "--output", out_dir,
+            ] + extra
+            with patch.object(sys, "argv", argv), \
+                    redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                rc = walk_forward_main()
+            assert rc == 0, f"optimize should exit 0, got {rc}"
+            results_path = os.path.join(out_dir, "parameter_optimization.json")
+            assert os.path.exists(results_path), "parameter_optimization.json not written"
+            with open(results_path) as f:
+                payload = json.load(f)
+            top = payload[0]
+            return tuple(sorted(top["params"].items()))
+
+    uncapped = top_params([])
+    capped = top_params(["--max-impact", "0.00001"])
+    assert capped != uncapped, (
+        "a binding --max-impact must change the optimize top-ranked "
+        f"parameter set; both runs selected {uncapped} (cap ignored)"
+    )
+
+
 def test_cli_cpcv_regime_impact_coefficients_reflected_in_capacity():
     """CLI cpcv with --regime-impact-coefficients writes cpcv_summary.csv whose
     per-fold capacity is compared against the flat path.
@@ -11039,4 +11148,14 @@ def test_walk_forward_determinism_across_repeated_runs():
 TEST_REGISTRY.append(
     ("test_walk_forward_determinism_across_repeated_runs",
      test_walk_forward_determinism_across_repeated_runs)
+)
+
+TEST_REGISTRY.append(
+    ("test_cli_monte_carlo_max_impact_binds_returns",
+     test_cli_monte_carlo_max_impact_binds_returns)
+)
+
+TEST_REGISTRY.append(
+    ("test_cli_optimize_max_impact_affects_selection",
+     test_cli_optimize_max_impact_affects_selection)
 )

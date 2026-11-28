@@ -10960,6 +10960,7 @@ def run_parameter_optimization(args) -> int:
         max_funding_cost=getattr(args, "max_funding_cost", None),
         leverage=getattr(args, "leverage", 1.0),
         short_exposure=getattr(args, "short_exposure", 0.0),
+        max_impact=getattr(args, "max_impact", None),
     )
 
     if not results:
@@ -11155,8 +11156,9 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
                                      leverage=None, short_exposure=None,
                                      regime_impact_coefficients=None,
                                      regime_cost_multipliers=None,
-                                     pit_results=None, survivorship=None,
-                                     max_participation_rate: Optional[float] = None):
+                                      pit_results=None, survivorship=None,
+                                      max_participation_rate: Optional[float] = None,
+                                      max_impact: Optional[float] = None):
     """Run the Monte Carlo pipeline for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -11214,6 +11216,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
         raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
     if max_participation_rate is None:
         max_participation_rate = getattr(args, "max_participation_rate", None)
+    if max_impact is None:
+        max_impact = getattr(args, "max_impact", None)
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -11239,6 +11243,7 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
             benchmark_expense_ratio=bench_expense_ratio,
             benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
             panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
+            max_impact=max_impact,
         )
         if opt_results:
             best_params = opt_results[0]["params"]
@@ -11267,7 +11272,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
                                           impact_model=getattr(args, "impact_model", DEFAULT_IMPACT_MODEL),
                                           regime_impact_coefficients=regime_impact_coefficients,
                                           regime_cost_multipliers=regime_cost_multipliers,
-                                          book_weights=book_weights)
+                                          book_weights=book_weights,
+                                          max_impact=max_impact)
 
     dsr = None
     n_trials = getattr(args, "n_trials", None)
@@ -11726,6 +11732,7 @@ def run_monte_carlo(args) -> int:
             benchmark_expense_ratio=bench_expense_ratio,
             benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
             panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
+            max_impact=getattr(args, "max_impact", None),
         )
         if opt_results:
             best_params = opt_results[0]["params"]
@@ -11758,7 +11765,8 @@ def run_monte_carlo(args) -> int:
                                           impact_model=getattr(args, "impact_model", DEFAULT_IMPACT_MODEL),
                                           regime_impact_coefficients=regime_impact_coefficients,
                                           regime_cost_multipliers=regime_cost_multipliers,
-                                          book_weights=book_weights)
+                                          book_weights=book_weights,
+                                          max_impact=getattr(args, "max_impact", None))
     # The warmup convention of the series the Monte Carlo resamples.
     _print_execution_warmup(
         execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency)
