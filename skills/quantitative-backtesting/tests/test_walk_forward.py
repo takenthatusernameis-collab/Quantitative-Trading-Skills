@@ -5166,6 +5166,52 @@ def test_cli_optimize_max_impact_affects_selection():
     )
 
 
+def test_cli_optimize_max_participation_rate_affects_selection():
+    """The --max-participation-rate cap must reach parameter selection under the
+    `optimize` subcommand.
+
+    `run_parameter_optimization` forwarded every other capacity control
+    (max_impact, max_borrow_cost, max_funding_cost, leverage, short_exposure)
+    into `parameter_optimization` but the `parameter_optimization` function
+    did not forward max_participation_rate into `_calculate_strategy_returns`
+    when computing per-combo returns. So `optimize --max-participation-rate ...`
+    ranked parameter sets on UNCAPPED returns. A binding cap changes the
+    per-combo returns that drive the ranking, so the top-ranked parameter set
+    must differ from the uncapped ranking.
+    """
+    def top_params(extra):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            csv_path = os.path.join(tmpdir, "data.csv")
+            _write_ohlcv_csv(csv_path, periods=500)
+            out_dir = os.path.join(tmpdir, "out")
+            argv = [
+                "walk_forward", "optimize",
+                "--data", csv_path,
+                "--symbol", "SPY",
+                "--strategy", "sma_crossover",
+                "--param-grid", '{"fast_period": [3, 5, 8], "slow_period": [10, 14, 20]}',
+                "--impact-coefficient", "0.5",
+                "--output", out_dir,
+            ] + extra
+            with patch.object(sys, "argv", argv), \
+                    redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                rc = walk_forward_main()
+            assert rc == 0, f"optimize should exit 0, got {rc}"
+            results_path = os.path.join(out_dir, "parameter_optimization.json")
+            assert os.path.exists(results_path), "parameter_optimization.json not written"
+            with open(results_path) as f:
+                payload = json.load(f)
+            top = payload[0]
+            return tuple(sorted(top["params"].items()))
+
+    uncapped = top_params([])
+    capped = top_params(["--max-participation-rate", "0.00001"])
+    assert capped != uncapped, (
+        "a binding --max-participation-rate must change the optimize top-ranked "
+        f"parameter set; both runs selected {uncapped} (cap ignored)"
+    )
+
+
 def test_cli_monte_carlo_max_participation_rate_binds_returns():
     """The --max-participation-rate capacity-aware position cap must bind under the
     `monte-carlo` subcommand, not be silently ignored.
@@ -11198,9 +11244,15 @@ TEST_REGISTRY.append(
 )
 
 TEST_REGISTRY.append(
+    ("test_cli_optimize_max_participation_rate_affects_selection",
+     test_cli_optimize_max_participation_rate_affects_selection)
+)
+
+TEST_REGISTRY.append(
     ("test_cli_monte_carlo_max_participation_rate_binds_returns",
      test_cli_monte_carlo_max_participation_rate_binds_returns)
 )
+
 
 if __name__ == "__main__":
     import sys

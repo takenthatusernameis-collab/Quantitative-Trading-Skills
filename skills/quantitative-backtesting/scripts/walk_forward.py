@@ -1007,6 +1007,7 @@ def walk_forward_analysis(
                         regime_impact_coefficients=regime_impact_coefficients,
                         regime_cost_multipliers=regime_cost_multipliers,
                         max_impact=max_impact,
+                        max_participation_rate=max_participation_rate,
                         book_weights=test_book_weights,
                     )
 
@@ -1022,6 +1023,7 @@ def walk_forward_analysis(
                         regime_impact_coefficients=regime_impact_coefficients,
                         regime_cost_multipliers=regime_cost_multipliers,
                         max_impact=max_impact,
+                        max_participation_rate=max_participation_rate,
                         book_weights=(
                             strategy_target_weights(strategy, train_data)
                             if panel_pricing == "book"
@@ -1816,6 +1818,7 @@ def parameter_optimization(
                 regime_impact_coefficients=regime_impact_coefficients,
                 regime_cost_multipliers=regime_cost_multipliers,
                 max_impact=max_impact,
+                max_participation_rate=max_participation_rate,
                 book_weights=book_weights,
             )
 
@@ -4939,6 +4942,7 @@ def cpcv_analysis(
                         regime_impact_coefficients=regime_impact_coefficients,
                         regime_cost_multipliers=regime_cost_multipliers,
                         max_impact=max_impact,
+                        max_participation_rate=max_participation_rate,
                         book_weights=test_book_weights,
                     )
 
@@ -4954,6 +4958,7 @@ def cpcv_analysis(
                         regime_impact_coefficients=regime_impact_coefficients,
                         regime_cost_multipliers=regime_cost_multipliers,
                         max_impact=max_impact,
+                        max_participation_rate=max_participation_rate,
                         book_weights=(
                             strategy_target_weights(strategy, train_data)
                             if panel_pricing == "book"
@@ -7474,6 +7479,7 @@ def out_of_sample_validation(
         regime_impact_coefficients=regime_impact_coefficients,
         regime_cost_multipliers=regime_cost_multipliers,
         max_impact=max_impact,
+        max_participation_rate=max_participation_rate,
         book_weights=val_book_weights,
     )
 
@@ -7589,6 +7595,7 @@ def out_of_sample_validation(
                         regime_impact_coefficients=regime_impact_coefficients,
                         regime_cost_multipliers=regime_cost_multipliers,
                         max_impact=max_impact,
+                        max_participation_rate=max_participation_rate,
                         book_weights=test_book_weights,
                     )
 
