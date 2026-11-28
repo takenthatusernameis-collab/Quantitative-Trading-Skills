@@ -4894,6 +4894,7 @@ def cpcv_analysis(
                         impact_model=impact_model,
                         regime_impact_coefficients=regime_impact_coefficients,
                         regime_cost_multipliers=regime_cost_multipliers,
+                        max_impact=max_impact,
                         book_weights=test_book_weights,
                     )
 
@@ -4908,6 +4909,7 @@ def cpcv_analysis(
                         impact_model=impact_model,
                         regime_impact_coefficients=regime_impact_coefficients,
                         regime_cost_multipliers=regime_cost_multipliers,
+                        max_impact=max_impact,
                         book_weights=(
                             strategy_target_weights(strategy, train_data)
                             if panel_pricing == "book"
@@ -7277,6 +7279,7 @@ def out_of_sample_validation(
             funding_cost=funding_cost,
             latency=latency,
             fill_rate=fill_rate,
+            max_impact=max_impact,
             apply_deflation=apply_deflation,
             benchmark=benchmark,
             total_return_benchmark=total_return_benchmark,
@@ -7312,6 +7315,7 @@ def out_of_sample_validation(
             funding_cost=funding_cost,
             latency=latency,
             fill_rate=fill_rate,
+            max_impact=max_impact,
             apply_deflation=apply_deflation,
             panel_pricing=panel_pricing,
             pit_strict=pit_strict,
@@ -7422,6 +7426,7 @@ def out_of_sample_validation(
         impact_model=impact_model,
         regime_impact_coefficients=regime_impact_coefficients,
         regime_cost_multipliers=regime_cost_multipliers,
+        max_impact=max_impact,
         book_weights=val_book_weights,
     )
 
@@ -7536,6 +7541,7 @@ def out_of_sample_validation(
                         impact_model=impact_model,
                         regime_impact_coefficients=regime_impact_coefficients,
                         regime_cost_multipliers=regime_cost_multipliers,
+                        max_impact=max_impact,
                         book_weights=test_book_weights,
                     )
 
@@ -8447,7 +8453,8 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                             pit_results=None, survivorship=None, pit_strict=None,
                             regime_cost_multipliers: Optional[Dict[str, float]] = None,
                             regime_impact_coefficients: Optional[Dict[str, float]] = None,
-                            max_participation_rate: Optional[float] = None):
+                            max_participation_rate: Optional[float] = None,
+                            max_impact: Optional[float] = None):
     """Run out-of-sample validation for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -8506,6 +8513,8 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         raise ValueError(f"fill_rate must be in (0, 1], got {fill_rate}")
     if max_participation_rate is None:
         max_participation_rate = getattr(args, "max_participation_rate", None)
+    if max_impact is None:
+        max_impact = getattr(args, "max_impact", None)
     param_grid = _parse_param_grid(args.param_grid)
     strategy_factory = _make_strategy_factory(args.strategy)
 
@@ -8549,6 +8558,7 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         regime_impact_coefficients=regime_impact_coefficients,
         survivorship=survivorship,
         max_participation_rate=max_participation_rate,
+        max_impact=max_impact,
     )
     test_perf = results.get("test_performance") or {}
     summary = results.get("summary") or {}
@@ -12433,6 +12443,7 @@ def run_out_of_sample_validation(args) -> int:
         short_exposure=getattr(args, "short_exposure", 0.0),
         max_borrow_cost=getattr(args, "max_borrow_cost", None),
         max_funding_cost=getattr(args, "max_funding_cost", None),
+        max_impact=getattr(args, "max_impact", None),
         regime_impact_coefficients=regime_impact_coefficients,
         regime_cost_multipliers=regime_cost_multipliers,
     )

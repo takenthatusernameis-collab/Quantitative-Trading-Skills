@@ -5289,6 +5289,69 @@ def test_cli_oos_summary_regime_impact_coefficients_reflected_in_capacity():
         )
 
 
+def test_cli_oos_max_impact_binds_test_total_return():
+    """CLI out-of-sample honors --max-impact on the held-out test window.
+
+    The out-of-sample path previously accepted ``max_impact`` in
+    ``out_of_sample_validation`` but never referenced it in the body, and
+    ``run_out_of_sample_validation`` never forwarded the flag, so
+    ``--max-impact`` was a silent no-op for OOS even though it is fully
+    implemented in run_backtest / walk_forward_analysis / cpcv_analysis.
+
+    Genuine regression guard: with a binding ``--max-impact`` the per-trade
+    position change is capped, so the held-out ``test_total_return`` must
+    differ from the uncapped run. Before the fix the two runs are byte-identical
+    (the flag is dropped); after the fix they differ. The uncapped run is the
+    default-path baseline, so default behavior is unchanged.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir_uncapped = os.path.join(tmpdir, "out_uncapped")
+        out_dir_capped = os.path.join(tmpdir, "out_capped")
+
+        base_argv = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+            "--adv-window", "10",
+            "--impact-coefficient", "0.5",
+            "--output", out_dir_uncapped,
+        ]
+
+        with patch.object(sys, "argv", base_argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, f"CLI out-of-sample uncapped run should exit 0, got {rc}"
+        json_uncapped = os.path.join(out_dir_uncapped, "out_of_sample_summary.json")
+        assert os.path.exists(json_uncapped), "out_of_sample_summary.json not written for uncapped path"
+        with open(json_uncapped) as f:
+            summary_uncapped = json.load(f)["summary"]
+        uncapped_return = summary_uncapped.get("test_total_return")
+        assert uncapped_return is not None, "uncapped summary must report test_total_return"
+
+        capped_argv = base_argv.copy()
+        capped_argv[capped_argv.index("--output") + 1] = out_dir_capped
+        capped_argv.extend(["--max-impact", "0.00005"])
+        with patch.object(sys, "argv", capped_argv), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, f"CLI out-of-sample capped run should exit 0, got {rc}"
+        json_capped = os.path.join(out_dir_capped, "out_of_sample_summary.json")
+        assert os.path.exists(json_capped), "out_of_sample_summary.json not written for capped path"
+        with open(json_capped) as f:
+            summary_capped = json.load(f)["summary"]
+        capped_return = summary_capped.get("test_total_return")
+        assert capped_return is not None, "capped summary must report test_total_return"
+
+        assert capped_return != uncapped_return, (
+            f"--max-impact must change the held-out test_total_return when it "
+            f"binds: capped={capped_return} uncapped={uncapped_return}"
+        )
+
+
 def test_cli_monte_carlo_regime_impact_coefficients_reflected_in_capacity():
     """CLI monte-carlo with --regime-impact-coefficients writes monte_carlo_summary.csv
     whose capacity reflects the regime-aware effective impact coefficient.
@@ -8290,6 +8353,7 @@ TEST_REGISTRY = [
     ("test_cli_cpcv_regime_impact_coefficients_reflected_in_capacity", test_cli_cpcv_regime_impact_coefficients_reflected_in_capacity),
     ("test_cli_cpcv_summary_regime_impact_coefficients_reflected_in_capacity", test_cli_cpcv_summary_regime_impact_coefficients_reflected_in_capacity),
     ("test_cli_oos_summary_regime_impact_coefficients_reflected_in_capacity", test_cli_oos_summary_regime_impact_coefficients_reflected_in_capacity),
+    ("test_cli_oos_max_impact_binds_test_total_return", test_cli_oos_max_impact_binds_test_total_return),
     ("test_cli_monte_carlo_regime_impact_coefficients_reflected_in_capacity", test_cli_monte_carlo_regime_impact_coefficients_reflected_in_capacity),
     ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ("test_deflated_alpha_ratio_cross_sectional_frequency_invariant", test_deflated_alpha_ratio_cross_sectional_frequency_invariant),

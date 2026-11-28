@@ -1,38 +1,26 @@
-# Handoff — OOS regime-impact wiring + guard done; next: --max-impact on OOS
+# Handoff — --max-impact real on OOS; suite 252/252; next: guard CPCV path
 
 ## Prior session (complete, uncommitted)
-Out-of-sample CLI path dropped `--regime-impact-coefficients` /
-`--regime-cost-multipliers`. Fixed `run_out_of_sample_validation` (parse +
-forward both into the single-run call) and `_oos_sweep_coefficient` (new
-`regime_impact_coefficients` param + forward). Added genuine regression guard
-`test_cli_oos_summary_regime_impact_coefficients_reflected_in_capacity`
-(fails without the fix: flat==regime 581632.45; passes with it: flat 581632.45
-> regime 370715.67). Full suite **251/251 passed**. Default path byte-identical.
-Only `scripts/walk_forward.py` + `tests/test_walk_forward.py` modified; NOT
-committed. See HANDOFF_SESSION_CURRENT.md for full evidence.
+`--max-impact` was a silent no-op on the out-of-sample path. Threaded it through
+`out_of_sample_validation` (4 internal calls), `cpcv_analysis` (2 internal calls,
+which previously accepted but ignored it), `_oos_sweep_coefficient` (new param +
+forward), and `run_out_of_sample_validation` (handler forward). Added genuine
+guard `test_cli_oos_max_impact_binds_test_total_return` (fails without the handler
+forward: capped==uncapped; passes with it). Full suite **252/252 passed**. Default
+path byte-identical. Only `scripts/walk_forward.py` + `tests/test_walk_forward.py`
+modified; NOT committed. See HANDOFF_SESSION_CURRENT.md for full evidence.
 
 ## One precise next task (bounded, evidence-based)
-Make `--max-impact` real (or loudly rejected) on the out-of-sample path.
-`out_of_sample_validation` accepts `max_impact` (walk_forward.py:7007) but never
-uses it in its body (6967–8018), and `run_out_of_sample_validation` doesn't
-forward it — so `--max-impact` is a silent no-op for OOS (it IS implemented in
-run_backtest / walk_forward_analysis / cpcv_analysis).
+Guard `--max-impact` under the CPCV validation path (wiring exists, unguarded).
+1. Test FIRST: `walk_forward out-of-sample --validation-method cpcv` twice on
+   periods=600 synthetic OHLCV at `--impact-coefficient 0.5`, once with
+   `--max-impact 0.00005` and once without; assert `summary.test_total_return`
+   DIFFERS. Register it. Confirm it FAILS when the cpcv_analysis forward
+   (~walk_forward.py:4894/:4909) is reverted.
+2. Keep default-path invariance. Verify full `test_walk_forward.py` (expect 253/253).
 
-1. Test FIRST: run `walk_forward out-of-sample` twice at `--impact-coefficient
-   0.5`, once with `--max-impact 0.0005` and once without; assert
-   `out_of_sample_summary.json` `summary.capacity` is currently IDENTICAL
-   (proves the blind spot). Register it.
-2. Fix: thread `max_impact` from the handler (~:12375) into
-   `out_of_sample_validation`, then into its internal `walk_forward_analysis` /
-   `cpcv_analysis` validation sub-calls (~:7262, :7296) and val/test
-   `run_backtest` calls (~:7416, :7530). Default `None` → byte-identical.
-   If threading is non-trivial, minimal safe alternative: reject `--max-impact`
-   on the `out-of-sample` subcommand loudly (mirror the cap-sweep rejection at
-   ~:12990) and pin that.
-3. Flip test to assert a difference when `--max-impact` binds; keep default-path
-   invariance. Verify full `test_walk_forward.py` (expect 252/252).
-
-Constraints: scope to `walk_forward.py` + `test_walk_forward.py`; do NOT touch
-the inherited marketplace catalog or pinned data hashes; `pytest` absent (run
-`python3 <file>`); do NOT commit unless explicitly asked. Do NOT re-attempt the
-offline data-provenance restoration (blocked; do not fabricate).
+Constraints: scope to `walk_forward.py` + `test_walk_forward.py`; do NOT touch the
+inherited marketplace catalog or pinned data hashes; `pytest` absent (run
+`python3 <file>`); full suite ~9–10 min here — use `background_process` and grep
+the saved output for `tests passed`; do NOT commit unless explicitly asked. Do NOT
+re-attempt the offline data-provenance restoration (blocked; do not fabricate).
