@@ -163,10 +163,24 @@ def test_the_rename_moved_no_metric_and_no_verdict():
     expected = dict(baseline["test_performance"])
     old_count = expected.pop("test_n_periods")
 
-    # Same key set, modulo the rename.
-    current_keys = set(test_performance) - {"test_n_observations", "test_returns"}
+    # Same key set, modulo the rename. `capacity_detail` is a legitimate
+    # post-baseline feature (added in commit 646ad85, after this baseline was
+    # captured from the pre-rename commit 6074e3b); it is outside the rename's
+    # scope. Allow-list exactly that one key so any OTHER added or removed key
+    # still fails the guard.
+    current_keys = set(test_performance) - {
+        "test_n_observations",
+        "test_returns",
+        "capacity_detail",
+    }
     assert set(expected) == current_keys, (
-        "the rename added or removed a key beyond the rename itself"
+        "the rename added or removed a key beyond the rename itself "
+        "(capacity_detail is the only allow-listed post-baseline addition)"
+    )
+    # The allow-listed key must actually be present, so a future removal of the
+    # capacity feature is caught here rather than silently passing.
+    assert "capacity_detail" in test_performance, (
+        "the allow-listed capacity_detail key disappeared; update this guard"
     )
     # Same value for the renamed key.
     assert test_performance["test_n_observations"] == old_count, (
