@@ -8215,6 +8215,7 @@ TEST_REGISTRY = [
     ("test_cli_optimize_max_borrow_cost_cap_reflected_in_csv", test_cli_optimize_max_borrow_cost_cap_reflected_in_csv),
     ("test_cli_monte_carlo_max_borrow_cost_cap_reflected", test_cli_monte_carlo_max_borrow_cost_cap_reflected),
     ("test_cli_cpcv_regime_impact_coefficients_reflected_in_capacity", test_cli_cpcv_regime_impact_coefficients_reflected_in_capacity),
+    ("test_cli_cpcv_summary_regime_impact_coefficients_reflected_in_capacity", test_cli_cpcv_summary_regime_impact_coefficients_reflected_in_capacity),
     ("test_cli_monte_carlo_regime_impact_coefficients_reflected_in_capacity", test_cli_monte_carlo_regime_impact_coefficients_reflected_in_capacity),
     ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ("test_deflated_alpha_ratio_cross_sectional_frequency_invariant", test_deflated_alpha_ratio_cross_sectional_frequency_invariant),
