@@ -538,6 +538,7 @@ def validate_point_in_time(
     signal_column: Optional[str] = None,
     lookback_windows: Optional[List[int]] = None,
     lookahead_threshold: float = 0.3,
+    lookahead_warning_threshold: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Validate that no look-ahead bias exists in the data or signals.
@@ -553,7 +554,14 @@ def validate_point_in_time(
         lookback_windows: List of window sizes used in rolling calculations
         lookahead_threshold: Correlation threshold for look-ahead detection.
             A signal whose changes correlate with next-period returns above this
-            threshold is flagged as a potential look-ahead bias. Default 0.3.
+            threshold is flagged as a potential look-ahead bias (violation).
+            Default 0.3.
+        lookahead_warning_threshold: Optional lower bound of a warning band.
+            When not None, a signal whose next-period correlation magnitude is
+            strictly above this value but at or below ``lookahead_threshold``
+            emits a structured warning (not a violation), surfacing the
+            below-threshold false-negative regime without failing validation.
+            Default None disables the warning zone; behavior is unchanged.
 
     Returns:
         Dictionary with validation results:
@@ -593,6 +601,22 @@ def validate_point_in_time(
                     violations.append(
                         f"Signal '{signal_column}' correlates with next-period returns "
                         f"(corr={corr:.3f}, threshold={lookahead_threshold:.3f}); potential look-ahead bias"
+                    )
+                elif (
+                    lookahead_warning_threshold is not None
+                    and abs(corr) > lookahead_warning_threshold
+                ):
+                    # |corr| <= lookahead_threshold here (elif branch), so this is
+                    # the below-threshold warning band: the gate passes but the
+                    # signal still correlates with future returns. Surface it
+                    # explicitly rather than only in post-hoc analysis.
+                    warnings_list.append(
+                        f"Signal '{signal_column}' next-period correlation "
+                        f"|{corr:.3f}| in warning zone "
+                        f"({lookahead_warning_threshold:.3f}, "
+                        f"{lookahead_threshold:.3f}]: below the hard look-ahead "
+                        "threshold but above the warning band; inspect for "
+                        "look-ahead bias before trusting out-of-sample results"
                     )
 
     # Check 4: Rolling window calculations - verify lookback windows are valid.

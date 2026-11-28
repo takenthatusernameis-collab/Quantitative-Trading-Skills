@@ -314,6 +314,101 @@ def test_validate_point_in_time_flags_look_ahead_in_derived_column():
     assert res_ok["passed"] is True, f"valid lookback window flagged: {res_ok}"
 
 
+def _signal_with_next_period_corr(close: pd.Series, target_corr: float, seed: int) -> pd.Series:
+    """Build a signal whose changes have (essentially) exactly |target_corr|
+    next-period correlation with close returns, using an orthogonal noise draw
+    so the correlation is deterministic and not sampling-noise dependent."""
+    rng = np.random.default_rng(seed)
+    pc = close.pct_change().shift(-1)  # next-period return, aligned at time t
+    valid = pc.notna().to_numpy()
+    pc_v = pc[valid].to_numpy(dtype=float)
+    pc_std = (pc_v - pc_v.mean()) / pc_v.std()
+    n = int(valid.sum())
+    noise = rng.normal(0.0, 1.0, size=n)
+    # Orthogonalize noise against pc_std, demean, unit std; then blend so
+    # corr(signal_changes, next-period return) == target_corr exactly.
+    noise = noise - np.dot(noise, pc_std) / np.dot(pc_std, pc_std) * pc_std
+    noise = noise - noise.mean()
+    noise = noise / noise.std()
+    changes = np.zeros(len(close), dtype=float)
+    changes[valid] = target_corr * pc_std + np.sqrt(1.0 - target_corr ** 2) * noise
+    return pd.Series(np.cumsum(changes), index=close.index)
+
+
+def test_validate_point_in_time_warning_zone_emits_warning_not_violation():
+    """A signal in the warning band (warning_threshold < |corr| <= threshold)
+    must pass validation but emit a structured warning, surfacing the
+    below-threshold false-negative regime at validation time."""
+    np.random.seed(9)
+    dates = pd.date_range("2020-01-01", periods=400, freq="B")
+    close = pd.Series(
+        100 * np.exp(np.cumsum(np.random.normal(0.0005, 0.01, 400))), index=dates
+    )
+    df = pd.DataFrame({"close": close}, index=dates)
+    df["signal"] = _signal_with_next_period_corr(close, target_corr=0.28, seed=3)
+
+    pc = df["close"].pct_change().shift(-1)
+    signal_changes = df["signal"].diff()
+    valid = pc.notna() & signal_changes.notna()
+    actual_corr = float(pc[valid].corr(signal_changes[valid]))
+    assert 0.25 < abs(actual_corr) <= 0.3, f"|corr|={abs(actual_corr):.3f} not in warning band"
+
+    res = validate_point_in_time(
+        df,
+        signal_column="signal",
+        lookahead_threshold=0.3,
+        lookahead_warning_threshold=0.25,
+    )
+    assert res["passed"] is True, f"warning-zone signal must pass, got {res}"
+    assert not any("next-period returns" in v for v in res["violations"]), (
+        f"warning-zone signal must not be a violation, got {res['violations']}"
+    )
+    assert any("warning zone" in w and "signal" in w for w in res["warnings"]), (
+        f"expected a structured warning-zone warning, got {res['warnings']}"
+    )
+
+
+def test_validate_point_in_time_warning_zone_disabled_by_default():
+    """With lookahead_warning_threshold=None (default) behavior is unchanged:
+    a below-threshold signal passes with no warning-zone warning."""
+    np.random.seed(9)
+    dates = pd.date_range("2020-01-01", periods=400, freq="B")
+    close = pd.Series(
+        100 * np.exp(np.cumsum(np.random.normal(0.0005, 0.01, 400))), index=dates
+    )
+    df = pd.DataFrame({"close": close}, index=dates)
+    df["signal"] = _signal_with_next_period_corr(close, target_corr=0.28, seed=3)
+
+    res = validate_point_in_time(df, signal_column="signal", lookahead_threshold=0.3)
+    assert res["passed"] is True, f"default path must pass, got {res}"
+    assert not any("warning zone" in w for w in res["warnings"]), (
+        f"default must not emit warning-zone warnings, got {res['warnings']}"
+    )
+
+
+def test_validate_point_in_time_above_threshold_still_violation_with_warning_zone():
+    """A signal above the hard threshold is a violation even when a warning
+    band is configured; the warning zone never suppresses a real violation."""
+    np.random.seed(9)
+    dates = pd.date_range("2020-01-01", periods=400, freq="B")
+    close = pd.Series(
+        100 * np.exp(np.cumsum(np.random.normal(0.0005, 0.01, 400))), index=dates
+    )
+    df = pd.DataFrame({"close": close}, index=dates)
+    df["signal"] = _signal_with_next_period_corr(close, target_corr=0.35, seed=3)
+
+    res = validate_point_in_time(
+        df,
+        signal_column="signal",
+        lookahead_threshold=0.3,
+        lookahead_warning_threshold=0.25,
+    )
+    assert res["passed"] is False, f"above-threshold signal must fail, got {res}"
+    assert any("next-period returns" in v for v in res["violations"]), (
+        f"expected look-ahead violation, got {res['violations']}"
+    )
+
+
 def test_detect_survivorship_bias_survivors_only():
     """All symbols surviving full period gives low bias score."""
     dates = pd.date_range("2020-01-01", periods=300, freq="B")
@@ -1215,6 +1310,9 @@ TEST_REGISTRY = [
     ("test_validate_point_in_time_non_monotonic", test_validate_point_in_time_non_monotonic),
     ("test_validate_point_in_time_lookback_windows", test_validate_point_in_time_lookback_windows),
     ("test_validate_point_in_time_flags_look_ahead_in_derived_column", test_validate_point_in_time_flags_look_ahead_in_derived_column),
+    ("test_validate_point_in_time_warning_zone_emits_warning_not_violation", test_validate_point_in_time_warning_zone_emits_warning_not_violation),
+    ("test_validate_point_in_time_warning_zone_disabled_by_default", test_validate_point_in_time_warning_zone_disabled_by_default),
+    ("test_validate_point_in_time_above_threshold_still_violation_with_warning_zone", test_validate_point_in_time_above_threshold_still_violation_with_warning_zone),
     ("test_detect_survivorship_bias_survivors_only", test_detect_survivorship_bias_survivors_only),
     ("test_detect_survivorship_bias_entries_exits_insufficient", test_detect_survivorship_bias_entries_exits_insufficient),
     ("test_detect_survivorship_bias_empty", test_detect_survivorship_bias_empty),
