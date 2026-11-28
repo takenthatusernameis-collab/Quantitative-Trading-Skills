@@ -5216,6 +5216,79 @@ def test_cli_cpcv_summary_regime_impact_coefficients_reflected_in_capacity():
         )
 
 
+def test_cli_oos_summary_regime_impact_coefficients_reflected_in_capacity():
+    """CLI out-of-sample with --regime-impact-coefficients writes
+    out_of_sample_summary.json whose SUMMARY-level capacity reflects the
+    regime-aware effective impact coefficient.
+
+    The out-of-sample CLI handler (run_out_of_sample_validation) previously
+    dropped --regime-impact-coefficients entirely: it never parsed the flag and
+    never forwarded it into out_of_sample_validation, so the reported summary
+    capacity used the flat coefficient regardless of the flag. This is a
+    genuine regression guard: before the fix, flat == regime
+    (581632.45 == 581632.45) because the parsed dict was dropped on the CLI
+    path. After the fix, flat > regime (581632.45 > 370715.67) because the
+    summary estimate_capacity call runs on the FULL sample (>=200 bars), where
+    detect_combined_regime is active and the ADV-weighted effective coefficient
+    rises in the stressed regimes.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        csv_path = os.path.join(tmpdir, "data.csv")
+        _write_ohlcv_csv(csv_path, periods=600)
+        out_dir_flat = os.path.join(tmpdir, "out_flat")
+        out_dir_regime = os.path.join(tmpdir, "out_regime")
+
+        regime_dict = '{"bear_high": 1.0, "bull_high": 1.0, "sideways_high": 1.0}'
+
+        argv_flat = [
+            "walk_forward", "out-of-sample",
+            "--data", csv_path,
+            "--symbol", "SPY",
+            "--strategy", "macd",
+            "--param-grid", '{"fast_period": [10, 12], "slow_period": [24, 26], "signal_period": [8, 9]}',
+            "--adv-window", "10",
+            "--impact-coefficient", "0.5",
+            "--borrow-cost", "0.10",
+            "--funding-cost", "0.0",
+            "--leverage", "1.5",
+            "--short-exposure", "0.2",
+            "--output", out_dir_flat,
+        ]
+        with patch.object(sys, "argv", argv_flat), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, f"CLI out-of-sample flat run should exit 0, got {rc}"
+        json_flat = os.path.join(out_dir_flat, "out_of_sample_summary.json")
+        assert os.path.exists(json_flat), "out_of_sample_summary.json not written for flat path"
+        with open(json_flat) as f:
+            summary_flat = json.load(f)["summary"]
+        flat_capacity = summary_flat.get("capacity")
+        assert flat_capacity is not None, "flat summary must report a capacity"
+
+        argv_regime = argv_flat.copy()
+        argv_regime[argv_regime.index("--output") + 1] = out_dir_regime
+        argv_regime.extend(["--regime-impact-coefficients", regime_dict])
+        with patch.object(sys, "argv", argv_regime), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            rc = walk_forward_main()
+        assert rc == 0, f"CLI out-of-sample regime run should exit 0, got {rc}"
+        json_regime = os.path.join(out_dir_regime, "out_of_sample_summary.json")
+        assert os.path.exists(json_regime), "out_of_sample_summary.json not written for regime path"
+        with open(json_regime) as f:
+            summary_regime = json.load(f)["summary"]
+        regime_capacity = summary_regime.get("capacity")
+        assert regime_capacity is not None, "regime summary must report a capacity"
+
+        # Full sample has >=200 bars so detect_combined_regime is active; raising
+        # the stressed-regime impact coefficients lowers the ADV-weighted
+        # effective coefficient and therefore the reported summary capacity.
+        assert flat_capacity > regime_capacity, (
+            f"summary capacity must be strictly below flat when stressed-regime "
+            f"impact coefficients are raised: flat={flat_capacity} "
+            f"regime={regime_capacity}"
+        )
+
+
 def test_cli_monte_carlo_regime_impact_coefficients_reflected_in_capacity():
     """CLI monte-carlo with --regime-impact-coefficients writes monte_carlo_summary.csv
     whose capacity reflects the regime-aware effective impact coefficient.
@@ -8216,6 +8289,7 @@ TEST_REGISTRY = [
     ("test_cli_monte_carlo_max_borrow_cost_cap_reflected", test_cli_monte_carlo_max_borrow_cost_cap_reflected),
     ("test_cli_cpcv_regime_impact_coefficients_reflected_in_capacity", test_cli_cpcv_regime_impact_coefficients_reflected_in_capacity),
     ("test_cli_cpcv_summary_regime_impact_coefficients_reflected_in_capacity", test_cli_cpcv_summary_regime_impact_coefficients_reflected_in_capacity),
+    ("test_cli_oos_summary_regime_impact_coefficients_reflected_in_capacity", test_cli_oos_summary_regime_impact_coefficients_reflected_in_capacity),
     ("test_cli_monte_carlo_regime_impact_coefficients_reflected_in_capacity", test_cli_monte_carlo_regime_impact_coefficients_reflected_in_capacity),
     ("test_deflated_alpha_ratio_frequency_invariant", test_deflated_alpha_ratio_frequency_invariant),
     ("test_deflated_alpha_ratio_cross_sectional_frequency_invariant", test_deflated_alpha_ratio_cross_sectional_frequency_invariant),

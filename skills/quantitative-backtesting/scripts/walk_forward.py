@@ -8444,9 +8444,10 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
                            impact_coefficient, borrow_cost=None, funding_cost=None,
                            commission=None, slippage=None, latency=None, fill_rate=None,
                            leverage=None, short_exposure=None,
-                           pit_results=None, survivorship=None, pit_strict=None,
-                           regime_cost_multipliers: Optional[Dict[str, float]] = None,
-                           max_participation_rate: Optional[float] = None):
+                            pit_results=None, survivorship=None, pit_strict=None,
+                            regime_cost_multipliers: Optional[Dict[str, float]] = None,
+                            regime_impact_coefficients: Optional[Dict[str, float]] = None,
+                            max_participation_rate: Optional[float] = None):
     """Run out-of-sample validation for a single cost coefficient (sweep helper).
 
     No file I/O or stdout; returns the per-coefficient metrics used by the
@@ -8486,6 +8487,10 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
     if regime_cost_multipliers is None:
         regime_cost_multipliers = _parse_regime_cost_multipliers(
             getattr(args, "regime_cost_multipliers", None)
+        )
+    if regime_impact_coefficients is None:
+        regime_impact_coefficients = _parse_regime_impact_coefficients(
+            getattr(args, "regime_impact_coefficients", None)
         )
     if latency is None:
         latency = getattr(args, "latency", 0)
@@ -8541,6 +8546,7 @@ def _oos_sweep_coefficient(args, data, benchmark, total_return_benchmark,
         panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
         impact_aggregation=getattr(args, "impact_aggregation", "panel"),
         regime_cost_multipliers=regime_cost_multipliers,
+        regime_impact_coefficients=regime_impact_coefficients,
         survivorship=survivorship,
         max_participation_rate=max_participation_rate,
     )
@@ -12372,6 +12378,19 @@ def run_out_of_sample_validation(args) -> int:
     print(f"  Validation method: {args.validation_method}")
     print(f"  Selection criterion: {args.selection_criterion}")
 
+    # Parse the regime-aware cost/impact dicts once for the single-run path.
+    # Every sibling CLI handler (walk-forward, optimize, cpcv, monte-carlo)
+    # already forwards these; the out-of-sample path previously dropped them,
+    # so --regime-impact-coefficients / --regime-cost-multipliers were silently
+    # ignored here (reported capacity/cost used the flat coefficient). Unset
+    # flags parse to None and leave every published number byte-identical.
+    regime_impact_coefficients = _parse_regime_impact_coefficients(
+        getattr(args, "regime_impact_coefficients", None)
+    )
+    regime_cost_multipliers = _parse_regime_cost_multipliers(
+        getattr(args, "regime_cost_multipliers", None)
+    )
+
     results = out_of_sample_validation(
         data=data,
         strategy_factory=strategy_factory,
@@ -12414,6 +12433,8 @@ def run_out_of_sample_validation(args) -> int:
         short_exposure=getattr(args, "short_exposure", 0.0),
         max_borrow_cost=getattr(args, "max_borrow_cost", None),
         max_funding_cost=getattr(args, "max_funding_cost", None),
+        regime_impact_coefficients=regime_impact_coefficients,
+        regime_cost_multipliers=regime_cost_multipliers,
     )
 
     if pit_results is not None:
