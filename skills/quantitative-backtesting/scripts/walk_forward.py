@@ -3338,6 +3338,7 @@ def _calculate_strategy_returns(
     regime_impact_coefficients: Optional[Dict[str, float]] = None,
     regime_cost_multipliers: Optional[Dict[str, float]] = None,
     max_impact: Optional[float] = None,
+    max_participation_rate: Optional[float] = None,
 ) -> pd.Series:
     """Calculate strategy returns from signals and market data.
 
@@ -3446,6 +3447,14 @@ def _calculate_strategy_returns(
             capacity-aware position cap: if a trade would exceed max_impact,
             the position is proportionally reduced. Opt-in; when None (default),
             no capacity-aware scaling is applied.
+        max_participation_rate: Optional maximum participation rate per trade as
+            a fraction of ADV (e.g., 0.10 = 10%). When provided and
+            impact_coefficient > 0, the target position change is scaled so
+            that the estimated participation rate (|position_change| * equity /
+            ADV_notional) stays below this threshold. This implements an
+            alternative capacity-aware position cap based on participation
+            rather than impact. Opt-in; when None (default), no
+            participation-rate-based scaling is applied.
     """
     if fill_rate is None:
         fill_rate = 1.0
@@ -3462,6 +3471,11 @@ def _calculate_strategy_returns(
             raise ValueError(f"max_impact must be positive, got {max_impact}")
         if impact_coefficient <= 0:
             raise ValueError("max_impact requires impact_coefficient > 0")
+    if max_participation_rate is not None:
+        if max_participation_rate <= 0:
+            raise ValueError(f"max_participation_rate must be positive, got {max_participation_rate}")
+        if impact_coefficient <= 0:
+            raise ValueError("max_participation_rate requires impact_coefficient > 0")
     panel_pricing = resolve_panel_pricing(panel_pricing)
     # Shared market model: the single definition of how a single asset, a
     # MultiIndex panel and a dict panel are priced. It is shared with
@@ -3580,6 +3594,34 @@ def _calculate_strategy_returns(
                 )
     else:
         positions = target_positions
+
+    # Participation-rate-aware position scaling: if max_participation_rate is set
+    # and impact_coefficient > 0, scale target positions so estimated participation
+    # rate per trade <= max_participation_rate.
+    # participation_rate = |position_change| * equity / ADV_notional
+    # max |position_change| = max_participation_rate * ADV_notional / equity
+    if max_participation_rate is not None and impact_coefficient > 0 and volume is not None:
+        equity = initial_capital * (1 + raw_returns).cumprod()
+        adv_shares = volume.rolling(window=adv_window, min_periods=1).mean()
+        adv_notional = adv_shares * close
+        unscaled_changes = positions.diff().abs()
+        max_change = (float(max_participation_rate) * adv_notional) / equity
+        if is_panel:
+            max_change = max_change.mean(axis=1)
+        scale_factor = (max_change / unscaled_changes).clip(upper=1.0)
+        scale_factor = scale_factor.fillna(1.0)
+        scaled_changes = unscaled_changes * scale_factor
+        positions = positions.copy()
+        first_valid = positions.first_valid_index()
+        if first_valid is not None:
+            first_loc = positions.index.get_loc(first_valid)
+            for i in range(first_loc + 1, len(positions)):
+                direction = np.sign(positions.diff().iloc[i])
+                if pd.isna(direction):
+                    direction = 0.0
+                positions.iloc[i] = (
+                    positions.iloc[i - 1] + direction * scaled_changes.iloc[i]
+                )
 
     # Borrow and funding costs are annualized rates applied per period.
     # The per-period rate divides by the number of periods per year inferred
@@ -11244,6 +11286,7 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
             benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
             panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
             max_impact=max_impact,
+            max_participation_rate=max_participation_rate,
         )
         if opt_results:
             best_params = opt_results[0]["params"]
@@ -11273,7 +11316,8 @@ def _monte_carlo_sweep_coefficient(args, data, benchmark, total_return_benchmark
                                           regime_impact_coefficients=regime_impact_coefficients,
                                           regime_cost_multipliers=regime_cost_multipliers,
                                           book_weights=book_weights,
-                                          max_impact=max_impact)
+                                          max_impact=max_impact,
+                                          max_participation_rate=max_participation_rate)
 
     dsr = None
     n_trials = getattr(args, "n_trials", None)
@@ -11733,6 +11777,7 @@ def run_monte_carlo(args) -> int:
             benchmark_cost_is_periodic=getattr(args, "benchmark_cost_is_periodic", False),
             panel_pricing=getattr(args, "panel_pricing", "net-exposure"),
             max_impact=getattr(args, "max_impact", None),
+            max_participation_rate=getattr(args, "max_participation_rate", None),
         )
         if opt_results:
             best_params = opt_results[0]["params"]
@@ -11766,7 +11811,8 @@ def run_monte_carlo(args) -> int:
                                           regime_impact_coefficients=regime_impact_coefficients,
                                           regime_cost_multipliers=regime_cost_multipliers,
                                           book_weights=book_weights,
-                                          max_impact=getattr(args, "max_impact", None))
+                                          max_impact=getattr(args, "max_impact", None),
+                                          max_participation_rate=getattr(args, "max_participation_rate", None))
     # The warmup convention of the series the Monte Carlo resamples.
     _print_execution_warmup(
         execution_warmup_metadata(WARMUP_CONVENTION_WALK_FORWARD, latency)

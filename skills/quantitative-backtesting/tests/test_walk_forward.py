@@ -5166,6 +5166,45 @@ def test_cli_optimize_max_impact_affects_selection():
     )
 
 
+def test_cli_monte_carlo_max_participation_rate_binds_returns():
+    """The --max-participation-rate capacity-aware position cap must bind under the
+    `monte-carlo` subcommand, not be silently ignored.
+
+    `--max-participation-rate` is declared on the shared common_parser (so every
+    subcommand accepts it), but the Monte Carlo return path
+    (`_monte_carlo_sweep_coefficient` and `run_monte_carlo`'s single-run
+    body) did not forward it into `parameter_optimization` for selection or
+    `_calculate_strategy_returns` for the final simulation. A researcher running
+    `monte-carlo --max-participation-rate 0.00001` therefore got an UNCAPPED
+    backtest while believing the per-trade participation cap was applied -- a
+    silent methodological no-op.
+
+    This test pins the fix: a binding --max-participation-rate changes the
+    simulated return distribution, while a non-binding --max-participation-rate
+    (effectively infinite) leaves it byte-identical to the no-cap run
+    (default-path invariance).
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base = _run_monte_carlo_summary(tmpdir, [])
+        capped = _run_monte_carlo_summary(tmpdir, ["--max-participation-rate", "0.00001"])
+        nonbinding = _run_monte_carlo_summary(tmpdir, ["--max-participation-rate", "1000000"])
+
+    base_mean = base["total_return"]["mean"]
+    capped_mean = capped["total_return"]["mean"]
+    nonbinding_mean = nonbinding["total_return"]["mean"]
+
+    assert abs(capped_mean - base_mean) > 1e-9, (
+        "a binding --max-participation-rate must change the monte-carlo return "
+        f"distribution; base mean {base_mean} == capped mean {capped_mean} "
+        "means the cap was silently ignored"
+    )
+    assert abs(nonbinding_mean - base_mean) <= 1e-12, (
+        "a non-binding --max-participation-rate must leave the monte-carlo returns "
+        f"byte-identical to no cap; base {base_mean} vs nonbinding "
+        f"{nonbinding_mean}"
+    )
+
+
 def test_cli_cpcv_regime_impact_coefficients_reflected_in_capacity():
     """CLI cpcv with --regime-impact-coefficients writes cpcv_summary.csv whose
     per-fold capacity is compared against the flat path.
@@ -11158,4 +11197,9 @@ TEST_REGISTRY.append(
 TEST_REGISTRY.append(
     ("test_cli_optimize_max_impact_affects_selection",
      test_cli_optimize_max_impact_affects_selection)
+)
+
+TEST_REGISTRY.append(
+    ("test_cli_monte_carlo_max_participation_rate_binds_returns",
+     test_cli_monte_carlo_max_participation_rate_binds_returns)
 )
