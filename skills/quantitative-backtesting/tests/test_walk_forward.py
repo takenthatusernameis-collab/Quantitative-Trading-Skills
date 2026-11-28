@@ -11040,6 +11040,150 @@ TEST_REGISTRY.append(
 )
 
 
+def test_walk_forward_analysis_participation_rate_binds_returns():
+    """A binding --max-participation-rate must change the walk-forward OOS
+    returns, not only the reported capacity diagnostic.
+
+    walk_forward_analysis accepts max_participation_rate and threads it into
+    the per-period capacity estimate, but it was NOT forwarded into the
+    _calculate_strategy_returns calls that produce the OOS return series used
+    for selection and the summary total_return. A researcher setting
+    --max-participation-rate therefore got a capacity-capped report sitting
+    next to UNCAPPED returns -- the same silent methodological no-op class the
+    --max-impact fix addressed.
+
+    Genuine regression guard: with a binding cap the per-trade position change
+    is scaled down, so the summary total_return must differ from the uncapped
+    run. Before the fix the two runs are byte-identical on returns (the cap is
+    dropped from the return path); after the fix they differ. A loose cap must
+    leave returns byte-identical (default-path invariance).
+    """
+    data = _make_ohlcv_data(periods=500, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
+    common = dict(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        train_months=12,
+        test_months=3,
+        step_months=3,
+        initial_capital=100000,
+        commission=0.0002,
+        slippage=0.0001,
+        impact_coefficient=0.5,
+    )
+
+    uncapped = walk_forward_analysis(**common)
+    capped = walk_forward_analysis(**common, max_participation_rate=0.0001)
+    loose = walk_forward_analysis(**common, max_participation_rate=0.5)
+
+    uncapped_return = uncapped["summary"]["total_oos_return"]
+    capped_return = capped["summary"]["total_oos_return"]
+    loose_return = loose["summary"]["total_oos_return"]
+
+    assert capped_return != uncapped_return, (
+        "a binding --max-participation-rate must change walk-forward OOS "
+        f"total_oos_return: capped={capped_return} uncapped={uncapped_return}"
+    )
+    assert loose_return == uncapped_return, (
+        "a loose --max-participation-rate must leave returns byte-identical "
+        f"(default-path invariance): loose={loose_return} uncapped={uncapped_return}"
+    )
+
+
+def test_cpcv_analysis_participation_rate_binds_returns():
+    """A binding --max-participation-rate must change the CPCV OOS returns.
+
+    cpcv_analysis accepts max_participation_rate and threads it into the
+    per-fold capacity estimate, but it was NOT forwarded into the
+    _calculate_strategy_returns calls that produce the OOS return series.
+    CPCV analogue of test_walk_forward_analysis_participation_rate_binds_returns.
+    """
+    data = _make_ohlcv_data(periods=600, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [3, 5, 7], "slow_period": [10, 12, 15]}
+    common = dict(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        n_splits=4,
+        test_size=0.2,
+        impact_coefficient=0.5,
+    )
+
+    uncapped = cpcv_analysis(**common)
+    capped = cpcv_analysis(**common, max_participation_rate=0.0001)
+    loose = cpcv_analysis(**common, max_participation_rate=0.5)
+
+    uncapped_return = uncapped["summary"]["total_oos_return"]
+    capped_return = capped["summary"]["total_oos_return"]
+    loose_return = loose["summary"]["total_oos_return"]
+
+    assert capped_return != uncapped_return, (
+        "a binding --max-participation-rate must change CPCV OOS "
+        f"total_oos_return: capped={capped_return} uncapped={uncapped_return}"
+    )
+    assert loose_return == uncapped_return, (
+        "a loose --max-participation-rate must leave CPCV returns "
+        f"byte-identical: loose={loose_return} uncapped={uncapped_return}"
+    )
+
+
+def test_out_of_sample_validation_participation_rate_binds_test_return():
+    """A binding --max-participation-rate must change the OOS held-out
+    test_total_return.
+
+    out_of_sample_validation accepts max_participation_rate and threads it
+    into the validation/test capacity estimates, but it was NOT forwarded into
+    the _calculate_strategy_returns calls that produce the validation/test
+    return series. OOS analogue of the walk-forward / CPCV guards.
+    """
+    data = _make_ohlcv_data(periods=600, seed=42)
+    factory = lambda params: build_strategy("sma_crossover", json.dumps(params))
+    param_grid = {"fast_period": [5, 10], "slow_period": [15, 20]}
+    common = dict(
+        data=data,
+        strategy_factory=factory,
+        param_grid=param_grid,
+        validation_method="walk_forward",
+        impact_coefficient=0.5,
+        validate_pit=False,
+    )
+
+    uncapped = out_of_sample_validation(**common)
+    capped = out_of_sample_validation(**common, max_participation_rate=0.0001)
+    loose = out_of_sample_validation(**common, max_participation_rate=0.5)
+
+    uncapped_return = uncapped["summary"]["test_total_return"]
+    capped_return = capped["summary"]["test_total_return"]
+    loose_return = loose["summary"]["test_total_return"]
+
+    assert capped_return != uncapped_return, (
+        "a binding --max-participation-rate must change OOS held-out "
+        f"test_total_return: capped={capped_return} uncapped={uncapped_return}"
+    )
+    assert loose_return == uncapped_return, (
+        "a loose --max-participation-rate must leave OOS test_total_return "
+        f"byte-identical: loose={loose_return} uncapped={uncapped_return}"
+    )
+
+
+TEST_REGISTRY.append(
+    ("test_walk_forward_analysis_participation_rate_binds_returns",
+     test_walk_forward_analysis_participation_rate_binds_returns)
+)
+
+TEST_REGISTRY.append(
+    ("test_cpcv_analysis_participation_rate_binds_returns",
+     test_cpcv_analysis_participation_rate_binds_returns)
+)
+
+TEST_REGISTRY.append(
+    ("test_out_of_sample_validation_participation_rate_binds_test_return",
+     test_out_of_sample_validation_participation_rate_binds_test_return)
+)
+
 
 
 
