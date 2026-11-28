@@ -11043,6 +11043,21 @@ TEST_REGISTRY.append(
 
 
 
+TEST_REGISTRY.append(
+    ("test_cli_monte_carlo_max_impact_binds_returns",
+     test_cli_monte_carlo_max_impact_binds_returns)
+)
+
+TEST_REGISTRY.append(
+    ("test_cli_optimize_max_impact_affects_selection",
+     test_cli_optimize_max_impact_affects_selection)
+)
+
+TEST_REGISTRY.append(
+    ("test_cli_monte_carlo_max_participation_rate_binds_returns",
+     test_cli_monte_carlo_max_participation_rate_binds_returns)
+)
+
 if __name__ == "__main__":
     import sys
     sys.exit(main())
