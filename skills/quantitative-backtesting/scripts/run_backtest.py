@@ -98,6 +98,7 @@ def parse_args():
     parser.add_argument("--risk-free-rate", type=float, default=None, help="Annual risk-free rate (as decimal, e.g., 0.02 for 2%%)")
     parser.add_argument("--validate-point-in-time", action="store_true", help="Run point-in-time validation on the loaded data and strategy signals (temporal ordering, duplicate timestamps, signal/next-return correlation for look-ahead bias screening)")
     parser.add_argument("--point-in-time-strict", action="store_true", help="Abort with a non-zero exit code when point-in-time validation finds violations (default: warn only)")
+    parser.add_argument("--lookahead-warning-threshold", type=float, default=None, help="Optional lower bound of a point-in-time warning band (0..1). When set and --validate-point-in-time is active, a signal whose next-period correlation magnitude is strictly above this value but at or below the hard look-ahead threshold (0.3) emits a warning (not a violation), surfacing sub-threshold look-ahead without failing validation. Unset (default) disables the band so no published number or warning changes.")
     parser.add_argument("--multi-symbol", action="store_true", help="Load every symbol in a multi-symbol file (with a 'symbol' or 'ticker' column) as a panel, run survivorship-bias detection, and backtest a panel. Requires a panel strategy such as cross_sectional_momentum or dual_momentum.")
     parser.add_argument("--benchmark", type=str, nargs="+", default=None, help="Path to benchmark OHLCV file(s) (e.g. SPY QQQ) for buy-and-hold baseline comparison (alpha/beta, correlation)")
     parser.add_argument("--benchmark-name", type=str, nargs="+", default=None, help="Optional name(s) for each benchmark (corresponding to --benchmark order). If omitted, derived from filename.")
@@ -137,7 +138,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def _validate_point_in_time(data, signals) -> Dict[str, Any]:
+def _validate_point_in_time(data, signals, lookahead_warning_threshold=None) -> Dict[str, Any]:
     """Run point-in-time validation on the loaded data and signals.
 
     Single-asset data is validated together with the signal series so
@@ -145,23 +146,37 @@ def _validate_point_in_time(data, signals) -> Dict[str, Any]:
     bias. Panel data (dict or MultiIndex columns) has no single signal
     column, so each symbol frame is validated for structural violations
     (temporal ordering, duplicate timestamps) instead.
+
+    ``lookahead_warning_threshold`` (default None) is forwarded to
+    ``validate_point_in_time``: when set, a signal whose next-period
+    correlation sits in the band (warning_threshold, hard_threshold] emits a
+    warning rather than passing silently. None preserves prior behavior.
     """
     if isinstance(data, pd.DataFrame) and not isinstance(data.columns, pd.MultiIndex):
         check_df = data.copy()
         check_df["_pit_signal"] = signals
-        result = validate_point_in_time(check_df, signal_column="_pit_signal")
-        # The internal signal column is not user data: warnings about
-        # long runs of identical values are an artifact of the check
-        # (signals are sticky by design), not stale data.
+        result = validate_point_in_time(
+            check_df,
+            signal_column="_pit_signal",
+            lookahead_warning_threshold=lookahead_warning_threshold,
+        )
+        # The internal signal column is not user data: the "long run of
+        # identical values" warning is an artifact of the check (signals are
+        # sticky by design), not stale data, so drop only that artifact. The
+        # look-ahead correlation warning (including the warning-zone band)
+        # names the signal column too but is a genuine finding and must be
+        # preserved.
         result["warnings"] = [
-            w for w in result["warnings"] if "_pit_signal" not in w
+            w for w in result["warnings"] if "identical values" not in w
         ]
         return result
 
     frames = list(data.values()) if isinstance(data, dict) else [data]
     combined: Dict[str, Any] = {"passed": True, "violations": [], "warnings": []}
     for df in frames:
-        result = validate_point_in_time(df)
+        result = validate_point_in_time(
+            df, lookahead_warning_threshold=lookahead_warning_threshold
+        )
         combined["passed"] = combined["passed"] and result["passed"]
         combined["violations"].extend(result["violations"])
         combined["warnings"].extend(result["warnings"])
@@ -345,7 +360,9 @@ def run_backtest(data, strategy, args, data_provenance=None, benchmark=None, sur
     # Recorded in the results so the check is reproducible downstream.
     pit_result = None
     if getattr(args, "validate_point_in_time", False):
-        pit_result = _validate_point_in_time(data, signals)
+        pit_result = _validate_point_in_time(
+            data, signals, getattr(args, "lookahead_warning_threshold", None)
+        )
     # Shared market model: the single definition of how a single asset, a
     # MultiIndex panel and a dict panel are priced. It is shared with
     # walk_forward.py so the two entry points return comparable results for
